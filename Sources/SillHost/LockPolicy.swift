@@ -424,9 +424,9 @@ enum LockPolicy {
         case menuRequest
         /// Kind 28.
         case gesture
-        /// Kind 32 with text: a device's Paste.
-        case clipboardText
-        /// Kind 32 without text: a subscription, or a stop.
+        /// Kind 32 with text or an image: a device's Paste (`clipboardRequest`).
+        case clipboardSet
+        /// Kind 32 with neither: a subscription, or a stop.
         case clipboardSubscription
         /// Kind 8. `letsGo`: it is the up of a key or a button this device holds down on the Mac.
         case input(letsGo: Bool)
@@ -463,10 +463,22 @@ enum LockPolicy {
         case .windowCommand: return .refuse(.windowCommand)
         case .menuRequest: return .refuse(.menus)
         case .gesture: return .refuse(.gesture)
-        case .clipboardText: return .refuse(.clipboard)
+        case .clipboardSet: return .refuse(.clipboard)
         case .input(let letsGo): return takesInput(r, paired: paired) ? .take : (letsGo ? .letGo : .refuse(.input))
         case .menuSubscription, .clipboardSubscription, .other: return .take
         }
+    }
+
+    /// A device's kind 32 (decoded once; nil: it did not decode), as the lock weighs it: one that sets the
+    /// Mac's clipboard, text that is not empty or an image, is a set, refused while the Mac reads locked at
+    /// its arrival or now; a stop (which wins over anything with it), a subscription and what does not
+    /// decode are taken (HostClipboard then subscribes, stops or ignores). Found in review (#300's D2): an
+    /// image has no text, so it counted as a subscription, and one sent while the Mac read locked landed on
+    /// its clipboard after the unlock.
+    static func clipboardRequest(_ clip: Clipboard?) -> Request {
+        guard let clip, clip.stop != true else { return .clipboardSubscription }
+        let sets = (clip.text.map { !$0.isEmpty } ?? false) || clip.image != nil
+        return sets ? .clipboardSet : .clipboardSubscription
     }
 
     /// A request judged at the reading it arrived at and at the reading now, the off-console view as it is
@@ -685,7 +697,7 @@ enum LockPolicy {
         case .menus: what = n == 1 ? "a menu request" : "\(n) menu requests"
         case .gesture: what = n == 1 ? "a gesture" : "\(n) gestures"
         case .clipboard:
-            return "Locked: dropped " + (n == 1 ? "a device's clipboard text" : "\(n) clipboard texts from devices")
+            return "Locked: dropped " + (n == 1 ? "a device's clipboard text or image" : "\(n) clipboard texts or images from devices")
                 + "; the clipboard waits for this Mac to be unlocked."
         case .input:
             return "Locked: dropped " + (n == 1 ? "an input event" : "\(n) input events")

@@ -8,10 +8,29 @@ import Foundation
 /// reads and writes a pasteboard, and Tests/checks/clipboard checks this file with StreamProtocol's
 /// sources.
 public enum ClipboardPolicy {
-    /// `WindowList.clipboard` from a host that takes and sends text (1) and images (2, `imageGeneration`).
+    /// `WindowList.clipboard` from a host that takes and sends text (1) and images (2, `imageGeneration`):
+    /// this build's most. A host says 2 only while its Include images is on (`hostGeneration`).
     public static let generation = 2
     /// The generation from which a host and a subscription take images.
     public static let imageGeneration = 2
+    /// The most image a sender sends away from home (AwayPolicy's away: through a VPN, over the internet,
+    /// through a relay): 2 MiB, a bigger one made smaller to fit (ClipboardImage.fitted). An image is one
+    /// message, and nothing else reaches that device while it crosses (the picture waits: StreamServer's
+    /// image path), so the cap bounds the frozen picture: 2 MiB is 2.8 MB of JSON, about 6 s at 4 Mbit/s,
+    /// where 8 MiB's 11 MB would be 22 s. A receiver takes up to `Clipboard.maxImageBytes` whatever its
+    /// route. A default for Noah to confirm (the evaluation of #300, decision 3 (a)).
+    public static let awayImageBytes = 2 << 20
+    /// The most image a sender sends to or from a device: `Clipboard.maxImageBytes` at home,
+    /// `awayImageBytes` away.
+    public static func imageCap(away: Bool) -> Int { away ? awayImageBytes : Clipboard.maxImageBytes }
+
+    /// `WindowList.clipboard` from a host: nil while Share clipboard with devices is off, else 2 while
+    /// its Include images is on (the Mac owner's say: it sends and takes images) and 1 while it is off
+    /// (text alone, as a host of generation 1: devices then offer it none).
+    public static func hostGeneration(shareClipboard: Bool, images: Bool) -> Int? {
+        guard shareClipboard else { return nil }
+        return images ? imageGeneration : 1
+    }
     /// The most a kind 32's JSON may be, either way (Clipboard.maxTextBytes says why).
     public static let maxPayload = StreamMessage.maxClientPayload
     /// A device's subscriptions and texts a second, per connection: a tap sends one. More is a runaway
@@ -43,8 +62,11 @@ public enum ClipboardPolicy {
         return data
     }
 
-    /// A device's subscription: `{"accepts":2}`, text and images (a host of generation 1 reads it as `{}`).
-    public static var subscription: Data { Wire.encode(Clipboard(accepts: imageGeneration)) }
+    /// A device's subscription: `{"accepts":2}` with its Include Images on (text and images; a host of
+    /// generation 1 reads it as `{}`), `{}` with it off (text alone, as every device before images).
+    public static func subscription(images: Bool) -> Data {
+        Wire.encode(images ? Clipboard(accepts: imageGeneration) : Clipboard())
+    }
 
     /// A kind 32 that sets the other side's clipboard to this PNG or JPEG image, or nil when it is
     /// neither, empty, or over `Clipboard.maxImageBytes` (ClipboardImage.fitted makes it fit first).
@@ -55,14 +77,26 @@ public enum ClipboardPolicy {
         return data
     }
 
-    /// Whether a device's kind 32 says it takes images (`accepts` 2 or more).
-    public static func takesImages(_ payload: Data) -> Bool {
-        (Wire.decode(Clipboard.self, from: payload)?.accepts ?? 0) >= imageGeneration
+    /// Whether a subscriber takes images after its kind 32 (`clip`; `was`, what it took before, nil for a
+    /// connection not subscribed yet). What a message says of `accepts` counts, whatever else it carries
+    /// (2 or more: images too). A message that does not say it: a subscription (`{}`, neither text nor an
+    /// image) is generation 1's, text alone; a Paste (text or an image) leaves it as it was, nothing for a
+    /// connection whose first kind 32 is one. Found in review (#300's D1): every kind 32 set it from its own
+    /// `accepts`, and a Paste carries none, so one Paste from a device stopped the Mac's images reaching it
+    /// for the rest of the session.
+    public static func subscriberTakesImages(_ clip: Clipboard, was: Bool?) -> Bool {
+        if let accepts = clip.accepts { return accepts >= imageGeneration }
+        let pastes = (clip.text.map { !$0.isEmpty } ?? false) || clip.image != nil
+        return pastes ? (was ?? false) : false
     }
 
-    /// Who a device's image goes to: the other subscribers whose subscription takes images.
-    public static func forwardImage<ID: Equatable>(to subscribers: [(ID, Bool)], from sender: ID) -> [ID] {
-        subscribers.filter { $0.0 != sender && $0.1 }.map(\.0)
+    /// Who a device's image (`bytes` long) goes to: the other subscribers whose subscription takes
+    /// images, one away from home only when it is within `awayImageBytes` (the Mac never re-encodes a
+    /// device's image: parsing it would happen inside Sill, which holds Accessibility and Screen
+    /// Recording), in the order given.
+    public static func forwardImage<ID: Equatable>(to subscribers: [(id: ID, images: Bool, away: Bool)], from sender: ID,
+                                                   bytes: Int) -> [ID] {
+        subscribers.filter { $0.id != sender && $0.images && bytes <= imageCap(away: $0.away) }.map(\.id)
     }
     /// A device's switch going off: `{"stop":true}`.
     public static var stopping: Data { Wire.encode(Clipboard(stop: true)) }
@@ -98,7 +132,9 @@ public enum ClipboardPolicy {
     public enum HostDecision: Equatable, Sendable {
         /// To every subscriber, this kind 32.
         case send(Data)
-        /// To every subscriber that takes images, this kind 32 (an image).
+        /// To every subscriber that takes images, this image, as the pasteboard holds it (its PNG, JPEG,
+        /// HEIC or TIFF), once fitted to each subscriber's cap (ClipboardImage.fitted, `imageCap`) off the
+        /// pasteboard's queue.
         case sendImage(Data)
         case skip(HostSkip)
     }
@@ -118,17 +154,18 @@ public enum ClipboardPolicy {
     /// launch), then Universal Clipboard's, from the types alone, so another device's copy is never
     /// read; only then the text (`text`), and the
     /// marker's value (`ownMarker`) only when its type is there.
-    /// With no text, an image (`image`: the pasteboard's, as ClipboardImage.fitted makes it), never for a
-    /// copy of files (`fileURLType`), whose items carry the files' icons as images.
+    /// With no text, an image (`image`: the pasteboard's as it is there, read only when given: nil while no
+    /// subscriber takes images or this Mac's Include images is off, so nothing of an image is read for
+    /// nobody), never for a copy of files (`fileURLType`), whose items carry the files' icons as images.
     public static func hostDecides(types: [String], changeCount: Int, ownChangeCount: Int?, launchID: String,
                                    ownMarker: () -> String?, text: () -> String?,
-                                   image: () -> Data? = { nil }) -> HostDecision {
+                                   image: (() -> Data?)? = nil) -> HostDecision {
         if let own = ownChangeCount, own == changeCount { return .skip(.own) }
         if types.contains(remoteClipboardType) { return .skip(.remote) }
         if types.contains(ownType), ownMarker() == launchID { return .skip(.own) }
         guard let text = text() else {
-            guard !types.contains(fileURLType), let picture = image() else { return .skip(.noText) }
-            return payload(image: picture).map { .sendImage($0) } ?? .skip(.tooLong)
+            guard let image, !types.contains(fileURLType), let picture = image(), !picture.isEmpty else { return .skip(.noText) }
+            return .sendImage(picture)
         }
         guard !text.isEmpty else { return .skip(.empty) }
         guard let data = payload(text: text) else { return .skip(.tooLong) }
@@ -142,6 +179,9 @@ public enum ClipboardPolicy {
         case tooLong
         /// A subscription or text past `perSecond` in a second (`hostReceives`).
         case rate
+        /// An image while this Mac takes none (its Include images off: its lists say 1, so no device of
+        /// this generation sends one).
+        case images
     }
 
     /// What a device's kind 32 asks of the host.
@@ -162,8 +202,13 @@ public enum ClipboardPolicy {
     /// `stop` wins over anything with it; text that is not empty sets; else an image sets (a PNG or
     /// JPEG within `Clipboard.maxImageBytes`; anything else refused); anything else (`{}`, empty text)
     /// subscribes.
-    public static func fromDevice(_ payload: Data) -> FromDevice {
-        guard let clip = Wire.decode(Clipboard.self, from: payload) else { return .refuse(.undecodable) }
+    public static func fromDevice(_ payload: Data) -> FromDevice { fromDevice(Wire.decode(Clipboard.self, from: payload)) }
+
+    /// The same for a kind 32 decoded once (nil: it did not decode): the host decodes a device's message
+    /// once, for the lock and for this (#300's D7: an image's 11 MB of JSON was decoded three times on the
+    /// main actor, where every device's input is handled).
+    public static func fromDevice(_ clip: Clipboard?) -> FromDevice {
+        guard let clip else { return .refuse(.undecodable) }
         if clip.stop == true { return .stop }
         guard let text = clip.text, !text.isEmpty else {
             guard let image = clip.image else { return .subscribe }
@@ -186,8 +231,15 @@ public enum ClipboardPolicy {
     /// off, and a stop lost to the rate left the Mac's copies going to that device (found in review:
     /// off, on, off, on, off within a second, and the next copy still went). Neither a stop nor a
     /// refusal counts against the rate.
-    public static func hostReceives(_ payload: Data, arrivals: [Double], now: Double) -> (ask: FromDevice, kept: [Double]) {
-        let ask = fromDevice(payload)
+    public static func hostReceives(_ payload: Data, arrivals: [Double], now: Double, imagesOn: Bool = true) -> (ask: FromDevice, kept: [Double]) {
+        hostReceives(Wire.decode(Clipboard.self, from: payload), arrivals: arrivals, now: now, imagesOn: imagesOn)
+    }
+
+    /// The same for a kind 32 decoded once. While this Mac's Include images is off (`imagesOn` false) a
+    /// device's image is refused (`images`) and sets nothing.
+    public static func hostReceives(_ clip: Clipboard?, arrivals: [Double], now: Double, imagesOn: Bool) -> (ask: FromDevice, kept: [Double]) {
+        var ask = fromDevice(clip)
+        if case .setImage = ask, !imagesOn { ask = .refuse(.images) }
         guard countsAgainstRate(ask) else { return (ask, arrivals) }
         let admitted = admits(arrivals: arrivals, now: now)
         return (admitted.taken ? ask : .refuse(.rate), admitted.kept)
@@ -210,6 +262,33 @@ public enum ClipboardPolicy {
         let recent = arrivals.filter { now - $0 < 1 }
         guard recent.count < perSecond else { return (false, recent) }
         return (true, recent + [now])
+    }
+
+    // MARK: The host: an image on its way to a device (StreamServer's image path)
+
+    /// A connection holding no more than this that it has not taken holds nothing but control messages
+    /// (the files plan's `idleBytes`).
+    public static let imageIdleBytes = 64 * 1024
+
+    /// Whether the Mac starts an image to a device now: only while its connection holds no more than
+    /// `imageIdleBytes` it has not taken and no keyframe is still crossing to it, so the image never
+    /// queues behind the picture's backlog and a keyframe never waits for an image (#300's D4: one copied
+    /// image held every frame behind it, and the device was dropped as not draining). An image is one
+    /// message: from the moment one waits for a device until it has crossed, that device's frames are
+    /// withheld (its queue drains, and nothing waits behind the image), and a keyframe brings its picture
+    /// back after. It goes on a path of its own, as the sound's: never counted as the picture's messages or
+    /// in the drain eviction, its bytes counted as every message's are (the link judge, remote pacing).
+    public static func hostMaySendImage(pendingBytes: Int, keyframesInFlight: Int) -> Bool {
+        pendingBytes <= imageIdleBytes && keyframesInFlight == 0
+    }
+
+    /// While an image waits for a device or crosses to it, its frames are withheld, so the home door's
+    /// drain eviction (a frame not taken for 4 s) never meets a device that has gone: one silent this
+    /// long then, connected at least as long, is dropped, at either door (a device pings four times a
+    /// second; the remote door drops any device silent this long, StreamServer.remoteSilence).
+    public static let imageSilence = 8.0
+    public static func dropsSilentWhileImage(silentFor: Double, connectedFor: Double) -> Bool {
+        connectedFor >= imageSilence && silentFor > imageSilence
     }
 
     // MARK: The host: macOS's paste privacy
@@ -282,19 +361,29 @@ public enum ClipboardPolicy {
     /// Whether it takes and sends images too.
     public static func hostTakesImages(_ hostClipboard: Int?) -> Bool { (hostClipboard ?? 0) >= imageGeneration }
 
-    /// A kind 32 from the Mac: the image the device writes to its clipboard, or nil. Only with the
-    /// switch on, from a Mac that takes images, a PNG or JPEG within the cap.
-    public static func deviceWritesImage(_ payload: Data, switchOn: Bool, hostClipboard: Int?) -> Data? {
-        guard switchOn, hostTakesImages(hostClipboard), let clip = Wire.decode(Clipboard.self, from: payload),
-              let image = clip.image, Self.payload(image: image) != nil else { return nil }
+    /// Whether this device offers images (its Paste control takes them, its chip lights for one, a Mac's
+    /// is written): its Include Images on (`imagesOn`, off unless turned on) and a Mac that says it takes
+    /// them. Share Clipboard is asked beside it, as for text.
+    public static func deviceOffersImages(imagesOn: Bool, hostClipboard: Int?) -> Bool {
+        imagesOn && hostTakesImages(hostClipboard)
+    }
+
+    /// A kind 32 from the Mac, decoded once: the image the device writes to its clipboard, or nil. Only
+    /// with Share Clipboard and Include Images on, from a Mac that takes images, a PNG or JPEG within the
+    /// cap, told by its size and first bytes (#300's D7: it was encoded again to be measured).
+    public static func deviceWritesImage(_ clip: Clipboard?, switchOn: Bool, imagesOn: Bool, hostClipboard: Int?) -> Data? {
+        guard switchOn, deviceOffersImages(imagesOn: imagesOn, hostClipboard: hostClipboard), let image = clip?.image,
+              image.count <= Clipboard.maxImageBytes, Clipboard.imageType(image) != nil else { return nil }
         return image
     }
 
-    /// An image the system's Paste control gave, as ClipboardImage.fitted made it: to a connected Mac
-    /// that takes images while the switch is on.
-    public static func deviceSendsImage(_ image: Data, connected: Bool, hostClipboard: Int?, switchOn: Bool) -> DeviceSend {
-        guard connected, hostTakesImages(hostClipboard), switchOn else { return .nothing }
-        guard let data = payload(image: image) else { return .tooLong }
+    /// An image the system's Paste control gave, as ClipboardImage.fitted made it for this session
+    /// (`imageCap(away:)`): to a connected Mac that takes images while Share Clipboard and Include Images
+    /// are on; one over the cap (it never is, fitted) is too big.
+    public static func deviceSendsImage(_ image: Data, connected: Bool, hostClipboard: Int?, switchOn: Bool,
+                                        imagesOn: Bool, away: Bool) -> DeviceSend {
+        guard connected, switchOn, deviceOffersImages(imagesOn: imagesOn, hostClipboard: hostClipboard) else { return .nothing }
+        guard image.count <= imageCap(away: away), let data = payload(image: image) else { return .tooLong }
         return .send(data)
     }
 
@@ -310,11 +399,15 @@ public enum ClipboardPolicy {
     /// switch is on and this connection has not; stop when it has and the switch went off. A Mac
     /// that stopped saying it (its Share clipboard with devices turned off) forgot every
     /// subscription, so the connection has none, and subscribes again when it says it again.
+    /// Include Images (`imagesOn`) is what the subscription says (`subscription(images:)`), and a move of
+    /// it subscribes again at once (`subscribedImages`: what the last one said), which the Mac takes as
+    /// the subscriber's new word (`subscriberTakesImages`).
     /// Returns what to send and whether the connection is subscribed after it.
-    public static func deviceSubscription(hostClipboard: Int?, switchOn: Bool, subscribed: Bool)
+    public static func deviceSubscription(hostClipboard: Int?, switchOn: Bool, subscribed: Bool,
+                                          imagesOn: Bool = false, subscribedImages: Bool = false)
         -> (send: Subscription, subscribed: Bool) {
         guard hostTakes(hostClipboard) else { return (.none, false) }
-        if switchOn && !subscribed { return (.subscribe, true) }
+        if switchOn && (!subscribed || subscribedImages != imagesOn) { return (.subscribe, true) }
         if !switchOn && subscribed { return (.stop, false) }
         return (.none, subscribed)
     }
@@ -332,20 +425,29 @@ public enum ClipboardPolicy {
     /// since the send: the Mac's echo, which a host of this generation never sends).
     public static func deviceWrites(_ payload: Data, switchOn: Bool, hostClipboard: Int?, lastSent: Sent?,
                                     changeCount: Int) -> String? {
-        guard switchOn, hostTakes(hostClipboard), let clip = Wire.decode(Clipboard.self, from: payload),
+        deviceWrites(Wire.decode(Clipboard.self, from: payload), switchOn: switchOn, hostClipboard: hostClipboard,
+                     lastSent: lastSent, changeCount: changeCount)
+    }
+
+    /// The same for a kind 32 decoded once (the device decodes the Mac's off its main thread).
+    public static func deviceWrites(_ clip: Clipboard?, switchOn: Bool, hostClipboard: Int?, lastSent: Sent?,
+                                    changeCount: Int) -> String? {
+        guard switchOn, hostTakes(hostClipboard), let clip,
               let text = clip.text, !text.isEmpty, text.utf8.count <= Clipboard.maxTextBytes else { return nil }
         if let lastSent, lastSent.text == text, lastSent.changeCount == changeCount { return nil }
         return text
     }
 
     /// The chip, "Paste on ‹Mac›": while connected to a Mac that takes the clipboard with the switch
-    /// on, when the device's clipboard has text (`hasStrings`, which never asks to paste) and its
-    /// change count is not the one Sill last handled (`handled`: sent, written from the Mac, or the
+    /// on, when the device's clipboard has text (`hasStrings`, which never asks to paste), or an image
+    /// (`hasImages`, which never asks either) while this device offers images (`deviceOffersImages`), and
+    /// its change count is not the one Sill last handled (`handled`: sent, written from the Mac, or the
     /// chip dismissed or timed out for it). Asked when Sill becomes active, and at a session's start
     /// soon after (`looksAtSessionStart`).
     public static func offersChip(connected: Bool, hostClipboard: Int?, switchOn: Bool, hasStrings: Bool,
-                                  changeCount: Int, handled: Int?) -> Bool {
-        connected && hostTakes(hostClipboard) && switchOn && hasStrings && changeCount != handled
+                                  changeCount: Int, handled: Int?, hasImages: Bool = false, imagesOn: Bool = false) -> Bool {
+        let has = hasStrings || (hasImages && deviceOffersImages(imagesOn: imagesOn, hostClipboard: hostClipboard))
+        return connected && hostTakes(hostClipboard) && switchOn && has && changeCount != handled
     }
 
     /// Whether the chip's `chipLifetime` runs now: only while the chip is on screen (nothing open over
@@ -390,8 +492,21 @@ public enum ClipboardPolicy {
     public static let receiptLength = 16
 
     /// How long a Paste waits for that pong before it says the text did not reach the Mac: four times
-    /// the worst recent round trip, and at least 4 s, as a settings pick waits.
-    public static func receiptWait(worstRttMs: Int?) -> Double { max(4, 4 * Double(worstRttMs ?? 0) / 1000) }
+    /// the worst recent round trip, and at least 4 s, as a settings pick waits; and the message's `bytes`
+    /// at `receiptFloorBytesPerSecond` on top (#300's D5: an image's 11 MB of JSON takes more than 4 s on
+    /// any uplink slower than 23 Mbit/s, so "Didn’t reach…" came though the image arrived, and Paste on
+    /// ‹Mac› Right Away never pressed ⌘V, its receipt late).
+    public static func receiptWait(worstRttMs: Int?, bytes: Int = 0) -> Double {
+        max(4, 4 * Double(worstRttMs ?? 0) / 1000) + Double(bytes) / receiptFloorBytesPerSecond
+    }
+    /// The slowest uplink a Paste's receipt allows for: 2 Mbit/s (250,000 bytes a second). 8 MiB of image
+    /// (11 MB of JSON) waits 49 s at most, 2 MiB away (2.8 MB) 15 s; a text of a few bytes as before.
+    public static let receiptFloorBytesPerSecond = 250_000.0
+
+    /// A Paste this big says "Sending to ‹Mac›…" until its receipt or its time comes (`Copy.sending`), so a
+    /// big image's wait is never a silence: more than `sendingNoteBytes` of JSON.
+    public static let sendingNoteBytes = 256 * 1024
+    public static func showsSending(bytes: Int) -> Bool { bytes > sendingNoteBytes }
 
     /// Paste right away (2026-10-29; Noah, with the clipboard on his iPad: "still doesn't automatically
     /// Cmd+V"): with this device's switch on (Paste on ‹Mac› Right Away, on unless turned off), a
@@ -449,22 +564,33 @@ public enum ClipboardPolicy {
         // The chip.
         public static func chipTitle(mac: String) -> String { "Paste on \(mac)" }
         public static let chipSubtitle = "Then press ⌘V there."
-        /// The chip's words for VoiceOver, one element; its Paste button and Dismiss are their own.
-        public static func chipSpoken(mac: String, device: String) -> String {
-            "Paste on \(mac). Sends the text you copied on this \(device) to \(mac)’s clipboard. Then press Command-V there."
+        /// The chip's words for VoiceOver, one element; its Paste button and Dismiss are their own. "The
+        /// text or image" while this device offers images (`deviceOffersImages`).
+        public static func chipSpoken(mac: String, device: String, images: Bool = false) -> String {
+            "Paste on \(mac). Sends the \(what(images)) you copied on this \(device) to \(mac)’s clipboard. Then press Command-V there."
         }
+        /// What Paste sends, in the chip's and the hint's words.
+        static func what(_ images: Bool) -> String { images ? "text or image" : "text" }
         public static let dismiss = "Dismiss"
         /// Told to VoiceOver when the chip first shows for a copy (found in review: it came unannounced).
         public static func chipAnnouncement(mac: String) -> String { "Paste on \(mac) is available, near the bar." }
         /// The Paste button's hint, on the chip and in Settings.
         public static func pasteHint(mac: String, device: String, images: Bool = false) -> String {
-            "Sends the \(images ? "text or image" : "text") you copied on this \(device) to \(mac)’s clipboard."
+            "Sends the \(what(images)) you copied on this \(device) to \(mac)’s clipboard."
         }
         public static func sent(mac: String) -> String { "Sent to \(mac)’s clipboard. Press ⌘V there." }
         public static func sentSpoken(mac: String) -> String { "Sent to \(mac)’s clipboard. Press Command-V there." }
         public static func tooLong(mac: String) -> String { "Too long to send: \(mac) takes up to \(cap) of text." }
-        /// An image that would not fit in `Clipboard.maxImageBytes` even re-encoded (ClipboardImage.fitted).
-        public static func imageTooBig(mac: String) -> String { "Too big to send: \(mac) takes images up to 8 MB." }
+        /// An image over the cap after fitting (ClipboardImage.fitted makes every image it reads fit, so
+        /// this is a safeguard), at home and away.
+        public static func imageTooBig(mac: String, away: Bool = false) -> String {
+            "Too big to send: \(mac) takes images up to \(away ? "2 MB away from home" : "8 MB")."
+        }
+        /// The Paste control's image could not be read (#300's D11: it said "Too big to send…").
+        public static let imageUnreadable = "Couldn’t send the image you copied: it couldn’t be read."
+        /// A big Paste on its way (`showsSending`), until its receipt or "Didn’t reach…".
+        public static func sending(mac: String) -> String { "Sending to \(mac)…" }
+        public static func sendingSpoken(mac: String) -> String { "Sending to \(mac)." }
         /// No receipt in time (`receiptWait`): the copy is not counted as dealt with, so the chip offers
         /// it again.
         public static func notSent(mac: String) -> String { "Didn’t reach \(mac). Try Paste again." }
@@ -477,13 +603,13 @@ public enum ClipboardPolicy {
         /// cursor is." was cut short ("It goes where the cur…", found in review; at 393 pt "…the curso…").
         public static func chipSubtitle(rightAway: Bool) -> String { rightAway ? "Where the cursor is." : chipSubtitle }
         /// The chip's words for VoiceOver.
-        public static func chipSpoken(mac: String, device: String, rightAway: Bool) -> String {
-            rightAway ? "Paste on \(mac). Pastes the text you copied on this \(device) where \(mac)’s cursor is."
-                      : chipSpoken(mac: mac, device: device)
+        public static func chipSpoken(mac: String, device: String, rightAway: Bool, images: Bool = false) -> String {
+            rightAway ? "Paste on \(mac). Pastes the \(what(images)) you copied on this \(device) where \(mac)’s cursor is."
+                      : chipSpoken(mac: mac, device: device, images: images)
         }
         /// The Paste button's hint, on the chip and in Settings.
         public static func pasteHint(mac: String, device: String, rightAway: Bool, images: Bool = false) -> String {
-            rightAway ? "Pastes the \(images ? "text or image" : "text") you copied on this \(device) where \(mac)’s cursor is."
+            rightAway ? "Pastes the \(what(images)) you copied on this \(device) where \(mac)’s cursor is."
                 : pasteHint(mac: mac, device: device, images: images)
         }
         /// A receipt with ⌘V (`receiptNote`), written and spoken alike.
@@ -504,11 +630,33 @@ public enum ClipboardPolicy {
             on ? "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here, tap Paste, then press ⌘V there."
                : "Nothing you copy goes between this \(device) and \(mac) while this is off."
         }
+        /// The group's footnote while Include Images shows (`images`: its value; nil while it does not, Share
+        /// Clipboard off or a Mac that takes no images): the words above, then what Include Images does.
+        public static func footnote(on: Bool, rightAway: Bool, images: Bool?, mac: String, device: String) -> String {
+            let words = footnote(on: on, rightAway: rightAway, mac: mac, device: device)
+            guard on, let images else { return words }
+            return words + " " + imagesNote(on: images, mac: mac, device: device)
+        }
+
+        // Include Images: this device's switch under Paste on ‹Mac› Right Away (generation 2), off unless
+        // turned on, shown while Share Clipboard is on and the Mac says it takes images.
+        public static let imagesTitle = "Include Images"
+        /// Under the group, after its words: what the switch does on, and what turning it on would.
+        public static func imagesNote(on: Bool, mac: String, device: String) -> String {
+            on ? "Images you copy on \(mac) come to this \(device) too, and Paste can send an image you copied here. A big one is made smaller to fit 8 MB (2 MB away from home) and takes a moment to arrive."
+               : "With Include Images on, images you copy on \(mac) come to this \(device) too, and Paste can send an image you copied here."
+        }
 
         // Sill for Mac's Settings › General, under Share clipboard with devices.
         /// Its footnote ("theirs here" read as if a device's copies came by themselves, so it names Paste;
         /// a password manager's copies go like any other since 2026-10-29, so it no longer excepts them).
-        public static let macFootnote = "Text and images you copy here can be pasted on a connected iPhone or iPad, and what one sends with Paste becomes this Mac’s."
+        /// Images have their own switch and words under it (`macImagesTitle`).
+        public static let macFootnote = "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s."
+        /// The Mac owner's say on images, under Share clipboard with devices: on unless turned off, so a
+        /// device's Include Images is the one opt-in; off, the lists say `clipboard` 1 and no image goes
+        /// either way (`hostGeneration`).
+        public static let macImagesTitle = "Include images"
+        public static let macImagesFootnote = "Images copied here go to iPhones and iPads that take them, up to 8 MB each, or 2 MB away from home (a bigger one is made smaller), and an image a device sends with Paste becomes this Mac’s."
         /// Under it while macOS does not allow every read (MacAccess): why what is copied here stays.
         public static func macAccessWarning(_ access: MacAccess) -> String? {
             switch access {
@@ -521,8 +669,8 @@ public enum ClipboardPolicy {
         public static func macAccessHint(_ access: MacAccess) -> String? {
             switch access {
             case .allowed: return nil
-            case .notAsked: return "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives."
-            case .asks, .denied: return "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives."
+            case .notAsked: return "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. What a device sends with Paste still arrives."
+            case .asks, .denied: return "Set Sill to Allow under Paste from Other Apps in Privacy & Security. What a device sends with Paste still arrives."
             }
         }
         public static let macAccessButton = "Allow in System Settings…"
@@ -541,13 +689,22 @@ public enum ClipboardPolicy {
         // The host's lines: one when a device subscribes or stops, never one per copy, never what
         // was copied.
         public static func sharesLine(device: String) -> String { "Clipboard: \(device) shares the clipboard." }
+        /// The same for a subscription that takes images (`accepts` 2: the device's Include Images on).
+        public static func sharesLine(device: String, images: Bool) -> String {
+            images ? "Clipboard: \(device) shares the clipboard, images too." : sharesLine(device: device)
+        }
+        /// A subscriber's Include Images moved (a subscription that says otherwise than its last).
+        public static func imagesLine(device: String, images: Bool) -> String {
+            "Clipboard: \(device) takes \(images ? "images too" : "no images") now."
+        }
         public static func stoppedLine(device: String) -> String { "Clipboard: \(device) stopped sharing the clipboard." }
         /// One line a minute for what was ignored (RefusalSummary's counts).
-        public static func ignoredLine(rate: Int, tooLong: Int, undecodable: Int) -> String {
+        public static func ignoredLine(rate: Int, tooLong: Int, undecodable: Int, images: Int = 0) -> String {
             var parts: [String] = []
             if rate > 0 { parts.append("\(rate) from devices sending more than \(perSecond) a second") }
             if tooLong > 0 { parts.append("\(tooLong) longer than \(cap)") }
             if undecodable > 0 { parts.append("\(undecodable) that did not decode") }
+            if images > 0 { parts.append("\(images) image\(images == 1 ? "" : "s") while Include images is off") }
             return "Clipboard from devices ignored in a minute: " + (parts.isEmpty ? "none" : parts.joined(separator: ", ")) + "."
         }
     }

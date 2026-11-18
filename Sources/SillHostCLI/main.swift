@@ -42,6 +42,13 @@ config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 // A --synthetic host shares a pasteboard of its own, never this Mac's clipboard.
 config.shareClipboard = !CommandLine.arguments.contains("--no-clipboard")
 
+// `SillHost --no-clipboard-images`: the clipboard's text alone for this run, as Sill.app's Include images
+// off (docs/clipboard-plan.md, "Generation 2"): the lists say `clipboard` 1, so devices offer no images,
+// and none is read, sent or taken here. Images on by default, as in Sill.app: an image copied here goes to
+// a device whose Include Images is on, made smaller to fit 8 MB (2 MB away from home). Without the flag
+// the output is what it always was.
+config.shareClipboardImages = !CommandLine.arguments.contains("--no-clipboard-images")
+
 // `SillHost --audio`: Send Audio for this run, a beta (docs/audio-plan.md): every connected device that
 // plays the Mac's sound (its hello lists a codec) gets the streamed app's sound, or every app's for the
 // Desktop, or with --synthetic a test tone. Off by default, as in Sill.app: the Mac keeps playing its
