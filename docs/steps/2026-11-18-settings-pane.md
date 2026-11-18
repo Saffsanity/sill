@@ -41,19 +41,19 @@
   the fold (`ScrollEdgeFade`): the first photos showed a sliver of a line under the laptop pose's fold.
 - **The review of #393** (2026-11-18), three findings, all real:
   - *The home indicator's room never reached the pane.* StreamScreen passed its reader's
-    `geo.safeAreaInsets.bottom`, and a GeometryReader that ignores an edge (the stream screen's ignores the
-    bottom, under the home indicator) reports no inset there, as full screen had found for its hidden room
-    (docs/full-screen-plan.md, "Found and fixed"). So Disconnect sat 16 pt from the screen's edge, inside the
-    home indicator's 34 (21 on a phone on its side, 20 on an iPad), and this device's part scrolled its last
-    line under the indicator; the harness photos showed it (Disconnect 16.7 pt from the edge on an upright
-    iPhone, 16.5 on half an iPad). Now the pane takes the window's inset, `deviceInsets` (UIKit's, or the
-    harness's fake screen's), as full screen does; the room under Disconnect is a rule of the pure layout,
-    `SettingsPane.Layout.footBottom` (the home indicator's room, 16 pt at least; 12 over the laptop pose's
-    fold), checked at every real size and over the grid, with mutants M32 to M34; Disconnect comes right
-    under the rows only where that room is left under it too; and the console's `settings:` line says the
-    bottom the pane was given ("one column 361 pt wide at 16 (393×793, 34 pt kept at the bottom)"), so a
-    gate sees it arrive. The tour's card is given the same 0 (TourOverlay, StreamScreen's `bottomInset:`
-    beside it): main's, untouched here.
+    `geo.safeAreaInsets.bottom`, and a GeometryReader that ignores an edge (the stream screen's ignores the bottom,
+    under the home indicator) reports no inset there, as full screen had found for its hidden room
+    (docs/full-screen-plan.md, "Found and fixed"). So Disconnect sat 16 pt from the screen's edge, inside the home
+    indicator's 34 (21 on a phone on its side, 20 on an iPad), and this device's part scrolled its last line under
+    the indicator; the harness photos showed it (measured: Disconnect's foot 16 pt from the edge in every photo
+    where it is pinned; this device's last line, at its end, 13). Now the pane takes the window's inset,
+    `deviceInsets` (UIKit's, or the harness's fake screen's), as full screen does; the room under Disconnect is a
+    rule of the pure layout, `SettingsPane.Layout.footBottom` (the home indicator's room, 16 pt at least; 12 over
+    the laptop pose's fold), checked at every real size and over the grid, with mutants M32 to M34; Disconnect
+    comes right under the rows only where that room is left under it too; and the console's `settings:` line says
+    the bottom the pane was given ("one column 361 pt wide at 16 (393×793, 34 pt kept at the bottom)"), so a gate
+    sees it arrive. The tour's card is given the same 0 (TourOverlay, StreamScreen's `bottomInset:` beside it):
+    main's, untouched here.
   - *`-SillSettingsEnd 1` stopped short on an upright iPhone* (Take the Tour's footnote faded at the edge, the
     version out of view), the only `-end` photo that did: `StartAnchor` anchored only the
     initial offset on iOS 18, so a size change after the first layout left the rows where they were. It
@@ -71,6 +71,16 @@
   columns, the book pose's pages and the laptop pose's, scrolled to the end, a long list (the link's
   callout, Picture in Picture, a Paste note), the third accessibility text size and right to left. Photos and
   side-by-side pairs: `~/Downloads/sill-handoff/next/settings-pane/photos/`.
+- **Verified after the review** (2026-11-18, fa90df8f, on this Mac): `run-all.sh` all 75 pass; `settings-pane` 258
+  checks (708,590 layouts on the grid, Disconnect's room among the rules) and 34 of 34 mutants; the iOS app built
+  with CI's line here and on GitHub's CI, no new warning. The same 39 photo cases against origin/main (eb48ac9f):
+  with Settings closed, main's (6 of 7 pixel for pixel; `ipad-upright-stream` 3,161 pixels one level apart in the
+  strip's fading thumbnail, a gradient that nothing here draws: the simulator's rendering). Measured in them:
+  Disconnect, where pinned, ends 34 pt above the screen's edge on the Duo, its cover and an upright iPhone, 21 on
+  a phone on its side, 20 on an iPad, 16 on an SE (each 16 before); this device's last line at its end 46.7 pt
+  (book), 47 (laptop), 34 (phone on its side), 33 (iPad) (12.7 to 13 before); where the rows fit (iPads upright
+  and sideways) Disconnect stays right under them; `phone-upright-end` reaches the version. The photos, the
+  first set beside them and the measures: `~/Downloads/sill-handoff/next/settings-pane/photos/` (its README).
 - **Not tested here** (Noah's list in the pull request): anything on a device; the motion; VoiceOver's order
   and its escape gesture, Esc and ⌘. on a hardware keyboard; Picture in Picture started with Settings open;
   rotating and folding with Settings open; the keyboard coming back after Done; Take the Tour and Full Screen
