@@ -126,7 +126,7 @@ M = [
     ("the Mac's place shown uncleaned", DW, 'let place = SafeText.label(t.place ?? "", limit: 120)', 'let place = t.place ?? ""'),
     ("the person's own Cancel as a warning", DW, "return !(reason == FileReason.cancelled.rawValue && !byPeer)", "return true"),
     ("a folder said as a read failure", DW, "        if reason == folderReason {", "        if reason == folderReason && false {"),
-    ("no announcement at the start", DW, '        case .offering: return "Sending \\(what(s.names)) to \\(mac)."\n', ""),
+    ("no announcement at the start", DW, 'case .offering: return "Sending \\(what(s.names)) to \\(mac)."', "case .offering: return nil"),
     ("moves never wait for a transfer", DW, "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { out.map { !$0.isOver } ?? false }",
      "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { false }"),
     ("a fraction past 1", DW, "return total == 0 ? 0 : min(1, Double(acked) / Double(total))", "return total == 0 ? 0 : Double(acked) / Double(total) * 1.01"),
