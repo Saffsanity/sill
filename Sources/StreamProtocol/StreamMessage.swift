@@ -91,6 +91,7 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
+    case pen = 45            // device → host: JSON PenBatch — coalesced Pencil samples with pressure and tilt
     // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which open pull requests
     // hold (the microphone and the pen; the camera). Older hosts map it to `.unknown` and skip it.
     case nextDisplay = 47    // device → host, empty payload: the Desktop button tapped while the Desktop
