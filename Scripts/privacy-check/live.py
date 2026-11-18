@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """TEST ONLY (docs/privacy-mode-plan.md, part 1): Lock this Mac when the last device leaves, on test hosts. Each case
 starts synthetic CLI hosts on loopback (the software encoder, no router, no screen: never this Mac's screen or encoder)
-with --lock-after-session, which on a test host locks nothing and puts no display to sleep: ScreenLocker's dry run says
-what it would do ("Privacy (test host): would lock this Mac now; nothing is locked."). The wait is shortened with the
+with --lock-after-session, which locks nothing and puts no display to sleep: only Sill.app itself ever does
+(PrivacyPolicy.locksForReal), and ScreenLocker's dry run says what it would do ("Privacy (dry run): would lock this Mac
+now; nothing is locked."). The wait is shortened with the
 TEST ONLY SILL_TEST_PRIVACY_GRACE, this Mac's lock is SILL_TEST_LOCKED_FILE's (its own witnesses ignored:
 SILL_TEST_LOCK_IGNORE_MAC), and test clients (Scripts/sillclient.py) come and go. Nothing here locks this Mac, switches
 its user, sleeps its display, posts input or a notification another app hears. Each host lives under 60 s.
 
-    Scripts/privacy-check/live.py OUT [off|wait|back|move|locked|offconsole|nodisplay|nosymbol|quit|crash|pairing|gate|all]
+    Scripts/privacy-check/live.py OUT [off|wait|back|move|locked|offconsole|nodisplay|nosymbol|quit|crash|pairing|gate|nosleep|away|all]
 
 Prints one verdict per rule and exits 1 when one fails. Needs .build/release/SillHost."""
 import os, re, signal, subprocess, sys, tempfile, threading, time
@@ -29,8 +30,9 @@ def verdict(ok, what):
 
 
 class Host:
-    """One synthetic host: its stdout's lines with the time each was read, and its port (127.0.0.1 only)."""
-    def __init__(self, out, label, env, args=("--lock-after-session",)):
+    """One synthetic host: its stdout's lines with the time each was read, and its ports (127.0.0.1 only): `port` the
+    first, `ports` all of them once `want_ports` listen (2 with --remote: the home door and the remote door)."""
+    def __init__(self, out, label, env, args=("--lock-after-session",), want_ports=1):
         self.lines = []
         self.out = out; self.label = label
         e = dict(os.environ); e.update(BASE_ENV); e.update(env)
@@ -38,13 +40,13 @@ class Host:
         self.p = subprocess.Popen(["nice", "-n", "10", HOST, "--synthetic", *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   env=e, start_new_session=True, text=True, bufsize=1)
         self.reader = threading.Thread(target=self._read, daemon=True); self.reader.start()
-        self.port = None
+        self.port = None; self.ports = []
         for _ in range(100):
             time.sleep(0.1)
             r = subprocess.run(["lsof", "-nP", "-a", "-p", str(self.p.pid), "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True)
             if re.findall(r"(\*|\[::\]|0\.0\.0\.0):(\d+) \(LISTEN\)", r.stdout): self.stop(); raise SystemExit(f"{label}: a listener not on loopback")
-            ports = re.findall(r"127\.0\.0\.1:(\d+) \(LISTEN\)", r.stdout)
-            if ports: self.port = ports[0]; break
+            ports = sorted(set(re.findall(r"127\.0\.0\.1:(\d+) \(LISTEN\)", r.stdout)))
+            if len(ports) >= want_ports: self.port = ports[0]; self.ports = ports; break
         if self.port is None: self.stop(); raise SystemExit(f"{label}: no listening port")
 
     def _read(self):
@@ -87,11 +89,12 @@ class Host:
         return None
 
 
-def client(host, out, label, start, seconds, args=("none",)):
-    """A sillclient session `start` seconds after the host's start, `seconds` long, in a thread; its output saved."""
+def client(host, out, label, start, seconds, args=("none",), port=None):
+    """A sillclient session `start` seconds after the host's start, `seconds` long, in a thread, at `port` (the host's
+    first one unless given); its output saved."""
     def run():
         host.at(start)
-        r = subprocess.run([sys.executable, "-I", CLIENT, host.port, str(seconds), *args], capture_output=True, text=True,
+        r = subprocess.run([sys.executable, "-I", CLIENT, port or host.port, str(seconds), *args], capture_output=True, text=True,
                            timeout=seconds + 20, env={**os.environ, **BASE_ENV})
         open(os.path.join(out, label + ".client.log"), "w").write(r.stdout + r.stderr + f"\nEXIT {r.returncode}\n")
     th = threading.Thread(target=run); th.start()
@@ -105,9 +108,11 @@ def write(path, text):
 LEFT = r"^Privacy: the last device left; this Mac locks in 5 s unless one connects again\.$"
 BACK = r"^Privacy: a device connected again within 5 s; this Mac won’t be locked\.$"
 LOCKING = r"^Privacy: locking this Mac: the last device left 5 s ago\.$"
-WOULD_LOCK = r"^Privacy \(test host\): would lock this Mac now; nothing is locked\.$"
-WOULD_SLEEP = r"^Privacy \(test host\): would put this Mac’s display to sleep; nothing sleeps\.$"
+WOULD_LOCK = r"^Privacy \(dry run\): would lock this Mac now; nothing is locked\.$"
+WOULD_SLEEP = r"^Privacy \(dry run\): would put this Mac’s display to sleep; nothing sleeps\.$"
 LOCKED = r"^Privacy: this Mac is locked; its display sleeps\.$"
+LOCKED_LIT = r"^Privacy: this Mac is locked\.$"
+NOT_AWAY = r"^Privacy: the last device left; none connected from away from home, so this Mac won’t be locked\.$"
 ANY_LOCK = r"would lock|^Privacy: locking"
 
 
@@ -324,8 +329,63 @@ def run_gate(out):
     h.at(h.now() + 4); h.stop()
 
 
+def run_nosleep(out):
+    """Turn off its display too off (--lock-after-session=nosleep): the wait and the lock as ever, confirmed, and no
+    display sleep."""
+    print("== nosleep: the lock with its display left on", flush=True)
+    e, lock = env(out, "nosleep")
+    h = Host(out, "nosleep", e, args=("--lock-after-session=nosleep",))
+    start = h.first(r"^Privacy: Lock this Mac when the last device leaves is on: 5 s after the last device leaves, Sill locks this Mac\. "
+                    r"A dry run here \(only Sill\.app itself locks a Mac\): it says what it would do\.$")
+    verdict(start is not None, f"the start line: the lock without the display sleep, and the dry run said ({start} s)")
+    c = client(h, out, "nosleep-c", 1.0, 3); c.join()
+    L = h.wait_for(LEFT, timeout=5)
+    W = h.wait_for(WOULD_LOCK, after=L or 0, timeout=GRACE + 3)
+    if W is not None: write(lock, "1")
+    C = h.wait_for(LOCKED_LIT, after=W or 0, timeout=4)
+    verdict(L is not None and W is not None and C is not None and GRACE - 0.05 <= W - L <= GRACE + 0.8 and C - W <= 3.0,
+            f"the wait, the lock {((W or 0) - (L or 0)):.2f} s after the departure, its confirmation {((C or 0) - (W or 0)):.2f} s later: '{LOCKED_LIT[1:-3]}'")
+    h.at((C or h.now()) + 2); h.stop()
+    verdict(not h.all(WOULD_SLEEP) and not h.all(LOCKED), "no display sleep, and no line that says one")
+
+
+def run_away(out):
+    """Only after a device away from home (--lock-after-session=away, with --remote): a session at the home door leaves
+    and no wait starts; one at the remote door (from this Mac: a relay on it, away from home as AwayPolicy says)
+    leaves, and the wait and the lock follow."""
+    print("== away: only after a device away from home", flush=True)
+    e, lock = env(out, "away")
+    h = Host(out, "away", e, args=("--lock-after-session=away", "--remote"), want_ports=2)
+    rx = re.compile(r"^Remote access for this run on port (\d+) .*Pair with .* or (sill://pair\S+)$")
+    h.wait_for(rx.pattern, timeout=5)
+    m = next((rx.match(l) for _, l in h.lines if rx.match(l)), None)
+    if m is None or m.group(1) not in h.ports:
+        h.stop(); verdict(False, f"the remote door's port and link ({m and m.group(1)}, listening {h.ports})"); return
+    remote_port, url = m.group(1), m.group(2)
+    home_port = next(p for p in h.ports if p != remote_port)
+    start = h.first(r"^Privacy: Lock this Mac when the last device leaves is on: 5 s after the last device leaves, when one connected from away from home, ")
+    verdict(start is not None, f"the start line says only after a device away from home ({start} s)")
+    a = client(h, out, "away-home", 1.0, 3, port=home_port); a.join()
+    N = h.wait_for(NOT_AWAY, timeout=4)
+    verdict(N is not None and h.first(LEFT) is None, f"a session at the home door alone leaves: no wait, its line ({N} s)")
+    ident = os.path.join(out, "away-id"); os.makedirs(ident, exist_ok=True)
+    b = client(h, out, "away-remote", (N or h.now()) + 0.5, 3, args=("none", f"--identity={ident}", f"--pair-url={url}"), port=remote_port)
+    b.join()
+    paired = "PAIR ok" in open(os.path.join(out, "away-remote.client.log")).read()
+    L = h.wait_for(LEFT, after=N or 0, timeout=5)
+    verdict(paired and L is not None, f"a session away from home (paired by the link, then the remote door's session) leaves: the wait ({L} s)")
+    W = h.wait_for(WOULD_LOCK, after=L or 0, timeout=GRACE + 3)
+    if W is not None: write(lock, "1")
+    verdict(W is not None and L is not None and GRACE - 0.05 <= W - L <= GRACE + 0.8, f"and the lock {((W or 0) - (L or 0)):.2f} s after it")
+    C = h.wait_for(LOCKED, after=W or 0, timeout=4)
+    verdict(C is not None, f"confirmed, the display sleep after it ({C} s)")
+    h.at(h.now() + 1); h.stop()
+    verdict(len(h.all(WOULD_LOCK)) == 1 and len(h.all(NOT_AWAY)) == 1, "one lock, and one visit at home said")
+
+
 CASES = {"off": run_off, "wait": run_wait, "back": run_back, "move": run_move, "locked": run_locked, "offconsole": run_offconsole,
-         "nodisplay": run_nodisplay, "nosymbol": run_nosymbol, "quit": run_quit, "crash": run_crash, "pairing": run_pairing, "gate": run_gate}
+         "nodisplay": run_nodisplay, "nosymbol": run_nosymbol, "quit": run_quit, "crash": run_crash, "pairing": run_pairing, "gate": run_gate,
+         "nosleep": run_nosleep, "away": run_away}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or not os.path.exists(HOST):

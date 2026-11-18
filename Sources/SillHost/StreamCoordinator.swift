@@ -106,8 +106,10 @@ package final class StreamCoordinator {
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
     /// Lock this Mac when the last device leaves (PrivacyLock, PrivacyPolicy; docs/privacy-mode-plan.md, part 1): the
-    /// server's count of registered sessions, the switch (at once, from `setTarget`), the lock's reading and a quit go
-    /// to it. A test host's (`synthetic`) locks nothing and puts no display to sleep: it says what it would do.
+    /// server's count of registered sessions, each session's route as it registers, the switches (at once, from
+    /// `setTarget`), the lock's reading and a quit go to it. Only Sill.app's own (`testHooks` false, not `synthetic`:
+    /// PrivacyPolicy.locksForReal) locks; the CLI's, the bare SillMenuBar binary's and a test host's lock nothing and
+    /// put no display to sleep: they say what they would do.
     private let privacy: PrivacyLock
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
@@ -437,7 +439,8 @@ package final class StreamCoordinator {
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
         status = HostStatus()
-        privacy = PrivacyLock(on: config.lockAfterSession, dry: synthetic,
+        privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
+                              real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
                               testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                               status: status, gate: SessionLock.shared.gate)
         var home = StreamServer.HomeDoorMode.plain
@@ -545,6 +548,9 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
+                // Lock this Mac when the last device leaves, Only after a device away from home: this visit had one
+                // (after the count that took it, which the server reported first).
+                self.privacy.joined(away: route.isAway)
                 // A paired device shows its paired name until its own stats arrive, and a remote one
                 // its route; a home device its link (Wired, Wi-Fi, Direct) as soon as it is known.
                 self.status.update {
@@ -962,8 +968,8 @@ package final class StreamCoordinator {
             print(LockPolicy.viewChangedLine(view.now))
             Task { @MainActor in await self.lockChanged() }
         }
-        // Lock this Mac when the last device leaves, at once too: off ends a wait under way now.
-        privacy.switched(new.lockAfterSession)
+        // Lock this Mac when the last device leaves and its two switches, at once too: off ends a wait under way now.
+        privacy.switched(on: new.lockAfterSession, sleeps: new.lockSleepsDisplay, onlyAway: new.lockOnlyAfterAway)
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
