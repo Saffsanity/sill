@@ -1,5 +1,10 @@
 # Apple Pencil pressure and tilt — the plan
 
+**Since 2026-11-18 (branch `ready-175`, §14):** main merged in, the cursor's kind at 50, a Pencil's down
+on a sleeping display held back, the stroke clock and Smooth Pencil Lines from pull request #381, and four
+switches, all off but Ignore Fingers While Drawing until Pencil Pressure and Tilt is turned on. §2's
+"on by default" (decision 8) is now off, and kind 46 below is 50.
+
 ## Status (2026-10-13)
 
 On the branch `pencil-pressure` (from main at 985a733). Built and passing (§13): step 0's
@@ -876,3 +881,63 @@ mutant "kind 45 as 46" now "as 47", with "kind 46 as 47" and the field renamed),
 47…254), clipboard unchanged (29, 30, 31 and 33 still unknown). sillclient.py names kind 46. The
 files that conflicted (the docs, the checks' tables) took the rebase's side and the cursor's lines
 again by hand.
+
+## 14. Ready for review (2026-11-18, branch `ready-175`)
+
+Noah, 2026-11-18: "Anything that currently exists as a community PR should be reevaluated now to see if it
+solves the request and of course to add toggles", and "if the work is quality and doesn't conflict with
+other features, you build on it". The evaluation of #175, #381 and #382 that day
+(`~/Downloads/sill-handoff/next/feature-requests/pr-evaluations/pencil.md`) chose this pull request to carry
+the feature, with Hunter's commits as they are, and two ideas taken from #381 with cubelikeplayDaniel's
+credit. #382 (a mode with no picture) waits, to be redone on this message later.
+
+Done on top of #175's head (53eedf9), each its own commit:
+
+1. **Main merged in** at eb48ac9 (#388): sixteen files conflicted, each resolution keeping both sides
+   (Scripts/migrate-notes.py moved the notes to docs/LAYOUT.md, BUILD-AND-RUN.md, COMPATIBILITY.md and
+   docs/steps/2026-10-20-pencil-pressure-rebased.md). Main's `pencilTouching` (0.6.1's stale-hover fix,
+   #335, the same rule as this branch's first commit) gives way to `PenStrokes.hover`, which keeps it in
+   both modes; the credit moved into its comment.
+2. **The cursor's kind is 50.** The plans' overview (§1.1) gives 46 to the camera, 48 to the microphone,
+   49 to files and 50 to this; nothing had shipped with either number.
+3. **The waking Pencil.** PR #228 (a press on a display that reads asleep held back with its release)
+   landed after this branch's last merge and saw only kind 8. Now `DisplayWake.pass(pen:)` holds a
+   Pencil's down there the same way: a move to its spot without pressure goes instead, it wakes the
+   display, and its up or cancel is held back; the stroke between draws nothing. A leave, which a device
+   also sends by itself, is never a person's activity.
+4. **The stroke clock** (#381's idea, "hardware timestamp sync"). `t` is now the milliseconds since the
+   stroke's down (an elapsed time: no clock of the device leaves it), and the host's `PenClock` times the
+   stroke's down as it is posted and each later point at the down's time plus its own `t`, never after
+   now, never back, half a millisecond apart. The unit was settled first, posting nothing: AppKit reads a
+   CGEvent's timestamp as CLOCK_UPTIME_RAW's nanoseconds on this Apple silicon Mac (timebase 125/3), where
+   a time in mach ticks would read 41.7 times too early (`--pen-selftest`'s "Event clock" lines). Not a
+   switch: TEST ONLY `SILL_TEST_PEN_CLOCK=arrival`, read by every host, turns it off for a run.
+5. **Smooth Pencil Lines' filter** (#381's 1€ filter, his numbers). Measured on the check's strokes: 96 ms
+   behind the tip on a slow stroke (about 10 px of a 2,000 px frame), 13 ms on a fast one, a 10 Hz tremor
+   cut to 17 %. Never a tap: a stroke's down and up go where the tip is.
+6. **Four switches**, This iPad on an iPad (`PencilSettings`), each never sent:
+
+   | Switch | Key | Default | Shown |
+   |---|---|---|---|
+   | Pencil Pressure and Tilt | `Sill.pencilPressure` | Off (was on) | Always, on an iPad |
+   | Ignore Fingers While Drawing | `Sill.pencilIgnoreFingers` | On | While the first is on and the Mac takes a pen |
+   | Smooth Pencil Lines | `Sill.pencilSmoothing` | Off | The same |
+   | Brush Outline While Hovering | `Sill.pencilBrushOutline` | Off (was always on) | The same |
+
+   Each of the three acts only on a stroke or a hover that goes as a pen's, so with the first off a Pencil
+   is main's mouse exactly. The palm rule's words say the tip, not a hover: the rule has been the tip's
+   since step 3 (the other hand scrolls under a hovering Pencil), where the evaluation's draft said "or
+   hovers over it".
+
+Kept as it was: `WindowList.pencil` stays in a locked Mac's list, as `gestures` and `keyRepeat` do: the lock
+refuses a Pencil exactly as it refuses kind 8, and a list without it would have the device say "Update Sill".
+
+Not in this pull request: ink drawn under the tip on the device (no pull request has it), double tap and
+barrel roll (Noah's #81 review: a second pull request, after a PenProbe check of `NSEventTypeChangeMode`),
+and #382's drawing tablet with no picture.
+
+For Noah: the defaults above (questions 1 and 2 of the evaluation), and on a device, P0's per-app run with
+and without `SILL_TEST_PEN_CLOCK=arrival` (does a velocity-sensitive brush draw a burst's stroke evenly,
+and does the window server keep a time set at the HID tap), then P1 to P10 with the switches on, Smooth
+Pencil Lines' feel, and the brush outline's switch.
+

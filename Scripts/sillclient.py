@@ -50,10 +50,12 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
                      --gesture and --raw28 go only to a --synthetic host on this Mac, as input does:
                      it logs the shortcut it would post and posts nothing; any other host posts it
-  --pen=PHASE[,X,Y[,P[,ALT,AZ]]]@T  send an Apple Pencil message (kind 45) T seconds in: hover, down,
-                     move, up, cancel or leave, with one sample at the frame fraction X,Y (none for
-                     leave, and cancel may go without), pressure P (0…1) and the Pencil's altitude
-                     and azimuth in radians; e.g. --pen=down,0.3,0.5,0.2@2 --pen=move,0.4,0.5,0.8,1.0,0.5@2.1
+  --pen=PHASE[,X,Y[,P[,ALT,AZ[,MS]]]]@T  send an Apple Pencil message (kind 45) T seconds in: hover,
+                     down, move, up, cancel or leave, with one sample at the frame fraction X,Y (none
+                     for leave, and cancel may go without), pressure P (0…1), the Pencil's altitude
+                     and azimuth in radians, and MS, the sample's milliseconds since the stroke's
+                     down (the Mac's stroke clock times the stroke by it: without it, as posted);
+                     e.g. --pen=down,0.3,0.5,0.2@2 --pen=move,0.4,0.5,0.8,1.0,0.5,4.2@2.1
   --raw45=JSON@T     send this literal kind 45 payload T seconds in (split on the last @): several
                      samples, a phase --pen does not make
                      --pen and --raw45 go only to a --synthetic host on this Mac, as input does; the
@@ -252,16 +254,18 @@ def gesture(text):
 PEN_PHASES = ("hover", "down", "move", "up", "cancel", "leave")
 
 def pen(text):
-    """PHASE[,X,Y[,P[,ALT,AZ]]] as a PenInput with at most one sample."""
+    """PHASE[,X,Y[,P[,ALT,AZ[,MS]]]] as a PenInput with at most one sample; MS is the sample's `t`, its
+    milliseconds since the stroke's down (the Mac times the stroke's events by it)."""
     phase, *rest = text.split(",")
     if phase not in PEN_PHASES: raise ValueError(f"--pen: not a phase: {phase!r} ({', '.join(PEN_PHASES)})")
     if phase == "leave" or (phase == "cancel" and not rest):
         if rest: raise ValueError("--pen: leave takes no sample")
         return {"phase": phase}
-    if len(rest) not in (2, 3, 5): raise ValueError(f"--pen: {phase} takes X,Y[,P[,ALT,AZ]], got {text!r}")
+    if len(rest) not in (2, 3, 5, 6): raise ValueError(f"--pen: {phase} takes X,Y[,P[,ALT,AZ[,MS]]], got {text!r}")
     values = [number(v, "--pen", float) for v in rest]
     if not all(v == v and abs(v) != float("inf") for v in values): raise ValueError("--pen: every number must be finite")
-    return {"phase": phase, "samples": [dict(zip(("x", "y", "p", "alt", "az"), values))]}
+    if len(values) == 6 and values[5] < 0: raise ValueError("--pen: MS is 0 or more")
+    return {"phase": phase, "samples": [dict(zip(("x", "y", "p", "alt", "az", "t"), values))]}
 
 def fractions(text, flag):
     """X,Y for --move and --tap: two finite numbers, frame fractions (outside 0…1 is allowed)."""

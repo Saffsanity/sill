@@ -1,0 +1,11 @@
+# The Apple Pencil's rows in Settings › This iPad (PR #175, docs/pencil-pressure-plan.md §14) on the agents' iPad
+# (iPad Pro 13-inch (M5), iOS 27.0), scrolled to them: Pencil Pressure and Tilt off (its default), on with the three
+# under it, all three changed, a Mac that takes no pen, large type, and an iPad mini's width. The mock Mac takes a
+# pen in every settings case but `legacy`. No row on a phone, so none on the Duo.
+#   Scripts/harness-photos.sh Scripts/harness-photos/pencil-ipad.cases --device ipad --baseline origin/main
+ipad-pencil-off            -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil
+ipad-pencil-on             -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil -Sill.pencilPressure 1
+ipad-pencil-changed        -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil -Sill.pencilPressure 1 -Sill.pencilIgnoreFingers 0 -Sill.pencilSmoothing 1 -Sill.pencilBrushOutline 1
+ipad-pencil-legacy         -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil -Sill.pencilPressure 1 -SillSettingsCase legacy
+ipad-pencil-on-ax3         -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil -Sill.pencilPressure 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+ipad-mini-pencil-on        -SillLayout 744x1133 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pencil -Sill.pencilPressure 1

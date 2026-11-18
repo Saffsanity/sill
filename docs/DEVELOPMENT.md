@@ -480,8 +480,9 @@ come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
 (below; off unless turned on), Reverse Scrolling (below; off unless turned on),
 Hold to Show Window Controls (below, Holding a window's thumbnail; 0.5 s unless
 changed), Three-Finger Gestures (below, Trackpad gestures; on unless turned
-off) and, on an iPad, Pencil Pressure (below, Apple Pencil; on unless turned
-off), none of them ever sent to the Mac, and last Take the Tour.
+off) and, on an iPad, Pencil Pressure and Tilt (below, Apple Pencil; off unless
+turned on) with the three switches under it, none of them ever sent to the Mac, and
+last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
@@ -1442,31 +1443,55 @@ events it would post anyway with the tablet fields on them, and tells apps the
 pen came into range before its first point and left after its last. On an
 iPad and Pencil that support hover, the Pencil moves the pointer while it
 hovers, with the Mac cursor under it when that is an app's own, a drawing app's brush
-outline (never a standard arrow, I-beam or hand; hidden while the tip draws), and leaves range a tenth of a second after it is neither touching nor
+outline (never a standard arrow, I-beam or hand; hidden while the tip draws), with
+Brush Outline While Hovering on (below), and leaves range a tenth of a second after it is neither touching nor
 hovering, however long it is held still; one that cannot hover leaves a second
-after its last stroke. As with Sidecar's Pencil, the Pencil's button is its
-own: a stroke draws while another pointer holds the Mac's button (the Mac's
-trackpad, the portrait trackpad's press-and-hold), goes on when that pointer
-lets go, and ends at the Pencil's own lift; mouse input never takes the pen
-out of range.
+after its last stroke. The Pencil's button is its own: a stroke draws while
+another pointer holds the Mac's button (the Mac's trackpad, the portrait
+trackpad's press-and-hold), goes on when that pointer lets go, and ends at the
+Pencil's own lift; mouse input never takes the pen out of range.
 
-While the Pencil's tip is on the glass, and for half a second after it lifts,
-a finger stroke on the stream or the portrait trackpad sends nothing, so a
-palm resting on the glass neither clicks nor scrolls nor ends the stroke. A
-palm already resting for a moment before the tip first lands is a long press,
-a right-click, before Sill can know a Pencil is coming.
+Each point of a stroke reaches the Mac timed by the Pencil's own clock: the
+device sends how many milliseconds after the stroke's start each point came,
+and the Mac times the stroke's events by that, never later than now. So a stroke
+whose points crossed Wi-Fi in a burst keeps the spacing it was drawn with, for
+an app that reads a stroke's speed from its events' times (pull request #381's
+idea). `SILL_TEST_PEN_CLOCK=arrival` on the Mac times each event as it is posted
+instead, to compare the two in a drawing app.
 
-Settings › This iPad › Pencil Pressure (`Sill.pencilPressure`, on by default,
-never sent to the Mac) turns it off: the Pencil is then the mouse, the way out
-for a Mac app that mishandles tablet events. A stroke keeps the way it began. A
-Mac from before it gets the mouse, and the switch's footnote says to update
-Sill on it. The Mac's log has no line of the Pencil's own: a pen's down in a
+A Pencil's down on a sleeping display only wakes it, as a click does: the
+pointer moves there, the stroke draws nothing, and its lift is held back too.
+
+It is all off until Settings › This iPad › Pencil Pressure and Tilt
+(`Sill.pencilPressure`, never sent to the Mac) is turned on; off, the Pencil is
+the mouse, the way out for a Mac app that mishandles tablet events. A stroke
+keeps the way it began. A Mac from before it gets the mouse, and the switch's
+footnote says to update Sill on it. Under it, while it is on and the Mac takes
+a pen, each only for a stroke or a hover that goes as a pen's:
+
+- Ignore Fingers While Drawing (`Sill.pencilIgnoreFingers`, on unless turned
+  off): while the Pencil's tip is on the glass, and for half a second after it
+  lifts, a finger stroke on the stream or the portrait trackpad sends nothing,
+  so a palm resting on the glass neither clicks nor scrolls nor ends the stroke.
+  A palm already resting for a moment before the tip first lands is a long
+  press, a right-click, before Sill can know a Pencil is coming.
+- Smooth Pencil Lines (`Sill.pencilSmoothing`, off unless turned on): a stroke's
+  moves go through a 1€ filter (#381's) before they reach the Mac, which
+  steadies a slow, shaky line; the line then follows the tip about a tenth of a
+  second behind on a slow stroke and under 20 ms on a fast one. Never a tap: a
+  stroke's down and its lift go where the tip touched and lifted.
+- Brush Outline While Hovering (`Sill.pencilBrushOutline`, off unless turned
+  on): while the Pencil hovers, the Mac cursor shows under it when it is an
+  app's own (above).
+
+The Mac's log has no line of the Pencil's own: a pen's down in a
 streamed window is a "Click at …" line as a finger's tap is, and the stats lines
 count the Pencil's events (`in.pen`, `in.penProximity`).
 
 `swift run -c release SillHost --pen-selftest` builds the events the host
 would post, turns each into the `NSEvent` an app would get and prints what
-AppKit reads, posting nothing. `PenProbe` is the probe that settled whether
+AppKit reads, posting nothing; its "Event clock" lines show the unit the stroke
+clock writes (nanoseconds since the Mac started, CLOCK_UPTIME_RAW's). `PenProbe` is the probe that settled whether
 apps take synthesized tablet events: `--canvas` is a window that draws what it
 receives and prints its readings, and `--post-to-this-mac` posts three test
 strokes where the pointer is after a countdown (it moves your pointer and
