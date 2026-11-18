@@ -333,7 +333,12 @@ Rules found in the steps that hold for all work (each where it is written):
   size; `reconciles`; `Restore`, the window that comes back; the lines; and
   `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
-  `lockedMidSwitch` and `lockDecision`), `StillCapture` (SyntheticCapture.swift:
+  `lockedMidSwitch` and `lockDecision`), Lock this Mac when the last device leaves
+  (docs/privacy-mode-plan.md, part 1): `PrivacyPolicy` (which departures count, the
+  30 s wait, its end, the lock's confirmation, rule 10's displays, the words; pure,
+  `Tests/checks/privacy`), `PrivacyLock` (main actor: the rule's state and tick, the
+  status) and `ScreenLocker` (SACLockScreenImmediate and `pmset displaysleepnow` on
+  `sill.privacy.lock`; a test host's dry run), `StillCapture` (SyntheticCapture.swift:
   a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
@@ -424,7 +429,8 @@ Rules found in the steps that hold for all work (each where it is written):
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable` and `--no-clipboard`.
+  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session`
+  (with `--synthetic` only: a dry run).
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -440,7 +446,8 @@ Rules found in the steps that hold for all work (each where it is written):
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
   (Settings › Devices: Require pairing, Show the pairing window to screen
-  sharing, the paired devices, Remove and rename), `RemoteAccessPane`
+  sharing, Lock this Mac when the last device leaves, the paired devices, Remove
+  and rename), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code; the window a device's ask opens, and the cable notice),
   `PairingWindowSharing` (whether screen sharing shows that window: hidden
@@ -657,7 +664,11 @@ Rules found in the steps that hold for all work (each where it is written):
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
+  docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
+  synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,
+  a return, a move, locked already, another user, no display, no lock call, a quit,
+  a crash, a pairing connection, a refused device. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -1234,6 +1245,7 @@ python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDow
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_GRACE=5 .build/release/SillHost --synthetic --lock-after-session   # TEST ONLY dry run of Lock this Mac when the last device leaves: "would lock", nothing locked (SILL_TEST_PRIVACY_DISPLAYS, SILL_TEST_PRIVACY_NO_SYMBOL; Scripts/privacy-check/live.py)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
 python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
@@ -1274,7 +1286,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck,
+virtualDisplay, directWireless, sendAudio, shareClipboard, lockAfterSession, updateCheck,
 showPairingWindowToScreenSharing; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
