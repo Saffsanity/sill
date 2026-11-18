@@ -51,9 +51,10 @@ either is here, and nothing on the wire.
 - Wire: nothing. No kind, no field, no hello flag; older devices and Macs are unaffected. A Mac with no screen still sends
   no Desktop stops (Sill's display is no stop), so every device shows today's one-stop button.
 - Docs: docs/DEVELOPMENT.md (after the Desktop's stops: what it does, its lines, the guard, the headless hooks; the locked
-  Mac's exception), docs/locked-mac-plan.md's row, CLAUDE.md's one-line entries in Layout and Build and run (they move
-  with the lean-claude-md pull request). Not here: the Compatibility floor's kind 47 line (the overview's reserve-the-
-  numbers docs change), site/support.html and README (proposed text below).
+  Mac's exception), docs/locked-mac-plan.md's row, and the one-line entries in docs/LAYOUT.md and docs/BUILD-AND-RUN.md
+  (written into CLAUDE.md's Layout and Build and run, then moved there by `Scripts/migrate-notes.py` when main's #388, the
+  lean CLAUDE.md, was merged in: df04c7c8). Not here: the Compatibility floor's kind 47 line (the overview's
+  reserve-the-numbers docs change), site/support.html and README (proposed text below).
 
 **Defaults taken for Noah to confirm** (the plan's open decisions, each as recommended, and this branch's own):
 1. #200 lands first, alone, as this pull request (open decision 1 (a)): his commits merged as they are, ours on top.
@@ -105,7 +106,17 @@ no device update needed):
   iPhone at 60 joined), nosize (1920×1080 at 60, "no device's screen known yet"), guard (two stops: one line for two asks,
   nothing made or waited for, the marker taken, the count 2), guardok (made, the marker gone, the count 0) and offconsole
   (removed 0.06 s after the switch, none made off console, made again 2.1 s after the return).
-- `Tests/checks/run-all.sh`, CI's iOS build and H2 (the CLI against main's): pending (queued on the shared heavy lock).
+- `Tests/checks/run-all.sh`: all 75 checks passed, 0 failed (at `nice -n 19`, outside the heavy lock, whose jobs are the
+  builds, xcodebuild and harness photos).
+- CI's iOS step locally through heavy.sh (Xcode 27.1, Debug, the generic simulator, arm64, unsigned): BUILD SUCCEEDED, only
+  the known capture warning in StreamClient.swift; nothing under iOSClient, StreamProtocol or Package.swift differs from
+  main. GitHub's CI on #395 (run 44283282836, head f4f2e977): every step of Build and check passed (the release build,
+  run-all, the iOS app, the CLI's two paths).
+- H2 (the CLI against main's) was not run: main's CLI build waited over 15 minutes on the shared heavy lock behind long
+  mutant runs and was given up. Instead: every line this branch adds to the CLI's output is behind a TEST ONLY hook, the
+  AppKit loop (`--virtual-display`) or a made display; the gate's nodevice and view scenarios print no Headless line; and
+  the masked, sorted comparison (idle 8 s, then 8 s with a test client) gave identical output for this branch's CLI run
+  twice, so H2 is one build of main's `SillHost` and the same comparison away.
 
 **For Noah** (only he can: each makes a display, locks or switches his Mac, or needs a Mac with no screen; the same list is
 in the pull request). Install this branch as a release is built (his grants and pairings kept): `cd ~/Downloads/wt-vd-2a &&
