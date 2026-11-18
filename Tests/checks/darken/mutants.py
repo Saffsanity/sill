@@ -127,7 +127,7 @@ M = [
     ("a relative input file taken", F, "            if path.hasPrefix(\"/\") {", "            if !path.isEmpty {"),
     ("any value stamps the lines", F, 'if env["SILL_TEST_PRIVACY_LOG"] == "1" {', 'if env["SILL_TEST_PRIVACY_LOG"] != nil {'),
     ("three words taken", F, "guard let first = parts.first, parts.count <= 2 else { return nil }", "guard let first = parts.first, parts.count <= 3 else { return nil }"),
-    ("any second word is tagged", F, '            if tagged, parts[1] != "tagged" { return nil }\n', ""),
+    ("any second word is tagged", F, '        if tagged, parts[1] != "tagged" { return nil }\n', ""),
     # Every word.
     ("the scopes' words swapped", F, 'scope == .away ? "a device away from home is connected" : "a device is connected"',
      'scope == .any ? "a device away from home is connected" : "a device is connected"'),
