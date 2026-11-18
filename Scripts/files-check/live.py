@@ -7,7 +7,8 @@ folder under OUT), pairs a test client by the host's link, and drives Scripts/si
 --raw34 and --cancel-files against it. Every host runs under a minute. Prints a verdict per rule; exits 1 on any FAIL.
 
     python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]
-    python3 Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST   H2: the CLI's stdout against main's (about 75 s)"""
+    python3 Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST   H2: the CLI's stdout against main's (about 75 s)
+    python3 Scripts/files-check/live.py OUT h2 --logs=DIR             H2 judged again on the logs a run saved in DIR"""
 import hashlib, json, os, plistlib, random, re, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -321,12 +322,27 @@ def case_h2(out, base):
         os.killpg(p.pid, signal.SIGTERM)
         text = p.communicate(timeout=10)[0]
         open(os.path.join(out, f"h2-{label}.log"), "w").write(text)
-        mask = lambda l: re.sub(r"\d+(\.\d+)?", "N", re.sub(r"(/[^\s]+)+", "PATH", l))
-        return sorted(set(mask(l) for l in text.splitlines() if l.strip()))
-    mine, theirs = run(HOST, "branch"), run(base, "main")
-    extra = [l for l in mine if l not in theirs]
-    missing = [l for l in theirs if l not in mine]
+        return text
+    h2_compare(run(HOST, "branch"), run(base, "main"))
+
+
+def h2_lines(text):
+    """A CLI's stdout as H2 compares it: every line but the per-second counters masked (numbers N, paths PATH), as a set;
+    and the per-second counters ([1s] lines) by the names they use, since which counters a second shows is timing's."""
+    mask = lambda l: re.sub(r"\d+(\.\d+)?", "N", re.sub(r"(/[^\s]+)+", "PATH", l))
+    lines, counters = set(), set()
+    for l in text.splitlines():
+        if not l.strip(): continue
+        if l.startswith("[1s] "): counters |= set(re.findall(r"([A-Za-z][\w.]*) \d", l[5:].split(" · ")[0]))
+        else: lines.add(mask(l))
+    return lines, counters
+
+
+def h2_compare(mine_text, theirs_text):
+    (mine, mine_c), (theirs, theirs_c) = h2_lines(mine_text), h2_lines(theirs_text)
+    extra, missing = sorted(mine - theirs), sorted(theirs - mine)
     verdict(not extra and not missing, f"the same lines, masked: {len(extra)} new ({extra[:2]}), {len(missing)} gone ({missing[:2]})")
+    verdict(mine_c <= theirs_c, f"no counter main never prints: {sorted(mine_c - theirs_c)} (main's alone: {sorted(theirs_c - mine_c)})")
 
 
 def main():
@@ -334,6 +350,13 @@ def main():
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     base = next((a.partition("=")[2] for a in sys.argv[3:] if a.startswith("--base=")), None)
+    logs = next((a.partition("=")[2] for a in sys.argv[3:] if a.startswith("--logs=")), None)
+    if which == "h2" and logs:
+        # H2 judged again on the logs an earlier run saved (h2-branch.log, h2-main.log), no host started.
+        h2_compare(open(os.path.join(logs, "h2-branch.log")).read(), open(os.path.join(logs, "h2-main.log")).read())
+        failed = [w for ok, w in verdicts if not ok]
+        print(f"files-check: {len(verdicts) - len(failed)} of {len(verdicts)} rules hold")
+        sys.exit(1 if failed else 0)
     if not os.path.exists(HOST): raise SystemExit(f"no {HOST}: swift build -c release first")
     for name, case in [("send", case_send), ("refuse", case_refuse), ("hostile", case_hostile), ("lock", case_lock)]:
         if which in (name, "all"): case(out)
