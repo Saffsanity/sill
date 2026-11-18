@@ -56,6 +56,11 @@ MUTANTS = {
                                                    "arrangement == .twoColumns ? mac.width : nil"),
     # The bottom.
     "M26 the home indicator forgotten": ("self.bottom = max(0, bottomInset)", "self.bottom = 0"),
+    "M32 Disconnect in the home indicator's room": ("arrangement == .twoPages ? SettingsPane.foldGap : max(bottom, SettingsPane.footGap)",
+                                                     "arrangement == .twoPages ? SettingsPane.foldGap : SettingsPane.footGap"),
+    "M33 the laptop page's Disconnect as at the screen's foot": ("arrangement == .twoPages ? SettingsPane.foldGap : max(bottom, SettingsPane.footGap)",
+                                                                 "max(bottom, SettingsPane.footGap)"),
+    "M34 Disconnect at the very foot without a home indicator": ("static let footGap: CGFloat = 16", "static let footGap: CGFloat = 0"),
     # Closing.
     "M27 the overlay puts the keyboard back": ("var backToStream: Bool { self == .done || self == .harness }",
                                                "var backToStream: Bool { self == .done || self == .harness || self == .overlay }"),

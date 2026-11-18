@@ -39,6 +39,28 @@
   branch that adds a row there merges.
 - **Its edges**: each part's rows fade over 12 pt where they scroll out of sight under the header, Disconnect or
   the fold (`ScrollEdgeFade`): the first photos showed a sliver of a line under the laptop pose's fold.
+- **The review of #393** (2026-11-18), three findings, all real:
+  - *The home indicator's room never reached the pane.* StreamScreen passed its reader's
+    `geo.safeAreaInsets.bottom`, and a GeometryReader that ignores an edge (the stream screen's ignores the
+    bottom, under the home indicator) reports no inset there, as full screen had found for its hidden room
+    (docs/full-screen-plan.md, "Found and fixed"). So Disconnect sat 16 pt from the screen's edge, inside the
+    home indicator's 34 (21 on a phone on its side, 20 on an iPad), and this device's part scrolled its last
+    line under the indicator; the harness photos showed it (Disconnect 16.7 pt from the edge on an upright
+    iPhone, 16.5 on half an iPad). Now the pane takes the window's inset, `deviceInsets` (UIKit's, or the
+    harness's fake screen's), as full screen does; the room under Disconnect is a rule of the pure layout,
+    `SettingsPane.Layout.footBottom` (the home indicator's room, 16 pt at least; 12 over the laptop pose's
+    fold), checked at every real size and over the grid, with mutants M32 to M34; Disconnect comes right
+    under the rows only where that room is left under it too; and the console's `settings:` line says the
+    bottom the pane was given ("one column 361 pt wide at 16 (393×793, 34 pt kept at the bottom)"), so a
+    gate sees it arrive. The tour's card is given the same 0 (TourOverlay, StreamScreen's `bottomInset:`
+    beside it): main's, untouched here.
+  - *`-SillSettingsEnd 1` stopped short on an upright iPhone* (Take the Tour's footnote faded at the edge, the
+    version out of view), the only `-end` photo that did: `StartAnchor` anchored only the
+    initial offset on iOS 18, so a size change after the first layout left the rows where they were. It
+    anchors size changes to the end too now, as the panel's plain anchor (every role) did; the alignment
+    stays at the top, so rows shorter than their room still start there.
+  - *docs/DEVELOPMENT.md said Settings stays on one side of the book pose's fold*: it has a column on each
+    page (and in the laptop pose the Mac's part above the fold, this device's below); the paragraph says so.
 - **Verified** (2026-11-18, on this Mac, nothing on a device): `Tests/checks/run-all.sh` all 75 pass;
   `settings-pane` 199 checks (708,590 layouts on the grid) and 31 of 31 mutants; `phone-portrait` 71 of 71 and
   `duo` 169 of 169 mutants caught after their panel checks went; the iOS app built for the simulator with CI's line

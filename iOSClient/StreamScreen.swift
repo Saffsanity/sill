@@ -444,10 +444,12 @@ struct StreamScreen: View {
                 // the layouts so it takes every touch over the stream's UIKit input view, as the pairing overlay
                 // does. The layouts stay as they are under it (no viewport changes, the picture keeps decoding).
                 // The tour and the pairing overlay close it before they come (its zIndex keeps it over them while
-                // it slides away).
+                // it slides away). Its bottom inset, the home indicator's, is the window's (`deviceInsets`): this
+                // reader ignores the bottom edge and so reports none there (the review of #393: Disconnect sat
+                // 16 pt from the edge, in the home indicator's 34).
                 if settingsOpen {
                     HostSettingsPanel(client: client, close: { closeSettings(.done) }, pairThisDevice: openPairingOverlay,
-                                      takeTour: takeTour, fullScreen: fullScreenRow, bottomInset: geo.safeAreaInsets.bottom)
+                                      takeTour: takeTour, fullScreen: fullScreenRow, bottomInset: insets.bottom)
                         .transition(settingsTransition)
                         .zIndex(1)
                 }

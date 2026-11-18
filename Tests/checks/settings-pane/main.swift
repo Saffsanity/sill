@@ -22,6 +22,8 @@ func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CG
 check("16 pt margins, 20 between columns, columns of 300 sideways and 340 upright at least, 600 at most, pages of 200",
       SettingsPane.margin == 16 && SettingsPane.gap == 20 && SettingsPane.minColumn == 300 && SettingsPane.minUprightColumn == 340
         && SettingsPane.maxColumn == 600 && SettingsPane.minPage == 200)
+check("under Disconnect: 16 pt at a screen's foot with no home indicator, 12 over the laptop pose's fold",
+      SettingsPane.footGap == 16 && SettingsPane.foldGap == 12)
 check("two columns from 652 pt sideways and 732 upright", SettingsPane.twoColumnsFrom == 652 && SettingsPane.twoColumnsUprightFrom == 732)
 
 // MARK: - The real sizes
@@ -117,6 +119,11 @@ for c in cases {
                 && near(device.minX, wantDevice.minX) && near(device.width, wantDevice.width)
                 && near(device.minY, wantDevice.minY) && near(device.height, wantDevice.height))
         check("\(c.name)\(dir): the bottom inset kept, \(c.bottom)", l.bottom == c.bottom)
+        // Disconnect clear of the home indicator (its room, 16 pt at least), or 12 pt over the laptop pose's fold.
+        let foot: CGFloat = c.arrangement == .twoPages ? 12 : max(16, c.bottom)
+        check("\(c.name)\(dir): \(String(format: "%g", Double(foot))) pt under Disconnect, "
+                + (c.arrangement == .twoPages ? "over the fold" : "at the screen's foot"),
+              l.footBottom == foot)
     }
 }
 
@@ -159,10 +166,14 @@ check("600 pt at most: 1376 sideways gives two of 600 with 78 at each side",
       Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).mac == rect(78, 0, 600, 1008)
         && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).device == rect(698, 0, 600, 1008))
 check("one column 600 at most, centred", Layout(size: size(669, 951), bottomInset: 0, fold: .known(nil)).mac == rect(34.5, 0, 600, 951))
-check("the lines for the console",
-      bookL.description == "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the fold 455.5–495.5 between (951×669)"
-        && laptopL.description == "two pages 600 pt wide at 34.5, the Mac's to 455.5, this device's from 495.5 (669×951)"
-        && Layout(size: size(393, 793), bottomInset: 34, fold: .inferred).description == "one column 361 pt wide at 16 (393×793)")
+check("the lines for the console, with the bottom the pane was given",
+      bookL.description == "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the fold 455.5–495.5 between (951×669, 34 pt kept at the bottom)"
+        && laptopL.description == "two pages 600 pt wide at 34.5, the Mac's to 455.5, this device's from 495.5 (669×951, 34 pt kept at the bottom)"
+        && Layout(size: size(393, 793), bottomInset: 34, fold: .inferred).description == "one column 361 pt wide at 16 (393×793, 34 pt kept at the bottom)"
+        && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred, rightToLeft: true).description
+            == "two columns 600 pt wide, the Mac's at 78, this device's at 698 (1376×1008, 20 pt kept at the bottom, right to left)")
+check("the line without a bottom: nothing said (an iPhone SE on its side)",
+      Layout(size: size(667, 375), bottomInset: 0, fold: .inferred).description == "two columns 307.5 pt wide, the Mac's at 16, this device's at 343.5 (667×375)")
 
 // MARK: - The grid
 
@@ -184,7 +195,8 @@ let pairs = Rule("two columns without a fold: equal, 20 apart, centred, each at 
 let single = Rule("one column: both parts in it, min(600, W − 32) wide, centred, the screen's height")
 let headerRule = Rule("the header over the Mac's part (in two columns out to the far column's edge, its words the Mac's column less 8)")
 let mirrored = Rule("right to left mirrors left to right: the same rects on the screen, mirrored, the Mac's part on the leading side")
-let rules = [inside, widest, decided, offFold, leadingMac, pairs, single, headerRule, mirrored]
+let footRule = Rule("Disconnect clear of the home indicator: at the screen's foot its room, 16 pt at least; 12 over the laptop pose's fold")
+let rules = [inside, widest, decided, offFold, leadingMac, pairs, single, headerRule, mirrored, footRule]
 
 func mirror(_ r: CGRect, _ W: CGFloat) -> CGRect { rect(W - r.maxX, r.minY, r.width, r.height) }
 func same(_ a: CGRect, _ b: CGRect) -> Bool { near(a.minX, b.minX) && near(a.minY, b.minY) && near(a.width, b.width) && near(a.height, b.height) }
@@ -221,6 +233,8 @@ for w in stride(from: 200, through: 1400, by: 1) {
                     want = (W - 52) / 2 >= (H > W ? 340 : 300) ? .twoColumns : .oneColumn
                 }
                 decided.expect(l.arrangement == want, at + ", expected \(want.rawValue)")
+                footRule.expect(l.arrangement == .twoPages ? l.footBottom == 12 : l.footBottom == max(16, bottom) && l.footBottom >= bottom,
+                                at + ", \(l.footBottom) under Disconnect")
                 if let band = l.band.map(l.onScreen) {
                     offFold.expect(!mac.intersects(band) && !device.intersects(band), at)
                     if l.arrangement == .twoColumns {
