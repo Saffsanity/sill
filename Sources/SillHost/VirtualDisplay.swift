@@ -461,3 +461,101 @@ private enum Runtime {
         return fn(target, sel)
     }
 }
+
+/// Headless Mac / closed-lid MacBook fallback display for Desktop mode (issue #61).
+/// Pure: compiled and checked by `Tests/checks/virtual-display-api`.
+enum HeadlessDesktopPolicy {
+    static let defaultWidthPt = 1920
+    static let defaultHeightPt = 1080
+    static let minWidthPt = 1024
+    static let maxWidthPt = 3840
+    static let minHeightPt = 640
+    static let maxHeightPt = 2400
+
+    struct Dimensions: Equatable, Sendable {
+        var widthPt: Int
+        var heightPt: Int
+        var scale: Int
+
+        init(widthPt: Int, heightPt: Int, scale: Int) {
+            self.widthPt = widthPt
+            self.heightPt = heightPt
+            self.scale = scale
+        }
+    }
+
+    /// Whether the Desktop gets Sill's display now. `screenRecording`: this process may capture the screen
+    /// (CGPreflightScreenCaptureAccess). Without it no display is made, as VirtualStage.prepare refuses to make
+    /// one: measured 2026-09-22, SCShareableContent never returns in a process without Screen Recording once a
+    /// virtual display exists, and the catalog's look (`WindowCatalog.refreshWindows`, no timeout) right after
+    /// the display is made would hold the Desktop's select, and every select after it, for good. `onConsole`: this
+    /// session is the one on the screen (the lock's reading is not off console). A display made from a session
+    /// another user has the screen from would join that user's displays; the off-console view of #340 lets the
+    /// Desktop stream off console, and makes no virtual display there for that reason.
+    static func needsVirtualDesktop(
+        hasDisplay: Bool,
+        clientCount: Int,
+        appKitLoop: Bool,
+        synthetic: Bool,
+        apiAvailable: Bool,
+        screenRecording: Bool,
+        onConsole: Bool
+    ) -> Bool {
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole
+    }
+
+    /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
+    /// and Sill's own are none). When it goes once made is `releases`.
+    static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
+
+    /// The real displays that keep Sill's display from being made. The online ones, a display asleep among them: it
+    /// keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, while the Desktop starts
+    /// within about a third of a second of the connect; Sill's display made in that moment would show none of those
+    /// windows, and on a Mac without a built-in screen stay for the session (`releases`). With the lid
+    /// closed, the active ones alone: a monitor asleep there counts as none (#298, a closed-lid Mac whose only
+    /// monitor is off or asleep).
+    static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { lidClosed ? active : online }
+
+    /// macOS's own stand-in display, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a
+    /// Mac has no screen at all (the lid closed and nothing attached, seen on macOS 27). Not a real display:
+    /// Sill's Retina one is made in its place.
+    static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e && model == 0x76697274 }
+
+    enum Kind: Equatable { case real, sills, standIn }
+
+    /// Whether the fallback display goes now: a real display is active and the built-in screen is among them
+    /// (the lid opened: someone is at the Mac, and the windows come back to it) or no device is connected. A
+    /// monitor that comes back while the lid stays shut and a device works leaves it (#298): its going is a
+    /// display change, which macOS may lock a closed-lid Mac on.
+    static func releases(realDisplays: Int, builtInActive: Bool, devices: Int) -> Bool {
+        realDisplays > 0 && (builtInActive || devices == 0)
+    }
+
+    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while
+    /// it is kept (`releases`), so the Desktop stays where macOS moved the windows.
+    static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false) -> [T] {
+        for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
+            let some = displays.filter { kind($0) == wanted }
+            if !some.isEmpty { return some }
+        }
+        return displays
+    }
+
+    /// The fallback display's size: the MacBook's own screen as Sill last saw it, so windows keep their places;
+    /// never seen (a Mac mini), the device's viewport, as before.
+    static func desktopDimensions(builtIn: (widthPt: Int, heightPt: Int)?, viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
+        guard let builtIn else { return desktopDimensions(viewportWidth: viewportWidth, viewportHeight: viewportHeight) }
+        return desktopDimensions(viewportWidth: Double(builtIn.widthPt), viewportHeight: Double(builtIn.heightPt))
+    }
+
+    static func desktopDimensions(viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
+        guard let w = viewportWidth, let h = viewportHeight, w > 0, h > 0 else {
+            return Dimensions(widthPt: defaultWidthPt, heightPt: defaultHeightPt, scale: 2)
+        }
+        let clampedW = min(maxWidthPt, max(minWidthPt, Int(w.rounded())))
+        let clampedH = min(maxHeightPt, max(minHeightPt, Int(h.rounded())))
+        let evenW = clampedW & ~1
+        let evenH = clampedH & ~1
+        return Dimensions(widthPt: evenW, heightPt: evenH, scale: 2)
+    }
+}

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import IOKit
 import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
@@ -20,6 +21,9 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// Sill's fallback display is kept while devices work with the lid shut (HeadlessDesktopPolicy.releases): the
+    /// Desktop's display is it, before a real one (the coordinator's).
+    var keepsSills = false
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -165,6 +169,18 @@ final class WindowCatalog {
                               width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
+    /// The MacBook's own screen in points, as the last look that saw it had it: the size of Sill's Retina
+    /// display with the lid closed (HeadlessDesktopPolicy). Kept in the preferences, so a relaunch with the
+    /// lid already closed still knows it.
+    static var lastBuiltIn: (widthPt: Int, heightPt: Int)? {
+        guard let a = UserDefaults.standard.array(forKey: builtInKey) as? [Int], a.count == 2 else { return nil }
+        return (a[0], a[1])
+    }
+    private static let builtInKey = "lastBuiltInDisplayPoints"
+    private static func rememberBuiltIn(widthPt: Int, heightPt: Int) {
+        guard widthPt > 0, heightPt > 0, lastBuiltIn.map({ $0 == (widthPt, heightPt) }) != true else { return }
+        UserDefaults.standard.set([widthPt, heightPt], forKey: builtInKey)
+    }
     /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
     private var leftOutNamed: Set<String> = []
 
@@ -247,6 +263,35 @@ final class WindowCatalog {
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
         return Array(ids.prefix(Int(count)))
+    }
+
+    /// The displays macOS has online now: the active ones and those asleep (a display asleep is online, not
+    /// active), by ID. No ScreenCaptureKit call. Empty when the call fails.
+    nonisolated static func onlineDisplayIDs() -> [UInt32] {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
+    }
+
+    /// Whether a MacBook's lid is closed, by the lid's own sensor (IOPMrootDomain's AppleClamshellState): false with
+    /// it open, and on a Mac with no lid, which has no such property. About 10 µs a read.
+    nonisolated static func lidClosed() -> Bool {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return false }
+        defer { IOObjectRelease(root) }
+        return (IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? Bool) ?? false
+    }
+
+    /// The displays as `LockPolicy.displaysLine` counts them, read now.
+    nonisolated static func displaysLine() -> String {
+        let online = onlineDisplayIDs()
+        let kinds = online.map { StreamCoordinator.displayKind($0) }
+        return LockPolicy.displaysLine(online: online.count, active: activeDisplayIDs().count,
+                                       asleep: online.filter { CGDisplayIsAsleep($0) != 0 }.count,
+                                       sills: kinds.filter { $0 == .sills }.count, standIn: kinds.filter { $0 == .standIn }.count)
     }
 
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
@@ -335,7 +380,8 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        lookedDisplays = content.displays
+        if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
+        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { StreamCoordinator.displayKind($0.displayID) }, sillsFirst: keepsSills)
         resolveDesktopDisplay()
         // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
         // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).

@@ -178,5 +178,88 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
     check(Encoding.normalized(Encoding.normalized(raw)) == Encoding.normalized(raw), "\(raw): normalized twice is normalized once")
 }
 
+// Headless Mac / closed-lid MacBook virtual Desktop fallback (issue #61):
+typealias HDP = HeadlessDesktopPolicy
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == true,
+      "headless with connected client, AppKit loop and API available needs virtual Desktop")
+check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
+      "Mac with a display already does not need a headless fallback display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
+      "0 connected clients does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
+      "without AppKit loop does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true, screenRecording: true, onConsole: true) == false,
+      "synthetic test host does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false, screenRecording: true, onConsole: true) == false,
+      "when CGVirtualDisplay API is unavailable does not create a headless display")
+// Without Screen Recording, never (VirtualStage.prepare's rule): SCShareableContent never returns in a process without it
+// once a virtual display exists (measured 2026-09-22), and the catalog's look right after the display is made has no timeout.
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: false, onConsole: true) == false,
+      "without Screen Recording no headless display is made")
+// Never from a session another user has the screen from (off console): it would join their displays (#340's rule).
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: false) == false,
+      "off console no headless display is made")
+
+// The lid opened (or a monitor plugged in) while the fallback display exists: macOS moved every window
+// onto it when the last real display went, so it goes at once and they come back, not when the last
+// device leaves.
+check(HDP.stillNeeded(physicalDisplays: 0) == true, "no real display online: the fallback display stays")
+check(HDP.stillNeeded(physicalDisplays: 1) == false, "the lid opened, the built-in display back: the fallback display goes")
+check(HDP.stillNeeded(physicalDisplays: 2) == false, "two monitors plugged in: the fallback display goes")
+
+// macOS's own stand-in, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') with the lid closed and nothing
+// attached (seen on macOS 27, 2026-11-02): not a real display, so Sill's Retina one is made in its place.
+check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x76697274) == true, "macOS's stand-in ('unkn', 'virt') is no real display")
+check(HDP.isStandIn(vendor: 0x5111, model: 0x0001) == false, "Sill's own virtual display is not the stand-in")
+check(HDP.isStandIn(vendor: 0x610, model: 0xa050) == false, "Apple's built-in panel is a real display")
+check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x1234) == false, "an unknown vendor alone is not the stand-in")
+// Which displays the Desktop may stream: a real one, else Sill's, else the stand-in.
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }) == [.real], "a real display online: it alone")
+check(HDP.pool([HDP.Kind.standIn, .sills], kind: { $0 }) == [.sills], "the lid closed, Sill's Retina display made: it, not macOS's stand-in")
+check(HDP.pool([HDP.Kind.standIn], kind: { $0 }) == [.standIn], "only macOS's stand-in (before Sill's is made): the stand-in")
+check(HDP.pool([HDP.Kind](), kind: { $0 }) == [], "no display: none")
+// Kept while a device works with the lid shut (#298): a monitor Sill's wake brings back is a display change
+// macOS may lock a closed-lid Mac on, so Sill's display stays, and the Desktop stays on it.
+check(HDP.releases(realDisplays: 0, builtInActive: false, devices: 0) == false, "no real display: kept")
+check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 1) == false, "the lid shut, a monitor back, a device connected: kept")
+check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 0) == true, "the lid shut, a monitor back, no device: it goes")
+check(HDP.releases(realDisplays: 1, builtInActive: true, devices: 1) == true, "the lid opened with a device connected: it goes at once, as before")
+check(HDP.releases(realDisplays: 2, builtInActive: true, devices: 0) == true, "the lid opened, nobody connected: it goes")
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
+check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, sillsFirst: true) == [.real], "kept but not listed yet: the real one")
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: false) == [.real], "not kept: the real one first, as before")
+// Which real displays keep Sill's display from being made (the review of 2026-11-09): a display only asleep is
+// online and keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, so it counts; with
+// the lid closed only the active ones count, a monitor asleep there being none (#298).
+check(HDP.realDisplays(active: 0, online: 1, lidClosed: false) == 1, "the lid open, its screen asleep: counted (the wake turns it on)")
+check(HDP.realDisplays(active: 0, online: 2, lidClosed: false) == 2, "a Mac mini, its two monitors asleep: counted")
+check(HDP.realDisplays(active: 1, online: 1, lidClosed: false) == 1, "a monitor awake: counted")
+check(HDP.realDisplays(active: 0, online: 0, lidClosed: false) == 0, "a Mac with no monitor: none")
+check(HDP.realDisplays(active: 0, online: 2, lidClosed: true) == 0, "the lid closed, its monitors asleep: none (#298)")
+check(HDP.realDisplays(active: 1, online: 2, lidClosed: true) == 1, "the lid closed, a monitor awake: counted")
+check(HDP.realDisplays(active: 0, online: 0, lidClosed: true) == 0, "the lid closed, nothing attached: none")
+check(!HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: false)),
+      "a screen asleep with the lid open, or a Mac mini's monitor asleep: no display made")
+check(HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: true)),
+      "a monitor asleep with the lid closed: Sill's display made (#298)")
+// Its size: the MacBook's own screen as Sill last saw it, so windows keep their places (Noah's choice, 2026-11-02).
+check(HDP.desktopDimensions(builtIn: (1800, 1169), viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1800, heightPt: 1168, scale: 2),
+      "the built-in screen last seen at 1800×1169 pt: 1800×1168 @2× (even), not the iPad's size")
+check(HDP.desktopDimensions(builtIn: (1512, 982), viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1512, heightPt: 982, scale: 2),
+      "a 14-inch MacBook Pro's default 1512×982 pt: kept")
+check(HDP.desktopDimensions(builtIn: nil, viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),
+      "the built-in screen never seen (a Mac mini): the viewport, as before")
+
+check(HDP.desktopDimensions(viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1920, heightPt: 1080, scale: 2),
+      "no viewport defaults to 1920×1080 @2×")
+check(HDP.desktopDimensions(viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),
+      "iPad Pro viewport 1366×1024 kept")
+check(HDP.desktopDimensions(viewportWidth: 1195, viewportHeight: 835) == HDP.Dimensions(widthPt: 1194, heightPt: 834, scale: 2),
+      "odd viewport dimensions rounded down to even points")
+check(HDP.desktopDimensions(viewportWidth: 400, viewportHeight: 300) == HDP.Dimensions(widthPt: 1024, heightPt: 640, scale: 2),
+      "small viewport clamped to minimum 1024×640")
+check(HDP.desktopDimensions(viewportWidth: 6000, viewportHeight: 4000) == HDP.Dimensions(widthPt: 3840, heightPt: 2400, scale: 2),
+      "huge viewport clamped to maximum 3840×2400")
+
 print("virtual-display-api: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

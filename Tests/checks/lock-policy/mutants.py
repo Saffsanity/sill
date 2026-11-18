@@ -203,6 +203,8 @@ M = [
     ("line: off console's words", F, "and nothing they send is posted, until it is back.\"", "until it is back.\""),
     ("the unlock's line", F, "devices see its windows again.\"", "devices see it again.\""),
     ("the menus' note", F, 'static let menuNote = "The Mac is locked."', 'static let menuNote = "The menus changed. Open the menu again."'),
+    ("the displays' line without the asleep count", F, '\\(active) active, \\(asleep) asleep, \\(sills)', '\\(active) active, \\(sills)'),
+    ("the displays' line counting the asleep as active", F, '\\(active) active, \\(asleep) asleep', '\\(asleep) active, \\(asleep) asleep'),
     ("a count of none reads as none", F, "        let n = max(1, count)", "        let n = count"),
     ("picks counted as one", F, 'case .pick: what = n == 1 ? "a window pick" : "\\(n) window picks"', 'case .pick: what = "a window pick"'),
     ("input's words", F, '"; only a paired device types at a locked Mac, and no device at one switched to another user."', '"."'),
