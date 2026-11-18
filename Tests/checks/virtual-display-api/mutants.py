@@ -199,6 +199,24 @@ MUTANTS = [
      "case [\"standin\", \"asleep\"]: displays.append(TestDisplay(kind: .standIn, active: true))"),
     ("TEST ONLY: the screens' line left out",
      "case [\"screens\", \"asleep\"]: screensAsleep = true", "case [\"screens\", \"asleep\"]: break"),
+    # The modes a display is made with, and its backing (phase 2b's probe P2)
+    ("a room turned keeps its sides", "var turned: ModeSize { ModeSize(width: height, height: width) }",
+     "var turned: ModeSize { ModeSize(width: width, height: height) }"),
+    ("the asked mode not listed first", "        var list = [asked]\n        for m in others where !list.contains(m) { list.append(m) }\n        return list\n",
+     "        var list: [ModeSize] = []\n        for m in others where !list.contains(m) { list.append(m) }\n        if !list.contains(asked) { list.append(asked) }\n        return list\n"),
+    ("a size given twice listed twice", "for m in others where !list.contains(m) { list.append(m) }",
+     "for m in others where m != asked { list.append(m) }"),
+    ("the other modes dropped", "for m in others where !list.contains(m) { list.append(m) }", "for m in others where false { list.append(m) }"),
+    ("the backing the first mode's width", "(wide: (modes.map(\\.width).max() ?? 0) * scale,", "(wide: (modes.first?.width ?? 0) * scale,"),
+    ("the backing the narrowest mode's", "(wide: (modes.map(\\.width).max() ?? 0) * scale,", "(wide: (modes.map(\\.width).min() ?? 0) * scale,"),
+    ("the backing's height from the widths", "high: (modes.map(\\.height).max() ?? 0) * scale)", "high: (modes.map(\\.width).max() ?? 0) * scale)"),
+    ("the backing in points", "high: (modes.map(\\.height).max() ?? 0) * scale)", "high: (modes.map(\\.height).max() ?? 0))"),
+    ("init sizes the descriptor for the asked mode alone (as before)", "let maxPx = Self.maxPixels(modes, scale: scale)",
+     "let maxPx = Self.maxPixels([modes[0]], scale: scale)"),
+    ("init applies the asked mode alone", "let settings = try Self.newSettings(modes, scale: scale, refreshHz: refreshHz)",
+     "let settings = try Self.newSettings([modes[0]], scale: scale, refreshHz: refreshHz)"),
+    ("switchMode to a size the display was not made with", "guard displayID != 0, modesListed.contains(size) else { return false }",
+     "guard displayID != 0 else { return false }"),
 ]
 # A mutant names its file as a fourth element: "kind" is HeadlessDisplayKind.swift, else VirtualDisplay.swift.
 FILES = {"vd": F, "kind": os.path.join(WT, "Sources/SillHost/HeadlessDisplayKind.swift")}

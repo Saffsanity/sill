@@ -243,7 +243,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
   `Tests/checks/virtual-display-api`, which also runs `Runtime.method`'s decision
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
-  on classes it makes at run time),
+  on classes it makes at run time; `ModeSize`, `modeList` and `maxPixels`: the modes a display is made
+  with and its backing, `switchMode` and `applyModes` for phase 2b's probe P2, checked there too),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
@@ -611,6 +612,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
+  `Scripts/display-modes-probe/run.sh` (TEST ONLY; P2 of docs/virtual-desktop-plan.md as revised
+  2026-11-18, phase 2b): `probe.swift` with VirtualDisplay.swift alone; without `--make` the dry run (the
+  private API looked up, the modes, their backing and the steps printed; nothing made), with `--make`
+  Noah's run on a Mac at rest (refused while a Sill runs): a display with the room both ways as its modes,
+  switched in place, given new modes by `applySettings:` again, a window of its own on it, each change's
+  ID, mode, callback flags and the window's place, and one verdict line for each way.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own

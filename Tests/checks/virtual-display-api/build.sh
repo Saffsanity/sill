@@ -5,10 +5,14 @@
 # pure TypeEncoding, and Runtime.method and the applySettings: call against classes it makes at run
 # time: no private class is looked up and no display is made. Also HeadlessDisplayKind.swift (the
 # Desktop display rules' kinds by role) with StreamProtocol's DesktopDisplays.swift, `import
-# StreamProtocol` stripped, so they compile as one module.
+# StreamProtocol` stripped, so they compile as one module. The VirtualDisplay.swift compiled goes beside the binary
+# (OUT.VirtualDisplay.swift), where the check reads init's wiring as text.
 WT=$1; OUT=$2; T=$(mktemp -d)
 cp "${3:-$WT/Sources/SillHost/VirtualDisplay.swift}" "$T/VirtualDisplay.swift"
 sed '/^import StreamProtocol$/d' "${4:-$WT/Sources/SillHost/HeadlessDisplayKind.swift}" > "$T/HeadlessDisplayKind.swift"
 cp "$WT/Sources/StreamProtocol/DesktopDisplays.swift" "$T/DesktopDisplays.swift"
 cp "$(dirname "$0")/main.swift" "$T/main.swift"
-swiftc -O "$T"/*.swift -o "$OUT" 2>&1 | grep -E "error|warning" ; rm -rf "$T"
+swiftc -O "$T"/*.swift -o "$OUT" 2>&1 | grep -E "error|warning"
+# The VirtualDisplay.swift compiled in (a mutant's, under mutants.py), beside the binary: the check reads init's
+# wiring there as text.
+cp "$T/VirtualDisplay.swift" "$OUT.VirtualDisplay.swift"; rm -rf "$T"

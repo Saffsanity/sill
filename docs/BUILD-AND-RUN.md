@@ -11,6 +11,7 @@ swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no 
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default in the CLI; on in Sill.app)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it ([Hz] [WxH] after it: `60 800x830`)
+Scripts/display-modes-probe/run.sh [--make] [WxH] [HZ]   # TEST ONLY, P2 (phase 2b): the dry run (nothing made) by default; --make is Noah's, on a Mac at rest: a display with the room both ways as its modes, switched in place and given new modes, each change's ID, mode, callback flags and its window's place
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
 swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device's Settings panel turns it on or off too)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it

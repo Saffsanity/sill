@@ -75,14 +75,27 @@ final class VirtualDisplay {
         }
     }
 
+    /// A mode's size in points, as `init` lists it and `switchMode`, `applyModes` and the modes probe ask for it.
+    struct ModeSize: Equatable, CustomStringConvertible {
+        var width: Int
+        var height: Int
+        init(width: Int, height: Int) { self.width = width; self.height = height }
+        var description: String { "\(width)×\(height)" }
+        /// The same size turned a quarter (a device held the other way).
+        var turned: ModeSize { ModeSize(width: height, height: width) }
+    }
+
     let name: String
-    let widthPt: Int
-    let heightPt: Int
+    /// The mode asked for now, in points: the one `init` was given, until `switchMode` asks for another listed one.
+    private(set) var widthPt: Int
+    private(set) var heightPt: Int
     let scale: Int
     let refreshHz: Double
     let vendorID: UInt32
     let productID: UInt32
     let serialNum: UInt32
+    /// The modes the display was made with (`init`'s, the asked one first), or given since (`applyModes`), in points.
+    private(set) var modesListed: [ModeSize]
 
     /// Zero after `destroy()`.
     private(set) var displayID: CGDirectDisplayID = 0
@@ -119,6 +132,10 @@ final class VirtualDisplay {
     ///   - widthPt, heightPt: the size windows see, in points.
     ///   - scale: 2 for HiDPI (backing store is widthPt×2 by heightPt×2 pixels), 1 for not.
     ///   - vendorID, productID, serialNum: display identity; keep stable (see type docs).
+    ///   - otherModes: more sizes listed beside the one asked for (`modeList`), each a mode `switchMode` can move the live
+    ///     display to without removing it (a device's room turned a quarter: docs/virtual-desktop-plan.md §5 as revised
+    ///     2026-11-18, the modes probe P2 decides whether macOS does). None by default: one mode, as every display Sill
+    ///     made before.
     init(name: String,
          widthPt: Int,
          heightPt: Int,
@@ -126,9 +143,13 @@ final class VirtualDisplay {
          refreshHz: Double = 60,
          vendorID: UInt32 = 0x5111,
          productID: UInt32 = 0x0001,
-         serialNum: UInt32 = 1) throws {
-        guard widthPt >= 320, heightPt >= 240, widthPt <= 8192, heightPt <= 8192 else {
-            throw Failure.invalidSize("\(widthPt)×\(heightPt) pt is outside 320×240…8192×8192")
+         serialNum: UInt32 = 1,
+         otherModes: [ModeSize] = []) throws {
+        let modes = Self.modeList(asked: ModeSize(width: widthPt, height: heightPt), others: otherModes)
+        for m in modes {
+            guard m.width >= 320, m.height >= 240, m.width <= 8192, m.height <= 8192 else {
+                throw Failure.invalidSize("\(m.width)×\(m.height) pt is outside 320×240…8192×8192")
+            }
         }
         guard scale == 1 || scale == 2 else { throw Failure.invalidSize("scale must be 1 or 2") }
         self.name = name
@@ -139,14 +160,16 @@ final class VirtualDisplay {
         self.vendorID = vendorID
         self.productID = productID
         self.serialNum = serialNum
+        self.modesListed = modes
 
-        let pxW = widthPt * scale, pxH = heightPt * scale
+        // The largest mode's pixels each way: the window server sizes the display's backing for the largest mode listed.
+        let maxPx = Self.maxPixels(modes, scale: scale)
 
         // --- Descriptor ---------------------------------------------------------------
         let descriptor = try Runtime.newObject("CGVirtualDisplayDescriptor")
         try Runtime.setObject(descriptor, "setName:", name as NSString)
-        try Runtime.setUInt32(descriptor, "setMaxPixelsWide:", UInt32(pxW))
-        try Runtime.setUInt32(descriptor, "setMaxPixelsHigh:", UInt32(pxH))
+        try Runtime.setUInt32(descriptor, "setMaxPixelsWide:", UInt32(maxPx.wide))
+        try Runtime.setUInt32(descriptor, "setMaxPixelsHigh:", UInt32(maxPx.high))
         // Physical size drives the DPI macOS reports. ~110 pt per inch is what Apple's own
         // Retina panels use, which keeps the default "looks like" choice sensible.
         let mm = CGSize(width: Double(widthPt) / 110 * 25.4, height: Double(heightPt) / 110 * 25.4)
@@ -175,15 +198,13 @@ final class VirtualDisplay {
         // --- Display ------------------------------------------------------------------
         let display = try Runtime.allocInit("CGVirtualDisplay", "initWithDescriptor:", descriptor)
 
-        // --- Settings: one mode, given in points. With hiDPI = 1 macOS derives two modes
-        // from it, widthPt×heightPt at 1× and at 2× (backing pxW×pxH, which is why
-        // maxPixels is the 2× size). Measured on macOS 27: which of the two is current at
-        // creation depends on what macOS remembered for this vendor/product/serial, so
-        // `waitUntilOnline` selects the requested one explicitly with public API.
-        let mode = try Runtime.newMode(width: UInt32(widthPt), height: UInt32(heightPt), refreshRate: refreshHz)
-        let settings = try Runtime.newObject("CGVirtualDisplaySettings")
-        try Runtime.setUInt32(settings, "setHiDPI:", scale == 2 ? 1 : 0)
-        try Runtime.setObject(settings, "setModes:", [mode] as NSArray)
+        // --- Settings: the modes, given in points (one unless `otherModes`). With hiDPI = 1
+        // macOS derives two modes from each, widthPt×heightPt at 1× and at 2× (backing
+        // widthPt×scale by heightPt×scale, which is why maxPixels is the 2× size). Measured on
+        // macOS 27: which of the two is current at creation depends on what macOS remembered for
+        // this vendor/product/serial, so `waitUntilOnline` selects the requested one explicitly
+        // with public API.
+        let settings = try Self.newSettings(modes, scale: scale, refreshHz: refreshHz)
         guard try VirtualDisplay.applySettings(settings, to: display) else { throw Failure.applySettingsFailed }
 
         let id = try Runtime.getUInt32(display, "displayID")
@@ -241,6 +262,60 @@ final class VirtualDisplay {
         let opts = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
         let modes = (CGDisplayCopyAllDisplayModes(displayID, opts) as? [CGDisplayMode]) ?? []
         return modes.map { "\($0.width)×\($0.height) pt @ \($0.pixelWidth)×\($0.pixelHeight) px, \(Int($0.refreshRate)) Hz" }
+    }
+
+    // MARK: Modes in place (phase 2b's probe P2; nothing in Sill calls these before it has run)
+
+    /// Asks the live display for another of the modes it was made with (`modesListed`), in place: the same display, the
+    /// same ID, with public CoreGraphics (`selectRequestedMode`, CGConfigureDisplayWithDisplayMode), as `waitUntilOnline`
+    /// already selects the mode asked at creation. False, with nothing changed, for a size not listed; else the select's
+    /// own answer, with the size now the one asked for, so `waitUntilOnline` and `hasRequestedMode` judge it (macOS may
+    /// apply a mode a moment after the call returns). Main actor, as every call here.
+    @discardableResult
+    func switchMode(to size: ModeSize) -> Bool {
+        guard displayID != 0, modesListed.contains(size) else { return false }
+        widthPt = size.width
+        heightPt = size.height
+        return selectRequestedMode()
+    }
+
+    /// Gives the live display a new list of modes (`applySettings:` sent again, with the scale and rate it was made
+    /// with): the other way the probe P2 tries to change a display's size without removing it. The private call's own
+    /// answer; on YES the list is `sizes`, and `switchMode` takes one of them. Its backing stays the one `init` sized
+    /// (`maxPixels`), so a mode larger than every mode made with it may be refused or clipped: the probe says which.
+    /// Throws if a private class or method is missing, or the display has gone.
+    func applyModes(_ sizes: [ModeSize]) throws -> Bool {
+        guard let display = object, displayID != 0 else { throw Failure.noDisplayID }
+        let list = Self.modeList(asked: sizes.first ?? ModeSize(width: widthPt, height: heightPt), others: Array(sizes.dropFirst()))
+        let settings = try Self.newSettings(list, scale: scale, refreshHz: refreshHz)
+        guard try VirtualDisplay.applySettings(settings, to: display) else { return false }
+        modesListed = list
+        return true
+    }
+
+    /// The modes a display is made with: the one asked for first, then each of `others` in order, a size given twice
+    /// listed once. Pure; Tests/checks/virtual-display-api.
+    static func modeList(asked: ModeSize, others: [ModeSize]) -> [ModeSize] {
+        var list = [asked]
+        for m in others where !list.contains(m) { list.append(m) }
+        return list
+    }
+
+    /// The display's largest backing, in pixels each way: the widest mode's width and the tallest mode's height, at
+    /// `scale` (a room listed both ways, 1376×1032 and 1032×1376 at 2×, needs 2752 × 2752). The descriptor's maximum,
+    /// which the window server sizes the display's backing for. Pure; Tests/checks/virtual-display-api.
+    static func maxPixels(_ modes: [ModeSize], scale: Int) -> (wide: Int, high: Int) {
+        (wide: (modes.map(\.width).max() ?? 0) * scale, high: (modes.map(\.height).max() ?? 0) * scale)
+    }
+
+    /// A `CGVirtualDisplaySettings` listing `modes` (each at `refreshHz`), HiDPI when `scale` is 2: what `init` applies,
+    /// and `applyModes` again on the live display. Each mode is made before the settings object, as `init` always did.
+    private static func newSettings(_ modes: [ModeSize], scale: Int, refreshHz: Double) throws -> AnyObject {
+        let made = try modes.map { try Runtime.newMode(width: UInt32($0.width), height: UInt32($0.height), refreshRate: refreshHz) }
+        let settings = try Runtime.newObject("CGVirtualDisplaySettings")
+        try Runtime.setUInt32(settings, "setHiDPI:", scale == 2 ? 1 : 0)
+        try Runtime.setObject(settings, "setModes:", made as NSArray)
+        return settings
     }
 
     /// Every private class/selector/type encoding this file calls, in the order it calls them.

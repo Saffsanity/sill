@@ -608,5 +608,43 @@ check(HDP.desktopAgainAtWake(streamsDesktop: true, sills: false, gate: false) ==
 // Its size and rate are the device's (VirtualDesktopSize, Tests/checks/virtual-desktop; Noah, 2026-11-18), no longer
 // #200's built-in screen as last seen.
 
+// MARK: The modes a display is made with, and its backing (phase 2b's probe P2: Scripts/display-modes-probe)
+
+typealias Mode = VirtualDisplay.ModeSize
+let pad13 = Mode(width: 1376, height: 1032)
+check(pad13.turned == Mode(width: 1032, height: 1376), "a room turned a quarter swaps its sides: \(pad13.turned)")
+check(pad13.turned.turned == pad13, "turned twice is the room again")
+check(pad13.description == "1376×1032", "a mode reads W×H: \(pad13.description)")
+// The list: the one asked for first, each other in its order, a size given twice listed once.
+check(VirtualDisplay.modeList(asked: pad13, others: []) == [pad13], "one mode by default, as every display Sill made before")
+check(VirtualDisplay.modeList(asked: pad13, others: [pad13.turned]) == [pad13, pad13.turned], "the room both ways, the asked one first")
+check(VirtualDisplay.modeList(asked: pad13, others: [pad13, pad13.turned, pad13]) == [pad13, pad13.turned],
+      "the asked size given again is listed once, first")
+let mini = Mode(width: 1218, height: 800)
+check(VirtualDisplay.modeList(asked: pad13, others: [mini, pad13.turned, mini]) == [pad13, mini, pad13.turned],
+      "the others in their order, each once: \(VirtualDisplay.modeList(asked: pad13, others: [mini, pad13.turned, mini]))")
+check(VirtualDisplay.modeList(asked: mini.turned, others: [mini]).first == mini.turned, "the asked one first even upright")
+// The backing: the widest mode's width and the tallest mode's height, at the scale.
+func backing(_ modes: [Mode], _ scale: Int) -> [Int] { let b = VirtualDisplay.maxPixels(modes, scale: scale); return [b.wide, b.high] }
+check(backing([pad13], 2) == [2752, 2064], "one mode at 2×: its own pixels (as init sized it before: \(backing([pad13], 2)))")
+check(backing([pad13], 1) == [1376, 1032], "at 1×: its points")
+check(backing([pad13, pad13.turned], 2) == [2752, 2752], "the room both ways: a square of the longer side (\(backing([pad13, pad13.turned], 2)))")
+check(backing([Mode(width: 800, height: 1200), Mode(width: 1600, height: 600)], 2) == [3200, 2400],
+      "the widest's width and the tallest's height, from different modes: \(backing([Mode(width: 800, height: 1200), Mode(width: 1600, height: 600)], 2))")
+check(backing([mini, pad13, Mode(width: 1000, height: 700)], 2) == [2752, 2064], "the largest of three, wherever it is listed")
+check(backing([], 2) == [0, 0], "no mode, no backing")
+// init's wiring, read as text: the descriptor's maximum is the list's backing, and every listed mode goes to setModes:.
+// build.sh puts the VirtualDisplay.swift it compiled (a mutant's too) beside the binary.
+let vdSource = (try? String(contentsOfFile: CommandLine.arguments[0] + ".VirtualDisplay.swift", encoding: .utf8)) ?? ""
+check(!vdSource.isEmpty, "the VirtualDisplay.swift compiled in is read (\(CommandLine.arguments[0]).VirtualDisplay.swift)")
+check(vdSource.contains("let maxPx = Self.maxPixels(modes, scale: scale)")
+      && vdSource.contains("\"setMaxPixelsWide:\", UInt32(maxPx.wide))") && vdSource.contains("\"setMaxPixelsHigh:\", UInt32(maxPx.high))"),
+      "init sizes the descriptor's maximum for every mode it lists")
+check(vdSource.contains("let modes = Self.modeList(asked: ModeSize(width: widthPt, height: heightPt), others: otherModes)")
+      && vdSource.contains("let settings = try Self.newSettings(modes, scale: scale, refreshHz: refreshHz)"),
+      "init lists the asked mode and the others, and applies them all")
+check(vdSource.contains("guard displayID != 0, modesListed.contains(size) else { return false }"),
+      "switchMode moves only to a mode the display was made with (or given since)")
+
 print("virtual-display-api: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
