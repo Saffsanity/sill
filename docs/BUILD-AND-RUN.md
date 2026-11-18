@@ -60,6 +60,7 @@ SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROF
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
 Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (docs/release-checklist.md, TestFlight; --privacy-report, --print-version)
 Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's disk image of any build, ad hoc (release.sh makes the real one)
+Scripts/app-icon-previews.sh [--looks DIR]   # Settings' App Icon pictures from Packaging/*.icon (ictool, iOS Default look; DIR: every look of each, iOS and macOS)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
@@ -351,7 +352,12 @@ remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
 parts scrolled to their ends), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
-to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
+to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper; `appicon` to the
+App Icon group over the version, docs/app-icons-plan.md), `-SillAppIcon original|community|<name>` (that
+group's stand-in for iOS's alternate icon name, an unknown name too; a tap moves the stand-in alone),
+`-SillAppIconFailed 1` (its line for a change iOS refused), `-SillAppIconSet original|community` (a tap's
+real call a second after the group appears: iOS's alert in a photo, the icon iOS keeps at the next launch;
+the console's `app icon: …` lines say what happened),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
 run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
