@@ -489,10 +489,12 @@ do {
     let k = dev.snapshots.count
     dev.send([DeviceFiles.Source(url: shrink, name: "shrink.bin")])
     check(waitFor(20) { dev.snapshots.count > k && (dev.last?.acked ?? 0) >= 300_000 }, "under way")
-    // To one byte: the next part read, wherever the reader is, comes up short.
-    let h = try! FileHandle(forWritingTo: shrink); try! h.truncate(atOffset: 1); try! h.close()
+    // Ten bytes short of its size: every part reads whole but the last, which comes up short. A short part
+    // sent anyway would end at the Mac (`damaged`, by the Mac) instead of here.
+    let h = try! FileHandle(forWritingTo: shrink); try! h.truncate(atOffset: 30_000_000 - 10); try! h.close()
     let s = dev.end(20)
-    check(stopped(s).map { $0.reason == "cantRead" && $0.name == "shrink.bin" && !$0.byPeer } == true, "a file that shrank: cantRead: \(String(describing: s?.phase))")
+    check(stopped(s).map { $0.reason == "cantRead" && $0.name == "shrink.bin" && !$0.byPeer } == true,
+          "a file that shrank: cantRead here, never a short part sent: \(String(describing: s?.phase))")
     _ = waitFor(5) { staged(mac.folder).isEmpty }
     check(staged(mac.folder).isEmpty && listing(mac.folder).isEmpty, "the Mac was told and deleted its partial")
     dev.stop(); mac.stop()
