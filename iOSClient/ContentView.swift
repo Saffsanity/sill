@@ -221,6 +221,12 @@ struct ContentView: View {
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
 ///   switch and its footnote (#291).
+///   `-SillSettingsScroll appicon` at the App Icon group's title, its pictures, its footnote and the version
+///   under it (docs/app-icons-plan.md).
+/// * `-SillAppIcon original|community|<name>` — the App Icon group's stand-in for iOS's alternate icon name
+///   (an unknown name too, which shows Original marked), so a photo shows each mark; a tap moves the stand-in
+///   alone, never the real icon. `-SillAppIconFailed 1` shows the line for a change iOS refused. The console
+///   says which shows ("app icon: …"). In the normal app too.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
