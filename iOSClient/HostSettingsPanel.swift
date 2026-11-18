@@ -227,7 +227,7 @@ struct HostSettingsPanel: View {
     // MARK: The pane's arrangement (SettingsPane.Layout)
 
     /// The header, the two parts and Disconnect where the layout puts them, in the leading-edge space (so right
-    /// to left mirrors them): one column, the header pinned over one scroll view and Disconnect under it, as the
+    /// to left mirrors them): one column, the header pinned over both parts and Disconnect under them, as the
     /// panel had them; two columns, the header over both (its words over the Mac's column, Done at the far
     /// column's end), the Mac's part with Disconnect under it in the leading column and this device's in the
     /// trailing one, a column on each page in the book pose; or the laptop pose's two pages, the header, the
@@ -237,11 +237,10 @@ struct HostSettingsPanel: View {
         case .oneColumn:
             VStack(spacing: 0) {
                 header(words: nil)
-                part(bottom: 0) {
+                withDisconnect(footBottom: footBottom(l)) {
                     macPart
                     devicePart
                 }
-                foot.padding(.bottom, footBottom(l))
             }
             .frame(width: l.mac.width, height: l.size.height)
             .paneAt(x: l.mac.minX, y: 0, in: l.size)
@@ -249,11 +248,8 @@ struct HostSettingsPanel: View {
             VStack(spacing: 0) {
                 header(words: l.headerWords)
                 HStack(alignment: .top, spacing: l.device.minX - l.mac.maxX) {
-                    VStack(spacing: 0) {
-                        part(bottom: 0) { macPart }
-                        foot.padding(.bottom, footBottom(l))
-                    }
-                    .frame(width: l.mac.width)
+                    withDisconnect(footBottom: footBottom(l)) { macPart }
+                        .frame(width: l.mac.width)
                     part(bottom: l.bottom) { devicePart }
                         .frame(width: l.device.width)
                 }
@@ -264,8 +260,7 @@ struct HostSettingsPanel: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     header(words: nil)
-                    part(bottom: 0) { macPart }
-                    foot.padding(.bottom, 12)
+                    withDisconnect(footBottom: 12) { macPart }
                 }
                 .frame(width: l.mac.width, height: l.mac.height)
                 .paneAt(x: l.mac.minX, y: l.mac.minY, in: l.size)
@@ -278,6 +273,26 @@ struct HostSettingsPanel: View {
 
     /// Under Disconnect at the screen's foot: the home indicator's room, or 16 pt where there is none.
     private func footBottom(_ l: SettingsPane.Layout) -> CGFloat { l.bottom > 0 ? l.bottom : 16 }
+
+    /// Rows, then Disconnect, in reach either way, as the panel had them: right under the rows while they fit
+    /// (an iPad's tall column), else pinned under the rows' scroll view (`footBottom` under it, at the screen's
+    /// foot or the fold's).
+    private func withDisconnect<Content: View>(footBottom: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
+        let rows = content()
+        return ViewThatFits(in: .vertical) {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) { rows }
+                    .padding(.top, ScrollEdgeFade.height)
+                    .dynamicTypeSize(...Self.largestRowType)
+                foot
+                Spacer(minLength: 0)
+            }
+            VStack(spacing: 0) {
+                part(bottom: 0) { rows }
+                foot.padding(.bottom, footBottom)
+            }
+        }
+    }
 
     /// One part's rows in a scroll view of their own, which bounces only where they do not fit. `bottom`: the
     /// room kept under the rows where the scroll view reaches the screen's bottom edge (the home indicator's),
