@@ -26,7 +26,7 @@ public enum RemoteTLS {
     public static let sessionALPN = "sill/1"
     /// Pairing: exactly one kind 19 from the device and one kind 20 back, then close.
     public static let pairingALPN = "sill-pair/1"
-    /// What a host offers, both doors, for good (the compatibility floor, CLAUDE.md): a device from
+    /// What a host offers, both doors, for good (the compatibility floor, docs/COMPATIBILITY.md): a device from
     /// the first public build offers `sill/1` for a session and `sill-pair/1` for pairing, and only
     /// inside a `sill/1` session can a host tell it anything, kind 22 "update" included. So a later
     /// host adds a later generation beside these and never drops one: a host that no longer serves

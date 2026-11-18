@@ -1,7 +1,8 @@
 """The rules that keep branches out of each other's way (2026-11-12, branch `tooling-speedup`): every
 check folder describes itself, no table or list of the checks is kept by hand, CI reads the checks
 with mutants from the folders, and the notes of a piece of work go in its own docs/steps file, not
-back into CLAUDE.md. Prints `ok` or `FAIL` per rule, exits 1 on any FAIL. usage: rules.py ROOT"""
+back into CLAUDE.md; and CLAUDE.md stays lean (2026-11-18, branch `lean-claude-md`). Prints `ok` or
+`FAIL` per rule, exits 1 on any FAIL. usage: rules.py ROOT"""
 import glob
 import importlib.util
 import json
@@ -103,6 +104,17 @@ rule(names and not badnames, f"docs/steps' {len(names)} files are named <date>-<
      ", ".join(badnames))
 empty = [f for f in names if not read(os.path.join(steps, f)).strip()]
 rule(not empty, "no step file is empty", ", ".join(empty))
+
+# 6. CLAUDE.md stays lean (Noah, 2026-11-18): every turn of every agent reads it whole, so it keeps
+#    rules and pointers only, and what it knows of files, commands, test hooks and the wire lives in
+#    the docs it points to (its Layout, Build and run and Compatibility floor moved there that day).
+LEAN_LIMIT = 12_000
+size = os.path.getsize(os.path.join(root, "CLAUDE.md"))
+rule(size <= LEAN_LIMIT, f"CLAUDE.md stays lean: {size:,} bytes, at most {LEAN_LIMIT:,}",
+     "every turn of every agent reads it, so it keeps rules and pointers only (Noah, 2026-11-18). "
+     "Move the rest where it belongs: what a file, folder or type does to docs/LAYOUT.md; a command, "
+     "test hook or harness argument to docs/BUILD-AND-RUN.md; a rule of the wire to "
+     "docs/COMPATIBILITY.md; what a piece of work did to its step file (Scripts/steps.sh new)")
 
 print(f"repo-rules: {passed} of {passed + failed} rules hold")
 sys.exit(1 if failed else 0)
