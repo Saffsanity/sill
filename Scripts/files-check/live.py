@@ -137,18 +137,25 @@ def case_send(out):
         names = [n for n, _ in sizes if n != "one.bin"]
         leaked = [l for _, l in h.lines if any(n in l for n in names)]
         verdict(not leaked, f"no file name in the host's output: {leaked[:2]}")
+    finally:
+        h.stop()
+    # A host of its own for the rest, so each runs under a minute.
+    h = Host(out, "send500")
+    try:
+        ident = paired(h, out)
+        if not ident: return
         # 500 files of 1 KB in one transfer; 501 refused tooMany.
         many = os.path.join(out, "send.many"); os.makedirs(many, exist_ok=True)
         for i in range(500): make(many, f"f{i:03}.txt", 1000, i)
         text, code = client(h, "500", 25, "--tls", f"--send-file={many}@1", "--expect-files=done", identity=ident)
         verdict(code == 0, f"500 files of 1 KB: done ({re.findall(r'files done: .*', text)[:1]})")
-        verdict(len(h.kept()) == 505, f"505 files kept in all: {len(h.kept())}")
+        verdict(len(h.kept()) == 500, f"500 files kept: {len(h.kept())}")
         make(many, "f500.txt", 1000, 500)
         text, code = client(h, "501", 6, "--tls", f"--send-file={many}@1", "--expect-files=answer:tooMany", identity=ident)
         verdict(code == 0, "501 files: refused tooMany before any byte")
-        # The same names again: numbered, never replaced.
-        text, code = client(h, "again", 10, "--tls", f"--send-file={paths[2]}@1", "--expect-files=done", identity=ident)
-        verdict(code == 0 and os.path.exists(os.path.join(h.files, "chunk 2.bin")), "the same name again: chunk 2.bin")
+        # The same name again: numbered, never replaced.
+        text, code = client(h, "again", 8, "--tls", f"--send-file={os.path.join(many, 'f000.txt')}@1", "--expect-files=done", identity=ident)
+        verdict(code == 0 and os.path.exists(os.path.join(h.files, "f000 2.txt")), "the same name again: f000 2.txt")
     finally:
         h.stop()
 
