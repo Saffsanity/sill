@@ -11,11 +11,13 @@
 //       prints one word on stdout: missing (App Store Connect lists no such build yet), PROCESSING,
 //       VALID, FAILED or INVALID. Reads only.
 //   asc whats-new   --key-file F --key-id ID --issuer ID --version 0.6.0 --build 983 --whats-new FILE
-//       waits for the build to be processed, then gives it FILE as What to Test (English, U.S.).
+//       waits for the build to be processed, then gives it FILE as What to Test (English, U.S.),
+//       replacing what it had.
 //   asc distribute  --key-file F --key-id ID --issuer ID --version 0.6.0 --build 983 --whats-new FILE
-//                   [--public-beta [--public-beta-group NAME]]
-//       the same, then the build goes to every internal group, and with --public-beta to the public
-//       beta group too, and to Beta App Review when TestFlight asks for that.
+//                   [--replace-whats-new] [--public-beta [--public-beta-group NAME]]
+//       the same, but FILE only for a build with no What to Test yet (below), then the build goes to
+//       every internal group, and with --public-beta to the public beta group too, and to Beta App
+//       Review when TestFlight asks for that.
 //
 // Options for all four:
 //   --bundle-id ID        the app, by default me.saffer.sill
@@ -42,6 +44,14 @@
 //   version is reviewed in full; a later build of the same version is submitted the same way and
 //   usually approved within minutes. A build already in review or approved is left as it is.
 //
+// What to Test, in `distribute`: a build that has some already, in any language, keeps it, and FILE
+// is sent only to a build with none (no localization, or only empty ones), unless --replace-whats-new
+// asks for FILE whatever the build has. The nightly asks for that only for a build its own run
+// uploaded; one it finds in App Store Connect already (uploaded by hand with its own text, or by an
+// earlier run of the same night) keeps what it has (2026-11-09: build 1304, uploaded by hand with its
+// What to Test, had it replaced by that night's notes). `whats-new` always replaces: it is how a
+// build's text is set or put back by hand.
+//
 // The token: an ES256 JWT (header alg ES256, kid the Key ID, typ JWT; claims iss the Issuer ID, iat,
 // exp 15 minutes later, aud appstoreconnect-v1; App Store Connect refuses more than 20 minutes) signed
 // with the .p8 key, made again every 10 minutes during a long wait. It goes only into the
@@ -63,7 +73,7 @@ let usageText = """
            asc build-state --key-file F --key-id ID --issuer ID --version V --build N
            asc whats-new   --key-file F --key-id ID --issuer ID --version V --build N --whats-new FILE
            asc distribute  --key-file F --key-id ID --issuer ID --version V --build N --whats-new FILE
-                           [--public-beta [--public-beta-group NAME]]
+                           [--replace-whats-new] [--public-beta [--public-beta-group NAME]]
            [--wait-minutes 90] [--poll-seconds 60] [--retry-seconds 5] [--api-base URL]
     Scripts/asc.swift's header says what each does; docs/release-checklist.md, "Nightlies".
     """
@@ -109,6 +119,7 @@ struct Options {
     var version = ""
     var build = ""
     var whatsNewFile = ""
+    var replaceWhatsNew = false
     var publicBeta = false
     var publicBetaGroup: String?
     var waitMinutes = 90.0
@@ -145,6 +156,11 @@ func parseOptions(_ arguments: [String]) -> Options {
         if name == "--public-beta" {
             if value != nil { usageError("--public-beta takes no value") }
             options.publicBeta = true
+            continue
+        }
+        if name == "--replace-whats-new" {
+            if value != nil { usageError("--replace-whats-new takes no value") }
+            options.replaceWhatsNew = true
             continue
         }
         if name == "-h" || name == "--help" { print(usageText); exit(0) }
@@ -199,6 +215,9 @@ func validate(_ options: Options) -> URL {
     }
     if options.command == "whats-new" || options.command == "distribute" {
         if options.whatsNewFile.isEmpty { usageError("\(options.command) needs --whats-new FILE: the build's What to Test") }
+    }
+    if options.replaceWhatsNew && options.command != "distribute" {
+        usageError("--replace-whats-new goes with distribute (whats-new always replaces What to Test)")
     }
     if options.publicBeta {
         guard options.command == "distribute" else { usageError("--public-beta goes with distribute") }
@@ -576,10 +595,32 @@ func waitForBuild(_ client: Client, appID: String, options: Options) -> Build {
     }
 }
 
-/// The build's What to Test in English (U.S.): the localization changed if it exists, made if not.
-func setWhatsNew(_ client: Client, build: Build, text: String) {
+/// Whether a betaBuildLocalization holds What to Test: text with more than white space in it.
+func hasWhatsNew(_ localization: [String: Any]) -> Bool {
+    guard let text = attributes(localization)["whatsNew"] as? String else { return false }
+    return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+/// The localization whose What to Test the build keeps (the header's "What to Test, in `distribute`"):
+/// English (U.S.)'s if it has some, else another language's; nil when the build has none, or when
+/// `replace` asks for the new text whatever the build has.
+func keptWhatsNew(_ localizations: [[String: Any]], replace: Bool) -> [String: Any]? {
+    if replace { return nil }
+    return localizations.first(where: { attributes($0)["locale"] as? String == "en-US" && hasWhatsNew($0) })
+        ?? localizations.first(where: hasWhatsNew)
+}
+
+/// The build's What to Test in English (U.S.): the localization changed if it exists, made if not; or,
+/// unless `replace`, left as it is on a build that has some (keptWhatsNew).
+func setWhatsNew(_ client: Client, build: Build, text: String, replace: Bool) {
     let (localizations, _) = client.list("/v1/builds/\(build.id)/betaBuildLocalizations",
                                          [("fields[betaBuildLocalizations]", "locale,whatsNew"), ("limit", "50")])
+    if let kept = keptWhatsNew(localizations, replace: replace) {
+        let locale = attributes(kept)["locale"] as? String ?? "?"
+        let count = (attributes(kept)["whatsNew"] as? String ?? "").count
+        say("What to Test left as it is: the build has its own already (\(locale == "en-US" ? "English (U.S.)" : clean(locale)), \(count) characters); distribute replaces it only with --replace-whats-new")
+        return
+    }
     if let existing = localizations.first(where: { attributes($0)["locale"] as? String == "en-US" }) {
         let address = client.url("/v1/betaBuildLocalizations/\(identifier(existing))")
         let answer = client.send("PATCH", address, json: ["data": ["type": "betaBuildLocalizations", "id": identifier(existing),
@@ -666,7 +707,7 @@ case "build-state":
 
 case "whats-new":
     let build = waitForBuild(client, appID: app.id, options: options)
-    setWhatsNew(client, build: build, text: whatsNew!)
+    setWhatsNew(client, build: build, text: whatsNew!, replace: true)
 
 case "distribute":
     // The groups first: a wrong key or a missing group shows now, not after the wait.
@@ -685,7 +726,7 @@ case "distribute":
     }
     say("\(app.name): \(internalGroups.count) internal group\(internalGroups.count == 1 ? "" : "s") (\(internalGroups.map(\.name).joined(separator: ", ").ifEmpty("none"))), \(externalGroups.count) external (\(externalGroups.map(\.described).joined(separator: ", ").ifEmpty("none")))")
     let build = waitForBuild(client, appID: app.id, options: options)
-    setWhatsNew(client, build: build, text: whatsNew!)
+    setWhatsNew(client, build: build, text: whatsNew!, replace: options.replaceWhatsNew)
     var given: [String] = []
     var automatic: [String] = []
     for group in internalGroups {

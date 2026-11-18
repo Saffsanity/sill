@@ -233,4 +233,8 @@ public struct Goodbye: Codable, Sendable, Equatable {
     public static let pairingRequired = "pairingRequired"
     /// The host no longer serves this device's version: update it (DeviceGate).
     public static let update = "update"
+    /// Sill on the Mac is restarting to install an update by itself, and holds new sessions until it has
+    /// (Sill.app's automatic update, which installs only while no device is connected). Always with its
+    /// `message` and `reconnect` true: a device that doesn't know it shows the message and reconnects.
+    public static let restarting = "restarting"
 }

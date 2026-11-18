@@ -113,9 +113,11 @@ struct PenStrokes: Equatable {
     /// A hover began or moved; `isPencil` when it is the Pencil's (it reports a height or a tilt).
     /// While a Pencil touch is down, whatever the mode, it is stale and goes nowhere: as the tip
     /// lifts iPadOS sends one more hover, just before the touch ends, carrying where the Pencil
-    /// hovered before it landed (an iPad Pro M4 with iPadOS 27.0.1, one in each of six strokes). Sent
-    /// as a move, with the Mac's button still down, it drew a line from the stroke's end back to its
-    /// start. Otherwise a Pencil's hover goes as a pen's in pen mode, and as the mouse's else.
+    /// hovered before it landed (an iPad Pro M4 with iPadOS 27.0.1, one in each of six strokes: Hunter
+    /// Ahlquist's finding, issue #81; reported again in #322, and main's `pencilTouching` since 0.6.1,
+    /// which this rule replaces). Sent as a move, with the Mac's button still down, it drew a line from
+    /// the stroke's end back to its start. Otherwise a Pencil's hover goes as a pen's in pen mode, and as
+    /// the mouse's else.
     mutating func hover(isPencil: Bool, penMode: Bool) -> Hover {
         guard stroke == nil else { return .ignore }
         guard isPencil else { return .mouse }

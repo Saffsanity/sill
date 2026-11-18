@@ -63,7 +63,12 @@ MUTANTS = [
     ("a real host takes the scripted pointer", "        guard synthetic else { return (nil, \"SILL_TEST_POINTER_PATH=", "        guard true else { return (nil, \"SILL_TEST_POINTER_PATH="),
     ("a real host takes the software encoder", "        guard synthetic else { return (false, \"SILL_TEST_SOFTWARE_ENCODER ignored",
      "        guard true else { return (false, \"SILL_TEST_SOFTWARE_ENCODER ignored"),
-    ("any value turns the software encoder on", "        guard value == \"1\" else {", "        guard !value.isEmpty else {"),
+    ("any value turns the software encoder on", "        guard value == \"1\" else { return (false, \"SILL_TEST_SOFTWARE_ENCODER=",
+     "        guard !value.isEmpty else { return (false, \"SILL_TEST_SOFTWARE_ENCODER="),
+    ("a real host takes no screen", "        guard synthetic else { return (false, \"SILL_TEST_NO_SCREEN ignored",
+     "        guard true else { return (false, \"SILL_TEST_NO_SCREEN ignored"),
+    ("any value turns no screen on", "        guard value == \"1\" else { return (false, \"SILL_TEST_NO_SCREEN=",
+     "        guard !value.isEmpty else { return (false, \"SILL_TEST_NO_SCREEN="),
     ("\"steps\" for one step", "step\\(n == 1 ? \"\" : \"s\")", "steps"),
 ]
 caught = 0
