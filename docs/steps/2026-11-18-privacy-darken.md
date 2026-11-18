@@ -50,10 +50,11 @@ used)"; #323: "as a toggle".
   and `--darken-keys=lock|pass`, with `--synthetic` only (a dry run), otherwise one line each; stdout unchanged without
   them. **TestHooks**: SILL_TEST_PRIVACY_INPUT, SILL_TEST_PRIVACY_LOG. **Sill.app**: no switch yet (HostSettings passes
   `.off`); Settings › Devices gets its section once the seams are filled.
-- **Verified**: the darken check (204 checks, 20,000 random sessions running this rule beside part 1's against nine
-  invariants, every mutant caught but the equivalent ones its mutants.py names); away-quality with the new knobs and
-  mutants; typecheck of SillHostCore, the CLI and Sill.app; `swift build -c release`; `Scripts/privacy-check/darken.py`
-  on loopback; `Tests/checks/run-all.sh`. Results in the pull request.
+- **Verified**: the darken check (202 checks, among them 20,000 random sessions running this rule beside part 1's
+  against nine invariants; 91 of 91 mutants caught, the equivalent ones named in its mutants.py); away-quality with the
+  new knobs (58 of 58 mutants, AQ-D1..9 new); stage-release and repo-rules; `Tests/checks/run-all.sh` (all passed);
+  typecheck of SillHostCore, the CLI and Sill.app; the probe compiled (`--build-only`). The release build and the live
+  dry run on loopback: in the pull request.
 - **Defaults taken** (the pull request lists them for Noah): the plan's recommendations for its open decisions; the
   black under the lock screen until G0; one key's lock may hold the dark up to 3 s past the wait; a failed key lock
   stops key locks until a lock shows or a switch changes; a change of scope lifts at once, a move home under "only away"

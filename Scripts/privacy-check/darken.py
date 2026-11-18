@@ -7,6 +7,8 @@ own file, never this Mac's), lives under 30 s and is killed at the end. One verd
 
   order     the black is up (\"would darken\") before the connect's display wake is counted (rule 5), both stamped
   home      --darken=away and a device at home: nothing darkens; the start line says the switch
+  away      --darken=away and a paired device at the remote door: away from a relay on this Mac, it darkens; at home
+            (SILL_TEST_REMOTE_ORIGIN=lan), it does not
   wait      --darken=any: dark at the connect, the wait's line at the departure, a return within it, lit at its end
   keys      a pointer move only shows the hint; Sill's own (tagged) key nothing; a key locks (dry), unconfirmed after
             3 s: the ⌃⌘Q hint, and a second key asks no lock
@@ -15,7 +17,7 @@ own file, never this Mac's), lives under 30 s and is killed at the end. One verd
   hold      with --lock-after-session: the dark holds through the lock's wait and its confirmation, lit only after
   quit      SIGTERM while dark: lit before the host exits
 
-    Scripts/privacy-check/darken.py OUT [order|home|wait|keys|pass|takeback|hold|quit|all]
+    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|all]
 
 Needs .build/release/SillHost. Exits 1 when a verdict fails."""
 import os, re, signal, subprocess, sys, threading, time
@@ -207,6 +209,38 @@ def case_hold(out):
     verdict(lit is not None and asked is not None and lit - asked <= 3 + 1.5, "lit within the confirmation and a tick")
 
 
+def case_away(out):
+    print("== away: only away, a paired device at the remote door (from a relay on this Mac: away; SILL_TEST_REMOTE_ORIGIN=lan: home)", flush=True)
+    for origin, away in (("", True), ("lan", False)):
+        label = "away" if away else "away-lan"
+        d = os.path.join(out, label + ".remote"); os.makedirs(d, exist_ok=True); os.chmod(d, 0o700)
+        env = {"SILL_TEST_REMOTE_DIR": d}
+        if origin: env["SILL_TEST_REMOTE_ORIGIN"] = origin
+        h = Host(out, label, env, ["--remote", "--darken=away"])
+        h.at(1.5)
+        _, _, door = h.first("Remote access: listening on port")
+        _, _, offer = h.first("sill://pair")
+        port = re.search(r"port (\d+)", door or "")
+        link = re.search(r"(sill://pair\S+)", offer or "")
+        if not port or not link:
+            h.stop(); verdict(False, f"{label}: no remote door or pairing link ({door!r}, {offer!r})"); continue
+        ident = os.path.join(out, label + ".id")
+        pair = subprocess.run([sys.executable, "-I", CLIENT, port.group(1), "2", "none", f"--pair-url={link.group(1)}", f"--identity={ident}"],
+                              capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
+        open(os.path.join(out, label + "-pair.client.log"), "w").write(pair.stdout + pair.stderr + f"\nEXIT {pair.returncode}\n")
+        joined = time.time() - h.start
+        session = subprocess.run([sys.executable, "-I", CLIENT, port.group(1), "3", "desktop", "--tls", f"--identity={ident}"],
+                                 capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
+        open(os.path.join(out, label + ".client.log"), "w").write(session.stdout + session.stderr + f"\nEXIT {session.returncode}\n")
+        h.at(time.time() - h.start + 1.0); h.stop()
+        dark = h.find(DARK, after=joined)
+        line = h.find("Privacy: this Mac’s screen is dark while a device away from home is connected (1 display).")
+        if away:
+            verdict(bool(dark) and bool(line), f"a paired device at the remote door from a relay on this Mac (away) darkens it: {len(dark)} raises")
+        else:
+            verdict(not dark and not line, f"the same device from this network (at home) darkens nothing: {len(dark)} raises")
+
+
 def case_quit(out):
     print("== quit: SIGTERM while dark", flush=True)
     h = Host(out, "quit", {}, ["--darken=any"])
@@ -218,7 +252,7 @@ def case_quit(out):
     verdict(bool(q) and bool(lit) and lit[0][1] < q[0][1], f"lit, then its line, as the host quits: {len(lit)} lifts, {len(q)} lines")
 
 
-CASES = {"order": case_order, "home": case_home, "wait": case_wait, "keys": case_keys, "pass": case_pass,
+CASES = {"order": case_order, "home": case_home, "away": case_away, "wait": case_wait, "keys": case_keys, "pass": case_pass,
          "takeback": case_takeback, "hold": case_hold, "quit": case_quit}
 
 if __name__ == "__main__":
