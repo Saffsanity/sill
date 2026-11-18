@@ -974,6 +974,9 @@ let everyFeatures: [TourFeatures] = (0..<128).map { i in
                  pasteRightAway: i & 16 != 0, sound: i & 32 != 0, largerPicture: i & 64 != 0)
 }
 check(Set(everyFeatures.map { "\($0)" }).count == 128, "the 128 combinations differ")
+/// The same 128 in either Touch Mode (#178): Direct Touch's, then Trackpad's, for the rules every card keeps.
+let everyFeaturesBothModes = everyFeatures + everyFeatures.map { f -> TourFeatures in var t = f; t.trackpadMode = true; return t }
+check(Set(everyFeaturesBothModes.map { "\($0)" }).count == 256, "the 256 combinations differ")
 func with(_ base: TourFeatures = allOn, _ change: (inout TourFeatures) -> Void) -> TourFeatures {
     var f = base
     change(&f)
@@ -1038,18 +1041,43 @@ check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Ma
 for f in everyFeatures {
     check(words(.touch, L, features: f).rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "the swipe row follows the gestures: \(f)")
 }
-// Trackpad mode (#178): the picture is a trackpad, so its card says what a trackpad does there, and
-// nothing of direct touch (no Pencil, no pinch: the trackpad covers the picture).
-let R1 = "Drag to move the pointer.", R2 = "Tap to click where the pointer is.", R3 = "Tap with two fingers to right-click."
-let R4 = "Touch and hold, then drag, to move a window or select text.", R5 = "Drag with two fingers to scroll."
+// Trackpad mode (#178): the picture is a trackpad, so its card says what the trackpad does there; no pinch
+// (it zooms nothing while the trackpad covers the picture); on an iPad the Pencil still clicks and drags where
+// it touches (TouchMode.taker), its row where direct touch's is; the two taps in one row, so six at most.
+let R1 = "Drag to move the pointer.", R2 = "Tap to click where the pointer is, or tap with two fingers to right-click."
+let R3 = "Touch and hold, then drag, to move a window or select text.", R4 = "Drag with two fingers to scroll."
+let R5 = "Apple Pencil still clicks and drags where it touches."
 let trackpadMode = with { $0.trackpadMode = true }
 let touchTrackpad = words(.touch, L, features: trackpadMode)
 check(touchTrackpad.title == "The Picture Is a Trackpad" && touchTrackpad.subtitle == "What you do here happens on Mac mini.", "trackpad mode: title and subtitle")
 check(texts(touchTrackpad) == [R1, R2, R3, R4, R5, T6], "trackpad mode on iPad: \(texts(touchTrackpad))")
-check(texts(words(.touch, P, device: "iPhone", features: trackpadMode)) == [R1, R2, R3, R4, R5, T6], "trackpad mode on iPhone, upright: the same rows")
+check(touchTrackpad.rows.map(\.symbol) == ["hand.point.up.left", "hand.tap", "hand.draw", "scroll", "applepencil", "hand.raised.fingers.spread"],
+      "trackpad mode's symbols: \(touchTrackpad.rows.map(\.symbol))")
+check(touchTrackpad.rows[1].spans == [TourSpan(text: "Tap", strong: true), TourSpan(text: " to click where the pointer is, or ", strong: false),
+                                      TourSpan(text: "tap with two fingers", strong: true), TourSpan(text: " to right-click.", strong: false)],
+      "trackpad mode: both taps' words semibold in one row")
+check(touchTrackpad.rows[2].spans.filter(\.strong).map(\.text) == ["Touch and hold", "then drag"] && touchTrackpad.rows[4].spans.first == TourSpan(text: "Apple Pencil", strong: true),
+      "trackpad mode: the hold's and the Pencil's words semibold")
+check(texts(words(.touch, P, device: "iPhone", features: trackpadMode)) == [R1, R2, R3, R4, T6], "trackpad mode on iPhone, upright: no Pencil row")
+check(texts(words(.touch, F, device: "iPhone", features: trackpadMode)) == [R1, R2, R3, R4, T6], "trackpad mode on a phone upright: the same")
+check(texts(words(.touch, P, features: trackpadMode)) == [R1, R2, R3, R4, R5, T6], "trackpad mode on an iPad upright: the halves' card is the same")
 check(texts(words(.touch, L, features: with(trackpadMode) { $0.gestures = false })) == [R1, R2, R3, R4, R5], "trackpad mode, the gestures off: no swipe row")
-check(touchTrackpad.hint == touchPad.hint, "trackpad mode: the same hint")
+check(texts(words(.touch, L, device: "iPhone", features: with(allOff) { $0.trackpadMode = true })) == [R1, R2, R3, R4], "trackpad mode on iPhone with nothing on: four rows")
+check(touchTrackpad.hint == touchPad.hint && words(.touch, P, features: trackpadMode).hint == words(.touch, P).hint
+      && words(.touch, F, device: "iPhone", features: trackpadMode).hint == words(.touch, F, device: "iPhone").hint, "trackpad mode: each layout's own hint")
+check(words(.touch, L, mac: "", features: trackpadMode).subtitle == "What you do here happens on your Mac.", "trackpad mode: the “your Mac” fallback")
 check(!allOn.trackpadMode && !allOff.trackpadMode, "Direct Touch unless Trackpad mode is chosen")
+for f in everyFeatures {
+    let pad = with(f) { $0.trackpadMode = true }
+    for (layout, device) in [(L, "iPad"), (P, "iPad"), (L, "iPhone"), (F, "iPhone")] {
+        let rows = words(.touch, layout, device: device, features: pad).rows
+        check(rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "trackpad mode: the swipe row follows the gestures: \(layout) \(device) \(f)")
+        check(rows.contains { $0.symbol == "applepencil" } == (device == "iPad"), "trackpad mode: the Pencil's row on an iPad only: \(layout) \(device) \(f)")
+        check(!rows.contains { $0.symbol == "plus.magnifyingglass" || $0.symbol == "contextualmenu.and.cursorarrow" },
+              "trackpad mode: no pinch and no direct touch's right click: \(layout) \(device) \(f)")
+        check(rows.count <= 6, "trackpad mode: six rows at most: \(layout) \(device) \(f)")
+    }
+}
 
 // The bar's card: Windows (and Menus), the Virtual Display row with Aa in it, the Keyboard button and a
 // hardware keyboard where the bar has the button.
@@ -1214,6 +1242,8 @@ func counts(_ layout: TourLayout, device: String, voiceOver: Bool = false, featu
 check(counts(L, device: "iPad") == [6, 5, 3, 5] && counts(L, device: "iPhone") == [5, 5, 3, 5], "sideways: 6 (5 on iPhone), 5, 3, 5")
 check(counts(P, device: "iPad") == [6, 3, 3, 4, 5] && counts(F, device: "iPhone") == [5, 5, 3, 4, 4], "the halves 6, 3, 3, 4, 5; a phone 5, 5, 3, 4, 4")
 check(counts(F, device: "iPhone", features: with { $0.largerPicture = false }).last == 3, "the Duo's cover: three on its laptop card")
+check(counts(L, device: "iPad", features: trackpadMode) == [6, 5, 3, 5] && counts(P, device: "iPad", features: trackpadMode) == [6, 3, 3, 4, 5]
+      && counts(F, device: "iPhone", features: trackpadMode) == [5, 5, 3, 4, 4], "Trackpad mode: the same counts, its picture card 6 on an iPad and 5 on a phone")
 check(counts(L, device: "iPad", voiceOver: true) == [5, 3, 3] && counts(P, device: "iPad", voiceOver: true) == [3, 3, 2, 3]
       && counts(F, device: "iPhone", voiceOver: true) == [5, 3, 2, 2], "under VoiceOver: bar 5/3/5, sharing 3, settings 3/2/2, laptop 3/2")
 var mostRows = 0
@@ -1221,7 +1251,7 @@ for layout in [L, P, F] {
     for voiceOver in [false, true] {
         for device in ["iPad", "iPhone"] {
             for thumbnails in [true, false] {
-                for f in everyFeatures {
+                for f in everyFeaturesBothModes {
                     for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
                         mostRows = max(mostRows, words(step, layout, device: device, voiceOver: voiceOver, first: true, thumbnails: thumbnails, features: f).rows.count)
                     }
@@ -1251,7 +1281,7 @@ for layout in [L, P, F] {
         for device in ["iPad", "iPhone"] {
             for thumbnails in [true, false] {
                 for onItsSide in [false, true] {
-                    for f in everyFeatures {
+                    for f in everyFeaturesBothModes {
                         for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
                             let copy = words(step, layout, device: device, voiceOver: voiceOver, first: true, onItsSide: onItsSide, thumbnails: thumbnails, features: f)
                             for row in copy.rows {
@@ -1313,7 +1343,7 @@ for layout in [L, P, F] {
 // Every row is read whole, never its symbol's name.
 for layout in [L, P, F] {
     for step in TourPolicy.steps(layout, voiceOver: false) {
-        for f in everyFeatures {
+        for f in everyFeaturesBothModes {
             for row in words(step, layout, first: true, features: f).rows + words(step, layout, first: true, thumbnails: false, features: f).rows {
                 // Read as its words (the key row's caps by name), never with the symbol's name before them.
                 check(!row.spoken.isEmpty && !row.spoken.hasPrefix(row.symbol) && !(row.symbol.contains(".") && row.spoken.contains(row.symbol))
