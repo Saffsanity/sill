@@ -596,5 +596,5 @@ The recommendation is what the work proceeds with if he says nothing.
 
 - 2026-11-18, part 1 (branch `privacy-lock`): #184's head merged in as it is (main's four conflicts resolved, its
   check's README.md); then the lock alone, as rule 6 with `darken` off, rules 10, 11 and 14 (docs/steps/
-  2026-11-18-privacy-lock.md has what was built, proven and left for Noah).
+  2026-11-18-privacy-lock.md has what was built, proven and left for Noah). Draft pull request #402.
 

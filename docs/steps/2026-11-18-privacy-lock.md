@@ -36,9 +36,25 @@
   locked." and counts `priv.lockDry`. Sill.app holds App Nap off during a wait (`NapHold.lockWait`, allowing idle
   sleep) so the tick keeps its time. The CLI takes `--lock-after-session` only with `--synthetic`; without the flag
   its stdout is as before.
-- **Never locked this Mac.** No test called `SACLockScreenImmediate` or `pmset`: every host was a synthetic test host
-  on loopback whose locker is the dry run. The symbol was only looked up (`dlopen` and `dlsym` by both paths the
-  locker uses, from a scratch program with no call site; and `dyld_info -exports`): found on macOS 27.2.
+- **Never locked this Mac.** Nothing here called `SACLockScreenImmediate` or `pmset`; a test host's locker is the dry
+  run, and only Sill.app's is real. The symbol was only looked up (`dlopen` and `dlsym` by both paths the locker uses,
+  from a scratch program with no call site; and `dyld_info -exports`): found on macOS 27.2.
+- **Verified.** `Tests/checks/privacy` 157 checks, its 55 mutants every one caught on the final rule (one equivalent
+  mutant found on the way, tick's second guard against a quit, replaced by one a quit catches); `away-quality` with the
+  knob's cases, 49 of 49 mutants (5 new); `stage-release`, `update-install` and `repo-rules`, which read the changed
+  files; `Tests/checks/run-all.sh`, all 75 (run outside the heavy lock at nice 19 while the build waited for it);
+  the host library, the app and the CLI typechecked with swiftc against each other, clean; the merge of #184
+  (5f3a4632) built with `swift build -c release` and its own check passed, 49 of 49; CI on the pull request (run
+  44299093908, GitHub's merge 86cadb58 of b2959b87 into main): `swift build -c release`, run-all, the iOS app for the
+  simulator and the CLI's paths, all green.
+- **Not run here: the disk.** After two hours in heavy.sh's queue (about eleven jobs deep), this branch's turn found
+  24 GB free (`df -g /`), under the 25 GB every build needs, and stopped before building, as the rule says. So the
+  local `swift build -c release` of the final tree, `Scripts/privacy-check/live.py` (its twelve cases: off, wait,
+  back, move, locked, offconsole, nodisplay, nosymbol, quit, crash, pairing, gate), H2 (the CLI's stdout against
+  main's, idle 45 s and with a Desktop client 20 s, masked and sorted) and the previews (`pane-devices-lock*`) are
+  still to run, with 25 GB free: `heavy.sh "…" -- swift build -c release`, then `Scripts/privacy-check/live.py OUT all`,
+  H2 against `swift build -c release --product SillHost` of main from `git archive`, and
+  `.build/release/SillMenuBar -SillRenderPreviews DIR`.
 - **Defaults taken for Noah to confirm** (the plan's recommendations): the switch in Settings › Devices (open decision
   1); a 30 s wait (4); after any session, home or away (5: so an iPad used as a second screen at the desk locks the Mac
   30 s after it disconnects); the display sleeps after the lock (6) and after a failed one; a quit never locks; a
@@ -60,6 +76,6 @@
     (Settings › Devices)."
   - privacy.html: nothing new is collected or sent; no change needed for part 1.
   - Replies drafted for Noah on #283 and #275 (posted only on his word): "Lock this Mac when the last device leaves is
-    in pull request #‹N› (Settings › Devices, off by default): 30 seconds after the last device disconnects, Sill locks
+    in pull request #402 (Settings › Devices, off by default): 30 seconds after the last device disconnects, Sill locks
     the Mac and its display sleeps; a reconnect within that time keeps it unlocked. Darkening the screen while a
     device uses the Mac (#133) comes after a measurement." and on #184: thanks to addhumal, whose commits are merged in.
