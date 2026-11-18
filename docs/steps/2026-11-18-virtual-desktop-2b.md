@@ -63,6 +63,9 @@ commits 1 to 3 of twelve; nothing a person sees changes, and nothing changes on 
 6. No switch in this part. The Virtual Desktop's switch (commits 6, 9, 10) goes where Settings is on this base (Sill
    for Mac's Virtual Display tab, the device's Settings panel) and moves into #393's whole-screen pane, its Mac part,
    once that lands.
+7. The plan's open decisions that phase 2b builds (5 following the device, 11 changing it from away, 12 switched on from
+   a device shows it at once, 13 Aa dimmed on it, 14 its lifetime, 15 the name) are taken as the plan recommends, each
+   listed here again by the commit that builds it; none is built in this part.
 
 **Verified** (on this Mac; nothing made a display, posted input, locked, slept or switched anything):
 - The probe's dry run (`Scripts/display-modes-probe/run.sh`, and with `1133x744 120`): built (VirtualDisplay.swift and
