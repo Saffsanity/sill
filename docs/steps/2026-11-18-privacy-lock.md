@@ -45,16 +45,24 @@
   files; `Tests/checks/run-all.sh`, all 75 (run outside the heavy lock at nice 19 while the build waited for it);
   the host library, the app and the CLI typechecked with swiftc against each other, clean; the merge of #184
   (5f3a4632) built with `swift build -c release` and its own check passed, 49 of 49; CI on the pull request (run
-  44299093908, GitHub's merge 86cadb58 of b2959b87 into main): `swift build -c release`, run-all, the iOS app for the
+  44299093908, at 86cadb58, main merged into the branch): `swift build -c release`, run-all, the iOS app for the
   simulator and the CLI's paths, all green.
-- **Not run here: the disk.** After two hours in heavy.sh's queue (about eleven jobs deep), this branch's turn found
-  24 GB free (`df -g /`), under the 25 GB every build needs, and stopped before building, as the rule says. So the
-  local `swift build -c release` of the final tree, `Scripts/privacy-check/live.py` (its twelve cases: off, wait,
-  back, move, locked, offconsole, nodisplay, nosymbol, quit, crash, pairing, gate), H2 (the CLI's stdout against
-  main's, idle 45 s and with a Desktop client 20 s, masked and sorted) and the previews (`pane-devices-lock*`) are
-  still to run, with 25 GB free: `heavy.sh "…" -- swift build -c release`, then `Scripts/privacy-check/live.py OUT all`,
-  H2 against `swift build -c release --product SillHost` of main from `git archive`, and
-  `.build/release/SillMenuBar -SillRenderPreviews DIR`.
+- **Live, on test hosts** (after a first turn of the heavy lock found 24 GB free and stopped before building, as the rule
+  says; the second, with 38 GB, built): `swift build -c release` of 1655f272, no warning; `Scripts/privacy-check/live.py
+  OUT all`, 39 of 39 verdicts in its twelve cases, each a synthetic loopback host under a minute whose lock is the dry
+  run: the switch off says and counts nothing; the wait from the departure to "would lock" 5.12 s (5 s and a tick), the
+  test's lock file then confirming it 0.53 s later with the display sleep after it, one wait and one lock, `priv.lockDry`
+  and `priv.sleepDry` in the stats; a device back 2 s in ends the wait, its own departure's lock unconfirmed fails at
+  3.08 s with the display sleep instead; two overlapping sessions start no wait until the last leaves; locked already,
+  another user and no display each say why and lock nothing; no lock call fails at once; SIGTERM during the wait says
+  Sill is quitting and locks nothing; SIGKILL during it locks nothing and the next launch, 12 s with no device, starts
+  no wait; a `sill-pair/1` ask (answered `shown`) starts no wait alone and ends none during one; a device the gate
+  refuses (`SILL_TEST_MIN_DEVICE_VERSION=1.2`, hello 0.6) ends none. A session cut off has no headless path (Direct
+  Wireless off needs AWDL; Remove and Require pairing are the app's): the check's model of the server covers it, and
+  Noah's list. H2: main's CLI (8dbbb500, built from `git
+  archive`) and this branch's, idle 45 s (9 lines each) and with a Desktop client 20 s (35 each), identical masked and
+  sorted. The previews from the bare binary (`pane-devices-{lock,locknodisplay,lockfailed}`, light and dark, and the
+  switch off in every other Devices sample): the section after the off-console view's, its footnotes, its warnings.
 - **Defaults taken for Noah to confirm** (the plan's recommendations): the switch in Settings › Devices (open decision
   1); a 30 s wait (4); after any session, home or away (5: so an iPad used as a second screen at the desk locks the Mac
   30 s after it disconnects); the display sleeps after the lock (6) and after a failed one; a quit never locks; a
