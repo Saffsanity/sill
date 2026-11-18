@@ -492,7 +492,11 @@ Rules found in the steps that hold for all work (each where it is written):
   `com.apple.application-identifier`, the team and the keychain group, signed
   in only with `embedded.provisionprofile`, the Developer ID profile, which is
   git-ignored; docs/keychain-plan.md), and `ExportOptions-appstore.plist`, how
-  the iOS app's archive is exported for App Store Connect. `Scripts/release-ios.sh`
+  the iOS app's archive is exported for App Store Connect. `AppIcon.icon`, the
+  original icon as an Icon Composer document (Liquid Glass; both apps' primary
+  icon, make-app.sh's and the iOS project's, A1C0/F1C0), and `AppIconCommunity.icon`,
+  grub-basket's (#386), the iOS app's alternate (A1C1/F1C1); `Scripts/app-icon-previews.sh`
+  renders Settings' pictures of them (docs/app-icons-plan.md). `Scripts/release-ios.sh`
   makes the iOS app's build: the Release archive (automatic signing on team
   9B2KKVM937, or none with `--sign-at-export` and `--unsigned`), the export
   (destination export; `--upload` adds a second one whose destination is
@@ -885,6 +889,10 @@ Rules found in the steps that hold for all work (each where it is written):
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
+  `AppIconChoice` (the Home Screen icon, the person's choice: the original, the primary, or grub-basket's
+  community icon, an alternate; which shows for any name iOS keeps, what a tap asks; pure, `Tests/checks/app-icon`,
+  which checks the project's icon wiring too; pbxproj A1C2/F1C2; docs/app-icons-plan.md) and `AppIconPicker`
+  (Settings' App Icon group beside the version, `setAlternateIconName`; A1C3/F1C3),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
   the picture's interruptions on the network queue: `checkLayer` flushes a layer
   that failed, could not decode a frame or needs a flush to decode again, at each
