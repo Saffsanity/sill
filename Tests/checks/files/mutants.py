@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 W = "Sources/StreamProtocol/Files.swift"
 P = "Sources/StreamProtocol/FilePolicy.swift"
+DW = "iOSClient/FilesCopy+Device.swift"
 K = "Sources/StreamProtocol/StreamMessage.swift"
 M = [
     # The wire.
@@ -117,5 +118,15 @@ M = [
     ("sizes in binary units", P, 'let units: [(Double, String)] = [(1e12, "TB"), (1e9, "GB"), (1e6, "MB"), (1e3, "KB")]',
      'let units: [(Double, String)] = [(1_099_511_627_776, "TB"), (1_073_741_824, "GB"), (1_048_576, "MB"), (1_024, "KB")]'),
     ("the refusals' line counts zeros", P, "guard let n = counts[r.rawValue], n > 0 else { return nil }", "guard let n = counts[r.rawValue] else { return nil }"),
+    # The device's words and rows (iOSClient/FilesCopy+Device.swift).
+    ("the rows enabled while busy", DW, "case .yes: return Rows(shown: true, enabled: true)\n        case .older, .off, .notPaired, .busy:",
+     "case .yes, .busy: return Rows(shown: true, enabled: true)\n        case .older, .off, .notPaired:"),
+    ("the rows shown for the CLI", DW, "case .hidden: return Rows(shown: false, enabled: false)", "case .hidden: return Rows(shown: true, enabled: false)"),
+    ("100% before the Mac wrote every byte", DW, "return \"\\(Int((f * 100).rounded(.down)))%\"", "return \"\\(Int((f * 100).rounded()))%\""),
+    ("the Mac's place shown uncleaned", DW, 'let place = SafeText.label(t.place ?? "", limit: 120)', 'let place = t.place ?? ""'),
+    ("the person's own Cancel as a warning", DW, "return !(reason == FileReason.cancelled.rawValue && !byPeer)", "return true"),
+    ("a folder said as a read failure", DW, "        if reason == folderReason {", "        if reason == folderReason && false {"),
+    ("no announcement at the start", DW, '        case .offering: return "Sending \\(what(s.names)) to \\(mac)."\n', ""),
+    ("a fraction past 1", DW, "return total == 0 ? 0 : min(1, Double(acked) / Double(total))", "return total == 0 ? 0 : Double(acked) / Double(total) * 1.01"),
 ]
 sys.exit(0 if module.mutate("files", M, sys.argv[1]) else 1)

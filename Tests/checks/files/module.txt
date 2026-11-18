@@ -1,2 +1,4 @@
-# Compiled as one module by ../module.py, with main.swift.
+# Compiled as one module by ../module.py, with main.swift: StreamProtocol and the device's own words for files
+# (pure: Foundation and StreamProtocol).
 Sources/StreamProtocol/*.swift
+iOSClient/FilesCopy+Device.swift

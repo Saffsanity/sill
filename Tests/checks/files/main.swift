@@ -717,5 +717,54 @@ for line in [C.savedLine(files: 1, bytes: 1, device: "iPad", folder: "Downloads/
     check(line.hasPrefix("Files: ") && !line.contains("\n"), "a log line begins with the feature: \(line)")
 }
 
+// MARK: - The device's words (iOSClient/FilesCopy+Device.swift) and its rows
+
+typealias DC = DeviceFilesCopy
+eq(DC.rows(.hidden), DC.Rows(shown: false, enabled: false), "hidden: no rows")
+eq(DC.rows(.yes), DC.Rows(shown: true, enabled: true), "yes: the rows, enabled")
+for o in [P.Offering.older, .off, .notPaired, .busy] { eq(DC.rows(o), DC.Rows(shown: true, enabled: false), "\(o): shown, disabled") }
+eq(DC.footnote(.hidden, mac: "Mac mini", device: "iPad"), nil, "hidden: no footnote")
+eq(DC.footnote(.notPaired, mac: "Mac mini", device: "iPad"), "Files go only between paired devices. Pair this iPad with Mac mini to send files.", "unpaired")
+eq(DC.footnote(.off, mac: "Mac mini", device: "iPad"), "Mac mini doesn’t take files now. Turn on Share files with devices in Sill’s Settings on Mac mini.", "off")
+eq(DC.footnote(.older, mac: "Mac mini", device: "iPad"), "To send files, update Sill on Mac mini.", "older")
+check(DC.footnote(.yes, mac: "Mac mini", device: "iPad")?.contains("Downloads › Sill on Mac mini") == true
+      && DC.footnote(.busy, mac: "Mac mini", device: "iPad") == DC.footnote(.yes, mac: "Mac mini", device: "iPad"), "yes and busy: where they go")
+eq(DC.sendFiles(mac: "Mac mini"), "Send Files to Mac mini…", "the files row"); eq(DC.sendPhotos(mac: "Mac mini"), "Send Photos to Mac mini…", "the photos row")
+func shot(_ phase: OutgoingFiles.Phase, names: [String] = ["IMG_1204.heic"], total: UInt64 = 1_000, acked: UInt64 = 0) -> OutgoingFiles {
+    OutgoingFiles(serial: 1, phase: phase, names: names, total: total, acked: acked, since: 0)
+}
+eq(DC.title(shot(.preparing), mac: "Mac mini", device: "iPad"), "Getting “IMG_1204.heic” ready…", "preparing")
+eq(DC.title(shot(.preparing, names: ["a", "b", "c"]), mac: "Mac mini", device: "iPad"), "Getting 3 files ready…", "preparing three")
+eq(DC.title(shot(.sending), mac: "Mac mini", device: "iPad"), "Sending “IMG_1204.heic” to Mac mini", "sending")
+eq(DC.title(shot(.offering, names: ["a", "b"]), mac: "Mac mini", device: "iPad"), "Sending 2 files to Mac mini", "offering two")
+eq(DC.detail(shot(.offering), mac: "Mac mini"), "Waiting for Mac mini…", "waiting for the answer")
+eq(DC.detail(shot(.sending, acked: 425), mac: "Mac mini"), "42%", "42%")
+eq(DC.detail(shot(.finishing, acked: 999), mac: "Mac mini"), "99%", "never 100% before the Mac wrote every byte")
+eq(DC.detail(shot(.done(.done(transfer: 1, kept: ["a"], place: "x"))), mac: "M"), nil, "no detail once over")
+eq(DC.percent(1), "100%", "100%"); eq(DC.percent(.nan), "0%", "not a number: 0%"); eq(DC.percent(-1), "0%", "below 0: 0%")
+eq(shot(.sending, total: 0).fraction, 0, "no bytes: 0 while it runs"); eq(shot(.done(.done(transfer: 1, kept: [], place: "x")), total: 0).fraction, 1, "and 1 once done")
+eq(DC.title(shot(.done(.done(transfer: 1, kept: ["IMG_1204.heic"], place: "Downloads › Sill"))), mac: "Mac mini", device: "iPad"),
+   "Saved in Downloads › Sill on Mac mini.", "saved")
+eq(DC.title(shot(.done(.done(transfer: 1, kept: ["a", "b"], place: "Desktop\n\u{202E}")), names: ["a", "b"]), mac: "Mac mini", device: "iPad"),
+   "Saved 2 files in Desktop on Mac mini.", "saved two, the Mac's place cleaned")
+eq(DC.title(shot(.done(FileTransfer(op: "done", transfer: 1, kept: ["a"]))), mac: "Mac mini", device: "iPad"),
+   "Saved in Downloads › Sill on Mac mini.", "no place from the Mac: the default")
+eq(DC.title(shot(.stopped(reason: "cancelled", message: nil, byPeer: false, name: nil)), mac: "Mac mini", device: "iPad"), "Sending stopped.", "own Cancel")
+eq(DC.title(shot(.stopped(reason: "cancelled", message: nil, byPeer: true, name: nil)), mac: "Mac mini", device: "iPad"),
+   "Mac mini stopped the transfer.", "the Mac's person stopped it")
+eq(DC.title(shot(.stopped(reason: DC.folderReason, message: nil, byPeer: false, name: "Holiday")), mac: "M", device: "iPad"),
+   "“Holiday” is a folder. Sill sends files, not folders.", "a folder")
+eq(DC.title(shot(.stopped(reason: "locked", message: nil, byPeer: true, name: nil)), mac: "Mac mini", device: "iPad"),
+   "Mac mini is locked. Unlock it to send files.", "the shared reasons")
+eq(DC.title(shot(.stopped(reason: "quota", message: "Over quota.", byPeer: true, name: nil)), mac: "Mac mini", device: "iPad"), "Over quota.",
+   "a reason not known: the Mac's words")
+check(!DC.warns(shot(.stopped(reason: "cancelled", message: nil, byPeer: false, name: nil))) && DC.warns(shot(.stopped(reason: "cancelled", message: nil, byPeer: true, name: nil)))
+      && DC.warns(shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil))) && !DC.warns(shot(.sending)), "a warning but for the person's own Cancel")
+eq(DC.spoken(shot(.sending, acked: 500), mac: "Mac mini", device: "iPad"), "Sending “IMG_1204.heic” to Mac mini, 50%", "spoken")
+eq(DC.announcement(shot(.offering), mac: "Mac mini", device: "iPad"), "Sending “IMG_1204.heic” to Mac mini.", "announced at the start")
+eq(DC.announcement(shot(.sending), mac: "Mac mini", device: "iPad"), nil, "not while it runs")
+check(DC.announcement(shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil)), mac: "Mac mini", device: "iPad") != nil, "announced at a stop")
+check(shot(.sending).isOver == false && shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil)).isOver, "isOver")
+
 print("files: \(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

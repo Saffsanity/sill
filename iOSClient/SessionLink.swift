@@ -40,8 +40,17 @@ import Network
 /// §3.3): each report (kind 26) says how many the Mac had read on the connection, and one built before
 /// it read this device's latest input is dropped.
 ///
+/// It also keeps the uplink ledger (UplinkLedger; the overview's §2.3, docs/files-plan.md §6.3): every
+/// message handed to the session's connection is counted until the connection has taken it
+/// (`contentProcessed`), by lane. Everything `send` hands goes at once, as before; a file's messages go
+/// only through `sendFile`, and only into what the rest leaves: while no fence or hold stands (files pause
+/// then, and nothing of a file ever waits in `waiting`) and the connection holds nothing it was handed, so
+/// the person's input, pings and stats never queue behind a file in Sill's own queue. What a file may
+/// have on its way beyond that is its acknowledgement window's (FileFlow, DeviceFiles).
+///
 /// Foundation and Network only: it is checked on its own with swiftc against a local stand-in for
-/// the Mac whose old connection is slow (docs/direct-wireless-plan.md, the review fixes).
+/// the Mac whose old connection is slow (docs/direct-wireless-plan.md, the review fixes), and with
+/// DeviceFiles against the Mac's own FileHub (Tests/checks/device-files).
 final class SessionLink {
     /// What a fence or a hold let go of when it ended: how many messages went out, how many still
     /// wait (for another fence, or the hold), whether nothing stands any more (`clear`: what waited,
@@ -81,6 +90,41 @@ final class SessionLink {
     /// Input messages counted for the session's connection: those handed to it since it became the
     /// session's, and those waiting to go out on it (see `inputsOnSession`).
     private var inputs = 0
+    /// What the session's connection was handed and has not taken yet, by lane (UplinkLedger).
+    private var ledger = UplinkLedger()
+    /// When an input message (kind 8) was last handed to `send` (systemUptime): the person using the
+    /// stream, which narrows a file's window (FileFlow.active).
+    private var lastInput: Double?
+    /// Called once the session's connection has taken everything it was handed after a file's message
+    /// found no room (`sendFile` said `.later`), on the connection's queue: the sender may try again. A
+    /// fence or a hold ending calls nothing; the sender's own clock tries again then (DeviceFiles).
+    var onRoom: (() -> Void)?
+
+    /// What became of a file's message (`sendFile`).
+    enum FileSend: Equatable {
+        /// Handed to the connection.
+        case sent
+        /// Not now: a fence or the hold stands, or the connection still holds what it was handed.
+        case later
+        /// The connection is no longer the session's: the transfer on it is over.
+        case gone
+    }
+
+    /// When an input message was last handed to `send` (systemUptime), nil before any.
+    var lastInputAt: Double? {
+        lock.lock(); defer { lock.unlock() }
+        return lastInput
+    }
+
+    /// The bytes the session's connection was handed and has not taken yet, by lane (for the checks).
+    var pendingBytes: [UplinkLedger.Lane: Int] {
+        lock.lock(); defer { lock.unlock() }
+        var out: [UplinkLedger.Lane: Int] = [:]
+        for lane in UplinkLedger.Lane.allCases {
+            out[lane] = current.map { ledger.pending(lane, for: ObjectIdentifier($0)) } ?? 0
+        }
+        return out
+    }
 
     /// The number of input messages (kind 8) counted for the session's connection: those `send` handed
     /// to it since it became the session's, and those waiting to go out on it once the fences and the
@@ -112,13 +156,47 @@ final class SessionLink {
     /// hold stands.
     func send(_ data: Data) {
         lock.lock(); defer { lock.unlock() }
+        if Self.isInput(data) { lastInput = ProcessInfo.processInfo.systemUptime }
         if !fences.isEmpty || holding != nil {
             waiting.append(data)
             if Self.isInput(data) { inputs += 1 }
             return
         }
-        current?.send(content: data, completion: .contentProcessed { _ in })
+        if let c = current { handLocked(data, .first, to: c) }
         if current != nil, Self.isInput(data) { inputs += 1 }
+    }
+
+    /// A message of a file transfer (kind 34 or 49) to the Mac on `c`, the connection its transfer was
+    /// offered on, only into what the rest leaves (UplinkLedger.filesMayGo): handed only while `c` is the
+    /// session's connection, no fence or hold stands, and `c` has taken everything it was handed. Never
+    /// kept in `waiting`. `.later`: try again once `onRoom` says so, or on the sender's clock.
+    func sendFile(_ data: Data, on c: NWConnection) -> FileSend {
+        lock.lock(); defer { lock.unlock() }
+        guard current === c else { return .gone }
+        guard UplinkLedger.filesMayGo(pending: ledger.pending(for: ObjectIdentifier(c)), fenced: !fences.isEmpty,
+                                      held: holding != nil) else {
+            ledger.wantRoom()
+            return .later
+        }
+        handLocked(data, .files, to: c)
+        return .sent
+    }
+
+    /// Hands `data` to `c`, counted in `lane` until `c` has taken it. Under the lock.
+    private func handLocked(_ data: Data, _ lane: UplinkLedger.Lane, to c: NWConnection) {
+        let bytes = data.count
+        let epoch = ledger.handed(bytes, lane, to: ObjectIdentifier(c))
+        c.send(content: data, completion: .contentProcessed { [weak self] _ in self?.taken(bytes, lane, epoch: epoch) })
+    }
+
+    /// A connection took what it was handed (or failed with it, which ends it): the ledger counts it
+    /// off, and a file waiting for room is told once nothing is left. On the connection's queue.
+    private func taken(_ bytes: Int, _ lane: UplinkLedger.Lane, epoch: Int) {
+        lock.lock()
+        let room = ledger.taken(bytes, lane, epoch: epoch)
+        let call = room ? onRoom : nil
+        lock.unlock()
+        call?()
     }
 
     /// Whether `c` is still read: the session's connection, or the old one of a hand-over until its
@@ -211,7 +289,7 @@ final class SessionLink {
         }
         let out = waiting
         waiting = []
-        for data in out { current?.send(content: data, completion: .contentProcessed { _ in }) }
+        if let c = current { for data in out { handLocked(data, .first, to: c) } }
         let close = fencedOff
         fencedOff = []
         return Released(held: out.count, waiting: 0, clear: true, seconds: seconds, close: close)
@@ -229,5 +307,64 @@ final class SessionLink {
         waiting = []
         fencedOff = []
         return connections
+    }
+}
+
+/// The uplink ledger (the overview's §2.3; docs/files-plan.md §6.3): what the device has handed its
+/// session's connection and the connection has not taken yet (`contentProcessed`), by lane, for one
+/// connection at a time. The person's input, pings, stats and every other message (`first`) go at once,
+/// always; a file's messages (`files`) only into what they leave (`filesMayGo`). The microphone and the
+/// camera are to join with lanes of their own. Pure: SessionLink keeps one under its lock; the fence and
+/// device-files checks hold it.
+struct UplinkLedger: Equatable {
+    enum Lane: Int, CaseIterable, Hashable {
+        case first, files
+    }
+
+    /// The connection counted, and its generation: handing to another starts the counts again, and a
+    /// completion of what an earlier one was handed counts nothing.
+    private(set) var connection: ObjectIdentifier?
+    private(set) var epoch = 0
+    private(set) var pending = [Int](repeating: 0, count: Lane.allCases.count)
+    /// A file's message found no room: the completion that leaves the connection holding nothing says so.
+    private(set) var roomWanted = false
+
+    /// What the counted connection holds in all.
+    var total: Int { pending.reduce(0, +) }
+
+    /// What `c` holds that it was handed and has not taken: nothing for a connection not counted (nothing
+    /// was handed to it yet).
+    func pending(for c: ObjectIdentifier) -> Int { connection == c ? total : 0 }
+    func pending(_ lane: Lane, for c: ObjectIdentifier) -> Int { connection == c ? pending[lane.rawValue] : 0 }
+
+    /// `bytes` handed to `c` in `lane`; returns the epoch its completion names.
+    mutating func handed(_ bytes: Int, _ lane: Lane, to c: ObjectIdentifier) -> Int {
+        if connection != c {
+            connection = c
+            epoch += 1
+            pending = [Int](repeating: 0, count: Lane.allCases.count)
+            roomWanted = false
+        }
+        pending[lane.rawValue] += bytes
+        return epoch
+    }
+
+    /// The connection took `bytes` of `lane` it was handed at `epoch`. True once a file's message waited
+    /// for room and the connection now holds nothing (said once).
+    mutating func taken(_ bytes: Int, _ lane: Lane, epoch: Int) -> Bool {
+        guard epoch == self.epoch else { return false }
+        pending[lane.rawValue] = max(0, pending[lane.rawValue] - bytes)
+        guard roomWanted, total == 0 else { return false }
+        roomWanted = false
+        return true
+    }
+
+    mutating func wantRoom() { roomWanted = true }
+
+    /// Whether a file's message may be handed now: no fence or hold stands (files pause then, and never
+    /// wait in SessionLink's `waiting`) and the connection holds nothing it was handed, so at most one
+    /// file's message is ever ahead of the person's next input in Sill's own queue.
+    static func filesMayGo(pending: Int, fenced: Bool, held: Bool) -> Bool {
+        !fenced && !held && pending == 0
     }
 }
