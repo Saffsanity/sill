@@ -553,6 +553,84 @@ do {
     check(strokes > 6_000 && kept > 50_000 && held > 1_000, "\(strokes) random strokes: \(kept) intervals kept as drawn, \(held) held to now or to order")
 }
 
+// MARK: Smooth Pencil Lines (PenSmoothing: pull request #381's 1€ filter)
+
+check(PenSmoothing.minCutoff == 1.1 && PenSmoothing.beta == 11 && PenSmoothing.derivativeCutoff == 4 && PenSmoothing.rate == 240,
+      "#381's numbers: 1.1 Hz, 11 Hz a frame width a second, 4 Hz, 240 readings a second")
+check(near(PenSmoothing.alpha(rate: 240, cutoff: 1 / (2 * .pi) * 240), 0.5), "a low-pass at a cutoff of rate/2π takes half of each reading")
+do {
+    // A tip held still: it stays where it is, nothing drifts.
+    var f = PenSmoothing(aspect: 0.625)
+    f.begin(reading(0.4, 0.6, p: 0.5, at: 0))
+    var out = reading(0, 0, at: 0)
+    for i in 1...240 { out = f.smooth(reading(0.4, 0.6, p: 0.5, at: Double(i) / 240)) }
+    check(near(out.x, 0.4) && near(out.y, 0.6) && out.pressure == 0.5, "a still tip stays put, its pressure untouched")
+}
+do {
+    // A slow, shaky line (a hand's tremor of ±0.002 at 10 Hz on 0.05 frame widths a second): steadied.
+    var f = PenSmoothing(aspect: 1)
+    f.begin(reading(0.2, 0.5, at: 0))
+    var rawWobble = 0.0, outWobble = 0.0
+    for i in 1...480 {
+        let t = Double(i) / 240
+        let wobble = 0.002 * sin(2 * .pi * 10 * t)
+        let out = f.smooth(reading(0.2 + 0.05 * t, 0.5 + wobble, at: t))
+        if i > 120 { rawWobble = max(rawWobble, abs(wobble)); outWobble = max(outWobble, abs(out.y - 0.5)) }
+    }
+    check(outWobble < rawWobble * 0.35, "a slow shaky line: its tremor cut to \(String(format: "%.0f", 100 * outWobble / rawWobble))% of what it was")
+}
+func lagMs(speed: Double) -> Double {
+    var f = PenSmoothing(aspect: 1)
+    f.begin(reading(0.1, 0.5, at: 0))
+    var out = reading(0, 0, at: 0)
+    for i in 1...240 { out = f.smooth(reading(0.1 + speed * Double(i) / 240, 0.5, at: Double(i) / 240)) }
+    return (0.1 + speed - out.x) / speed * 1000
+}
+func lagMs(speed: Double, rate: Double) -> Double {
+    var f = PenSmoothing(aspect: 1)
+    f.begin(reading(0.1, 0.5, at: 0))
+    var out = reading(0, 0, at: 0)
+    let n = Int(rate)
+    for i in 1...n { out = f.smooth(reading(0.1 + speed * Double(i) / rate, 0.5, at: Double(i) / rate)) }
+    return (0.1 + speed - out.x) / speed * 1000
+}
+check(abs(lagMs(speed: 0.05, rate: 120) - lagMs(speed: 0.05, rate: 240)) < 5, "the same lag at 120 readings a second as at 240: the rate is measured")
+do {
+    // Two readings a tenth of a millisecond apart are taken as 480 a second at most, and the jump's speed
+    // through its own filter: the line moves about a quarter of the way.
+    var f = PenSmoothing(aspect: 1)
+    f.begin(reading(0.3, 0.5, at: 0))
+    let out = f.smooth(reading(0.4, 0.5, at: 0.0001))
+    check(out.x > 0.32 && out.x < 0.333, "a jump 0.1 ms after the down: to \(out.x)")
+}
+let slowLag = lagMs(speed: 0.05), fastLag = lagMs(speed: 1)
+check(slowLag > 70 && slowLag < 130, "a slow stroke (a twentieth of the frame a second) follows the tip about 0.1 s behind: \(Int(slowLag)) ms")
+check(fastLag > 0 && fastLag < 20, "a fast one (a frame width a second) within 20 ms: \(Int(fastLag)) ms")
+do {
+    // The speed in frame widths whichever way the stroke goes: a frame wider than tall (aspect 0.5)
+    // moving down at half a height a second is as slow as moving right at a quarter width.
+    var right = PenSmoothing(aspect: 0.5), down = PenSmoothing(aspect: 0.5)
+    right.begin(reading(0.1, 0.1, at: 0)); down.begin(reading(0.1, 0.1, at: 0))
+    var r = reading(0, 0, at: 0), d = reading(0, 0, at: 0)
+    for i in 1...240 {
+        let t = Double(i) / 240
+        r = right.smooth(reading(0.1 + 0.25 * t, 0.1, at: t))
+        d = down.smooth(reading(0.1, 0.1 + 0.5 * t, at: t))
+    }
+    check(abs((0.35 - r.x) / 0.25 - (0.6 - d.y) / 0.5) < 1e-9, "the same lag in time across and down a frame half as tall as wide")
+}
+do {
+    var f = PenSmoothing()
+    let first = f.smooth(reading(0.3, 0.3, p: 0.7, at: 5))
+    check(first == reading(0.3, 0.3, p: 0.7, at: 5), "a first reading without a down: taken as it is, the filter starts there")
+    let same = f.smooth(reading(0.3, 0.3, at: 5))
+    check(same.x.isFinite && same.y.isFinite && near(same.x, 0.3), "two readings at one time: no division by nothing")
+    let bad = f.smooth(reading(.nan, 0.3, at: 6))
+    check(bad.x.isNaN && f.smooth(reading(0.31, 0.3, at: 6.01)).x.isFinite, "a reading that is no number: passed on, and the filter starts again after it")
+    check(PenSmoothing(aspect: .nan).aspect == 1 && PenSmoothing(aspect: 0).aspect == 1 && PenSmoothing(aspect: 0.75).aspect == 0.75,
+          "an aspect that is no number, or none: 1")
+}
+
 // MARK: Random sessions against a model
 
 /// SplitMix64: the same sessions every run.

@@ -167,6 +167,20 @@ MUTANTS = [
     ("arrival ignored", TABLET, '            return (true, "TEST: an Apple Pencil', '            return (false, "TEST: an Apple Pencil'),
     ("the variable's value echoed", TABLET, 'return (false, "\\(variable) ignored: it takes arrival or stroke;', 'return (false, "\\(variable)=\\(value) ignored: it takes arrival or stroke;'),
     ("the variable's name", TABLET, 'package static let variable = "SILL_TEST_PEN_CLOCK"', 'package static let variable = "SILL_TEST_PENCLOCK"'),
+    # Smooth Pencil Lines (PenSmoothing, #381's 1€ filter)
+    ("x not smoothed", STROKES, "        x = a * reading.x + (1 - a) * px\n", "        x = reading.x\n"),
+    ("y not smoothed", STROKES, "        y = a * reading.y + (1 - a) * y\n", "        y = reading.y\n"),
+    ("the cutoff does not open with speed", STROKES, "Self.minCutoff + Self.beta * (dx * dx + dy * dy).squareRoot()", "Self.minCutoff"),
+    ("the speed read raw", STROKES, "dx = derivative * (reading.x - rawX) * rate + (1 - derivative) * dx", "dx = (reading.x - rawX) * rate"),
+    ("the aspect ignored", STROKES, "dy = derivative * (reading.y - rawY) * rate * aspect + (1 - derivative) * dy",
+     "dy = derivative * (reading.y - rawY) * rate + (1 - derivative) * dy"),
+    ("the rate never measured", STROKES, "if let last = time, reading.time > last { rate = min(max(1 / (reading.time - last), 60), 480) }", ""),
+    ("the rate unbounded", STROKES, "rate = min(max(1 / (reading.time - last), 60), 480)", "rate = 1 / (reading.time - last)"),
+    ("a slow cutoff of 5 Hz", STROKES, "static let minCutoff = 1.1", "static let minCutoff = 5.0"),
+    ("beta 2", STROKES, "static let beta = 11.0", "static let beta = 2.0"),
+    ("a reading that is no number kept as the filter's", STROKES, "        guard reading.x.isFinite, reading.y.isFinite else {\n            x = nil\n",
+     "        guard reading.x.isFinite, reading.y.isFinite else {\n            begin(reading)\n"),
+    ("an aspect that is no number taken", STROKES, "self.aspect = aspect.isFinite && aspect > 0 ? aspect : 1", "self.aspect = aspect"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

@@ -183,3 +183,79 @@ struct PenStrokes: Equatable {
     }
 }
 
+/// Smooth Pencil Lines (a switch of this device's, off unless turned on): the 1€ filter (Casiez,
+/// Roussel and Vogel, CHI 2012) over a stroke's moves before they reach the Mac, as cubelikeplayDaniel
+/// wrote it for Sill in pull request #381, with his numbers: slow, shaky motion is smoothed hard (its
+/// cutoff 1.1 Hz), and the cutoff opens as the tip speeds up (11 more hertz for each frame width a
+/// second), so a fast stroke follows the tip closely. The line follows the tip a little behind: about
+/// 0.1 s on a slow stroke. Never a tap: the stroke's down and its up go where the tip is (`begin` takes
+/// the down as it is, and the overlay sends the up unfiltered), only the moves between are smoothed,
+/// so a tap, a click and the end of a stroke land where the Pencil touched and lifted. Positions are
+/// fractions of the frame; its height over its width (`aspect`) makes the speed a frame width's in
+/// every direction. Pure; the stream's overlay keeps one for the stroke under way.
+struct PenSmoothing: Equatable {
+    /// The cutoff of slow motion (Hz).
+    static let minCutoff = 1.1
+    /// How much the cutoff opens per frame width a second of the tip's speed (Hz).
+    static let beta = 11.0
+    /// The cutoff of the speed's own reading (Hz).
+    static let derivativeCutoff = 4.0
+    /// The Pencil's rate (readings a second), taken when two readings share a time; a measured one
+    /// is held to 60…480.
+    static let rate = 240.0
+
+    private var x: Double?
+    private var y = 0.0
+    private var rawX = 0.0
+    private var rawY = 0.0
+    private var time: Double?
+    private var dx = 0.0
+    private var dy = 0.0
+
+    /// The frame's height over its width (1 when unknown).
+    var aspect = 1.0
+
+    init(aspect: Double = 1) { self.aspect = aspect.isFinite && aspect > 0 ? aspect : 1 }
+
+    /// The stroke's down: the filter starts at the tip, and the down goes as it is.
+    mutating func begin(_ reading: PenStrokes.Reading) {
+        x = reading.x; y = reading.y; rawX = reading.x; rawY = reading.y
+        time = reading.time
+        dx = 0; dy = 0
+    }
+
+    /// A move's reading, smoothed: its place moves, nothing else does. Before a `begin` it starts there;
+    /// a reading that is no number goes on as it is, and the filter starts again at the next one.
+    mutating func smooth(_ reading: PenStrokes.Reading) -> PenStrokes.Reading {
+        guard reading.x.isFinite, reading.y.isFinite else {
+            x = nil
+            return reading
+        }
+        guard let px = x else {
+            begin(reading)
+            return reading
+        }
+        var rate = Self.rate
+        if let last = time, reading.time > last { rate = min(max(1 / (reading.time - last), 60), 480) }
+        time = reading.time
+        // The speed, in frame widths a second, read through its own low-pass filter.
+        let derivative = Self.alpha(rate: rate, cutoff: Self.derivativeCutoff)
+        dx = derivative * (reading.x - rawX) * rate + (1 - derivative) * dx
+        dy = derivative * (reading.y - rawY) * rate * aspect + (1 - derivative) * dy
+        rawX = reading.x; rawY = reading.y
+        let a = Self.alpha(rate: rate, cutoff: Self.minCutoff + Self.beta * (dx * dx + dy * dy).squareRoot())
+        x = a * reading.x + (1 - a) * px
+        y = a * reading.y + (1 - a) * y
+        var out = reading
+        out.x = x ?? reading.x
+        out.y = y
+        return out
+    }
+
+    /// How much of a new reading a low-pass filter at `cutoff` takes at `rate`.
+    static func alpha(rate: Double, cutoff: Double) -> Double {
+        let tau = 1 / (2 * Double.pi * cutoff)
+        return 1 / (1 + tau * rate)
+    }
+}
+
