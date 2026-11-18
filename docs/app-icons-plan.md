@@ -96,8 +96,10 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   toggle"): the choice is a picker, and the original stays unless the person picks the other; nothing changes for
   anyone who never opens it.
 - **DEBUG**: `-SillAppIcon original|community|<name>` stands in for iOS's alternate icon name in the harness (a
-  tap moves the stand-in alone), `-SillAppIconFailed 1` shows the refusal's line, `-SillSettingsScroll appicon`
-  opens Settings at the group. The console says which icon shows ("app icon: …").
+  tap moves the stand-in alone), `-SillAppIconFailed 1` shows the refusal's line, `-SillAppIconSet
+  original|community` makes a tap's real call a second after the group appears (iOS's alert in a photo of the
+  harness's own simulator, and the icon iOS kept at the next launch), `-SillSettingsScroll appicon` opens Settings
+  at the group. The console says what happened ("app icon: …").
 
 ## App Review
 

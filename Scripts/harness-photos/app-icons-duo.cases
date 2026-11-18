@@ -20,7 +20,7 @@ phone-side-appicon               -SillLayout 852x393 -SillSafeArea 0,59,21,59 -S
 # Closed: the cover, upright.
 cover-appicon                    -SillLayout 466x678 -SillHinge closed -SillSettings 1 -SillSettingsScroll appicon --pose=closed-upright
 # Last, the real call a tap makes (-SillAppIconSet), in this run's fresh install: iOS's alert over Settings, the
-# community's icon still set at the next launch, then the original again, so the photos above read iOS's own name.
+# community's icon still set at the next launch, then the original again, so the install ends on the primary icon.
 flat-portrait-appicon-set-community -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIconSet community --wait=6
 flat-portrait-appicon-kept          -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon
 flat-portrait-appicon-set-original  -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIconSet original --wait=6
