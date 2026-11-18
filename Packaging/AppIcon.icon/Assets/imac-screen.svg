@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- design/AppIcon.svg's iMac screen, under the body's gloss. -->
+<defs>
+<linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="0" y1="176" x2="0" y2="632"><stop offset="0" stop-color="#ffffff" stop-opacity="0.3"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+</defs>
+<g transform="translate(0 56)">
+<rect x="204" y="204" width="616" height="352" rx="36" fill="#07080a"/>
+<rect x="204" y="204" width="616" height="352" rx="36" fill="url(#gloss)"/>
+</g>
+</svg>

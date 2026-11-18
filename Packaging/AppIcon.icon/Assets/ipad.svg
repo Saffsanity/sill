@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- design/AppIcon.svg's iPad, its glass: the slate body, tilted 5 degrees, under the iPad's gloss. -->
+<defs>
+<linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="0" y1="240" x2="0" y2="540"><stop offset="0" stop-color="#ffffff" stop-opacity="0.48"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+</defs>
+<g transform="translate(0 56) rotate(-5 520 392)">
+<rect x="316" y="240" width="408" height="300" rx="48" fill="#2a2f3a"/>
+<rect x="316" y="240" width="408" height="300" rx="48" fill="url(#gloss)"/>
+</g>
+</svg>

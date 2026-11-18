@@ -18,7 +18,7 @@
 # macOS belongs to an app bundle. Screen Recording, Accessibility, Local Network and Login Items
 # are granted to the CFBundleIdentifier plus the code's designated requirement. So: swift build,
 # wrap the SillMenuBar executable with Packaging/Info.plist and an icon compiled from
-# design/AppIcon.svg, sign the whole bundle last, verify.
+# Packaging/AppIcon.icon, sign the whole bundle last, verify.
 #
 # Grants survive rebuilds only with a real identity: its designated requirement names the bundle ID
 # and the certificate, not this binary. Ad hoc ("-") is a hash of this exact build, so every
@@ -116,13 +116,14 @@ if [ "${SILL_RELEASE_NIGHTLY:-}" = 1 ]; then
 fi
 printf 'APPL????' > "$stage/Contents/PkgInfo"
 
-# The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a
-# full-bleed icon itself when it comes from an asset catalog, but shows a legacy .icns shrunk
-# inside a grey tile (seen on macOS 27). So Quick Look renders the SVG (design/README.md's own
-# tool), the render becomes the one layer of an Icon Composer document, and actool, the compiler
-# Xcode uses, turns that into Assets.car (macOS 26+) plus an AppIcon.icns masked for macOS 14–15.
-# A layered Packaging/AppIcon.icon made in Icon Composer (the SVG's four groups) wins when it
-# exists. Cached in .build/icon until the SVG, that document or this script changes.
+# The icon. Packaging/AppIcon.icon, the Icon Composer document both apps use (design/AppIcon.svg's
+# iMac and iPad in layers, so the system draws them in Liquid Glass; design/README.md), goes to
+# actool, the compiler Xcode uses, which turns it into Assets.car (macOS 26+ masks and lights it)
+# plus an AppIcon.icns masked for macOS 14–15; a legacy .icns alone shows shrunk inside a grey tile
+# (seen on macOS 27). Sill for Mac keeps this one icon: the iOS app's alternate icons
+# (Packaging/AppIconCommunity.icon) are not compiled here. Without that document, Quick Look renders
+# design/AppIcon.svg, the flat original, as the one layer of a generated one. Cached in .build/icon
+# until the SVG, that document or this script changes.
 icon_out="$PWD/.build/icon"   # absolute: actool resolves relative paths in its helper's directory, not ours
 if [ ! -f "$icon_out/compiled/Assets.car" ] || [ design/AppIcon.svg -nt "$icon_out/compiled/Assets.car" ] \
    || [ "$0" -nt "$icon_out/compiled/Assets.car" ] \

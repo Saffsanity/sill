@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- design/AppIcon.svg's streamed window on the iPad: its title bar, lights and lines, under the iPad's gloss. -->
+<defs>
+<linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="0" y1="240" x2="0" y2="540"><stop offset="0" stop-color="#ffffff" stop-opacity="0.48"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+<clipPath id="card"><rect x="368" y="296" width="304" height="180" rx="20"/></clipPath>
+</defs>
+<g transform="translate(0 56) rotate(-5 520 392)">
+<rect x="368" y="296" width="304" height="180" rx="20" fill="#ffffff"/>
+<rect x="368" y="296" width="304" height="40" rx="20" fill="#9bb7ff"/>
+<rect x="368" y="316" width="304" height="20" fill="#9bb7ff"/>
+<circle cx="394" cy="316" r="7" fill="#ffffff" fill-opacity="0.7"/>
+<circle cx="416" cy="316" r="7" fill="#ffffff" fill-opacity="0.5"/>
+<circle cx="438" cy="316" r="7" fill="#ffffff" fill-opacity="0.35"/>
+<rect x="394" y="362" width="150" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.9"/>
+<rect x="394" y="392" width="210" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.55"/>
+<rect x="394" y="422" width="110" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.55"/>
+<rect x="368" y="296" width="304" height="180" fill="url(#gloss)" clip-path="url(#card)"/>
+</g>
+</svg>

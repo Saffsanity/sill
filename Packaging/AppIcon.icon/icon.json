@@ -1,0 +1,97 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.10196,0.10196,0.10980,1.00000",
+      "srgb:0.00000,0.00000,0.00000,1.00000"
+    ],
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 1
+      }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "window.svg",
+          "name" : "window"
+        },
+        {
+          "glass" : false,
+          "image-name" : "ipad-screen.svg",
+          "name" : "ipad-screen"
+        },
+        {
+          "glass" : true,
+          "image-name" : "ipad.svg",
+          "name" : "ipad"
+        }
+      ],
+      "name" : "iPad",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 1
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "imac-screen.svg",
+          "name" : "imac-screen"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "linear-gradient" : [
+                  "srgb:0.88000,0.88000,0.90000,1.00000",
+                  "srgb:0.62000,0.62000,0.66000,1.00000"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0,
+                    "y" : 0
+                  },
+                  "stop" : {
+                    "x" : 1,
+                    "y" : 1
+                  }
+                }
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "imac.svg",
+          "name" : "imac"
+        }
+      ],
+      "name" : "iMac",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}
