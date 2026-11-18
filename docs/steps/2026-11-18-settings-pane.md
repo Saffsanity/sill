@@ -11,7 +11,8 @@
   whole-screen pane over the stream screen, a sibling over the layouts in StreamScreen's root (never a system
   presentation: the harness's fake screen, the fold). Its rows are the panel's, the same views, in the same order
   and meaning; what changed is the container. Two parts: the Mac's (`macPart`, under the pinned header: the Mac's
-  name, a page title now, the readout and route, the away line, Done; Disconnect pinned under it) and this
+  name, a page title now, the readout and route, the away line, Done; Disconnect under it, right under the rows
+  while they fit and pinned where they scroll, as the panel had it) and this
   device's (`devicePart`: This iPad's group, Take the Tour, the version). `SettingsPane.Layout` (pure,
   `Tests/checks/settings-pane`) places them: one column (phones upright, the Duo's cover, the Duo open flat
   upright, narrow iPad windows), two columns side by side (sideways from 652 pt, upright from 732: phones on
@@ -36,3 +37,19 @@
 - **Kept for the parallel branches**: the file and type names (`HostSettingsPanel`), and the rows' code where it
   was (the Mac's block keeps its indentation; `middle` is `macPart` with `devicePart` split off after it), so a
   branch that adds a row there merges.
+- **Its edges**: each part's rows fade over 12 pt where they scroll out of sight under the header, Disconnect or
+  the fold (`ScrollEdgeFade`): the first photos showed a sliver of a line under the laptop pose's fold.
+- **Verified** (2026-11-18, on this Mac, nothing on a device): `Tests/checks/run-all.sh` all 75 pass;
+  `settings-pane` 199 checks (708,590 layouts on the grid) and 31 of 31 mutants; `phone-portrait` 71 of 71 and
+  `duo` 169 of 169 mutants caught after their panel checks went; the iOS app built for the simulator with CI's line
+  (Xcode 27.1), no new warning (StreamClient.swift:4527's is main's). Harness photos through
+  `Scripts/harness-photos.sh` on the agents' Duo (iOS 27.1, every pose by duorig) and iPad (iOS 27.0), 39
+  cases against origin/main (`Scripts/harness-photos/settings-pane-duo.cases`, `settings-pane-ipad.cases`):
+  the 7 cases with Settings closed are main's pixel for pixel; the rest show the pane in one column, two
+  columns, the book pose's pages and the laptop pose's, scrolled to the end, a long list (the link's
+  callout, Picture in Picture, a Paste note), the third accessibility text size and right to left. Photos and
+  side-by-side pairs: `~/Downloads/sill-handoff/next/settings-pane/photos/`.
+- **Not tested here** (Noah's list in the pull request): anything on a device; the motion; VoiceOver's order
+  and its escape gesture, Esc and ⌘. on a hardware keyboard; Picture in Picture started with Settings open;
+  rotating and folding with Settings open; the keyboard coming back after Done; Take the Tour and Full Screen
+  from the pane.

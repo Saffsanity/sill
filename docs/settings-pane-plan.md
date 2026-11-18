@@ -34,11 +34,11 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
 - **Arranged by the screen and the fold** (the rule is `SettingsPane.Layout`'s):
   - *One column* (an iPhone upright, the Duo's cover either way, the Duo open flat upright, an iPad window
     narrower than two columns): the header pinned at the top, both parts in one scroll view, Disconnect
-    pinned at the bottom, as the panel had them. At most 600 pt wide, centred, 16 pt from the safe area.
+    under them, as the panel had them. At most 600 pt wide, centred, 16 pt from the safe area.
   - *Two columns* (a screen held sideways with room for two of 300 pt: every iPhone on its side, the SE's
     667 pt included; the Duo open flat sideways; an iPad sideways; and upright where two of 340 pt fit: an
     iPad upright, the mini's 744 included, but never the Duo's 669): the Mac's part in the leading column
-    with Disconnect pinned under it, this device's in the trailing one, each scrolling on its own; each at
+    with Disconnect under it, this device's in the trailing one, each scrolling on its own; each at
     most 600 pt, 20 pt apart, the pair centred. The header runs over both: the Mac's name and lines over the
     Mac's column, Done at the far column's trailing end. Why: a phone on its side is 375 to 440 pt tall and
     shows twice as much; an iPad has room for both parts side by side; and the book pose needs exactly this.
@@ -50,6 +50,12 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
     nothing on the band. A fold whose pages could not hold a column (no device has one) is not kept to.
   - Right to left (Arabic, Hebrew): the Mac's part is on the leading side, the right, Done on the left; a
     fold's pages are the right page and the left one.
+- **Disconnect**, in every arrangement, comes right under the Mac's rows while they fit without scrolling
+  (an iPad's tall column) and is pinned under their scroll view where they do not, as the panel had it: in
+  reach either way.
+- **Scrolling**: each part scrolls on its own and bounces only when it does not fit; its edges fade over
+  12 pt where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply,
+  which at the laptop pose's fold left a sliver of a line).
 - **For the rows to come**: a feature of the Mac (Virtual Desktop, privacy mode) adds its group to the Mac's
   part, a feature of this device (microphone and camera passthrough, recording, files and photos) to this
   device's: a group is a `Rows` with its `Footnote`, and a group that begins a topic of its own carries a

@@ -12,7 +12,7 @@ import StreamProtocol
 /// presentation anywhere; sheets adapt by size class, which is unknown for the Duo; the layout harness
 /// draws a fake Duo screen inside the simulator's, which a presentation would escape; and a presentation
 /// knows nothing of the half-folded crease. Its two parts are the places for rows: the Mac's (`macPart`,
-/// under the pinned header with Done, Disconnect pinned under it) and this device's (`devicePart`), in one
+/// under the pinned header with Done, then Disconnect, `withDisconnect`) and this device's (`devicePart`), in one
 /// column, two columns side by side, or the laptop pose's two pages, each part scrolling on its own and
 /// nothing on the fold (`SettingsPane.Layout`). A feature's rows go into the part whose they are: a group
 /// is a `Rows` with its `Footnote`, and a group that begins a topic carries a header as Away from home and
