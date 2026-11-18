@@ -1817,7 +1817,13 @@ final class StreamServer {
     /// On `queue`: `client`'s image has crossed (or was dropped): the next one if one waits, else its picture
     /// back through a keyframe.
     private func imageCrossed(_ client: Client) {
-        if client.pendingImage != nil { pumpImage(client); return }
+        if client.pendingImage != nil {
+            // Progress: the next one is timed from now, so images copied one after another never add up to a
+            // stall (`imageStalls`).
+            client.imageSince = Date().timeIntervalSince1970
+            pumpImage(client)
+            return
+        }
         guard !client.imageBusy, clients[ObjectIdentifier(client.connection)] === client else { return }
         client.imageSince = nil
         client.needsKeyframe = true
