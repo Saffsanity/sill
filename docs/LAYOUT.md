@@ -80,7 +80,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   events (iPadOS's own Natural Scrolling set those); pure,
   `Tests/checks/protocol`. Kind 44, `keyframeRequest` (device → host, no
   payload: this device's picture was interrupted and waits for a keyframe;
-  issue #101), has no type of its own.
+  issue #101), has no type of its own. `Camera.swift` — the device's camera
+  on the Mac (kind 46, both ways; docs/camera-plan.md §5, #193's kind):
+  `CameraMessage`, type 1 a JSON `CameraFormat` (the device's offer, `claim`,
+  `pause`, `stop`, or an epoch's HEVC format with its parameter sets), type 2
+  a binary `CameraFrame` (type · epoch · seq · one access unit; its capture
+  time and keyframe flag in the header), type 3 a JSON `CameraDemand` (Mac →
+  device: size, rate, keyframe, bitrate ceiling, token); `CameraCodec`
+  (generation 1's bounds); caps refused, never cut; kind 16's `CameraState`
+  sits in HostSettings.swift; pure, `Tests/checks/camera-wire`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -297,7 +305,16 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size; `reconciles`; `Restore`, the window that comes back; the lines; and
   `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
-  `lockedMidSwitch` and `lockDecision`), `StillCapture` (SyntheticCapture.swift:
+  `lockedMidSwitch` and `lockDecision`), `CameraHostPolicy` (the devices'
+  cameras, docs/camera-plan.md §6.3, one reducer: who may, the one holder and
+  its claims, the grace of a move, kind 16's camera, the demand and its
+  keyframes, the epochs and rates, what Sill Camera shows; pure,
+  `Tests/checks/camera-host`), `CameraReceiver` (kind 46 from the network
+  queue on its own queue `sill.camera`: the policy, VideoToolbox's decoder per
+  epoch, never an encoder; `CameraOutput`, the seam Sill Camera's sink takes;
+  the TEST ONLY `CameraTestOutput`), `CameraTestHook` (SILL_TEST_CAMERA,
+  SILL_TEST_CAMERA_DEMAND, SILL_TEST_CAMERA_LOG, a test host's only; pure,
+  `Tests/checks/camera-host`), `StillCapture` (SyntheticCapture.swift:
   a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
@@ -597,7 +614,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   streams; it needs Accessibility for whatever runs it, and an unlocked screen),
   and its `close` step WindowSizer's Close (with WindowRestore.swift, which
   WindowSizer needs since #75) against Slow Close: back within 1 s, as no answer.
-  `Scripts/audio/` is the
+  `Scripts/camera/` (TEST ONLY; docs/camera-plan.md §13.2): `make-fixture.swift`
+  made `fixture-640x360.bin` (three seconds of a moving pattern, each frame's
+  number in blocks along its top, on VideoToolbox's software HEVC encoder,
+  refusing a hardware session) and `check-fixture.swift` decodes it on the
+  software decoder, each frame reading its own number; `Scripts/camera-check/live.py
+  OUT [live|two|lock|unpaired|hostile|nohook|all]` runs the camera's loopback
+  gates against synthetic `--pairing` test hosts with SILL_TEST_CAMERA and
+  paired sillclient.py clients sending the fixture (`--camera`), each host
+  under a minute. `Scripts/audio/` is the
   encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
