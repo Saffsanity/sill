@@ -117,12 +117,21 @@ MUTANTS = [
      "guard testHost || true else { return (nil, \"\\(testHeadlessVariable) ignored: only a --synthetic test host takes it, never Sill.app.\") }"),
     ("the Desktop leaves the kept display for a real one",
      "for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {", "for wanted in [Kind.real, .sills] {"),
-    ("macOS's stand-in taken for a real display",
-     "static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e && model == 0x76697274 }",
-     "static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { false }"),
-    ("any unknown vendor taken for the stand-in",
-     "static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e && model == 0x76697274 }",
-     "static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e }"),
+    # The kinds by role (HeadlessDisplayKind.swift, the assessment of 2026-11-18's defect 3)
+    ("a gone display taken as what it was", "        guard online else { return .gone }\n", "", "kind"),
+    ("a screen taken for Sill's display", "        case .screen: return .real", "        case .screen: return .sills", "kind"),
+    ("Sill's Desktop display taken for a real screen", "        case .sillDesktop: return .sills",
+     "        case .sillDesktop: return .real", "kind"),
+    ("macOS's stand-in taken for a real display", "        case .standIn: return .standIn", "        case .standIn: return .real", "kind"),
+    ("the stage's display taken for Sill's Desktop display (#200's vendor test)", "        case .stage: return .stage",
+     "        case .stage: return .sills", "kind"),
+    ("the stage's display taken for a real screen", "        case .stage: return .stage", "        case .stage: return .real", "kind"),
+    # The pool never takes the stage's display or a gone one
+    ("the stage's display in the Desktop's pool", "displays.filter { kind($0) != .stage && kind($0) != .gone }",
+     "displays.filter { kind($0) != .gone }"),
+    ("a gone display in the Desktop's pool", "displays.filter { kind($0) != .stage && kind($0) != .gone }",
+     "displays.filter { kind($0) != .stage }"),
+    ("the pool's last resort every display again", "        return desktops\n    }", "        return displays\n    }"),
     ("the stand-in preferred over Sill's Retina display",
      "for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {",
      "for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .standIn] {"),
@@ -191,15 +200,20 @@ MUTANTS = [
      "let evenW = clampedW & ~1",
      "let evenW = clampedW"),
 ]
+# A mutant names its file as a fourth element: "kind" is HeadlessDisplayKind.swift, else VirtualDisplay.swift.
+FILES = {"vd": F, "kind": os.path.join(WT, "Sources/SillHost/HeadlessDisplayKind.swift")}
 caught = 0
-for name, old, new in MUTANTS:
-    src = open(F).read()
+for entry in MUTANTS:
+    name, old, new = entry[:3]
+    which = entry[3] if len(entry) > 3 else "vd"
+    src = open(FILES[which]).read()
     if src.count(old) != 1:
         print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)"); continue
     with tempfile.TemporaryDirectory() as t:
-        mf = os.path.join(t, "VirtualDisplay.swift"); open(mf, "w").write(src.replace(old, new, 1))
+        mf = os.path.join(t, os.path.basename(FILES[which])); open(mf, "w").write(src.replace(old, new, 1))
         exe = os.path.join(t, "c")
-        subprocess.run([os.path.join(HERE, "build.sh"), WT, exe, mf], capture_output=True, text=True)
+        args = [mf, FILES["kind"]] if which == "vd" else [F, mf]
+        subprocess.run([os.path.join(HERE, "build.sh"), WT, exe, *args], capture_output=True, text=True)
         if not os.path.exists(exe):
             print(f"{name}: did not compile (caught)"); caught += 1; continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)

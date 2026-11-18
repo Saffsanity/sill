@@ -135,7 +135,8 @@ final class WindowCatalog {
     /// host's stop's (`testDisplays`). Nil with no display at all.
     private(set) var desktopDisplayID: UInt32?
     /// The displays the last look listed, which the stops are chosen among (where PR #200 puts its pool:
-    /// a real display, else Sill's, else macOS's stand-in).
+    /// a real display, else Sill's, else macOS's stand-in; never the stage's display, nor one gone, by role:
+    /// HeadlessDesktopPolicy.pool and `headlessKind`).
     private var lookedDisplays: [SCDisplay] = []
     /// The Desktop on the main display alone (DesktopDisplays.resolve's `mainOnly`): this Mac locked, or
     /// another user on its screen (the coordinator's lock reading). The choice is kept, and the Desktop
@@ -286,13 +287,32 @@ final class WindowCatalog {
             .takeRetainedValue() as? Bool) ?? false
     }
 
-    /// The displays as `LockPolicy.displaysLine` counts them, read now.
+    /// The displays as `LockPolicy.displaysLine` counts them, read now ("Sill's": the stage's and the Desktop's, by their
+    /// identities; off the main actor, so not by the IDs the stage made, which only a gone display needs).
     nonisolated static func displaysLine() -> String {
         let online = onlineDisplayIDs()
-        let kinds = online.map { StreamCoordinator.displayKind($0) }
+        let kinds = online.map { HeadlessDesktopPolicy.kind(role(of: $0, madeByStage: false), online: true) }
         return LockPolicy.displaysLine(online: online.count, active: activeDisplayIDs().count,
                                        asleep: online.filter { CGDisplayIsAsleep($0) != 0 }.count,
-                                       sills: kinds.filter { $0 == .sills }.count, standIn: kinds.filter { $0 == .standIn }.count)
+                                       sills: kinds.filter { $0 == .sills || $0 == .stage }.count,
+                                       standIn: kinds.filter { $0 == .standIn }.count)
+    }
+
+    /// A display's role (DesktopDisplays.role) by what CoreGraphics reads of its ID now: its vendor and product, and
+    /// `madeByStage`, whether the stage made this ID this run (a display it removed reads no monitor, 0xFFFFFFFF).
+    nonisolated static func role(of id: CGDirectDisplayID, madeByStage: Bool) -> DesktopDisplays.Role {
+        DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id), madeByStage: madeByStage)
+    }
+
+    /// A display's role, with the IDs the stage made this run (`stageDisplayIDs`).
+    func role(of id: CGDirectDisplayID) -> DesktopDisplays.Role {
+        Self.role(of: id, madeByStage: stageDisplayIDs.contains(id))
+    }
+
+    /// What Sill's Desktop display rules make of a display (HeadlessDesktopPolicy.kind): by its role, and nothing of
+    /// one that has gone (a gone display's ID reads online -1).
+    func headlessKind(of id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
+        HeadlessDesktopPolicy.kind(role(of: id), online: CGDisplayIsOnline(id) > 0)
     }
 
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
@@ -382,7 +402,7 @@ final class WindowCatalog {
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
-        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { StreamCoordinator.displayKind($0.displayID) }, sillsFirst: keepsSills)
+        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { self.headlessKind(of: $0.displayID) }, sillsFirst: keepsSills)
         resolveDesktopDisplay()
         // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
         // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
@@ -466,10 +486,8 @@ final class WindowCatalog {
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
         let mirrors = CGDisplayMirrorsDisplay(id)
         let refresh = CGDisplayCopyDisplayMode(id).map { $0.refreshRate }
-        let role = DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id),
-                                        madeByStage: stageDisplayIDs.contains(id))
         return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
-                                       role: role, online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
+                                       role: role(of: id), online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
                                        mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
                                        refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
                                        name: VirtualStage.screen(for: id)?.localizedName)

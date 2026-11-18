@@ -552,12 +552,18 @@ enum HeadlessDesktopPolicy {
     /// console…).
     static func desktopAgainAtWake(streamsDesktop: Bool, sills: Bool, gate: Bool) -> Bool { streamsDesktop && !sills && gate }
 
-    /// macOS's own stand-in display, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a
-    /// Mac has no screen at all (the lid closed and nothing attached, seen on macOS 27). Not a real display:
-    /// Sill's Retina one is made in its place.
-    static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e && model == 0x76697274 }
-
-    enum Kind: Equatable { case real, sills, standIn }
+    /// What a display is to these rules (`kind(_:online:)`, HeadlessDisplayKind.swift: from its role,
+    /// DesktopDisplays.role, never from its vendor alone):
+    /// - `real`: a screen of the Mac's (its own, a monitor, a Sidecar iPad, another app's virtual display);
+    /// - `sills`: Sill's own Desktop display (this one, product 0x0002);
+    /// - `standIn`: macOS's own 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a Mac has no
+    ///   screen at all (the lid closed and nothing attached, seen on macOS 27): no screen shows it, and Sill's Retina
+    ///   one is made in its place;
+    /// - `stage`: the display Sill makes for a picked window (VirtualStage): it holds that window alone, so the Desktop
+    ///   is never built on it and it is no screen;
+    /// - `gone`: a display that has gone (offline) while a look still lists it: none of the Desktop's (a stage display
+    ///   just removed read vendor 0xFFFFFFFF and counted as a real screen under #200's vendor test).
+    enum Kind: Equatable { case real, sills, standIn, stage, gone }
 
     /// The displays as Sill has looked at them over time, and the two rules that read them: when Sill's display may
     /// be made, and when it goes. Times are seconds on one clock (the coordinator's); nothing here reads a clock or a
@@ -693,13 +699,15 @@ enum HeadlessDesktopPolicy {
 
     /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while it
     /// exists and is not being released (the coordinator's `catalog.keepsSills`), so the Desktop stays on it through
-    /// `Watch`'s two seconds and moves once, when the display goes.
+    /// `Watch`'s two seconds and moves once, when the display goes. Never the stage's display, which holds a picked
+    /// window alone, nor one that has gone: with nothing else, none.
     static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false) -> [T] {
+        let desktops = displays.filter { kind($0) != .stage && kind($0) != .gone }
         for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
-            let some = displays.filter { kind($0) == wanted }
+            let some = desktops.filter { kind($0) == wanted }
             if !some.isEmpty { return some }
         }
-        return displays
+        return desktops
     }
 
     /// The fallback display's size: the MacBook's own screen as Sill last saw it, so windows keep their places;

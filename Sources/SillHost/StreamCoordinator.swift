@@ -1146,15 +1146,10 @@ package final class StreamCoordinator {
         return !WindowSizer.isFullScreen(p.element) && WindowSizer.liveBounds(of: p.windowID) != nil
     }
 
-    /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
+    /// Whether `id` is one of Sill's virtual displays (the stage's or the Desktop's), which the app keeps its own
+    /// windows off. Sill's display rules tell the two apart by role (WindowCatalog.headlessKind, DesktopDisplays.role).
     package nonisolated static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
-    }
-
-    /// A real display, Sill's own virtual one, or macOS's 1x stand-in (HeadlessDesktopPolicy.isStandIn).
-    nonisolated static func displayKind(_ id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
-        if isSillVirtualDisplay(id) { return .sills }
-        return HeadlessDesktopPolicy.isStandIn(vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id)) ? .standIn : .real
     }
 
     /// Sill's display for the Desktop when no real screen is online (a closed lid and no monitor, a headless Mac; issue
@@ -1216,7 +1211,8 @@ package final class StreamCoordinator {
         }
         guard headlessDisplay != nil else { return }      // a test host's said display has no look to wait for
         // Until the catalog's look has it (macOS's stand-in may still be listed beside it).
-        let onIt = { [catalog] in catalog.display.map { Self.isSillVirtualDisplay($0.displayID) } ?? false }
+        let made = headlessDisplay?.displayID
+        let onIt = { [catalog] in made != nil && catalog.display?.displayID == made }
         let deadline = Date().addingTimeInterval(3)
         while !onIt(), Date() < deadline {
             await catalog.refreshWindows()
@@ -1305,12 +1301,15 @@ package final class StreamCoordinator {
         }
         let online = WindowCatalog.onlineDisplayIDs()
         let active = WindowCatalog.activeDisplayIDs()
-        let real = { (ids: [UInt32]) in ids.filter { Self.displayKind($0) == .real }.count }
-        let working = active.filter { Self.displayKind($0) != .sills }.count     // the real ones and macOS's stand-in
+        // By role (WindowCatalog.headlessKind): the stage's display and Sill's own are no screen, and an ID listed
+        // online is there now.
+        let kind = { (id: UInt32) in HeadlessDesktopPolicy.kind(self.catalog.role(of: id), online: true) }
+        let real = { (ids: [UInt32]) in ids.filter { kind($0) == .real }.count }
+        let working = active.filter { [.real, .standIn].contains(kind($0)) }.count     // the real ones and macOS's stand-in
         let lidClosed = WindowCatalog.lidClosed()
         let count = HeadlessDesktopPolicy.realDisplays(active: real(active), online: real(online), lidClosed: lidClosed)
         let list = online.map { id in
-            "\(id):\(Self.displayKind(id)):\(active.contains(id) ? "active" : CGDisplayIsAsleep(id) != 0 ? "asleep" : "online")"
+            "\(id):\(kind(id)):\(active.contains(id) ? "active" : CGDisplayIsAsleep(id) != 0 ? "asleep" : "online")"
         }.sorted()
         return (count, list, HeadlessDesktopPolicy.screensAsleep(said: screensSaidAsleep, active: working), real(active),
                 real(online), lidClosed)

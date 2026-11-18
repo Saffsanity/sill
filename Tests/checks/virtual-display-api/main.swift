@@ -207,17 +207,41 @@ check(HDP.stillNeeded(physicalDisplays: 0) == true, "no real display online: the
 check(HDP.stillNeeded(physicalDisplays: 1) == false, "the lid opened, the built-in display back: the fallback display goes")
 check(HDP.stillNeeded(physicalDisplays: 2) == false, "two monitors plugged in: the fallback display goes")
 
-// macOS's own stand-in, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') with the lid closed and nothing
-// attached (seen on macOS 27, 2026-11-02): not a real display, so Sill's Retina one is made in its place.
-check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x76697274) == true, "macOS's stand-in ('unkn', 'virt') is no real display")
-check(HDP.isStandIn(vendor: 0x5111, model: 0x0001) == false, "Sill's own virtual display is not the stand-in")
-check(HDP.isStandIn(vendor: 0x610, model: 0xa050) == false, "Apple's built-in panel is a real display")
-check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x1234) == false, "an unknown vendor alone is not the stand-in")
-// Which displays the Desktop may stream: a real one, else Sill's, else the stand-in.
+// What a display is to these rules, by its role (DesktopDisplays.role, the Desktop stops' rule), never by its vendor
+// alone (#200's `displayKind` took any 0x5111 display for Sill's Desktop display; the assessment of 2026-11-18,
+// defect 3). The identities as CoreGraphics reads them on this Mac (2026-11-12): macOS's stand-in, a 1x 1920×1080
+// "Display" ('unkn', 'virt'), the stage's display (0x5111, 1), Sill's Desktop display (0x5111, 2), Apple's built-in
+// panel (0x610, 0xa050), and a display that has gone (0xFFFFFFFF, online -1).
+func kindOf(vendor: UInt32, product: UInt32, madeByStage: Bool = false, online: Bool = true) -> HDP.Kind {
+    HDP.kind(DesktopDisplays.role(vendor: vendor, product: product, madeByStage: madeByStage), online: online)
+}
+check(kindOf(vendor: 0x756e6b6e, product: 0x76697274) == .standIn, "macOS's stand-in ('unkn', 'virt') is no real display")
+check(kindOf(vendor: 0x756e6b6e, product: 0x1234) == .real, "an unknown vendor alone is not the stand-in")
+check(kindOf(vendor: 0x610, product: 0xa050) == .real, "Apple's built-in panel is a real display")
+check(kindOf(vendor: 0x5111, product: 0x0002) == .sills, "Sill's Desktop display (product 2) is Sill's")
+check(kindOf(vendor: 0x5111, product: 0x0001) == .stage, "the stage's display (product 1) is the stage's, not Sill's Desktop display")
+check(kindOf(vendor: 0x5111, product: 0x0001, madeByStage: true) == .stage, "…made by this run's stage too")
+check(kindOf(vendor: 0xFFFF_FFFF, product: 0xFFFF_FFFF, madeByStage: true) == .stage,
+      "a stage display that has gone and still reads in a look: the stage's (no real screen)")
+check(kindOf(vendor: 0xFFFF_FFFF, product: 0xFFFF_FFFF, madeByStage: true, online: false) == .gone, "…and gone, once offline")
+check(kindOf(vendor: 0x610, product: 0xa050, online: false) == .gone, "a monitor unplugged that an old look lists: gone, no real screen")
+check(kindOf(vendor: 0x5111, product: 0x0002, online: false) == .gone, "Sill's own display gone: gone")
+check(kindOf(vendor: 0x756e6b6e, product: 0x76697274, online: false) == .gone, "the stand-in gone: gone")
+check(kindOf(vendor: 0, product: 0) == .real && kindOf(vendor: 0, product: 0, madeByStage: true) == .stage,
+      "vendor 0: a display of its own, unless the stage made that ID (DesktopDisplays.role)")
+// Which displays the Desktop may stream: a real one, else Sill's, else the stand-in; never the stage's display or one gone.
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }) == [.real], "a real display online: it alone")
 check(HDP.pool([HDP.Kind.standIn, .sills], kind: { $0 }) == [.sills], "the lid closed, Sill's Retina display made: it, not macOS's stand-in")
 check(HDP.pool([HDP.Kind.standIn], kind: { $0 }) == [.standIn], "only macOS's stand-in (before Sill's is made): the stand-in")
 check(HDP.pool([HDP.Kind](), kind: { $0 }) == [], "no display: none")
+check(HDP.pool([HDP.Kind.stage, .standIn], kind: { $0 }) == [.standIn], "the stage's display and the stand-in: the stand-in, never the stage's")
+check(HDP.pool([HDP.Kind.stage, .sills], kind: { $0 }) == [.sills], "the stage's display beside Sill's Desktop display: Sill's")
+check(HDP.pool([HDP.Kind.stage, .sills], kind: { $0 }, sillsFirst: true) == [.sills], "…kept, the same")
+check(HDP.pool([HDP.Kind.stage], kind: { $0 }) == [], "the stage's display alone: no display for the Desktop (it holds a window alone)")
+check(HDP.pool([HDP.Kind.gone, .sills], kind: { $0 }) == [.sills], "a gone display listed beside Sill's: Sill's, the gone one no real screen")
+check(HDP.pool([HDP.Kind.gone, .standIn], kind: { $0 }) == [.standIn], "a gone display beside the stand-in: the stand-in")
+check(HDP.pool([HDP.Kind.gone], kind: { $0 }) == [], "only a gone display: none")
+check(HDP.pool([HDP.Kind.real, .stage, .gone, .real], kind: { $0 }) == [.real, .real], "two screens among the rest: both, in order")
 // While Sill's display exists and is not being released (the coordinator's keepsSills), the Desktop stays on it through
 // a real screen's two seconds and moves once, when it goes (Watch).
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
