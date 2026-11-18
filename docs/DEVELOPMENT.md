@@ -1455,7 +1455,9 @@ Headless (TEST ONLY, on a test host): a synthetic host keeps files in `$TMPDIR/s
 (`--send-file=PATH[,X,Y]@T`, a folder's files as one transfer; `--files-window`, `--files-pace`,
 `--cancel-files@T`, `--raw49`, `--raw34`, `--expect-files=OP[:REASON]`) and prints each kind 49 but the
 acknowledgements. `python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]` runs the gates
-(docs/files-plan.md §12.2, H3 to H5) against synthetic `--pairing` hosts on loopback, each under a minute.
+(docs/files-plan.md §12.2, H3 to H5) against synthetic `--pairing` hosts on loopback, each under a minute;
+`live.py OUT h2 --base=MAIN_SILLHOST` compares the CLI's stdout with main's (H2: every line masked, the per-second
+counters by name), and `h2 --logs=DIR` judges the logs a run saved again.
 `Tests/checks/device-files/run.sh` runs the device's sender against the Mac's own FileHub over loopback, with no host
 and no simulator. In the app's layout harness, `-SillFilesHost` and `-SillFiles` show the rows and the chip in each
 state (docs/BUILD-AND-RUN.md).
