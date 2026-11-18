@@ -791,7 +791,8 @@ The first building run (2026-11-18), draft pull request #391:
   `SILL_TEST_FILES_DIR`, `_LOG` and `_FREE`; sillclient.py's `--send-file`, `--cancel-files`, `--raw49`, `--raw34`,
   `--files-window` and `--expect-files`); Settings › General's Other Folder… with a chosen folder checked
   (`FileStore.refusal(forFolder:)`); the App Nap hold while a transfer runs (`fileTransfers` in the snapshot);
-  the gates' H2 (`Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST`).
+  the gates' H2 (`Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST`); and a check beyond §12.1's,
+  `Tests/checks/file-hub`: the real FileHub fed a device's messages with no host.
 - Taken beyond the plan: a reason `cancelled` for a person's own stop (the plan named none); a refusal or a cancel of
   kind 49 passes the lock's gate (`LockPolicy.passesLocked`), so a device hears at once why its transfer stopped; the
   Mac's answer judges the rate before `busy` and reads the free space last; the device's answer checks `busy`, the
