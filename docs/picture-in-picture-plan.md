@@ -71,8 +71,11 @@ from the device by itself meanwhile (no pointer move, no viewport), and the Mac'
 the device's clipboard while the person is in another app. Its pause freezes the picture and the sound;
 the Mac keeps sending, so play brings the live picture back at once. Coming back to Sill (the PiP
 window's return button, or opening Sill) puts the picture back in Sill. The session's end, the device's
-lock and ten minutes paused end PiP; after that Sill is in the background as it is today. The Mac changes
-nothing: it keeps streaming to a device that keeps reading.
+lock and ten minutes paused end PiP; after that Sill is in the background as it is today. (With #379,
+2026-11-18: an end of PiP with Sill in the background, its ✕ and a failed start included, ends the session
+too, the device closing its connection half a second later, and the reconnect waits for Sill's return:
+`PictureInPicturePolicy.endsSession`, docs/steps/2026-11-18-pip-lock-379.md.) The Mac changes nothing: it
+keeps streaming to a device that keeps reading.
 
 ### The rule (`PictureInPicturePolicy`, pure, `Tests/checks/picture-in-picture`)
 
@@ -107,7 +110,9 @@ nothing: it keeps streaming to a device that keeps reading.
    the return button or any other way, and half a second after iOS started it with the window already
    back in front: home, then straight back, when the scene's activation came first); when the device
    locks (iOS says protected data is about to go, which needs a passcode); and at `pausedLimit` paused. A
-   move to another path (the cable, Wi-Fi, home) keeps it: the session goes on.
+   move to another path (the cable, Wi-Fi, home) keeps it: the session goes on. With Sill in the background,
+   its end ends the session as well (#379, `endsSession`: looked at again `endSettle` later, then the
+   connection closed from the device and the reconnect held until Sill is back).
 8. **Only there** (`onlyInPictureInPicture`: PiP active, its window not in front): iOS sends no touch or key
    to an app in the background, and keys and touches still down as Sill leaves are cancelled, so their ups
    reach the Mac (`pressesCancelled`, `touchesCancelled`, as today). Beside that, while the picture shows
@@ -283,10 +288,11 @@ Settings (the gear) › This iPad (This iPhone), turn **Picture in Picture** on.
 9. **The session ends.** In PiP, quit Sill on the Mac: PiP closes (`pip: stopping: the session ended (…)`).
    Open Sill: "‹Mac› quit Sill.", and the session comes back once Sill on the Mac is open again.
 10. **The device locks.** In PiP, press the top button, wait 15 seconds, unlock: no PiP (`pip: stopping: the
-    device locked`), and within a minute Sill.log says "Client left". Then leave PiP alone, untouched, with
+    device locked`), and within a minute Sill.log says "Client left" (with #379: about ten seconds after the
+    lock, within a second of PiP's end; PR #406's steps). Then leave PiP alone, untouched, with
     the window moving, for the device's Auto-Lock time: say whether the device locked by itself.
 11. **Ten minutes paused.** Pause PiP and wait ten minutes: PiP closes (`pip: stopping: paused for 10
-    minutes`), and within a minute Sill.log says "Client left".
+    minutes`), and within a minute Sill.log says "Client left" (with #379: within a second).
 12. **A move.** At home on Wi-Fi, in PiP, plug the USB cable in: PiP goes on, and Sill.log shows the new
     connection over the cable, then "Client left" for the Wi-Fi one. Pull it: PiP goes on over Wi-Fi.
 13. **Two Sill windows (iPad).** Two windows side by side, each streaming a different Mac window. Tap in the
@@ -306,7 +312,9 @@ Settings (the gear) › This iPad (This iPhone), turn **Picture in Picture** on.
     (`echo hi | pbcopy` in Terminal): paste in Notes: the device's own copy, not "hi" (`clipboard: a copy from
     the Mac not written: …`). Back in Sill, a new copy on the Mac reaches the device as before.
 19. **iOS's switch off.** Sill's switch on, iOS's Start PiP Automatically off: leave Sill: no PiP, and Sill.log
-    says "Client left" within about ten seconds (iOS suspended Sill as before).
+    says "Client left" within about ten seconds (iOS suspended Sill as before). (#379's review: "cannot carry"
+    or growing frame-age lines first would mean the audio session's hold keeps Sill running without PiP, a
+    case `endsSession` cannot see: it needs PiP to have been on.)
 20. **The iPhone.** P2, P4 and P7 on the iPhone 15 Pro, held upright and sideways, with Larger Picture on too:
     the PiP window keeps the window's shape whatever Sill's layout.
 
