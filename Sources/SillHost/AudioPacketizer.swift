@@ -137,9 +137,9 @@ struct AudioPacketizer {
     }
 }
 
-/// What the sound should be of, as `AudioPipeline.follow` is asked for it: one app's (by pid; the
-/// name is for the log and the format), the whole Mac's (the Desktop), the test tone (a synthetic
-/// host's Desktop), or none.
+/// What the sound should be of, as `AudioPipeline.follow` is asked for it: one app's (by pid, and the
+/// ID of the display its capture is built on, 0 for none; the name is for the log and the format),
+/// the whole Mac's (the Desktop), the test tone (a synthetic host's Desktop), or none.
 enum AudioKey: Equatable, CustomStringConvertible {
     case none
     case desktop
@@ -183,11 +183,15 @@ enum AudioSourceRule {
     }
     /// A source that ended by itself or failed to start is tried again at most this often.
     static let retryInterval: TimeInterval = 10
+    /// The longest the pipeline waits, after a start, before it tries a source that keeps failing
+    /// again by itself (`retryIn`).
+    static let retryCap: TimeInterval = 160
 
-    /// The same source (an app by its pid) running or starting: keep it (a resize, a rotation,
-    /// another window of the same app). The same one ended by itself or failed: start it again, at
-    /// most once every `retryInterval` since its last start. Another app, the Desktop, the test tone:
-    /// a new stream and a new epoch. None: stop.
+    /// The same source (an app by its pid and its display) running or starting: keep it (a resize, a
+    /// rotation, another window of the same app on the same display). The same one ended by itself or
+    /// failed: start it again, at most once every `retryInterval` since its last start. Another app,
+    /// the same app on another display, the Desktop, the test tone: a new stream and a new epoch.
+    /// None: stop.
     static func decide(current: AudioKey, phase: Phase, lastStartAt: TimeInterval, wanted: AudioKey,
                        now: TimeInterval) -> Action {
         if wanted == .none { return current == .none && phase == .idle ? .keep : .stop }
@@ -199,12 +203,27 @@ enum AudioSourceRule {
         }
     }
 
-    /// How long until a source in `phase` that `wanted` still asks for should be tried again, in
-    /// seconds from `now` (`retryInterval` after `lastStartAt`, at least 0; a clock that went back
-    /// waits at most `retryInterval`, issue #365); nil unless `phase == .ended` and `wanted != .none`.
-    static func retryIn(phase: Phase, wanted: AudioKey, lastStartAt: TimeInterval, now: TimeInterval) -> TimeInterval? {
+    /// How long from `now` until the pipeline tries a source that ended by itself or failed to start
+    /// again on its own (issue #365): `retryInterval` after its last start (`lastStartAt`), twice as
+    /// long for each failure in a row before the last (`failures`, at least 1), at most `retryCap`:
+    /// 10, 20, 40, 80, then 160 s, so a source that keeps failing is not started and logged every
+    /// 10 s for the rest of a stream. 0 once that time has passed, never more than the whole wait (a
+    /// start stamped after `now`). Nil unless the source ended (`phase == .ended`) and one is still
+    /// wanted.
+    static func retryIn(phase: Phase, wanted: AudioKey, lastStartAt: TimeInterval, failures: Int,
+                        now: TimeInterval) -> TimeInterval? {
         guard phase == .ended, wanted != .none else { return nil }
-        return max(0, retryInterval - max(0, now - lastStartAt))
+        let doublings = min(max(failures, 1), 8) - 1
+        let wait = min(retryCap, retryInterval * Double(1 << doublings))
+        return max(0, wait - max(0, now - lastStartAt))
+    }
+
+    /// The failures in a row once a try of a source has failed to start (`ranFor` nil) or ended by
+    /// itself after `ranFor` seconds: one more than `previous`, but an end after `retryInterval` or
+    /// more of running is the first of a new run of them.
+    static func failures(after previous: Int, ranFor: TimeInterval?) -> Int {
+        if let ranFor, ranFor >= retryInterval { return 1 }
+        return max(previous, 0) + 1
     }
 }
 

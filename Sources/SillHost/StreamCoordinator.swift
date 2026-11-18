@@ -524,6 +524,14 @@ package final class StreamCoordinator {
         audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
         audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
         audio.onStatus = { [weak self] _ in self?.showAudio() }
+        // A sound that failed or ended by itself, due to be tried again (issue #365): what it should be of
+        // now, from the source, the display and the lock as they are (`audioKey`), never the key it had. Not
+        // during a switch, whose end asks anyway (`active`'s didSet, set on every path of `select`), and
+        // whose stage may have just taken the display that sound was built on away.
+        audio.onRetry = { [weak self] in
+            guard let self, !self.switching else { return }
+            self.audioFollow()
+        }
         server.onAudioListenersChanged = { [weak self] count in
             Task { @MainActor in
                 guard let self else { return }
@@ -2982,12 +2990,13 @@ package final class StreamCoordinator {
     // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
     //
     // One function decides what the sound is of, from Send Audio, the devices that play it, the
-    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
-    // stream through the picture's restarts and starts another for another source. It runs in
-    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
-    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
-    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
-    // server keeps each device's codec and epoch.
+    // source, the display an app's sound is built on, the lock and whether Sill is quitting, and hands
+    // it to the pipeline, which keeps the same app's stream through the picture's restarts (on the same
+    // display) and starts another for another source. It runs in `active`'s didSet (set on every path
+    // of `select`, once the picture has started, or to none), when the count of devices that play it
+    // changes, in `adopt` when Send Audio changed outside a select, when the pipeline's own retry is
+    // due outside a select (`onRetry`, issue #365), and at quit. The sound adds no device → host kind
+    // and no per-connection state here: the server keeps each device's codec and epoch.
 
     /// What the sound should be of now, and why none when none: the log's reason.
     private func audioKey() -> (AudioKey, String) {
@@ -3063,10 +3072,12 @@ package final class StreamCoordinator {
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
         case .app(let pid, let displayID, let name):
+            // The display the key names while it is still Sill's, else the one `appAudioDisplay` gives now.
             guard let display = (stage.scDisplay.flatMap { $0.displayID == displayID ? $0 : nil }) ?? appAudioDisplay else { return .failed("no display to capture from") }
+            let onStage = display.displayID == stage.scDisplay?.displayID ? " on virtual display \(display.displayID)" : ""
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it)\(onStage).")
         }
     }
 
