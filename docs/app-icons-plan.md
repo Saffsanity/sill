@@ -79,7 +79,8 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
 - **The rule** (`AppIconChoice`, pure, `Tests/checks/app-icon` with 50 mutants): the original is the primary icon
   (no alternate name) and the standard, first and always there; the community's is the alternate AppIconCommunity,
   credited "by grub-basket"; the Home Screen's icon is read from iOS's alternate icon name, which iOS keeps across
-  launches and updates, and a name this build does not ship reads as the original (iOS shows the primary then);
+  launches and updates, and a name this build does not ship reads as the original (iOS shows the primary icon
+  when the bundle lacks the alternate, as developers report of updates that dropped one; not tried here);
   a tap asks iOS for that icon unless it is set already, judged against the name itself, so Original clears an
   unknown name; the group shows only where iOS can change the icon. The check also reads the repository: both
   configurations' icon names exactly the choices', each document a resource with every layer it names, no icon
