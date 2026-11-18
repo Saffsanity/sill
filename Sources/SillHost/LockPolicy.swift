@@ -400,7 +400,7 @@ enum LockPolicy {
     /// cursor shape; every picture (a window's, the display's, the placeholder's) and the catalog go.
     static func viewWithholds(_ kind: StreamMessageKind) -> Bool {
         switch kind {
-        case .audio, .clipboard, .cursorShape, .macPointer: return true
+        case .audio, .clipboard, .cursorShape, .cursorKind, .macPointer: return true
         default: return false
         }
     }

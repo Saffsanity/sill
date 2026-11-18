@@ -673,7 +673,7 @@ for kind in gateKinds { for picture in pictures {
     switch kind {
     case .audio: want = !a.sound
     case .clipboard: want = !a.clipboard
-    case .cursorShape, .macPointer: want = !a.pointer
+    case .cursorShape, .cursorKind, .macPointer: want = !a.pointer   // kind 50 describes the cursor shape after it
     default: want = false
     }
     check(got == want, "the view: kind \(kind.rawValue) (\(picture.map { "\($0)" } ?? "no picture")) \(want ? "withheld" : "sent")")
@@ -754,7 +754,8 @@ _ = vg.setOffConsoleView(true); _ = vg.setConsoleTaken(true)
 check(!vg.offConsoleView && vg.withholds(.frame, picture: .display) && !vg.allowed.windows, "an unknown reading never shows the view")
 vg.set(.offConsole)
 check(vg.offConsoleView && !vg.withholds(.frame, picture: .display) && !vg.withholds(.frame, picture: .window) && !vg.withholds(.thumbnail)
-      && vg.withholds(.audio) && vg.withholds(.macPointer) && vg.withholds(.cursorShape) && vg.withholds(.clipboard) && vg.allowed == P.offConsoleViewAllowed,
+      && vg.withholds(.audio) && vg.withholds(.macPointer) && vg.withholds(.cursorShape) && vg.withholds(.cursorKind) && vg.withholds(.clipboard)
+      && vg.allowed == P.offConsoleViewAllowed,
       "established off console, the console taken, the switch on: the view (its pictures go, nothing of the console's)")
 check(vg.setConsoleTaken(false) == (true, false) && vg.withholds(.frame, picture: .display) && vg.withholds(.frame, picture: .window),
       "the console's witness back to this user: the view ends at once, before any settle")
