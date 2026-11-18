@@ -537,7 +537,8 @@ than today's picture and row 1's six buttons would be under 44 pt
 (`PhonePortraitLayout.largerPictureGains`). The Apps drawer opens above row 1,
 over the picture's room, so neither keyboard covers it, the Mac's or the one
 its search field brings. A change of the switch, or of what streams, shows when
-the Settings panel closes, so the panel never moves under the finger.
+Settings closes, so nothing under it changes while it is open (no new viewport
+goes to the Mac meanwhile).
 
 The first time a Mac's picture shows on a device, and nothing is touched, sent,
 used (by any means, VoiceOver's double tap included) or opened in the second
@@ -2136,8 +2137,17 @@ simulator:
 - `-SillLive 1`: a real client inside that frame. Otherwise the Mac is a mock,
   and `-SillActive none|desktop|<windowID>` picks what it streams.
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
-  settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
-  panel or the connect screen in a given state.
+  settings of the mock Mac) and `-SillConnectCase …`: the drawer, Settings or
+  the connect screen in a given state. Settings is a whole-screen pane
+  (docs/settings-pane-plan.md): the console's `settings: …` line says how it
+  sits on the screen ("two columns 423.5 pt wide, the Mac's at 16, this
+  device's at 511.5, the fold 455.5–495.5 between (951×669)"), and
+  `-SillSettingsEnd 1` starts each of its parts at its end. Large type and
+  right to left need no flag of Sill's: the system's own launch arguments,
+  `-UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL`
+  and `-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES`, set them
+  for one run (`Scripts/harness-photos/settings-pane-duo.cases` and
+  `settings-pane-ipad.cases` photograph the pane with them).
 - `-SillConnectCase tiles`: the connect screen's tiles (six, in Home, Work and
   Other: the Mac mini twice, its Wired row taken for it by its name and its
   Remote row, with its one picture; two more saved Macs with a picture each;

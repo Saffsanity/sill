@@ -1,0 +1,36 @@
+# Settings as a whole-screen pane (docs/settings-pane-plan.md) on the agents' Duo (iOS 27.1): every pose, an
+# iPhone upright and on its side, scrolled to the end, a long list, large type, right to left; and the stream
+# screen without it, which must be main's pixel for pixel. Grouped by pose, so the Duo folds as few times as can be.
+#   Scripts/harness-photos.sh Scripts/harness-photos/settings-pane-duo.cases --baseline origin/main
+# Open flat, upright (the default pose): the inner display, and an iPhone's 393x852 upright.
+flat-portrait              -SillLayout 669x951 -SillHinge flat -SillSettings 1
+flat-portrait-end          -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsEnd 1
+flat-portrait-long         -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsCase linkbehind -SillPiPSupported 1 -SillClipboardNote sent
+flat-portrait-stream       -SillLayout 669x951 -SillHinge flat
+phone-upright              -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1
+phone-upright-end          -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1 -SillSettingsEnd 1
+phone-upright-ax3          -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+phone-upright-stream       -SillLayout 393x852 -SillSafeArea 59,0,34,0
+# The laptop pose.
+laptop                     -SillLayout 669x951 -SillHinge half -SillSettings 1 --pose=laptop
+laptop-end                 -SillLayout 669x951 -SillHinge half -SillSettings 1 -SillSettingsEnd 1 --pose=laptop
+laptop-ax3                 -SillLayout 669x951 -SillHinge half -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL --pose=laptop
+laptop-stream              -SillLayout 669x951 -SillHinge half --pose=laptop
+# The book pose.
+book                       -SillLayout 951x669 -SillHinge half -SillSettings 1 --pose=book
+book-end                   -SillLayout 951x669 -SillHinge half -SillSettings 1 -SillSettingsEnd 1 --pose=book
+book-rtl                   -SillLayout 951x669 -SillHinge half -SillSettings 1 -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES --pose=book
+book-stream                -SillLayout 951x669 -SillHinge half --pose=book
+# Open flat, sideways: the inner display, and an iPhone's 852x393 on its side.
+flat-landscape             -SillLayout 951x669 -SillHinge flat -SillSettings 1 --pose=flat-landscape
+flat-landscape-long        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsCase linkbehind -SillPiPSupported 1 -SillClipboardNote sent --pose=flat-landscape
+phone-side                 -SillLayout 852x393 -SillSafeArea 0,59,21,59 -SillSettings 1 --pose=flat-landscape
+phone-side-end             -SillLayout 852x393 -SillSafeArea 0,59,21,59 -SillSettings 1 -SillSettingsEnd 1 --pose=flat-landscape
+phone-side-ax3             -SillLayout 852x393 -SillSafeArea 0,59,21,59 -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL --pose=flat-landscape
+phone-se-side              -SillLayout 667x375 -SillSettings 1 --pose=flat-landscape
+# Closed: the cover, upright and on its side.
+cover                      -SillLayout 466x678 -SillHinge closed -SillSettings 1 --pose=closed-upright
+cover-end                  -SillLayout 466x678 -SillHinge closed -SillSettings 1 -SillSettingsEnd 1 --pose=closed-upright
+cover-ax3                  -SillLayout 466x678 -SillHinge closed -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL --pose=closed-upright
+cover-stream               -SillLayout 466x678 -SillHinge closed --pose=closed-upright
+cover-side                 -SillLayout 678x466 -SillHinge closed -SillSettings 1 --pose=closed-side

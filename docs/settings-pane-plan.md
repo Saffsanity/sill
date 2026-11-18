@@ -74,8 +74,10 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   down: a whole-screen page closes with Done. No ⌘W: the app has none, and under Sill's hold ⌘W is the
   Mac's own Close Window.
 - VoiceOver: the pane is one modal element, as the panel was: its focus starts on the Mac's name, then the
-  header's lines, Done, the Mac's part, Disconnect, and this device's part; the stream screen under it is
-  hidden from VoiceOver and takes no touch.
+  header's lines, Done, the Mac's part, and this device's part, with Disconnect after the Mac's part in two
+  columns and pages and last in one column, where it is pinned at the bottom (the panel's order); the
+  stream screen under it is hidden from VoiceOver (iOS 18 and later; before, the modal trait alone keeps
+  VoiceOver in the pane, as it did in the panel) and takes no touch.
 
 ## The stream underneath
 

@@ -4,7 +4,7 @@ import CoreGraphics
 // that follow from it (docs/iphone-duo-plan.md). What the iOS 27.1 simulator reported, pose by pose,
 // as the inputs; the fold's band; the laptop pose's split at the real fold and open flat's at the
 // picture's shape; the book pose's bar (the right group, the strip) clear of the fold (Settings, a
-// panel under the bar until 0.6.3, keeps off it by itself now: Tests/checks/settings-pane); a card,
+// panel under the bar until 2026-11-18, keeps off it by itself now: Tests/checks/settings-pane); a card,
 // the connect column and the pairing overlay on one page; the inferred rules exactly as before iOS
 // 27.1; the harness's stand-in against the device's numbers. Compiled with the file as
 // it is:

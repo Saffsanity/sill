@@ -62,7 +62,7 @@ struct PhonePortraitLayout: Equatable {
     /// the shortest phone only just (an iPhone SE with Display Zoom, 320×548 under its status bar:
     /// the picture 188 pt tall, 2 pt short of 16:10).
     static let minTrackpad: CGFloat = 120
-    /// From row 1 to the drawer, which hangs under it (Settings, a panel there until 0.6.3, covers the
+    /// From row 1 to the drawer, which hangs under it (Settings, a panel there until 2026-11-18, covers the
     /// whole screen now: SettingsPane).
     static let panelGap: CGFloat = 8
     /// The Aa ruler's finger travel per detent at most, and `TextScaleControl.sliderInset`, the room

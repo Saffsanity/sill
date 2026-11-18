@@ -781,8 +781,8 @@ Rules found in the steps that hold for all work (each where it is written):
   twelve and six), `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
   an iPhone, as rects from the stream screen's size: the picture's fixed 16:10
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
-  and its vertical span, the Aa ruler, the drawer and the Settings panel across
-  row 1, and the dim, and the Menus button ending the strip's row (`menus`,
+  and its vertical span, the Aa ruler, the drawer across row 1, and the dim,
+  and the Menus button ending the strip's row (`menus`,
   `stripBesideMenus`; no Sound button anywhere since 2026-10-27); with Larger
   Picture's keyboard (`keyboard`, from
   `keyboardHeight(for:)`, only while a window streams: `largerPicture(switchOn:
@@ -921,10 +921,20 @@ Rules found in the steps that hold for all work (each where it is written):
   record's since PR #27),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
-  from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs; its last line this app's
-  version, `VersionLine`), `AwayCopy` (every
+  with swiftc), `HostSettingsPanel` (Settings, a whole-screen pane over the
+  stream screen on every device (2026-11-18, docs/settings-pane-plan.md):
+  the pinned header with the Mac's name, the readout and route line, the away
+  line and Done, then the Mac's part (`macPart`: the callouts, the link's callout
+  and its button, the slow-link callout for older Macs, its groups, Away from
+  home, the footnote) with Disconnect pinned under it, and this device's part
+  (`devicePart`: This iPad's group, Take the Tour, its last line this app's
+  version, `VersionLine`), each in a scroll view of its own, placed by
+  `SettingsPane.Layout`; a feature's group goes into the part whose it is),
+  `SettingsPane` (where the pane's two parts go: one column, two side by side
+  (sideways from 652 pt, upright from 732), a column on each page of the book
+  pose, the laptop pose's two pages, nothing on the fold, right to left
+  mirrored; and `Close`, what each way of closing it brings; pure,
+  `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`
@@ -1492,7 +1502,7 @@ closed|half|flat` (the hinge and a 40 pt fold across the middle of the longer
 side; without it the harness knows no hinge, even on the Duo's simulator),
 `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
-`-SillSettings 1` (the Settings panel open), `-SillMacMenu
+`-SillSettings 1` (Settings open: the whole-screen pane), `-SillMacMenu
 code|blender|long|stale|noaccess|none|slow|timeout|refuse` (the mock Mac's
 menus; `code` by default, VS Code's ten), `-SillMenusOpen 1` (the Menus
 pull-down opens after launch) or `-SillMenusOpen 'File/Open Recent'` (opens
@@ -1546,8 +1556,8 @@ reason the device does not know; the mock never browses) and remote access's `re
 pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
-remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
+remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
+parts scrolled to their ends), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

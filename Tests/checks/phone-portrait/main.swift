@@ -6,7 +6,7 @@
 // height from the width + 1 to 1,400: everything inside the screen and in order, the gaps, five
 // equal buttons and six equal caps across the row, the picture 16:10 unless the trackpad would drop
 // under 120 pt, the trackpad's span, the ruler, the drawer across row 1, the dim (Settings, a panel under row 1
-// until 0.6.3, covers the whole screen now: Tests/checks/settings-pane).
+// until 2026-11-18, covers the whole screen now: Tests/checks/settings-pane).
 //   swiftc -O iOSClient/PhonePortraitLayout.swift Tests/checks/phone-portrait/main.swift -o .build/checks/phone-portrait/check && .build/checks/phone-portrait/check
 import CoreGraphics
 import Foundation

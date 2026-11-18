@@ -7,7 +7,7 @@ import StreamProtocol
 ///
 /// A whole-screen pane over the stream screen on every device and in every layout (Noah, 2026-11-18:
 /// "Whole screen everywhere: Settings covers the stream completely on every device, with Done to go back,
-/// like a settings page"; docs/settings-pane-plan.md), the floating panel it was until 0.6.3 grown to the
+/// like a settings page"; docs/settings-pane-plan.md), the floating panel it was until 2026-11-18 grown to the
 /// screen. In the view hierarchy, not a sheet or a full-screen cover: the client has no system
 /// presentation anywhere; sheets adapt by size class, which is unknown for the Duo; the layout harness
 /// draws a fake Duo screen inside the simulator's, which a presentation would escape; and a presentation
@@ -277,18 +277,20 @@ struct HostSettingsPanel: View {
 
     /// One part's rows in a scroll view of their own, which bounces only where they do not fit. `bottom`: the
     /// room kept under the rows where the scroll view reaches the screen's bottom edge (the home indicator's),
-    /// so they scroll under it and their last line rests above it.
+    /// so they scroll under it and their last line rests above it. Its edges fade (`ScrollEdgeFade`), so a row
+    /// cut by the header, Disconnect or the fold reads as scrolled away; the rows begin under the top's fade.
     private func part<Content: View>(bottom: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         return ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) { rows }
-                    .padding(.top, 4)
+                    .padding(.top, ScrollEdgeFade.height)
             }
             .scrollIndicatorsFlash(onAppear: true)
             .scrollBounceBehavior(.basedOnSize)
             .modifier(StartAnchor(atEnd: Self.startsAtEnd))
             .contentMargins(.bottom, bottom, for: .scrollContent)
+            .modifier(ScrollEdgeFade())
             .dynamicTypeSize(...Self.largestRowType)
             .onAppear { if let id = Self.startsAt { reader.scrollTo(id, anchor: .top) } }
         }
@@ -377,9 +379,9 @@ struct HostSettingsPanel: View {
         }
         .padding(.horizontal, SettingsPane.Layout.headerInset)
         // 16 pt from the top: clear of the Duo's inner display's rounded corners, where the stream screen
-        // hides the status bar.
+        // hides the status bar. 4 under it, and the rows' 12 (their top fade's) before the first group.
         .padding(.top, 16)
-        .padding(.bottom, 12)
+        .padding(.bottom, 4)
         .dynamicTypeSize(...Self.largestPinnedType)
     }
 
@@ -1400,6 +1402,24 @@ private extension View {
         padding(.leading, x)
             .padding(.top, y)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+}
+
+/// A part's top and bottom edges, where its rows scroll out of sight under the header, Disconnect or the fold:
+/// 12 pt over which they fade, so a row cut there reads as scrolled away rather than cut off (the panel cut them
+/// sharply). The rows begin 12 pt down and end in a footnote's 12 pt, so at rest nothing shows faded.
+private struct ScrollEdgeFade: ViewModifier {
+    static let height: CGFloat = 12
+    func body(content: Content) -> some View {
+        content.mask {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.height)
+                Color.black
+                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.height)
+            }
+        }
     }
 }
 

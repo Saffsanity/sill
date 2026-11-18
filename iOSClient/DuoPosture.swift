@@ -539,7 +539,7 @@ extension DuoPosture {
     /// between everything, and a right group of `buttons` (Menus may come: count it). The group
     /// keeps its size while it begins past the band; else it takes `compactButtonWidth` (the
     /// approved step), then smaller gaps, down to `minimumGap`. The strip ends a gap short of the
-    /// band. (Settings, a panel under the bar's end until 0.6.3, is a whole-screen pane now, which keeps
+    /// band. (Settings, a panel under the bar's end until 2026-11-18, is a whole-screen pane now, which keeps
     /// off the band by itself: SettingsPane.)
     static func bookBar(width: CGFloat, fold: FoldInfo, padding: CGFloat, gap: CGFloat, buttonWidth: CGFloat,
                         compactButtonWidth: CGFloat, buttons: Int) -> BookBar {
