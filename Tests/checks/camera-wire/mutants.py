@@ -4,6 +4,9 @@ usage: mutants.py WORKTREE"""
 import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Not mutants, because no input tells them apart (equivalent): a demand written past its cap (its typed fields
+# cannot reach 4,096 bytes; the guard stays for a later field), and an epoch past 65,535 wrapped (the guard before
+# the conversion refuses it first).
 MUTANTS = [
     # The caps, at their edges.
     ("a format at the cap dropped", "Camera.swift", "guard payload.count <= maxFormatPayload,", "guard payload.count < maxFormatPayload,"),
@@ -12,11 +15,9 @@ MUTANTS = [
     ("a frame without data read", "Camera.swift", "payload.count > CameraFrame.headerBytes else", "payload.count >= CameraFrame.headerBytes else"),
     ("a frame's data cap one byte larger", "Camera.swift", "public static let maxDataBytes = 262_144", "public static let maxDataBytes = 262_145"),
     ("a format written past the cap", "Camera.swift", "return d.count <= Self.maxFormatPayload ? d : nil", "return d"),
-    ("a demand written past the cap", "Camera.swift", "return d.count <= Self.maxDemandPayload ? d : nil", "return d"),
     # Refused, never cut.
     ("a frame of too much data cut", "Camera.swift", "guard !data.isEmpty, data.count <= Self.maxDataBytes, CameraCodec.epochs.contains(epoch) else { return nil }", "guard !data.isEmpty, CameraCodec.epochs.contains(epoch) else { return nil }"),
     ("a frame without data written", "Camera.swift", "guard !data.isEmpty, data.count <= Self.maxDataBytes,", "guard data.count <= Self.maxDataBytes,"),
-    ("an epoch past 65,535 wrapped", "Camera.swift", "d.appendBigEndian(UInt16(epoch))", "d.appendBigEndian(UInt16(truncatingIfNeeded: epoch))"),
     ("a format written outside its bounds", "Camera.swift", "        case .format(let f):\n            guard f.isValid else { return nil }\n", "        case .format(let f):\n"),
     ("a demand written outside its bounds", "Camera.swift", "        case .demand(let r):\n            guard r.isValid else { return nil }\n", "        case .demand(let r):\n"),
     # The layout.
