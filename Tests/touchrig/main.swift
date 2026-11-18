@@ -71,6 +71,9 @@ enum Step {
     case reveal(Bool)
     /// A measuring pan on the overlay (beside everything, taking nothing) says where UIKit lets a pan begin.
     case measure(Bool)
+    /// Trackpad mode (TouchMode, #178): a third surface, the trackpad laid over the overlay as the app lays it over
+    /// the picture, shown (true) or hidden again.
+    case padOver(Bool)
 }
 
 /// UIKit's own pan threshold, measured: a pan beside every other recognizer, taking no touch, that logs its
@@ -322,6 +325,56 @@ func edgeHiddenScenarios(_ y: CGFloat) -> [(String, [Step])] {
     ]
 }
 
+/// Trackpad mode (TouchMode, #178): the trackpad laid over the picture (`PADOVER`), against the window's left edge,
+/// first with nothing of full screen's listening (`PADOVER ON`), then the controls hidden, the swipe in listening:
+/// a swipe in from the band brings the controls and sends nothing (`PADOVER REVEAL`); every other stroke sends
+/// what the same stroke sends unheld, its pointer's travel included (`PADOVER REVEALOFF`, judged against `ON`'s
+/// twin by compare.py --pad). The pad that answers nothing after the first stroke the swipe in held, the review's
+/// finding 1 (its finger counter made to wait), shows as the "after" strokes sending nothing. Each stroke starts
+/// at the frame's middle (the rig's feed: the anchor there), so the places compare. Nothing reaches the picture
+/// under the pad: the overlay sends nothing in any of them.
+func padOverScenarios(_ y: CGFloat) -> [(String, [Step])] {
+    let mid = CGPoint(x: 300, y: y)
+    let tapThenDrag = Gesture.tap(1, at: mid) + [.wait(20)] + Gesture.swipe(1, at: mid, dx: 120, dy: 0, frames: 12)
+    func path(_ xs: [CGFloat], dy: CGFloat = 0) -> [Step] {
+        var steps: [Step] = [.begin([CGPoint(x: xs[0], y: y)])]
+        for (i, x) in xs.dropFirst().enumerated() { steps.append(.move([CGPoint(x: x, y: y + dy * CGFloat(i + 1))])) }
+        return steps + [.end([0])]
+    }
+    // Every stroke both ways: shown (nothing listens) and hidden (the swipe in listens). The same steps.
+    let strokes: [(String, [Step])] = [
+        ("a tap in the middle", Gesture.tap(1, at: mid)),
+        ("a drag right in the middle", Gesture.swipe(1, at: mid, dx: 120, dy: 0, frames: 12)),
+        ("a tap 20 pt from the edge", Gesture.tap(1, at: CGPoint(x: 20, y: y))),
+        ("a long press 20 pt from the edge, 0.6 s", [.begin([CGPoint(x: 20, y: y)]), .wait(36), .end([0])]),
+        ("a drag down from 20 pt", Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 0, dy: 150, frames: 12)),
+        ("a drag up from 20 pt", Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 1, dy: -150, frames: 12)),
+        ("a drag left from 22 pt to the edge", Gesture.swipe(1, at: CGPoint(x: 22, y: y), dx: -20, dy: 0, frames: 10)),
+        ("two fingers from the band, up 150", Gesture.stroke([CGPoint(x: 12, y: y), CGPoint(x: 72, y: y)],
+                                                            to: [CGPoint(x: 12, y: y - 150), CGPoint(x: 72, y: y - 150)], frames: 8)),
+        ("a two-finger tap from the band", [.begin([CGPoint(x: 14, y: y), CGPoint(x: 74, y: y)]), .wait(4), .end([0, 1])]),
+        ("after a drag down from 20 pt: a tap and a drag right in the middle",
+         Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 0, dy: 150, frames: 12) + [.wait(30)] + tapThenDrag),
+        ("after a long press 20 pt from the edge: a tap and a drag right in the middle",
+         [.begin([CGPoint(x: 20, y: y)]), .wait(36), .end([0]), .wait(30)] + tapThenDrag),
+        ("a tap and a drag right in the middle", tapThenDrag),
+    ]
+    func shown(_ steps: [Step]) -> [Step] { [.padOver(true)] + steps + [.wait(60), .padOver(false)] }
+    func hidden(_ steps: [Step]) -> [Step] { [.padOver(true), .reveal(true)] + steps + [.wait(60), .reveal(false), .padOver(false)] }
+    var out = strokes.map { ("ON \($0.0)", shown($0.1)) }
+    #if REVEAL
+    out += strokes.map { ("REVEALOFF \($0.0)", hidden($0.1)) }
+    out += [
+        ("REVEAL a swipe in from the very edge", hidden(path([0.5, 30, 70, 120, 180, 240]))),
+        ("REVEAL a swipe in from 20 pt, 30° down", hidden(path([20, 45, 75, 110, 150], dy: 14))),
+        // The swipe in recognized, its waiting recognizers failed: the next strokes are the pad's whole
+        // (compare.py: as "ON a tap and a drag right in the middle").
+        ("REVEALOFF after a swipe in: a tap and a drag right in the middle", hidden(path([0.5, 30, 70, 120, 180, 240]) + [.wait(60)] + tapThenDrag)),
+    ]
+    #endif
+    return out
+}
+
 /// The review's strokes (2026-09-27): fingers placed slowly, a thumb resting on the glass, a pinch led by
 /// the thumb, the Mac's own thumb-and-three-finger pinch, a brief extra contact, and one- and two-finger
 /// strokes made right after a gesture on the same surface (compare.py holds them to the same strokes made
@@ -491,6 +544,9 @@ final class Runner {
             #endif
         case .measure(let on):
             panProbe.pan.isEnabled = on
+        case .padOver(let on):
+            root?.padOver.isHidden = !on
+            RigLog.log("[pad] over the picture \(on)")
         }
     }
 }
@@ -527,6 +583,14 @@ let revealLog = RevealLog()
 final class Root: UIViewController {
     let trackpad = TrackpadSurface(frame: .zero)
     let overlay = InputOverlayView(frame: .zero)
+    /// Trackpad mode (TouchMode, #178): the trackpad over the picture, the overlay's frame exactly, hidden but for
+    /// the PADOVER strokes. Where the sources have Trackpad mode (`PADOVER`) it is the app's pad over the picture
+    /// (`overPicture`); before, the same surface as the on-screen trackpad, as #222's first version laid it.
+    #if PADOVER
+    let padOver = TrackpadSurface(frame: .zero, overPicture: true)
+    #else
+    let padOver = TrackpadSurface(frame: .zero)
+    #endif
     /// The surfaces laid against the window's left edge, for the EDGE strokes.
     var edge = false
     override func viewDidLoad() {
@@ -536,14 +600,24 @@ final class Root: UIViewController {
         overlay.backgroundColor = UIColor(white: 0.2, alpha: 1)
         view.addSubview(trackpad)
         view.addSubview(overlay)
+        view.addSubview(padOver)
+        padOver.isHidden = true
         overlay.addGestureRecognizer(panProbe.pan)
         trackpad.send = { RigLog.log("trackpad send \(describe($0))") }
         overlay.send = { RigLog.log("overlay  send \(describe($0))") }
+        padOver.send = { RigLog.log("padover  send \(describe($0))") }
+        // Each of its strokes starts at the frame's middle: the anchor there, as the feed gives the app's pad the
+        // pointer's place (adopted at every stroke's first finger), so a stroke's places compare with its twin's.
+        padOver.feed = { (CGPoint(x: 0.5, y: 0.5), 0) }
+        #if PADOVER
+        padOver.pointerTouch = { phase, touch, _ in RigLog.log("padover  hands on \(touch.type.rawValue) phase \(phase.rawValue)") }
+        #endif
         overlay.videoSize = CGSize(width: 1512, height: 948)
         #if GESTURES
         let on = ProcessInfo.processInfo.environment["RIG_SWITCH"] != "off"
         trackpad.sendGesture = { g, n in RigLog.log("trackpad gesture \(g.rawValue) fingers \(n)" + (on ? "" : " (switch off: not sent)")); return on }
         overlay.sendGesture = { g, n in RigLog.log("overlay  gesture \(g.rawValue) fingers \(n)" + (on ? "" : " (switch off: not sent)")); return on }
+        padOver.sendGesture = { g, n in RigLog.log("padover  gesture \(g.rawValue) fingers \(n)" + (on ? "" : " (switch off: not sent)")); return on }
         #endif
     }
     override func viewDidLayoutSubviews() {
@@ -553,6 +627,7 @@ final class Root: UIViewController {
         let h = (b.height - 16) / 2
         trackpad.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: h)
         overlay.frame = CGRect(x: b.minX, y: b.minY + h + 16, width: b.width, height: h)
+        padOver.frame = overlay.frame
     }
 }
 
@@ -594,6 +669,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if ProcessInfo.processInfo.environment["RIG_TRACE"] == "1" {
             for g in root.trackpad.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "T.\(type(of: g))") }
             for g in root.overlay.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "O.\(type(of: g))") }
+            for g in root.padOver.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "P.\(type(of: g))") }
         }
         #if REVEAL
         edgeReveal.trace = { RigLog.log("[edge] trace " + $0) }
@@ -629,6 +705,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 for (title, steps) in edgeShownScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
             }
             for (title, steps) in edgeHiddenScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+        }
+        // Trackpad mode (#178): the trackpad over the picture, against the left edge, the swipe in listening and not.
+        // RIG_ONLY=pad: these alone.
+        if only.isEmpty || only == "pad" {
+            let oy = root.overlay.bounds.midY
+            for (title, steps) in padOverScenarios(oy) { runner.add("PADOVER \(title)", root.padOver, [.edgeLayout(true)] + steps) }
         }
         if only.isEmpty || only == "edge" {
             // UIKit's pan threshold, measured on the overlay's middle: one point a frame, right, left, down.
