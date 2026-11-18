@@ -188,6 +188,17 @@ package final class FileStore {
         return gone
     }
 
+    /// Why a folder the Mac's person chose cannot take files from devices, in Settings' words; nil when it can:
+    /// it must be a folder, not a link to one (Sill writes only where it can name the place), and writable.
+    package static func refusal(forFolder url: URL) -> String? {
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else { return "That folder can’t be found." }
+        if (st.st_mode & S_IFMT) == S_IFLNK { return "Choose the folder itself, not an alias or a link to it." }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else { return "Choose a folder." }
+        guard access(url.path, W_OK) == 0 else { return "Sill can’t save files in that folder." }
+        return nil
+    }
+
     /// The destination volume's free space for an ordinary file (nil when it cannot be read).
     package func freeSpace() -> UInt64? {
         let probe = (try? destination.checkResourceIsReachable()) == true ? destination : destination.deletingLastPathComponent()

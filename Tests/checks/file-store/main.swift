@@ -130,6 +130,19 @@ symlink(real.path, dest2.appendingPathComponent(FileStore.stagingName).path)
 check((try? FileStore(destination: dest2).prepare()) == nil, "a staging folder that is a link: refused")
 check(listing(real).isEmpty, "nothing written through either")
 
+// A folder the Mac's person chooses in Settings (Other Folder…): a folder, not a link to one, writable.
+check(FileStore.refusal(forFolder: real) == nil, "a writable folder: taken")
+check(FileStore.refusal(forFolder: linked) == "Choose the folder itself, not an alias or a link to it.", "a link to a folder: refused")
+let plainFile = scratch.appendingPathComponent("plain.txt")
+fm.createFile(atPath: plainFile.path, contents: Data("x".utf8))
+check(FileStore.refusal(forFolder: plainFile) == "Choose a folder.", "a file: refused")
+check(FileStore.refusal(forFolder: scratch.appendingPathComponent("missing")) == "That folder can’t be found.", "a folder that is gone: refused")
+let readOnly = scratch.appendingPathComponent("read-only", isDirectory: true)
+try! fm.createDirectory(at: readOnly, withIntermediateDirectories: true)
+chmod(readOnly.path, 0o555)
+check(FileStore.refusal(forFolder: readOnly) == "Sill can’t save files in that folder.", "a folder Sill cannot write: refused")
+chmod(readOnly.path, 0o755)
+
 // The free space, errno's meaning, the reasons.
 check((store.freeSpace() ?? 0) > 0, "the free space reads")
 check(FileStore.failure(ENOSPC) == .noRoom && FileStore.failure(EDQUOT) == .noRoom, "a full volume or quota: noRoom")

@@ -21,6 +21,8 @@ M = [
      "_ = st\n            return"),
     ("a full volume as cantSave", F, "code == ENOSPC || code == EDQUOT ? .noRoom", "code == EDQUOT ? .noRoom"),
     ("a staging folder anyone reads", F, "try makeFolder(staging, mode: 0o700)", "try makeFolder(staging, mode: 0o755)"),
+    ("a chosen link taken", F, '        if (st.st_mode & S_IFMT) == S_IFLNK { return "Choose the folder itself, not an alias or a link to it." }\n', ""),
+    ("a chosen folder Sill cannot write taken", F, '        guard access(url.path, W_OK) == 0 else { return "Sill can’t save files in that folder." }\n', ""),
     ("Where from not cleaned", F, 'let from = "\\(SafeText.label(device)), through Sill"', 'let from = "\\(device), through Sill"'),
 ]
 sys.exit(0 if module.mutate("file-store", M, sys.argv[1]) else 1)
