@@ -440,8 +440,12 @@ enum MockCatalog {
         // A Mac from this build takes the trackpad gestures (its window list says so); an older one
         // does not, and its Settings panel says to update it.
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
-        // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
-        client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
+        // …and shares its clipboard (`WindowList.clipboard` 2, text and images): the Settings panel's Share
+        // Clipboard and Include Images. `-SillMockClipboard 1`: a Mac that shares text alone (a Mac before
+        // images, or one whose Include images is off), with no Include Images row.
+        let defaults = UserDefaults.standard
+        let generation = defaults.object(forKey: "SillMockClipboard") != nil ? defaults.integer(forKey: "SillMockClipboard") : ClipboardPolicy.generation
+        client.hostClipboard = c == .legacy ? nil : generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's

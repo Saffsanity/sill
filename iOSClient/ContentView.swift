@@ -251,9 +251,11 @@ struct ContentView: View {
 ///   stepper's changes are saved for the next run; this one keeps 0.3). The console says
 ///   "thumbnails: hold 0.3 s" when a bar's thumbnails first read it and at each change.
 /// * `-Sill.shareClipboard 0` — not a harness argument either: this device's Share Clipboard (the
-///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
-///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
-///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
+///   Settings panel's This iPad group) off for one run, in the normal app too; `-Sill.clipboardImages 1`
+///   its Include Images on for one run (off unless turned on), in the normal app too. The mock Mac shares
+///   its clipboard (`WindowList.clipboard` 2, text and images) in every settings case but `legacy`, whose
+///   group then has no clipboard rows; `-SillMockClipboard 1` makes it a Mac that shares text alone (one
+///   before images, or with its Include images off: no Include Images row). `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
 ///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).

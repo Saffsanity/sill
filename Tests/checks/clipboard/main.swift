@@ -32,9 +32,11 @@ check(header(32)?.kind == .clipboard && header(32)?.payloadLength == 2, "a kind 
 check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil && header($0)?.kind == .unknown },
       "29, 30 and 31 (#66's side streams) and 33 are not this build's (the sound, once planned at 29, is 43)")
 check(StreamMessageKind(rawValue: 28) == .gesture, "28 is still the gesture")
-let message = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription).serialized()
+let message = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription(images: true)).serialized()
 check(message.first == 32 && StreamMessage.parseHeader(message)?.kind == .clipboard && message.count == StreamMessage.headerLength + 13,
-      "a subscription is a header and {\"accepts\":2}")
+      "a subscription taking images is a header and {\"accepts\":2}")
+let textOnly = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription(images: false)).serialized()
+check(textOnly.count == StreamMessage.headerLength + 2, "one taking text alone is a header and {}")
 
 let takes = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.6", protocol: 1,
                        gestures: TrackpadGesture.generation, clipboard: P.generation)
@@ -48,12 +50,20 @@ check(Wire.decode(WindowList.self, from: data(#"{"macName":"M","windows":[],"act
       "a later generation decodes")
 check(Wire.decode(WindowList.self, from: data(#"{"macName":"M","windows":[],"active":{"none":{}},"clipboard":true}"#)) == nil,
       "#66's Bool does not decode as this Int (why #66 changes it as it rebases)")
-check(P.generation == 2, "generation 2: text and images")
+check(P.generation == 2 && P.imageGeneration == 2, "generation 2: text and images")
+// The Mac's two switches: Share clipboard with devices, and Include images under it (the owner's say on images).
+check(P.hostGeneration(shareClipboard: true, images: true) == 2, "Share clipboard on, Include images on: the lists say 2")
+check(P.hostGeneration(shareClipboard: true, images: false) == 1, "Include images off: 1, text alone, as a host of generation 1")
+check(P.hostGeneration(shareClipboard: false, images: true) == nil && P.hostGeneration(shareClipboard: false, images: false) == nil,
+      "Share clipboard off: no clipboard at all, whatever Include images says")
+check(P.hostTakes(P.hostGeneration(shareClipboard: true, images: false)) && !P.hostTakesImages(P.hostGeneration(shareClipboard: true, images: false))
+      && P.hostTakesImages(P.hostGeneration(shareClipboard: true, images: true)), "a device reads 1 as text alone and 2 as images too")
 
 // MARK: - Clipboard's JSON
 
 check(json(Clipboard()) == "{}", "an empty Clipboard is {}: \(json(Clipboard()))")
-check(String(decoding: P.subscription, as: UTF8.self) == #"{"accepts":2}"#, "the subscription says it takes images: {\"accepts\":2}")
+check(String(decoding: P.subscription(images: true), as: UTF8.self) == #"{"accepts":2}"#, "with Include Images on the subscription says it takes images: {\"accepts\":2}")
+check(String(decoding: P.subscription(images: false), as: UTF8.self) == "{}", "with it off, {}: text alone, as every device before images")
 check(String(decoding: P.stopping, as: UTF8.self) == #"{"stop":true}"#, "stopping is {\"stop\":true}")
 check(json(Clipboard(text: "hi")) == #"{"text":"hi"}"#, "text alone: \(json(Clipboard(text: "hi")))")
 check(json(Clipboard(text: "a", image: Data([1, 2, 3]))) == #"{"image":"AQID","text":"a"}"#, "an image is base64, as #66 sends it")
@@ -110,11 +120,17 @@ check(bigPNG.count > Clipboard.maxImageBytes, "the test's noise PNG is over 8 MB
 check(Clipboard.maxImageBytes == 8 << 20, "the image cap: 8 MiB")
 check(Clipboard.imageType(png) == "public.png" && Clipboard.imageType(jpeg) == "public.jpeg" && Clipboard.imageType(tiff) == nil
       && Clipboard.imageType(Data([1, 2, 3])) == nil && Clipboard.imageType(Data()) == nil, "PNG and JPEG told by their first bytes; nothing else")
-check(StreamMessage.maxClipboardPayload == 12 << 20 && StreamMessage.maxClientPayload(for: .clipboard) == 12 << 20
-      && StreamMessage.maxClientPayload(for: .viewport) == StreamMessage.maxClientPayload
+check(StreamMessage.maxClipboardPayload == 12 << 20 && StreamMessage.maxClientPayload(for: .clipboard, clipboardImages: true) == 12 << 20
+      && StreamMessage.maxClientPayload(for: .viewport, clipboardImages: true) == StreamMessage.maxClientPayload
       && StreamMessage.maxHostPayload(for: .clipboard) == 12 << 20 && StreamMessage.maxHostPayload(for: .frame) == StreamMessage.maxFramePayload
       && StreamMessage.maxHostPayload(for: .windowList) == StreamMessage.maxOtherHostPayload,
       "kind 32 alone may be 12 MiB either way; every other kind's cap as before")
+// #300's D10: 12 MiB only from a connection whose subscription takes images while the Mac's Include images
+// is on; from any other (never subscribed, text alone, a Mac taking none) a kind 32 keeps the 1 MiB of text.
+check(StreamMessage.maxClientPayload(for: .clipboard, clipboardImages: false) == StreamMessage.maxClientPayload
+      && StreamMessage.maxClientPayload(for: .input, clipboardImages: false) == StreamMessage.maxClientPayload
+      && StreamMessage.maxClientPayload(for: .hello, clipboardImages: true) == StreamMessage.maxClientPayload,
+      "a kind 32 from a connection that takes no images: 1 MiB, as before images")
 let atImageCap = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(count: Clipboard.maxImageBytes - 8)
 check(P.payload(image: atImageCap).map { $0.count <= StreamMessage.maxClipboardPayload } == true, "8 MiB of PNG goes, within 12 MiB as base64 JSON")
 check(P.payload(image: atImageCap + Data([0])) == nil && P.payload(image: tiff) == nil && P.payload(image: Data()) == nil,
@@ -131,18 +147,91 @@ check(fromBig.map { Clipboard.imageType($0) == "public.jpeg" && $0.count <= Clip
 check(ClipboardImage.fitted(Data([1, 2, 3])) == nil && ClipboardImage.fitted(Data()) == nil, "not an image: nothing")
 check(ClipboardImage.fitted(bigPNG, max: 20_000).map { $0.count <= 20_000 && Clipboard.imageType($0) == "public.jpeg" } == true,
       "a tight cap: scaled down until it fits")
+check(ClipboardImage.fitted(bigPNG, max: P.awayImageBytes).map { $0.count <= P.awayImageBytes } == true, "fitted to the 2 MiB away from home too")
 
-// The host's look at a copy without text.
-var imageReads = 0
-func decideImage(_ types: [String], image: Data?) -> P.HostDecision {
-    P.hostDecides(types: types, changeCount: 3, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil },
-                  image: { imageReads += 1; return image })
+// Upright (#300's D6): a photo stored sideways with an orientation tag (the camera's portrait) arrives as it
+// stands, since a re-encoding carries no tag. Here a 600×200 JPEG tagged 6 (turn it a quarter clockwise to
+// view it), forced to be re-encoded by a cap a byte under its size, must come out taller than wide.
+func size(_ d: Data) -> (w: Int, h: Int, orientation: Int)? {
+    guard let src = CGImageSourceCreateWithData(d as CFData, nil),
+          let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+          let w = p[kCGImagePropertyPixelWidth] as? Int, let h = p[kCGImagePropertyPixelHeight] as? Int else { return nil }
+    return (w, h, p[kCGImagePropertyOrientation] as? Int ?? 1)
 }
-check(decideImage(["public.png"], image: png) == .sendImage(P.payload(image: png)!), "a copied image, no text: sent to the subscribers that take images")
+func encoded(_ w: Int, _ h: Int, noise: Bool, alpha: Bool = false, type: String, properties: [CFString: Any] = [:]) -> Data {
+    let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    if let p = ctx.data?.assumingMemoryBound(to: UInt32.self) {
+        var seed: UInt32 = 0x7A11
+        for y in 0..<h { for x in 0..<(ctx.bytesPerRow / 4) {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            // The left half transparent when `alpha` (premultiplied: all zero), the rest opaque noise or grey.
+            p[y * ctx.bytesPerRow / 4 + x] = alpha && x < w / 2 ? 0 : (noise ? seed | 0xFF00_0000 : 0xFF80_8080)
+        } }
+    }
+    let out = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(out, type as CFString, 1, nil)!
+    var props = properties
+    if type == "public.jpeg" { props[kCGImageDestinationLossyCompressionQuality] = 1.0 }
+    CGImageDestinationAddImage(dest, ctx.makeImage()!, props as CFDictionary)
+    _ = CGImageDestinationFinalize(dest)
+    return out as Data
+}
+let sideways = encoded(600, 200, noise: true, type: "public.jpeg", properties: [kCGImagePropertyOrientation: 6])
+check(size(sideways).map { $0.w == 600 && $0.h == 200 && $0.orientation == 6 } == true, "the test's photo is stored 600×200, tagged 6")
+check(ClipboardImage.fitted(sideways) == sideways, "within the cap a JPEG goes as it is, its tag with it")
+let upright = ClipboardImage.fitted(sideways, max: sideways.count - 1)
+check(upright.flatMap(size).map { $0.w < $0.h && $0.orientation == 1 && Clipboard.imageType(upright!) == "public.jpeg" } == true,
+      "re-encoded, it stands upright, taller than wide, no tag: \(upright.flatMap(size).map { "\($0.w)×\($0.h), \($0.orientation)" } ?? "nothing")")
+let tiffTagged = encoded(300, 100, noise: false, type: "public.tiff", properties: [kCGImagePropertyOrientation: 8])
+check(ClipboardImage.fitted(tiffTagged).flatMap(size).map { $0.w == 100 && $0.h == 300 && $0.orientation == 1 } == true,
+      "a TIFF tagged on its side: PNG, upright, at its full size")
+
+// A JPEG has no transparency (#300's D9): the transparent half of a PNG made smaller comes out white, not black.
+let halfClear = encoded(800, 800, noise: true, alpha: true, type: "public.png")
+func pixel(_ d: Data, x: Int, y: Int) -> (r: Int, g: Int, b: Int)? {
+    guard let src = CGImageSourceCreateWithData(d as CFData, nil), let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
+          let ctx = CGContext(data: nil, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: img.width * 4,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+    ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+    guard let p = ctx.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+    let at = ((img.height - 1 - y) * img.width + x) * 4
+    return (Int(p[at]), Int(p[at + 1]), Int(p[at + 2]))
+}
+let flattenedJPEG = ClipboardImage.fitted(halfClear, max: halfClear.count - 1)
+check(flattenedJPEG.map { Clipboard.imageType($0) == "public.jpeg" } == true, "a PNG over its cap: JPEG (never PNG again)")
+let corner = flattenedJPEG.flatMap { d in size(d).flatMap { pixel(d, x: 2, y: $0.h / 2) } }
+check(corner.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } == true, "its transparent half white: \(corner.map { "\($0)" } ?? "nothing")")
+// Photographs are re-encoded as JPEG, never tried as a PNG of tens of MB first (#300's D9); a TIFF (a
+// screenshot) as PNG while that fits.
+check(ClipboardImage.isPhotograph("public.jpeg") && ClipboardImage.isPhotograph("public.heic") && ClipboardImage.isPhotograph("public.heif")
+      && !ClipboardImage.isPhotograph("public.tiff") && !ClipboardImage.isPhotograph("public.png") && !ClipboardImage.isPhotograph(nil),
+      "photographs: JPEG, HEIC and HEIF; a TIFF, a PNG and the unknown are not")
+let bigGreyJPEG = encoded(1200, 1200, noise: false, type: "public.jpeg")
+check(ClipboardImage.fitted(bigGreyJPEG, max: bigGreyJPEG.count - 1).map { Clipboard.imageType($0) == "public.jpeg" } == true,
+      "a photograph over its cap stays a JPEG, though a PNG of it would be small")
+
+// The host's look at a copy without text: the image as the pasteboard holds it, fitted later off the
+// pasteboard's queue (#300's D8), and read only when someone takes images.
+var imageReads = 0
+func decideImage(_ types: [String], image: Data?, wanted: Bool = true) -> P.HostDecision {
+    P.hostDecides(types: types, changeCount: 3, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil },
+                  image: wanted ? { imageReads += 1; return image } : nil)
+}
+check(decideImage(["public.png"], image: png) == .sendImage(png), "a copied image, no text: to the subscribers that take images, as copied")
+check(decideImage(["public.tiff"], image: tiff) == .sendImage(tiff), "macOS's TIFF too: fitted on the way out")
+imageReads = 0
+check(decideImage(["public.png"], image: png, wanted: false) == .skip(.noText) && imageReads == 0,
+      "nobody takes images (or Include images is off): nothing sent and the image never read (#300's D8)")
 imageReads = 0
 check(decideImage(["public.file-url", "public.tiff"], image: png) == .skip(.noText) && imageReads == 0,
       "a copy of files in the Finder: not sent, its icon never read")
-check(decideImage(["public.tiff"], image: nil) == .skip(.noText), "an image that cannot be made to fit: nothing")
+check(decideImage(["public.tiff"], image: nil) == .skip(.noText) && decideImage(["public.tiff"], image: Data()) == .skip(.noText),
+      "no image there, or an empty one: nothing")
+imageReads = 0
+check(P.hostDecides(types: ["public.utf8-plain-text", "public.png"], changeCount: 3, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { "t" },
+                    image: { imageReads += 1; return png }) == .send(P.payload(text: "t")!) && imageReads == 0,
+      "text and an image: the text, the image never read")
 
 // The wire's rules for images.
 check(P.fromDevice(P.payload(image: png)!) == .setImage(png), "a device's PNG: set on the Mac")
@@ -150,25 +239,84 @@ check(P.fromDevice(P.payload(image: jpeg)!) == .setImage(jpeg), "a JPEG too")
 check(P.fromDevice(Wire.encode(Clipboard(image: atImageCap + Data([0])))) == .refuse(.tooLong), "over 8 MB: refused")
 check(P.fromDevice(Wire.encode(Clipboard(text: "t", image: png))) == .set("t"), "text and an image: the text, as before")
 check(P.countsAgainstRate(.setImage(png)), "an image counts against the rate, as text")
-check(P.takesImages(P.subscription) && P.takesImages(data(#"{"accepts":3}"#)) && !P.takesImages(data("{}"))
-      && !P.takesImages(data(#"{"text":"a"}"#)) && !P.takesImages(data("x")), "a subscription takes images when it says accepts 2 or more")
+check(!P.countsAgainstRate(.refuse(.images)), "an image refused while Include images is off counts nothing")
+// The Mac's Include images off: a device's image is refused (none of this generation sends one: the lists say 1).
+check(P.hostReceives(P.payload(image: png)!, arrivals: [], now: 0, imagesOn: false).ask == .refuse(.images)
+      && P.hostReceives(P.payload(image: png)!, arrivals: [], now: 0, imagesOn: true).ask == .setImage(png),
+      "a device's image with Include images off: refused, nothing set; on: set")
+check(P.hostReceives(P.payload(text: "t")!, arrivals: [], now: 0, imagesOn: false).ask == .set("t")
+      && P.hostReceives(P.subscription(images: true), arrivals: [], now: 0, imagesOn: false).ask == .subscribe,
+      "…its text and its subscription taken as ever")
+check(P.Refusal.images.rawValue == "images", "the refusal's name is the ignored line's count")
+
+// What a subscriber takes (#300's D1, confirmed: HostClipboard set it from every kind 32's own `accepts`, and
+// a Paste carries none, so one Paste from an iPad stopped the Mac's images reaching it for the session).
+func takes(_ json: String, was: Bool?) -> Bool { P.subscriberTakesImages(Wire.decode(Clipboard.self, from: data(json))!, was: was) }
+check(takes(#"{"accepts":2}"#, was: nil) && takes(#"{"accepts":3}"#, was: false) && !takes(#"{"accepts":1}"#, was: true),
+      "a subscription saying accepts: 2 or more takes images, 1 none, whatever before")
+check(!takes("{}", was: true) && !takes("{}", was: nil), "{}: text alone (Include Images turned off, or a device before images)")
+check(takes(#"{"text":"pasted"}"#, was: true) && takes(String(decoding: P.payload(image: png)!, as: UTF8.self), was: true),
+      "a Paste (text or an image, no accepts) leaves a subscriber that takes images taking them (the defect's case)")
+check(!takes(#"{"text":"pasted"}"#, was: false) && !takes(String(decoding: P.payload(image: png)!, as: UTF8.self), was: false) && !takes(#"{"text":"x"}"#, was: nil),
+      "…and one that takes none taking none, nothing for a first kind 32 that is a Paste")
+check(!takes(#"{"text":""}"#, was: true), "empty text is no Paste: a subscription, {} as generation 1's")
+check(takes(#"{"text":"x","accepts":2}"#, was: false) && !takes(#"{"text":"x","accepts":1}"#, was: true),
+      "a message that says accepts counts, a Paste's too")
 check(!P.hostTakesImages(nil) && !P.hostTakesImages(1) && P.hostTakesImages(2) && P.hostTakes(1),
       "a device sends images to a host of generation 2; text to one of 1, as before")
-check(P.forwardImage(to: [(1, true), (2, false), (3, true)], from: 3) == [1], "a device's image: to the other subscribers that take images")
-check(P.deviceWritesImage(P.payload(image: png)!, switchOn: true, hostClipboard: 2) == png, "the Mac's PNG written on the device")
-check(P.deviceWritesImage(P.payload(image: png)!, switchOn: false, hostClipboard: 2) == nil
-      && P.deviceWritesImage(P.payload(image: png)!, switchOn: true, hostClipboard: 1) == nil
-      && P.deviceWritesImage(Wire.encode(Clipboard(image: tiff)), switchOn: true, hostClipboard: 2) == nil
-      && P.deviceWritesImage(Wire.encode(Clipboard(text: "a")), switchOn: true, hostClipboard: 2) == nil,
-      "nothing with the switch off, from a host of generation 1, a TIFF, or text")
-check(P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: true) == .send(P.payload(image: png)!),
+// A device's image goes on to the others that take images; away from home only within 2 MiB (the Mac
+// never re-encodes a device's image).
+let peers: [(id: Int, images: Bool, away: Bool)] = [(1, true, false), (2, false, false), (3, true, false), (4, true, true), (5, false, true)]
+check(P.forwardImage(to: peers, from: 3, bytes: 1_000) == [1, 4], "a device's image: to the other subscribers that take images, home and away")
+check(P.forwardImage(to: peers, from: 3, bytes: P.awayImageBytes) == [1, 4], "2 MiB: away too")
+check(P.forwardImage(to: peers, from: 3, bytes: P.awayImageBytes + 1) == [1], "over 2 MiB: at home alone")
+check(P.forwardImage(to: peers, from: 9, bytes: 1) == [1, 3, 4], "from a connection not subscribed (yet): to every one that takes images")
+check(P.awayImageBytes == 2 << 20 && P.imageCap(away: true) == 2 << 20 && P.imageCap(away: false) == Clipboard.maxImageBytes,
+      "the cap a sender fits to: 8 MiB at home, 2 MiB away (a default for Noah)")
+// The device: Include Images (off unless turned on) and a Mac that takes images, both.
+check(P.deviceOffersImages(imagesOn: true, hostClipboard: 2) && !P.deviceOffersImages(imagesOn: false, hostClipboard: 2)
+      && !P.deviceOffersImages(imagesOn: true, hostClipboard: 1) && !P.deviceOffersImages(imagesOn: true, hostClipboard: nil),
+      "the device offers images only with Include Images on and a Mac that says 2")
+let macPNG = Wire.decode(Clipboard.self, from: P.payload(image: png)!)
+check(P.deviceWritesImage(macPNG, switchOn: true, imagesOn: true, hostClipboard: 2) == png, "the Mac's PNG written on the device")
+check(P.deviceWritesImage(macPNG, switchOn: false, imagesOn: true, hostClipboard: 2) == nil
+      && P.deviceWritesImage(macPNG, switchOn: true, imagesOn: false, hostClipboard: 2) == nil
+      && P.deviceWritesImage(macPNG, switchOn: true, imagesOn: true, hostClipboard: 1) == nil
+      && P.deviceWritesImage(Clipboard(image: tiff), switchOn: true, imagesOn: true, hostClipboard: 2) == nil
+      && P.deviceWritesImage(Clipboard(text: "a"), switchOn: true, imagesOn: true, hostClipboard: 2) == nil
+      && P.deviceWritesImage(nil, switchOn: true, imagesOn: true, hostClipboard: 2) == nil,
+      "nothing with Share Clipboard or Include Images off, from a host of generation 1, a TIFF, text, or what did not decode")
+check(P.deviceWritesImage(Clipboard(image: atImageCap), switchOn: true, imagesOn: true, hostClipboard: 2) == atImageCap
+      && P.deviceWritesImage(Clipboard(image: atImageCap + Data([0])), switchOn: true, imagesOn: true, hostClipboard: 2) == nil,
+      "told by its size and first bytes, never encoded again to be measured (#300's D7): 8 MiB written, a byte more not")
+check(P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: true, imagesOn: true, away: false) == .send(P.payload(image: png)!),
       "a pasted image goes to a host of generation 2")
-check(P.deviceSendsImage(png, connected: true, hostClipboard: 1, switchOn: true) == .nothing
-      && P.deviceSendsImage(png, connected: false, hostClipboard: 2, switchOn: true) == .nothing
-      && P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: false) == .nothing,
-      "to no host of generation 1, not while disconnected, not with the switch off")
-check(P.deviceSendsImage(atImageCap + Data([0]), connected: true, hostClipboard: 2, switchOn: true) == .tooLong,
+check(P.deviceSendsImage(png, connected: true, hostClipboard: 1, switchOn: true, imagesOn: true, away: false) == .nothing
+      && P.deviceSendsImage(png, connected: false, hostClipboard: 2, switchOn: true, imagesOn: true, away: false) == .nothing
+      && P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: false, imagesOn: true, away: false) == .nothing
+      && P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: true, imagesOn: false, away: false) == .nothing,
+      "to no host of generation 1, not while disconnected, not with Share Clipboard or Include Images off")
+check(P.deviceSendsImage(atImageCap + Data([0]), connected: true, hostClipboard: 2, switchOn: true, imagesOn: true, away: false) == .tooLong,
       "over 8 MB after fitting: too long")
+let overAway = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(count: P.awayImageBytes - 7)
+check(P.deviceSendsImage(overAway, connected: true, hostClipboard: 2, switchOn: true, imagesOn: true, away: true) == .tooLong
+      && P.deviceSendsImage(overAway, connected: true, hostClipboard: 2, switchOn: true, imagesOn: true, away: false) != .tooLong,
+      "away from home over 2 MiB: too long (fitted, it never is); at home it goes")
+
+// MARK: - The host: an image on its way to a device (StreamServer's image path; #300's D4)
+
+// It starts only while the device's connection holds no more than control messages and no keyframe is
+// crossing to it; meanwhile and while it crosses the device's frames wait, so the home door's drain
+// eviction never meets a device that went away: silence does, at either door.
+check(P.imageIdleBytes == 64 * 1024, "idle: 64 KiB not taken at most (the files plan's idleBytes)")
+check(P.hostMaySendImage(pendingBytes: 0, keyframesInFlight: 0) && P.hostMaySendImage(pendingBytes: 64 * 1024, keyframesInFlight: 0),
+      "an idle connection: the image starts")
+check(!P.hostMaySendImage(pendingBytes: 64 * 1024 + 1, keyframesInFlight: 0), "behind the picture's backlog: it waits")
+check(!P.hostMaySendImage(pendingBytes: 0, keyframesInFlight: 1), "while a keyframe crosses: it waits, the keyframe never behind an image")
+check(P.imageSilence == 8 && !P.dropsSilentWhileImage(silentFor: 8, connectedFor: 60) && P.dropsSilentWhileImage(silentFor: 8.01, connectedFor: 60),
+      "a device silent more than 8 s while an image waits for it or crosses: dropped (it pings four times a second)")
+check(!P.dropsSilentWhileImage(silentFor: 9, connectedFor: 7.9) && P.dropsSilentWhileImage(silentFor: 9, connectedFor: 8),
+      "…once it has been connected 8 s, as the remote door's rule")
 
 // MARK: - The host: a change of its pasteboard
 
@@ -247,8 +395,13 @@ check(C.macAccessHint(.notAsked)!.hasPrefix("Click Allow in System Settings: mac
       && C.macAccessHint(.asks) == C.macAccessHint(.denied) && C.macAccessHint(.asks)!.contains("Paste from Other Apps"),
       "the way to allow it: asked once first while macOS has not asked about Sill (it is not listed until then)")
 check(C.macAccessButton == "Allow in System Settings…", "the button")
-check(C.macFootnote == "Text and images you copy here can be pasted on a connected iPhone or iPad, and what one sends with Paste becomes this Mac’s.",
-      "Settings › General's footnote: the Mac's copies go, a device's text comes with Paste, nothing excepted")
+check(C.macFootnote == "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s.",
+      "Settings › General's footnote: the Mac's copies go, a device's text comes with Paste, nothing excepted (images have their own words)")
+check(C.macImagesTitle == "Include images", "the Mac's switch for images, under Share clipboard with devices")
+check(C.macImagesFootnote == "Images copied here go to iPhones and iPads that take them, up to 8 MB each, or 2 MB away from home (a bigger one is made smaller), and an image a device sends with Paste becomes this Mac’s.",
+      "its words")
+check(C.macAccessHint(.notAsked)!.hasSuffix(" What a device sends with Paste still arrives.") && C.macAccessHint(.asks)!.hasSuffix(" What a device sends with Paste still arrives."),
+      "what still arrives: a device's text or image (#300's D11: it said text)")
 check(C.macAccessLine(.allowed).hasPrefix("Clipboard: macOS lets Sill read the clipboard again")
       && C.macAccessLine(.asks).hasPrefix("Clipboard: macOS asks before Sill reads the clipboard")
       && C.macAccessLine(.notAsked) == C.macAccessLine(.asks)
@@ -324,17 +477,27 @@ check(P.Refusal.rate.rawValue == "rate" && P.Refusal.tooLong.rawValue == "tooLon
 // MARK: - The device: its subscription
 
 check(!P.hostTakes(nil) && !P.hostTakes(0) && P.hostTakes(1) && P.hostTakes(2), "a host takes it from generation 1")
+// Include Images (`imagesOn`) is what the subscription says, and a move of it subscribes again at once
+// (`subscribedImages`: what the last one said); with Share Clipboard off it moves nothing.
 for host in [nil, 0, 1, 2] as [Int?] {
     for on in [false, true] {
         for subscribed in [false, true] {
-            let got = P.deviceSubscription(hostClipboard: host, switchOn: on, subscribed: subscribed)
-            let takesIt = (host ?? 0) >= 1
-            let want: (P.Subscription, Bool) = !takesIt ? (.none, false)
-                : on && !subscribed ? (.subscribe, true) : !on && subscribed ? (.stop, false) : (.none, subscribed)
-            check(got.send == want.0 && got.subscribed == want.1, "host \(host.map(String.init) ?? "nil"), switch \(on), subscribed \(subscribed): \(got)")
+            for images in [false, true] {
+                for said in [false, true] {
+                    let got = P.deviceSubscription(hostClipboard: host, switchOn: on, subscribed: subscribed, imagesOn: images, subscribedImages: said)
+                    let takesIt = (host ?? 0) >= 1
+                    let want: (P.Subscription, Bool) = !takesIt ? (.none, false)
+                        : on && (!subscribed || said != images) ? (.subscribe, true) : !on && subscribed ? (.stop, false) : (.none, subscribed)
+                    check(got.send == want.0 && got.subscribed == want.1,
+                          "host \(host.map(String.init) ?? "nil"), switch \(on), subscribed \(subscribed), images \(images), said \(said): \(got)")
+                }
+            }
         }
     }
 }
+check(P.deviceSubscription(hostClipboard: 2, switchOn: true, subscribed: false) == (send: .subscribe, subscribed: true)
+      && P.deviceSubscription(hostClipboard: 2, switchOn: true, subscribed: true) == (send: .none, subscribed: true),
+      "without Include Images (off unless turned on) as before images")
 
 // MARK: - The device: the Mac's text
 
@@ -356,13 +519,19 @@ check(P.deviceWrites(fromMac, switchOn: true, hostClipboard: 1, lastSent: sent, 
 // MARK: - The device: the chip
 
 for connected in [false, true] {
-    for host in [nil, 1] as [Int?] {
+    for host in [nil, 1, 2] as [Int?] {
         for on in [false, true] {
             for has in [false, true] {
                 for handled in [nil, 5, 6] as [Int?] {
-                    let got = P.offersChip(connected: connected, hostClipboard: host, switchOn: on, hasStrings: has, changeCount: 6, handled: handled)
-                    let want = connected && host != nil && on && has && handled != 6
-                    check(got == want, "chip: connected \(connected), host \(host as Any), switch \(on), text \(has), handled \(handled as Any): \(got)")
+                    for image in [false, true] {
+                        for images in [false, true] {
+                            let got = P.offersChip(connected: connected, hostClipboard: host, switchOn: on, hasStrings: has, changeCount: 6,
+                                                   handled: handled, hasImages: image, imagesOn: images)
+                            // An image lights it only with Include Images on and a Mac that takes images.
+                            let want = connected && host != nil && on && (has || (image && images && host == 2)) && handled != 6
+                            check(got == want, "chip: connected \(connected), host \(host as Any), switch \(on), text \(has), handled \(handled as Any), image \(image), Include Images \(images): \(got)")
+                        }
+                    }
                 }
             }
         }
@@ -405,6 +574,17 @@ check(P.receiptLength == 16 && P.receiptLength != 8, "a receipt's payload: 16 by
 check(P.receiptWait(worstRttMs: nil) == 4 && P.receiptWait(worstRttMs: 0) == 4 && P.receiptWait(worstRttMs: 1000) == 4,
       "it waits 4 s while the round trip is a second or less")
 check(P.receiptWait(worstRttMs: 2500) == 10 && P.receiptWait(worstRttMs: 1001) > 4, "and four times the worst round trip above that")
+// …and the message's bytes at 2 Mbit/s on top (#300's D5: an image's 11 MB took more than 4 s on any uplink under
+// 23 Mbit/s, so "Didn’t reach…" came though it arrived, and ⌘V never went).
+let imageJSON = P.payload(image: atImageCap)!.count
+check(P.receiptFloorBytesPerSecond == 250_000, "the floor: 2 Mbit/s")
+check(abs(P.receiptWait(worstRttMs: nil, bytes: imageJSON) - (4 + Double(imageJSON) / 250_000)) < 1e-9 && P.receiptWait(worstRttMs: nil, bytes: imageJSON) > 48,
+      "an 8 MiB image waits 4 s and its 11 MB at 2 Mbit/s: \(P.receiptWait(worstRttMs: nil, bytes: imageJSON)) s")
+check(P.receiptWait(worstRttMs: 2500, bytes: 250_000) == 11, "the round trip's part and the bytes' add up")
+check(P.receiptWait(worstRttMs: 50, bytes: 20) < 4.001, "a short text waits as before")
+check(P.sendingNoteBytes == 256 * 1024 && P.showsSending(bytes: imageJSON) && P.showsSending(bytes: 256 * 1024 + 1)
+      && !P.showsSending(bytes: 256 * 1024) && !P.showsSending(bytes: 30),
+      "a Paste over 256 KB of JSON says Sending… until its receipt; a text does not")
 check(C.notSent(mac: "Mac mini") == "Didn’t reach Mac mini. Try Paste again.", "no receipt in time: the note")
 
 // Paste right away (2026-10-29; Noah: "still doesn't automatically Cmd+V"): with the device's switch on, a
@@ -479,13 +659,53 @@ check(C.stoppedLine(device: "iPad (iPad14,1)") == "Clipboard: iPad (iPad14,1) st
 check(C.ignoredLine(rate: 3, tooLong: 1, undecodable: 0) == "Clipboard from devices ignored in a minute: 3 from devices sending more than 4 a second, 1 longer than 256 KB.",
       "the ignored line")
 check(C.ignoredLine(rate: 0, tooLong: 0, undecodable: 2) == "Clipboard from devices ignored in a minute: 2 that did not decode.", "…with one count")
+check(C.ignoredLine(rate: 0, tooLong: 0, undecodable: 0, images: 1) == "Clipboard from devices ignored in a minute: 1 image while Include images is off."
+      && C.ignoredLine(rate: 1, tooLong: 0, undecodable: 0, images: 3) == "Clipboard from devices ignored in a minute: 1 from devices sending more than 4 a second, 3 images while Include images is off.",
+      "…images while Include images is off")
+check(C.sharesLine(device: "iPad", images: true) == "Clipboard: iPad shares the clipboard, images too." && C.sharesLine(device: "iPad", images: false) == C.sharesLine(device: "iPad"),
+      "the subscription's line says images when it takes them")
+check(C.imagesLine(device: "iPad", images: true) == "Clipboard: iPad takes images too now." && C.imagesLine(device: "iPad", images: false) == "Clipboard: iPad takes no images now.",
+      "…and when its Include Images moves")
+// Images' words on the device (generation 2; #300's D11: they said text alone, or "Too big" for an image that
+// could not be read).
+check(C.imagesTitle == "Include Images", "the device's switch")
+check(C.imagesNote(on: true, mac: "Mac mini", device: "iPad") == "Images you copy on Mac mini come to this iPad too, and Paste can send an image you copied here. A big one is made smaller to fit 8 MB (2 MB away from home) and takes a moment to arrive.",
+      "its words, on")
+check(C.imagesNote(on: false, mac: "Mac mini", device: "iPad") == "With Include Images on, images you copy on Mac mini come to this iPad too, and Paste can send an image you copied here.",
+      "its words, off")
+check(C.footnote(on: true, rightAway: true, images: nil, mac: "Mac mini", device: "iPad") == C.footnote(on: true, rightAway: true, mac: "Mac mini", device: "iPad")
+      && C.footnote(on: true, rightAway: false, images: nil, mac: "Mac mini", device: "iPad") == C.footnote(on: true, rightAway: false, mac: "Mac mini", device: "iPad"),
+      "the group's footnote with no Include Images row (a Mac taking none): as before")
+check(C.footnote(on: true, rightAway: true, images: true, mac: "Mac mini", device: "iPad")
+      == C.footnote(on: true, rightAway: true, mac: "Mac mini", device: "iPad") + " " + C.imagesNote(on: true, mac: "Mac mini", device: "iPad")
+      && C.footnote(on: true, rightAway: false, images: false, mac: "Mac mini", device: "iPad")
+      == C.footnote(on: true, rightAway: false, mac: "Mac mini", device: "iPad") + " " + C.imagesNote(on: false, mac: "Mac mini", device: "iPad"),
+      "…with the row: the text's words, then Include Images'")
+check(C.footnote(on: false, rightAway: true, images: true, mac: "Mac mini", device: "iPad") == C.footnote(on: false, mac: "Mac mini", device: "iPad"),
+      "…with Share Clipboard off: its words alone, whatever the switches under it")
+check(C.chipSpoken(mac: "Mac mini", device: "iPad", images: true) == "Paste on Mac mini. Sends the text or image you copied on this iPad to Mac mini’s clipboard. Then press Command-V there."
+      && C.chipSpoken(mac: "Mac mini", device: "iPad", rightAway: true, images: true) == "Paste on Mac mini. Pastes the text or image you copied on this iPad where Mac mini’s cursor is."
+      && C.chipSpoken(mac: "Mac mini", device: "iPad", rightAway: false, images: true) == C.chipSpoken(mac: "Mac mini", device: "iPad", images: true),
+      "the chip's spoken words with images")
+check(C.pasteHint(mac: "Mac mini", device: "iPhone", images: true) == "Sends the text or image you copied on this iPhone to Mac mini’s clipboard."
+      && C.pasteHint(mac: "Mac mini", device: "iPhone", rightAway: true, images: true) == "Pastes the text or image you copied on this iPhone where Mac mini’s cursor is.",
+      "the Paste button's hint with images")
+check(C.imageTooBig(mac: "Mac mini") == "Too big to send: Mac mini takes images up to 8 MB." && C.imageTooBig(mac: "Mac mini", away: true) == "Too big to send: Mac mini takes images up to 2 MB away from home.",
+      "too big, at home and away")
+check(C.imageUnreadable == "Couldn’t send the image you copied: it couldn’t be read.", "an image that could not be read")
+check(C.sending(mac: "Mac mini") == "Sending to Mac mini…" && C.sendingSpoken(mac: "Mac mini") == "Sending to Mac mini.", "a big Paste on its way")
 let words = [C.chipTitle(mac: "M"), C.chipSubtitle, C.chipSpoken(mac: "M", device: "iPad"), C.pasteHint(mac: "M", device: "iPad"), C.sent(mac: "M"),
              C.sentSpoken(mac: "M"), C.tooLong(mac: "M"), C.switchTitle, C.rowTitle(mac: "M"), C.footnote(on: true, mac: "M", device: "iPad"),
              C.footnote(on: false, mac: "M", device: "iPad"), C.sharesLine(device: "d"), C.stoppedLine(device: "d"), C.ignoredLine(rate: 1, tooLong: 1, undecodable: 1),
              C.macFootnote, C.macAccessButton, C.notSent(mac: "M"), C.chipAnnouncement(mac: "M"),
              C.chipSubtitle(rightAway: true), C.chipSpoken(mac: "M", device: "iPad", rightAway: true),
              C.pasteHint(mac: "M", device: "iPad", rightAway: true), C.pasted(mac: "M"), C.rightAwayTitle(mac: "M"),
-             C.footnote(on: true, rightAway: true, mac: "M", device: "iPad")]
+             C.footnote(on: true, rightAway: true, mac: "M", device: "iPad"),
+             C.macImagesTitle, C.macImagesFootnote, C.imagesTitle, C.imagesNote(on: true, mac: "M", device: "iPad"),
+             C.imagesNote(on: false, mac: "M", device: "iPad"), C.chipSpoken(mac: "M", device: "iPad", rightAway: true, images: true),
+             C.imageTooBig(mac: "M"), C.imageTooBig(mac: "M", away: true), C.imageUnreadable, C.sending(mac: "M"), C.sendingSpoken(mac: "M"),
+             C.sharesLine(device: "d", images: true), C.imagesLine(device: "d", images: true), C.imagesLine(device: "d", images: false),
+             C.ignoredLine(rate: 0, tooLong: 0, undecodable: 0, images: 2)]
     + [P.MacAccess.allowed, .notAsked, .asks, .denied].flatMap { [C.macAccessWarning($0), C.macAccessHint($0), C.macAccessLine($0)].compactMap { $0 } }
 check(words.allSatisfy { !$0.contains("—") && !$0.contains("–") }, "no dashes in the words")
 check(words.allSatisfy { !$0.contains("'") && !$0.contains("\"") }, "typographic quotes only: \(words.filter { $0.contains("'") || $0.contains("\"") })")
@@ -512,7 +732,7 @@ for _ in 0..<5_000 {
         let step = P.deviceSubscription(hostClipboard: hostOn ? P.generation : nil, switchOn: switchOn, subscribed: deviceSubscribed)
         if step.send != .none {
             if !hostOn { modelFailures += 1; break }    // a kind 32 to a host that did not say it takes it
-            let payload = step.send == .subscribe ? P.subscription : P.stopping
+            let payload = step.send == .subscribe ? P.subscription(images: Bool.random(using: &rng)) : P.stopping
             switch P.fromDevice(payload) {
             case .subscribe, .set, .setImage: hostSubscribed = true
             case .stop: hostSubscribed = false
@@ -553,7 +773,7 @@ for _ in 0..<5_000 {
         }
         let step = P.deviceSubscription(hostClipboard: hostOn ? P.generation : nil, switchOn: switchOn, subscribed: deviceSubscribed)
         deviceSubscribed = step.subscribed
-        if step.send != .none { payload = step.send == .subscribe ? P.subscription : P.stopping }
+        if step.send != .none { payload = step.send == .subscribe ? P.subscription(images: Bool.random(using: &rng)) : P.stopping }
         if let payload {
             if !hostOn { quickFailures += 1; break }               // a kind 32 to a host that did not say it takes it
             let got = P.hostReceives(payload, arrivals: arrivals, now: now)
@@ -616,7 +836,7 @@ for run in 0..<2_000 {
         switch Int.random(in: 0..<8, using: &rng) {
         case 0:   // a device subscribes
             let d = Int.random(in: 0..<devices, using: &rng)
-            if case .subscribe = P.fromDevice(P.subscription) { subscribed.insert(d) }
+            if case .subscribe = P.fromDevice(P.subscription(images: Bool.random(using: &rng))) { subscribed.insert(d) }
         case 1:   // a device stops
             let d = Int.random(in: 0..<devices, using: &rng)
             if case .stop = P.fromDevice(P.stopping) { subscribed.remove(d) }
@@ -727,6 +947,59 @@ for _ in 0..<5_000 {
 }
 check(pasteFailures == 0, "5,000 random runs of Pastes: ⌘V once for each receipt in time with the switch on, something streaming, the Mac still sharing and no tour, pasting that Paste's own text, and only then (\(pasteFailures) wrong)")
 check(chords > 0 && noChords > 0 && dropped > 0, "…and the model reached each case (\(chords) ⌘V, \(noChords) without, \(dropped) texts the Mac dropped)")
+
+// MARK: - Model 4: what each subscriber takes, images or not (#300's D1)
+
+// Random sessions of one device: its Share Clipboard and Include Images moving, Pastes of text and of images
+// while both allow, as StreamClient+Clipboard sends them (deviceSubscription, subscription(images:), deviceSends,
+// deviceSendsImage); the host taking each by hostReceives and keeping what the subscriber takes by
+// subscriberTakesImages, as HostClipboard does. At every step a subscribed device takes images at the host
+// exactly while its last subscription said so, and the Mac's image goes to it (Include images on at the Mac)
+// exactly while its Include Images is on. The pull request's rule (each kind 32's own `accepts`) fails it at
+// the first Paste.
+var takeFailures = 0, takePastes = 0, takeMoves = 0
+for _ in 0..<3_000 {
+    var shareOn = true, imagesOn = Bool.random(using: &rng)
+    var subscribed = false, said = false
+    var hostTakes: Bool? = nil            // nil: not subscribed at the host
+    var arrivals: [Double] = [], now = 0.0
+    for _ in 0..<Int.random(in: 1...30, using: &rng) {
+        now += Double.random(in: 0.6...1.2, using: &rng)   // two messages a step at most: within the rate, which is Model 1b's
+        var payloads: [Data] = []
+        switch Int.random(in: 0..<6, using: &rng) {
+        case 0: shareOn.toggle()
+        case 1: imagesOn.toggle(); takeMoves += 1
+        case 2:
+            if case .send(let p) = P.deviceSends(["text"], connected: true, hostClipboard: 2, switchOn: shareOn) { payloads.append(p); takePastes += 1 }
+        default:
+            if case .send(let p) = P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: shareOn, imagesOn: imagesOn, away: false) {
+                payloads.append(p); takePastes += 1
+            }
+        }
+        let step = P.deviceSubscription(hostClipboard: 2, switchOn: shareOn, subscribed: subscribed, imagesOn: imagesOn, subscribedImages: said)
+        subscribed = step.subscribed
+        switch step.send {
+        case .subscribe: payloads.insert(P.subscription(images: imagesOn), at: 0); said = imagesOn
+        case .stop: payloads.insert(P.stopping, at: 0)
+        case .none: break
+        }
+        for payload in payloads {
+            let clip = Wire.decode(Clipboard.self, from: payload)
+            let got = P.hostReceives(clip, arrivals: arrivals, now: now, imagesOn: true)
+            arrivals = got.kept
+            switch got.ask {
+            case .subscribe, .set, .setImage: hostTakes = P.subscriberTakesImages(clip!, was: hostTakes)
+            case .stop: hostTakes = nil
+            case .refuse: takeFailures += 1
+            }
+        }
+        // Agreement: subscribed at the host exactly while the device is, taking images exactly while its last
+        // subscription said so, and so the Mac's images reach it exactly while its Include Images is on.
+        if (hostTakes != nil) != subscribed || (subscribed && (hostTakes != said || said != imagesOn)) { takeFailures += 1; break }
+    }
+}
+check(takeFailures == 0, "3,000 random sessions: the Mac sends a device images exactly while its Include Images is on, whatever it pasted (\(takeFailures) wrong)")
+check(takePastes > 0 && takeMoves > 0, "…and the model pasted and moved the switch (\(takePastes) Pastes, \(takeMoves) moves)")
 
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

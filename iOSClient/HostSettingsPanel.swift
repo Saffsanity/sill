@@ -29,7 +29,8 @@ import StreamProtocol
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
 /// rows, as accessibility actions, do their gestures
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
-/// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
+/// `StreamClient.pasteRightAwayKey`, Include Images, `StreamClient.clipboardImagesKey`, while the Mac
+/// takes images, and the system's Paste for this device's text (and image); Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
@@ -93,6 +94,9 @@ struct HostSettingsPanel: View {
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// Include Images (the clipboard's generation 2, StreamClient.clipboardImagesOn): off unless turned on,
+    /// shown under Paste on ‹Mac› Right Away while the Mac says it takes images; a change subscribes again.
+    @AppStorage(StreamClient.clipboardImagesKey) private var clipboardImages = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -738,6 +742,15 @@ struct HostSettingsPanel: View {
                     }
                     .padding(.vertical, 6)          // a long Mac name takes two lines
                     .rowFrame()
+                    // Include Images (generation 2): only while the Mac says it takes images.
+                    if ClipboardPolicy.hostTakesImages(client.hostClipboard) {
+                        RowDivider()
+                        Toggle(isOn: $clipboardImages) {
+                            Text(ClipboardPolicy.Copy.imagesTitle).foregroundStyle(Palette.text)
+                        }
+                        .rowFrame()
+                        .onChange(of: clipboardImages) { _, _ in client.clipboardImagesSwitchChanged() }
+                    }
                     RowDivider()
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
                         .id(Self.clipboardRowsID)
@@ -748,7 +761,9 @@ struct HostSettingsPanel: View {
                     .padding(.bottom, -6)
                     .accessibilityHidden(true)      // announced as it came
             }
-            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
+            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway,
+                                                         images: ClipboardPolicy.hostTakesImages(client.hostClipboard) ? clipboardImages : nil,
+                                                         mac: mac, device: device))
         }
         Rows {
             Toggle(isOn: $reverseScroll) {
