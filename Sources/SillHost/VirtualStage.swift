@@ -4,12 +4,14 @@ import ApplicationServices
 import ScreenCaptureKit
 import StreamProtocol
 
-/// `--virtual-display`: the one owner of the virtual display and of the window moved onto it.
+/// `--virtual-display`: the one owner of the window moved onto Sill's display for it, and of what
+/// that display is for (its size, its menu bar, when it is made again); the display itself is made,
+/// listed and removed by SillDisplays, as every display of Sill's.
 ///
 /// Why: ScreenCaptureKit only delivers frames when a window repaints, and macOS stops repainting
 /// a window that is fully covered, so a streamed window buried on the Mac froze on the device. A
-/// window alone on its own display is never covered. The stage creates that display (private
-/// `CGVirtualDisplay`, see VirtualDisplay.swift), moves the picked window onto it with
+/// window alone on its own display is never covered. The stage has that display made (private
+/// `CGVirtualDisplay`, see VirtualDisplay.swift, through SillDisplays), moves the picked window onto it with
 /// Accessibility (no activation: AX position/size writes do not raise or focus anything), and
 /// hands the coordinator a display filter plus the crop rectangle of the window on it. On
 /// deselect, switch, last client leaving, loss of the display or exit it puts the window back
@@ -97,8 +99,12 @@ final class VirtualStage {
 
     // MARK: State
 
-    private(set) var display: VirtualDisplay?
-    private(set) var scDisplay: SCDisplay?
+    /// Every display Sill makes (SillDisplays): the stage's own is its `.stage` role's, made, listed, lost and removed
+    /// there; what goes on it, and when it is made again, stay here.
+    let displays: SillDisplays
+    /// The stage's display (SillDisplays' `.stage`), and ScreenCaptureKit's listing of it once it has one.
+    var display: VirtualDisplay? { displays.display(.stage) }
+    var scDisplay: SCDisplay? { displays.listed(.stage) }
     private(set) var placement: WindowSizer.Placement?
     /// The size the window actually took on the display, and the size that was asked for.
     private(set) var placedSize: CGSize?
@@ -135,8 +141,6 @@ final class VirtualStage {
     /// Set when staging must not be attempted again this run (API missing, repeated failures).
     var disabledReason: String?
     private var creationFailures = 0
-    /// Bumped per display created, so a late termination callback for an old display is ignored.
-    private var generation = 0
     /// Where the Mac cursor was before the host first drove it onto the virtual display.
     private var cursorBefore: CGPoint?
     /// The window `releaseWindow` last sent home. The window list shows an AX move only once the
@@ -156,23 +160,25 @@ final class VirtualStage {
     var onWarp: (() -> Void)?
     /// The coordinator's lock (LockPolicy, docs/locked-mac-plan.md): no display is made while it says
     /// locked (`Failure.locked`), and the cursor is never warped while `mayWarp` says no (off console the
-    /// cursor is the console's, another user's). Unset: as ever.
+    /// cursor is the console's, another user's). Unset: as ever. The guard for #380 is SillDisplays'
+    /// (`displays.makeGuard`): its marker around every display made here, and none made while it holds
+    /// (`Failure.guarded`).
     var mayMakeDisplay: (() -> Bool)?
     var mayWarp: (() -> Bool)?
-    /// The guard for #380 (DisplayMakeGuard, Sill.app's and a test host's under SILL_TEST_MAKE_GUARD; nil in the CLI):
-    /// its marker around every display made here, and none made while it holds (`Failure.guarded`).
-    var makeGuard: DisplayMakeGuard.Store?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
 
     /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
-    /// (the probe used serial 0xF00D and does not collide).
-    nonisolated static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
+    /// (the probe used serial 0xF00D and does not collide): the stage role's (SillDisplayRole).
+    nonisolated static let vendorID: UInt32 = SillDisplayRole.stage.vendor, productID: UInt32 = SillDisplayRole.stage.product,
+                           serialNum: UInt32 = SillDisplayRole.stage.serial
 
-    init(sizer: WindowSizer, catalog: WindowCatalog) {
+    init(sizer: WindowSizer, catalog: WindowCatalog, displays: SillDisplays) {
         self.sizer = sizer
         self.catalog = catalog
+        self.displays = displays
+        displays.onLost[.stage] = { [weak self] in self?.displayLost() }
     }
 
     var isStaged: Bool { display != nil && placement != nil }
@@ -538,34 +544,28 @@ final class VirtualStage {
         // A locked Mac makes no display: off console one joined the console's display set (2026-10-31). Two runs in a
         // row ended while making a display (#380): none until Try Again. Otherwise the guard's marker from just before
         // the old display goes (#380's stops came right after "Removed virtual display N", a remake) until the new one
-        // is up or failed (`made`).
-        let mayMake = mayMakeDisplay?() ?? true, guarded = makeGuard?.holds == true
-        if mayMake, !guarded { makeGuard?.willMake("stage") }
+        // is up or failed (SillDisplays: `make`'s throw, `waitUntilOnline`).
+        let mayMake = mayMakeDisplay?() ?? true, guarded = displays.guardHolds
+        if mayMake, !guarded { displays.willMake(.stage) }
         destroyDisplay()
         if !mayMake { throw Failure.locked }
         if guarded { throw Failure.guarded }
         let t0 = Date()
         let d: VirtualDisplay
         do {
-            d = try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
-                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: Self.serialNum)
+            // Made where every display of Sill's is (SillDisplays): the stage's identity, its lost callback (`displayLost`),
+            // its ID among the catalog's stage displays, never one of the Desktop's stops even once gone.
+            d = try displays.make(.stage, widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
+                                  refreshHz: Double(refreshHz))
         } catch {
-            makeGuard?.made(cameUp: false)
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
             throw Failure.displayCreate(error)
         }
         creationFailures = 0
-        generation += 1
-        let gen = generation
-        display = d
-        catalog.stageDisplayIDs.insert(d.displayID)    // never one of the Desktop's stops (DesktopDisplays.role), even once gone
         let created = Self.ms(since: t0)
-        // Fires on the display's private queue; the stage lives on the main actor.
-        d.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }
 
-        let online = await d.waitUntilOnline(timeout: 3)
-        makeGuard?.made(cameUp: d.bounds.width > 0)
+        let online = await displays.waitUntilOnline(d, timeout: 3)
         let onlineMs = Self.ms(since: t0)
         if !online {
             if d.bounds.width == 0 {
@@ -594,21 +594,13 @@ final class VirtualStage {
             }
         }
 
-        // ScreenCaptureKit lists new displays a little after CoreGraphics does. Bounded: without
-        // Screen Recording this call has been seen to never return while a virtual display exists.
+        // ScreenCaptureKit lists new displays a little after CoreGraphics does (SillDisplays.waitUntilListed, 3 s at most:
+        // without Screen Recording this call has been seen to never return while a virtual display exists).
         let t1 = Date()
-        var listed: SCDisplay?
-        while Date().timeIntervalSince(t1) < 3 {
-            let remaining = max(0.2, 3 - Date().timeIntervalSince(t1))
-            if let c = await WindowCatalog.shareableContent(excludingDesktopWindows: true, onScreenWindowsOnly: true, timeout: remaining),
-               let found = c.displays.first(where: { $0.displayID == d.displayID }) { listed = found; break }
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-        guard let listed, display === d else {
+        guard await displays.waitUntilListed(d, as: .stage, timeout: 3) != nil else {
             destroyDisplay()
             throw Failure.notListedBySCK
         }
-        scDisplay = listed
         Stats.shared.bump("vd.created")
         // The mode it came up at, not the one asked for: a display macOS kept at 1x read "@2×" here
         // until 2026-10-27 (the line before this one said so, "online but not at …").
@@ -708,15 +700,9 @@ final class VirtualStage {
     /// goes exactly where it was instead of wherever the window server dumps it; `releaseHome` also
     /// waits for the window to have left. `note` ends the line ("Google Chrome home after 38 ms").
     func destroyDisplay(note: String? = nil) {
-        if let d = display {
-            let id = d.displayID
-            display = nil
-            scDisplay = nil
-            d.destroy()
+        if let id = displays.remove(.stage) {
             print("Removed virtual display \(id)" + (note.map { " (\($0))" } ?? ""))
         }
-        display = nil
-        scDisplay = nil
     }
 
     /// Window home, then display gone, in one go: the teardowns (Quit, the signals, a shutdown mid-switch), which cannot
@@ -787,12 +773,10 @@ final class VirtualStage {
         }
     }
 
-    /// The window server tore the display down (sleep, another display arriving). The object is
-    /// dead; the window is already on some real display, so put it where it belongs.
-    private func lost(generation gen: Int) {
-        guard gen == generation, display != nil else { return }   // destroy() may fire this too; ignore our own
-        display = nil
-        scDisplay = nil
+    /// The window server tore the display down (sleep, another display arriving): SillDisplays has forgotten it (its
+    /// lost callback, for the stage's newest display alone: `destroy()` fires it too, and that is ignored there). The
+    /// object is dead; the window is already on some real display, so put it where it belongs.
+    private func displayLost() {
         releaseWindow()
         Stats.shared.bump("vd.lost")
         onLost?()

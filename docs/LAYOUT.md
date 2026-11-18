@@ -245,8 +245,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
   on classes it makes at run time; `ModeSize`, `modeList` and `maxPixels`: the modes a display is made
   with and its backing, `switchMode` and `applyModes` for phase 2b's probe P2, checked there too),
-  `VirtualStage` (`--virtual-display`: owns the display and the moved window,
-  geometry, prepare/release, emergency restore), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
+  `VirtualStage` (`--virtual-display`: owns the moved window and what its display is for,
+  geometry, prepare/release, emergency restore), `SillDisplays` (phase 2b: every display Sill makes, in
+  one place: made with its role's identity, the guard's marker around it, online, listed by
+  ScreenCaptureKit, its lost callback, removed, the stage's IDs given to the catalog; main actor) and
+  `SillDisplayRole` (the stage's and the Desktop's identities; pure, `Tests/checks/sill-displays`, which
+  also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
   size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;

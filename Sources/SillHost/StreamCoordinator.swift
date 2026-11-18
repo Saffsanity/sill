@@ -113,6 +113,8 @@ package final class StreamCoordinator {
     /// --virtual-display), so `NSWorkspace.frontmostApplication` is current (see `activePID`).
     /// The virtual display needs that loop too: without it the setting is forced off.
     private let appKitLoop: Bool
+    /// Every display Sill makes (SillDisplays, docs/virtual-desktop-plan.md §9): the stage's and the Desktop's.
+    let displays: SillDisplays
     let stage: VirtualStage
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
@@ -530,7 +532,8 @@ package final class StreamCoordinator {
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
-        stage = VirtualStage(sizer: sizer, catalog: catalog)
+        displays = SillDisplays(catalog: catalog)
+        stage = VirtualStage(sizer: sizer, catalog: catalog, displays: displays)
         // Sill's own motion is Sill's: the server counts each device's input, the injector notes
         // each post just before it (and a synthetic host posts nothing: the test pattern is not the
         // screen, docs/pointer-visibility-plan.md Q10), the stage its warp home.
@@ -570,7 +573,7 @@ package final class StreamCoordinator {
         injector.lockReading = { gate.reading }
         stage.mayWarp = { gate.reading != .offConsole }       // the cursor is the console's then, never moved from here
         stage.mayMakeDisplay = { !gate.locked }
-        stage.makeGuard = self.displayGuard
+        displays.makeGuard = self.displayGuard
         catalog.remembersBuiltIn = displayGuard        // Sill.app's preference alone (#200's defect 10)
         SessionLock.shared.onChange = { [weak self] in Task { @MainActor in await self?.lockChanged() } }
         SessionLock.shared.start(testHost: server.isTestHost)
