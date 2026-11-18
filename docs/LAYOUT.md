@@ -1166,7 +1166,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Scripts/harness-photos.sh CASES [--commit REV] [--baseline REV] [--device duo|ipad] [--repo DIR]`
   builds each commit's committed tree once (cached by commit and Xcode build in
   `~/Library/Caches/SillAgents`, one shared DerivedData), boots one of them inside the heavy lock,
-  takes a photo per case (a name and launch arguments a line, `example.cases`), compares a baseline's
+  takes a photo per case (a name and launch arguments a line, `example.cases`;
+  `clipboard-images-duo.cases` and `clipboard-images-ipad.cases`, the Share Clipboard group with
+  Include Images), compares a baseline's
   pixel for pixel (`pixeldiff.swift`: how many pixels, by how much, where; a picture of the
   differences) and shuts it down. It refuses another name than "Sill agents …", any other booted
   simulator, a case without `-SillLayout` or with `-SillLive` or anything that dials or sends input,
