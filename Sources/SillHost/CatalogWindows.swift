@@ -162,11 +162,11 @@ enum CatalogWindows {
     /// window that streams (`streaming`), whose switch is owed to it while a switch in flight holds the
     /// coordinator back. A window on the screen again that streams nothing was not replaced after all (a
     /// tab moved into a window of its own): a device that picks it later must not follow a switch from
-    /// before. A switch owed stands against a later one of the same window, which only one on the screen
-    /// again can make: that tab moved into a window of its own, which is where the person went. Without
-    /// these, a switch made while another window streamed lost the one back to it (`A -> B` then `B -> A`
-    /// came to nothing), and a window picked after it was moved out of its tabs followed the switch made
-    /// before (#368's review).
+    /// before. A switch owed stands against a later one of the same window, which it can make only once it
+    /// is on the screen again: when the tab it switched to was moved into a window of its own, the person
+    /// went with that tab, not with the group the window shows in again. Without these, a switch made
+    /// while another window streamed lost the one back to it (`A -> B` then `B -> A` came to nothing), and
+    /// a window picked after it was moved out of its tabs followed the switch made before (#368's review).
     static func mergedSwaps(existing: [UInt32: UInt32], next: [UInt32: UInt32], onScreen: Set<UInt32>,
                             streaming: UInt32?) -> [UInt32: UInt32] {
         var out: [UInt32: UInt32] = [:]

@@ -364,10 +364,11 @@ struct TabModel {
             if want == gone { want = groups[g].shown; wantChange = "a tab closed" }
         }
     }
-    /// Window › Move Tab to New Window, or a tab dragged out: a window of its own at another place. Looked
-    /// at on both sides, the one thing here a look 2 s apart cannot tell from another: a tab moved out and
-    /// closed (or picked from a tile drawn before it was hidden, then moved out) within one look is a tab
-    /// closed in its group (a tab hidden behind another) to any look, and followed as one.
+    /// A tab dragged out of the tab bar (any, shown or hidden), or Window › Move Tab to New Window (the tab
+    /// shown): a window of its own at another place. Looked at on both sides, the one thing here a look 2 s
+    /// apart cannot tell from another: a tab moved out and closed (or picked from a tile drawn before it was
+    /// hidden, then moved out) within one look is a tab closed in its group (a tab hidden behind another) to
+    /// any look, and followed as one.
     mutating func moveTabOut() {
         let multi = groups.indices.filter { groups[$0].tabs.count > 1 }
         guard !multi.isEmpty else { return }
