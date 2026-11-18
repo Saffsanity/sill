@@ -212,7 +212,7 @@ struct ContentView: View {
 /// * `-SillSettings 1` — start with Settings open, the whole-screen pane (a real Mac's state under
 ///   `-SillLive 1`; docs/settings-pane-plan.md). The console's `settings: …` line says how it sits
 ///   ("two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the fold 455.5–495.5
-///   between (951×669)").
+///   between (951×669, 34 pt kept at the bottom)", the last the home indicator's room it was given).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour, the version); in two columns or pages, each part at its own end. `-SillSettingsScroll gestures` starts them at the This iPad group

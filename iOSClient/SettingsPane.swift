@@ -27,6 +27,10 @@ enum SettingsPane {
     /// The laptop pose's pages: each at least this tall (the lower one above the home indicator), or the
     /// fold is not kept to (no device has such a fold: the Duo's pages are 455.5 and 421.5 pt).
     static let minPage: CGFloat = 200
+    /// Under Disconnect pinned at the screen's foot, where the screen has no home indicator (`Layout.footBottom`).
+    static let footGap: CGFloat = 16
+    /// Under Disconnect at the foot of the laptop pose's upper page, over the fold.
+    static let foldGap: CGFloat = 12
 
     /// The screen's width from which two columns fit: sideways and upright.
     static var twoColumnsFrom: CGFloat { 2 * minColumn + 2 * margin + gap }
@@ -125,6 +129,13 @@ enum SettingsPane {
         /// The header's own inset at each end (HostSettingsPanel: its words and Done 4 pt in from the span).
         static let headerInset: CGFloat = 4
 
+        /// The room under Disconnect, which ends the Mac's part (HostSettingsPanel's `withDisconnect`): at the
+        /// screen's foot the home indicator's (`bottom`), 16 pt at least; on the laptop pose's upper page 12 pt
+        /// over the fold. So Disconnect is never in the home indicator's room, nor on the fold.
+        var footBottom: CGFloat {
+            arrangement == .twoPages ? SettingsPane.foldGap : max(bottom, SettingsPane.footGap)
+        }
+
         /// How wide the Mac's name and lines may be in the header: in two columns the Mac's column less the
         /// header's insets, so they never reach the fold or the other column; nil in one column and on the
         /// laptop pose's page, where they share the row with Done.
@@ -133,10 +144,12 @@ enum SettingsPane {
         }
 
         /// The DEBUG console's line: "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the
-        /// fold 455.5–495.5 between (951×669)".
+        /// fold 455.5–495.5 between (951×669, 34 pt kept at the bottom)". The bottom is the home indicator's room
+        /// the pane was given, so a gate sees it arrive (none said where there is none).
         var description: String {
             func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", Double(v)) }
-            let screen = "(\(n(size.width))×\(n(size.height))\(rightToLeft ? ", right to left" : ""))"
+            let kept = bottom > 0 ? ", \(n(bottom)) pt kept at the bottom" : ""
+            let screen = "(\(n(size.width))×\(n(size.height))\(kept)\(rightToLeft ? ", right to left" : ""))"
             switch arrangement {
             case .oneColumn:
                 return "one column \(n(mac.width)) pt wide at \(n(mac.minX)) \(screen)"

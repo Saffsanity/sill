@@ -905,7 +905,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `SettingsPane` (where the pane's two parts go: one column, two side by side
   (sideways from 652 pt, upright from 732), a column on each page of the book
   pose, the laptop pose's two pages, nothing on the fold, right to left
-  mirrored; and `Close`, what each way of closing it brings; pure,
+  mirrored, the room under Disconnect, the home indicator's (`footBottom`); and
+  `Close`, what each way of closing it brings; pure,
   `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,

@@ -489,10 +489,12 @@ display (951×669 sideways, 669×951 upright); while streaming the status bar
 hides in every pose, so the picture has the top upright and the full width
 sideways; every other screen keeps it. Half folded sideways, the
 book pose, the picture runs across the fold, but nothing you touch sits on
-it: the thumbnails end short of it, the bar's buttons begin past it, and
-the Settings panel, the tour's cards, the window lights, the link's line and
+it: the thumbnails end short of it, the bar's buttons begin past it,
+Settings has a column on each page (the Mac's under its name, this device's
+under Done), and the tour's cards, the window lights, the link's line and
 the connect screen stay on one side. Half folded upright, the laptop pose, the picture is above the fold and the bar, the keys
-and the trackpad below it, and the connect screen's list scrolls above the
+and the trackpad below it, Settings has the Mac's part above it and this
+device's below, and the connect screen's list scrolls above the
 fold; with the software keyboard up there, the key row alone sits between the
 fold and the keyboard (its Keyboard cap takes the keyboard down) and the bar
 comes back with the keyboard down (issue #215); under a keyboard too tall for
@@ -2143,7 +2145,8 @@ simulator:
   the connect screen in a given state. Settings is a whole-screen pane
   (docs/settings-pane-plan.md): the console's `settings: …` line says how it
   sits on the screen ("two columns 423.5 pt wide, the Mac's at 16, this
-  device's at 511.5, the fold 455.5–495.5 between (951×669)"), and
+  device's at 511.5, the fold 455.5–495.5 between (951×669, 34 pt kept at the
+  bottom)", the last the home indicator's room it was given), and
   `-SillSettingsEnd 1` starts each of its parts at its end. Large type and
   right to left need no flag of Sill's: the system's own launch arguments,
   `-UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL`

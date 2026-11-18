@@ -50,8 +50,9 @@ struct HostSettingsPanel: View {
     /// Full Screen in This iPad (docs/full-screen-plan.md): the stream screen puts the panel away and hides
     /// its controls; nil where the panel shows no such row.
     var fullScreen: FullScreenRow? = nil
-    /// The safe area at the stream screen's bottom edge (the home indicator's), which the stream screen
-    /// ignores: the pane's content keeps clear of it.
+    /// The safe area at the screen's bottom edge, the home indicator's, which the stream screen ignores: the
+    /// pane's content keeps clear of it. The window's (StreamScreen's `deviceInsets`; in the harness its fake
+    /// screen's), since a reader that ignores an edge reports no inset there, this pane's own included.
     var bottomInset: CGFloat = 0
 
     /// Full Screen's row: whether a hide can start now (FullScreenPolicy.hideAllowed, the panel itself not
@@ -237,7 +238,7 @@ struct HostSettingsPanel: View {
         case .oneColumn:
             VStack(spacing: 0) {
                 header(words: nil)
-                withDisconnect(footBottom: footBottom(l)) {
+                withDisconnect(footBottom: l.footBottom) {
                     macPart
                     devicePart
                 }
@@ -248,7 +249,7 @@ struct HostSettingsPanel: View {
             VStack(spacing: 0) {
                 header(words: l.headerWords)
                 HStack(alignment: .top, spacing: l.device.minX - l.mac.maxX) {
-                    withDisconnect(footBottom: footBottom(l)) { macPart }
+                    withDisconnect(footBottom: l.footBottom) { macPart }
                         .frame(width: l.mac.width)
                     part(bottom: l.bottom) { devicePart }
                         .frame(width: l.device.width)
@@ -260,7 +261,7 @@ struct HostSettingsPanel: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     header(words: nil)
-                    withDisconnect(footBottom: 12) { macPart }
+                    withDisconnect(footBottom: l.footBottom) { macPart }
                 }
                 .frame(width: l.mac.width, height: l.mac.height)
                 .paneAt(x: l.mac.minX, y: l.mac.minY, in: l.size)
@@ -271,12 +272,10 @@ struct HostSettingsPanel: View {
         }
     }
 
-    /// Under Disconnect at the screen's foot: the home indicator's room, or 16 pt where there is none.
-    private func footBottom(_ l: SettingsPane.Layout) -> CGFloat { l.bottom > 0 ? l.bottom : 16 }
-
     /// Rows, then Disconnect, in reach either way, as the panel had them: right under the rows while they fit
-    /// (an iPad's tall column), else pinned under the rows' scroll view (`footBottom` under it, at the screen's
-    /// foot or the fold's).
+    /// (an iPad's tall column), else pinned under the rows' scroll view; `footBottom` under it either way
+    /// (SettingsPane.Layout's: the home indicator's room at the screen's foot, 12 pt over the laptop pose's
+    /// fold), so it never sits in that room or on the fold: the rows fit only if it is left under Disconnect too.
     private func withDisconnect<Content: View>(footBottom: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         return ViewThatFits(in: .vertical) {
@@ -285,7 +284,7 @@ struct HostSettingsPanel: View {
                     .padding(.top, ScrollEdgeFade.height)
                     .dynamicTypeSize(...Self.largestRowType)
                 foot
-                Spacer(minLength: 0)
+                Spacer(minLength: footBottom)
             }
             VStack(spacing: 0) {
                 part(bottom: 0) { rows }
@@ -1461,16 +1460,20 @@ private struct ScrollEdgeFade: ViewModifier {
     }
 }
 
-/// DEBUG `-SillSettingsEnd 1`: each part starts scrolled to its end. Rows shorter than their room still sit at
-/// its top (iOS 18's initial-offset role; before it the plain anchor, which the panel used, only where its rows
-/// scrolled).
+/// DEBUG `-SillSettingsEnd 1`: each part starts scrolled to its end and stays there as its size or its rows'
+/// settle after the first layout (the review of #393: with the initial offset alone an upright iPhone's one column
+/// stopped short of Take the Tour's footnote and the version, which the panel's plain anchor, every role, had
+/// kept). Rows shorter than their room still sit at its top: iOS 18's initial-offset and size-change roles, not
+/// the alignment's; before it the plain anchor, the panel's, only where its rows scrolled.
 private struct StartAnchor: ViewModifier {
     let atEnd: Bool
     @ViewBuilder func body(content: Content) -> some View {
         if !atEnd {
             content
         } else if #available(iOS 18.0, *) {
-            content.defaultScrollAnchor(.bottom, for: .initialOffset)
+            content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
         } else {
             content.defaultScrollAnchor(.bottom)
         }
