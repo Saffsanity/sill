@@ -117,12 +117,16 @@ final class FileHub: @unchecked Sendable {
     }
 
     /// At quit (HostShutdown): every transfer stopped and every partial deleted before the process ends.
-    /// Waits for the hub's queue, which never waits for the main thread.
+    /// Waits for the hub's queue (which never waits for the main thread) for a second at most, so a write
+    /// stuck on a slow volume never holds the quit; what it leaves goes before the next transfer.
     func quit() {
-        queue.sync { [self] in
+        let done = DispatchSemaphore(value: 0)
+        queue.async { [self] in
             for id in Array(incoming.keys) { stop(id, .lost, tellPeer: true) }
             if cleaned.contains(store.destination) { store.cleanLeftovers() }
+            done.signal()
         }
+        _ = done.wait(timeout: .now() + 1)
     }
 
     // MARK: From the network queue
