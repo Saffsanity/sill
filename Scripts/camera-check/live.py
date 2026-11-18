@@ -66,6 +66,14 @@ class Host:
         """A Stats key summed over every [1s] line."""
         return sum(int(m) for _, l in self.lines for m in re.findall(rf"(?:^|\s){re.escape(key)} (\d+)", l) if l.startswith("[1s]"))
 
+    def next_tick(self, timeout=2.5):
+        """Waits for the host's next [1s] line (printed while anything was counted, a client or not), so a count
+        read after a client leaves includes what the host did since its last line."""
+        n = len(self.lines); end = time.time() + timeout
+        while time.time() < end:
+            if any(l.startswith("[1s]") for _, l in self.lines[n:]): return
+            time.sleep(0.1)
+
     def link(self, after=0):
         """The newest pairing link printed after `after` lines."""
         for _ in range(60):
@@ -106,6 +114,11 @@ def paired(host, out, name):
     return ident
 
 
+def named(device):
+    """A paired device as the host's lines name it: its name, then its model in parentheses ("ipadA (sillclient)")."""
+    return re.escape(device) + r" \(sillclient\)"
+
+
 def states(text):
     return re.findall(r"camera state at [\d.]+s: (\S+)(?: app=(\S+))?(?: holder=(\S+))?", text)
 
@@ -139,8 +152,7 @@ def case_live(out):
         verdict(len(pngs) >= 5 and pngs[0] == "frame-00001.png", f"every 30th frame dumped as a PNG: {pngs[:3]}…")
         dropped = h.all(r"cam\.(refused|dropped)")
         verdict(not dropped, f"nothing refused or dropped: {dropped[:2]}")
-        verdict(bool(h.all(r"^Test camera: Sill Camera shows ipad\.$")) or bool(h.all(r"^Test camera: Sill Camera shows ")),
-                "Sill Camera showed the holder")
+        verdict(bool(h.all(rf"^Test camera: Sill Camera shows {named('ipad')}\.$")), "Sill Camera showed the holder")
     finally:
         h.stop()
 
@@ -160,9 +172,9 @@ def case_two(out):
         verdict(sa[:3] == ["idle", "inUse", "another"] and "inUse" in sa[3:], f"A: idle, in use, another, then in use again: {sa}")
         verdict(any(s[0] == "another" and s[2] == "iphoneB" for s in states(ta)), "A heard the holder's name")
         verdict(sb[:3] == ["another", "inUse", "another"] or sb[:2] == ["another", "inUse"], f"B: another until its claim, then in use: {sb}")
-        verdict(bool(h.all(r"^Camera: iphoneB took Sill Camera from ipadA\.$")), "the take's line")
-        verdict(bool(h.all(r"^Camera: iphoneB stopped sharing its camera\.$")) and bool(h.all(r"^Camera: ipadA is Sill Camera now\.$")),
-                "B's stop, and A's return")
+        verdict(bool(h.all(rf"^Camera: {named('iphoneB')} took Sill Camera from {named('ipadA')}\.$")), "the take's line")
+        verdict(bool(h.all(rf"^Camera: {named('iphoneB')} stopped sharing its camera\.$"))
+                and bool(h.all(rf"^Camera: {named('ipadA')} is Sill Camera now\.$")), "B's stop, and A's return")
         ca, cb = camera_line(ta), camera_line(tb)
         verdict(ca is not None and ca[2] >= 2 and cb is not None and cb[2] == 1, f"A sent two epochs, B one: A {ca}, B {cb}")
     finally:
@@ -222,6 +234,7 @@ def case_hostile(out):
         verdict(code == 0 and "EXPECT ok" in text and "EOF from host" not in text, "the session kept, still in use")
         verdict(h.count("cam.dropped.malformed") >= 4, f"bad JSON, an unknown type, an oversize frame and an odd width dropped ({h.count('cam.dropped.malformed')})")
         verdict(h.count("cam.dropped.wrongWay") >= 1, "a type 3 from a device dropped")
+        h.next_tick()    # the frames decoded after the host's last [1s] line, before the client left
         c = camera_line(text)
         verdict(c is not None and h.count("cam.decoded") >= c[0] - 3, f"its real frames still decoded ({h.count('cam.decoded')} of {c and c[0]})")
     finally:
