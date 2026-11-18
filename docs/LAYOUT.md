@@ -718,7 +718,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
   off a lost path: `handOver`, `hold`, `adopt`, `unhold`; the input messages
   counted for the session's connection, `inputsOnSession`, which a kind 26's
-  `seen` is judged against; Foundation and Network only, checked with swiftc),
+  `seen` is judged against; the uplink ledger, `UplinkLedger`: what the
+  connection was handed and has not taken, by lane, `send` at once and a file's
+  messages only through `sendFile`, into what the rest leaves, never while a
+  fence or hold stands, never into `waiting`; Foundation and Network only,
+  checked with swiftc: `Tests/checks/fence`, and `Tests/checks/device-files`
+  for the ledger),
   `MessageReader` (the session's reader: each header, then the payload in
   pieces of at most 256 KB, every piece a sign of life for the liveness check;
   Network and StreamProtocol only, checked with swiftc),
@@ -812,7 +817,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `DeviceIdlePolicy` (when Sill
   holds the device's own auto-lock off: while a window the person can see streams,
   until 10 minutes after the person last used it, and what counts as the person's
-  use; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
+  use, a transfer of files' progress among it; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
   `DeviceIdleTimer` carries it out, PR #230), `PictureInPicturePolicy` (Picture in Picture,
   #291: when a window's picture is offered and which window, what counts as watched, heard and
   running while it shows, the pause, what ends it, the Lifecycle; pure,
@@ -948,7 +953,28 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   receipt, a ping whose pong says the Mac read it; pbxproj AC64/FC64) and `ClipboardChip`
   (the chip and `ClipboardPasteButton`, the system's Paste control;
   AD64/FD64); StreamScreen places the chip, the Settings panel's This iPad
-  group has Share Clipboard and Paste on ‹Mac›. The
+  group has Share Clipboard and Paste on ‹Mac›. Files and photos, the
+  device's sending (docs/files-plan.md §8): `DeviceFiles` (the session's one
+  outgoing transfer on `sill.files`: the sources' sizes read off its queue
+  under NSFileCoordinator, the offer, parts of 64 KiB read in place and
+  hashed, within FileFlow's window, through SessionLink's `sendFile`; a
+  transfer belongs to the connection it was offered on; Foundation, Network
+  and CryptoKit only, checked against the Mac's own FileHub on loopback,
+  `Tests/checks/device-files`; pbxproj A188/F188), `FilesCopy+Device`
+  (`DeviceFilesCopy`, the Files rows' words, which show and which are
+  enabled, the chip's lines; `OutgoingFiles`, a transfer as the chip shows
+  it, and `holdsMoves`; pure, `Tests/checks/files`; A189/F189),
+  `StreamClient+Files` (the window list's `files` and kind 16's pairing to
+  the rows, the sources to DeviceFiles, its snapshots to the chip, VoiceOver,
+  the background task, auto-lock and the moves a transfer holds; a file
+  shared into Sill and its question; A18A/F18A), `FilePickers` (the Files
+  picker's URLs as sources, `PhotosPickerSheet`, PHPicker's originals copied
+  into the outbox; A18B/F18B) and `FileChip` (the chip over the stream, in
+  the clipboard chip's corner, which waits while it shows; A18C/F18C); the
+  Settings panel's This ‹device› group has Send Files and Send Photos before
+  the clipboard's rows; both Info.plists declare one document type
+  (`public.item`, Alternate) and open documents in place, for the share
+  sheet. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers and
   the tour's version (`version`, 2 since 0.6; `upgraded`, an older memory

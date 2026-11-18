@@ -396,6 +396,11 @@ chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock M
 shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
 '<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
 `-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened),
+`-SillFilesHost off|old|none|gives` and `-SillFiles preparing|offering|sending|finishing|
+saved|saved3|cancelled|refused|lost|folder|ask` (files and photos, docs/files-plan.md: the mock
+Mac's `files`, 1 in every settings case but `legacy` and `cli`, and a transfer to the Mac on the
+chip over the stream and the line under the Settings panel's Files rows, or a file shared into
+Sill asking to be sent; `-SillSettingsScroll files` starts the panel at the Files rows),
 `-SillMacLocked 1|2|unlocking` (the mock Mac's screen locked, switched to another
 user, or just unlocked: no windows, apps or clipboard, the cover over the stream,
 the drawer's and the panel header's line, docs/locked-mac-plan.md), and in

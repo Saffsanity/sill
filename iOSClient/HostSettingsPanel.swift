@@ -190,6 +190,17 @@ struct HostSettingsPanel: View {
         // tour's and the pairing overlay's do: SwiftUI's `.cancelAction` shortcut on Done (kept for
         // ⌘.) does not ask for priority (docs/hardware-keyboard-plan.md §1).
         .background(EscapeKey(action: close))
+        // The Files rows' pickers, here once: the rows sit in `middle`, which ViewThatFits lays out twice.
+        .fileImporter(isPresented: $filesPickerShown, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { client.sendFiles(FilePickers.sources(files: urls)) }
+        }
+        .sheet(isPresented: $photosPickerShown) {
+            PhotosPickerSheet { results in
+                photosPickerShown = false
+                FilePickers.send(results, client: client)
+            }
+            .ignoresSafeArea()
+        }
         .onAppear { headerFocused = true }
         // A refused change: the control has already gone back to the Mac's value, and the reason
         // is in the footer or the note. The haptic is a no-op on an iPad.
@@ -810,16 +821,6 @@ struct HostSettingsPanel: View {
                 }
             }
             .id(Self.filesRowsID)
-            .fileImporter(isPresented: $filesPickerShown, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result { client.sendFiles(FilePickers.sources(files: urls)) }
-            }
-            .sheet(isPresented: $photosPickerShown) {
-                PhotosPickerSheet { results in
-                    photosPickerShown = false
-                    FilePickers.send(results, client: client)
-                }
-                .ignoresSafeArea()
-            }
             if let out = client.fileOut {
                 Footnote(text: DeviceFilesCopy.panelLine(out, mac: mac, device: device), warning: DeviceFilesCopy.warns(out), top: 6)
                     .padding(.bottom, -6)
