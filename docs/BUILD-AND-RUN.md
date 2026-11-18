@@ -354,7 +354,13 @@ This iPad group; the mock Mac takes gestures in every case but `legacy`; `revers
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
-run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
+run, in the normal app too), `-Sill.holdToLockModifiers 1` (its Hold to Lock
+Modifiers on for one run, in the normal app too: a finger held a second on ctrl,
+opt, cmd or shift locks it, #268; `-SillSettingsScroll keys` the panel at its
+Keys group), `-SillLocked cmd` and `-SillLatched shift` (the key row's modifiers
+as a hold and a tap leave them, any of ctrl, opt, cmd and shift, comma separated,
+so a photo shows the lock and the latch; only while a key row is on screen does
+anything carry them: none on the device's side or in full screen), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
 for one run, in the normal app too; the console's `thumbnails: hold 0.3 s` when a bar
 first reads it and at each change), `-Sill.largerPicture 1` (its Larger Picture on for one run,
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
