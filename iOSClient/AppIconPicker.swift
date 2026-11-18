@@ -12,6 +12,9 @@ import UIKit
 /// DEBUG `-SillAppIcon original|community|<name>`: the harness's stand-in for iOS's alternate icon name (an
 /// unknown name too, as iOS could hand one back), so a photo shows each mark without a change; a tap then moves
 /// the stand-in alone. `-SillAppIconFailed 1`: the refusal's line, as though iOS had said no.
+/// `-SillAppIconSet original|community`: a second after the group appears, the real call a tap makes, so a photo
+/// of the harness's own simulator shows iOS's alert, and a later launch the icon iOS kept; never with
+/// `-SillAppIcon`, whose stand-in it would move instead.
 struct AppIconPicker: View {
     /// iOS's alternate icon name (nil: the primary icon), read when the group appears and when Sill comes back to
     /// the front (a change made while Settings was open elsewhere).
@@ -63,6 +66,12 @@ struct AppIconPicker: View {
         }
         #if DEBUG
         .onAppear { print("app icon: \(current.rawValue) shown (\(name.map { "alternate \($0)" } ?? "the primary icon"))") }
+        .task {
+            guard let word = UserDefaults.standard.string(forKey: "SillAppIconSet"), let choice = AppIconChoice(rawValue: word) else { return }
+            try? await Task.sleep(for: .seconds(1))
+            print("app icon: asking iOS for \(choice.rawValue), as a tap does (-SillAppIconSet)")
+            choose(choice)
+        }
         #endif
     }
 
@@ -134,6 +143,9 @@ struct AppIconPicker: View {
         Task { @MainActor in
             do {
                 try await UIApplication.shared.setAlternateIconName(target)
+                #if DEBUG
+                print("app icon: iOS shows \(UIApplication.shared.alternateIconName.map { "the alternate \($0)" } ?? "the primary icon") now")
+                #endif
             } catch {
                 failed = true
                 #if DEBUG

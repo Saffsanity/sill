@@ -225,8 +225,10 @@ struct ContentView: View {
 ///   under it (docs/app-icons-plan.md).
 /// * `-SillAppIcon original|community|<name>` — the App Icon group's stand-in for iOS's alternate icon name
 ///   (an unknown name too, which shows Original marked), so a photo shows each mark; a tap moves the stand-in
-///   alone, never the real icon. `-SillAppIconFailed 1` shows the line for a change iOS refused. The console
-///   says which shows ("app icon: …"). In the normal app too.
+///   alone, never the real icon. `-SillAppIconFailed 1` shows the line for a change iOS refused.
+///   `-SillAppIconSet original|community` makes a tap's real call a second after the group appears (iOS's alert
+///   in a photo; the icon iOS keeps shows at the next launch). The console says what happened ("app icon: …").
+///   In the normal app too.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
