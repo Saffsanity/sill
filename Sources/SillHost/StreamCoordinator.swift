@@ -695,6 +695,10 @@ package final class StreamCoordinator {
         server.onFileMessage = { [files] message, connection, arrived, done in
             files.received(message, from: connection, arrived: arrived, done: done)
         }
+        // Transfers running: the snapshot says how many, so Sill.app keeps the Mac awake meanwhile.
+        files.onRunning = { [weak self] count in
+            Task { @MainActor in self?.status.update { $0.fileTransfers = count } }
+        }
         // A device's offer is a person at it: the display wakes as for a tap (DisplayWake).
         files.onOffer = { [weak self] id in
             Task { @MainActor in

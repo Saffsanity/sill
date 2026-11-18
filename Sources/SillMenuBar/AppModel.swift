@@ -423,13 +423,14 @@ final class AppModel {
             print("Status: \(line)")
         }
         let snapshot = coordinator?.status.snapshot
-        holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0)
+        holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0,
+                      files: snapshot?.fileTransfers ?? 0)
         // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).
         updater.devicesChanged(snapshot?.devices.count ?? 0)
         scheduleExpiry()
     }
 
-    private enum NapHold { case none, connected, remote }
+    private enum NapHold { case none, connected, remote, files }
 
     /// App Nap would coalesce this windowless app's timers once it is in the background, among
     /// them the 30 ms link keepalive ticks that keep a device's Wi-Fi out of power save, and the
@@ -437,10 +438,11 @@ final class AppModel {
     /// latency-critical activity, which still lets the Mac sleep when idle: a device at home can
     /// wake it (Bonjour Sleep Proxy) or walk over. A device connected from away cannot, so while
     /// one is, the activity is `.userInitiated`, which also keeps the Mac from idle sleep (the
-    /// display may still sleep; docs/remote-access-plan.md §6.5). Switching ends one activity and
-    /// begins the other.
-    private func holdAppNapOff(devices: Int, remote: Int) {
-        let want: NapHold = remote > 0 ? .remote : (devices > 0 ? .connected : .none)
+    /// display may still sleep; docs/remote-access-plan.md §6.5). So too while a device's files are on
+    /// their way (`files`, docs/files-plan.md §7.1), at home too: an idle sleep would cut the transfer off.
+    /// Switching ends one activity and begins the other.
+    private func holdAppNapOff(devices: Int, remote: Int, files: Int = 0) {
+        let want: NapHold = remote > 0 ? .remote : files > 0 ? .files : (devices > 0 ? .connected : .none)
         guard want != napHold else { return }
         if let activity = napActivity {
             ProcessInfo.processInfo.endActivity(activity)
@@ -451,6 +453,9 @@ final class AppModel {
         case .remote:
             napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
                                                                 reason: "Sill is serving a device connected from away")
+        case .files:
+            napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+                                                                reason: "Sill is taking a device's files")
         case .connected:
             napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
                                                                 reason: "Sill is serving a connected device")

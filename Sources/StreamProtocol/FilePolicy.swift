@@ -3,8 +3,8 @@ import Foundation
 // The rules of files and photos between a device and the Mac, both ends (docs/files-plan.md §6): who may
 // offer and when, how each end answers (FilePolicy), what a name from the other end becomes (FileNames), how
 // much of a file may be on its way at once so the picture and the person's input come first (FileFlow),
-// each transfer's ledger at its sender and at its receiver (FileSender, FileReceiver), and the words both
-// ends show (FilesCopy). Pure (Foundation only): the Mac's FileHub and FileStore and the device's
+// each transfer's ledger at its sender and at its receiver (FileSender, FileReceiver: the plan's
+// FileTransferState, §6.4), and the words both ends show (FilesCopy). Pure (Foundation only): the Mac's FileHub and FileStore and the device's
 // DeviceFiles do only what reads, writes and sends; Tests/checks/files checks this file with StreamProtocol.
 
 public enum FilePolicy {
