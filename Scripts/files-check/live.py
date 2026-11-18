@@ -8,7 +8,7 @@ folder under OUT), pairs a test client by the host's link, and drives Scripts/si
 
     python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]
     python3 Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST   H2: the CLI's stdout against main's (about 75 s)"""
-import hashlib, json, os, random, re, shutil, signal, subprocess, sys, threading, time
+import hashlib, json, os, plistlib, random, re, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -106,8 +106,16 @@ def sha(path): return hashlib.sha256(open(path, "rb").read()).hexdigest()
 
 
 def xattr(path, name):
-    r = subprocess.run(["xattr", "-p", name, path], capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else None
+    """An extended attribute's bytes (`xattr -px`: hex, so a binary plist such as Where from reads whole), or None."""
+    r = subprocess.run(["xattr", "-px", name, path], capture_output=True, text=True)
+    return bytes.fromhex("".join(r.stdout.split())) if r.returncode == 0 else None
+
+
+def where_from(path):
+    """The Where from list Finder's Get Info shows (com.apple.metadata:kMDItemWhereFroms, a binary plist), or None."""
+    b = xattr(path, "com.apple.metadata:kMDItemWhereFroms")
+    try: return plistlib.loads(b) if b is not None else None
+    except Exception: return None
 
 
 def case_send(out):
@@ -127,8 +135,10 @@ def case_send(out):
         same = all(os.path.exists(os.path.join(h.files, n)) and sha(os.path.join(h.files, n)) == sha(p) for (n, _), p in zip(sizes, paths))
         verdict(same, "each byte for byte the source")
         q = xattr(os.path.join(h.files, "three-mb.bin"), "com.apple.quarantine")
+        q = q.decode("utf-8", "replace") if q is not None else None
         verdict(q is not None and q.split(";")[0] != "", f"quarantined: {q}")
-        verdict(xattr(os.path.join(h.files, "three-mb.bin"), "com.apple.metadata:kMDItemWhereFroms") is not None, "a Where from")
+        wf = where_from(os.path.join(h.files, "three-mb.bin"))
+        verdict(isinstance(wf, list) and any(isinstance(w, str) and w.endswith(", through Sill") for w in wf), f"a Where from: {wf}")
         mode = oct(os.stat(os.path.join(h.files, "three-mb.bin")).st_mode & 0o777)
         verdict(mode == "0o644", f"mode 0644: {mode}")
         verdict(h.partials() == [], f"nothing left in .Sill Incoming: {h.partials()}")
