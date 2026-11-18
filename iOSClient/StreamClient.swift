@@ -980,9 +980,6 @@ final class StreamClient: ObservableObject {
     }
     /// "Unlocking…"'s timeout.
     private var lockShadeExpiry: DispatchWorkItem?
-    /// What this session's Mac takes of the device's camera (`WindowList.camera`, 1 for JPEG / HEVC).
-    @Published var hostCamera: Int?
-    var cameraSender: AnyObject?
     /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
     /// its time is up; the stream screen hides it while something is open over the stream.
     @Published var clipboardChip = false
@@ -3736,8 +3733,6 @@ final class StreamClient: ObservableObject {
         hostDesktopDisplay = nil
         hostDesktopDisplayNames = nil
         desktopStepSentFrom = nil
-        stopCameraCapture(sendStop: false)
-        hostCamera = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -4452,10 +4447,6 @@ final class StreamClient: ObservableObject {
                 #if DEBUG
                 print("lock: list \(list.locked == true ? "locked" : "unlocked")\(list.offConsole == true ? ", off console" : "")\(view ? ", the off-console view" : ""); cover \(self.lockShade.map { "\($0)" } ?? "none")")
                 #endif
-                if self.hostCamera != list.camera {
-                    self.hostCamera = list.camera
-                    self.updateCameraCapture()
-                }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {
