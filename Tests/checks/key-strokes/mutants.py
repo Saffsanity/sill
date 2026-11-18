@@ -205,8 +205,8 @@ MUTANTS = [
     ("the device's caps lock bit is the numeric pad's", CHORDS, "static let capsLock = KeyModifiers(rawValue: 1 << 16)", "static let capsLock = KeyModifiers(rawValue: 1 << 21)"),
     # The device: iPadOS's ⌃Space switch, whose Space the Mac never hears (the review of #162's letters)
     ("iPadOS's switch lets nothing up (a held letter repeats on through it, ⌃P)", CHORDS,
-     "            if let up = ended(usage) { ups.append(up) }\n        }\n        return ups\n    }\n\n    // MARK: A key command's key (Esc)",
-     "            _ = usage\n        }\n        return ups\n    }\n\n    // MARK: A key command's key (Esc)"),
+     "            if let up = ended(usage) { ups.append(up) }\n        }\n        return ups\n    }\n\n    // MARK: A key command's key (Esc,",
+     "            _ = usage\n        }\n        return ups\n    }\n\n    // MARK: A key command's key (Esc,"),
     ("iPadOS's switch lets the modifiers' own keys up too", CHORDS,
      "for usage in down.reversed() where KeyModifiers.flag(forKey: usage) == nil {", "for usage in down.reversed() {"),
     ("iPadOS's switch lets the first pressed up first", CHORDS,
@@ -275,6 +275,11 @@ MUTANTS = [
     ("shortcutCommandKeys drops w (#129)", CHORDS,
      '("v", 0x19), ("w", 0x1A), ("x", 0x1B),',
      '("v", 0x19), ("x", 0x1B),'),
+    ("the ⌘ shortcuts' S and T keys swapped (#129)", CHORDS,
+     '("s", 0x16), ("t", 0x17),', '("s", 0x17), ("t", 0x16),'),
+    ("the ⌘ shortcuts claim ⌘Q, which quits Sill on this Mac (#129)", CHORDS,
+     '("o", 0x12), ("p", 0x13),', '("o", 0x12), ("p", 0x13), ("q", 0x14),'),
+    ("a ⌘ shortcut's character in capitals (#129)", CHORDS, '("a", 0x04),', '("A", 0x04),'),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

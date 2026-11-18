@@ -551,6 +551,22 @@ check("isAttached: on an iPad or iPhone, follows GameController's coalesced keyb
 check("isAttached: DEBUG -SillHardwareKeyboard override wins on both iPad and Mac",
       !P.isAttached(coalesced: true, isiOSAppOnMac: true, override: false)
         && P.isAttached(coalesced: false, isiOSAppOnMac: false, override: true))
+// Every case: GameController's keyboard or none, a Mac or not, and the override's three states.
+do {
+    var wrong: [String] = []
+    for coalesced in [false, true] {
+        for onMac in [false, true] {
+            for override in [Bool?.none, false, true] {
+                let want = override ?? (coalesced || onMac)
+                if P.isAttached(coalesced: coalesced, isiOSAppOnMac: onMac, override: override) != want {
+                    wrong.append("coalesced \(coalesced), Mac \(onMac), override \(override.map { $0 ? "1" : "0" } ?? "none")")
+                }
+            }
+        }
+    }
+    check("isAttached, all 12 cases: the override if set, else a keyboard or a Mac" + (wrong.isEmpty ? "" : ": " + wrong.joined(separator: "; ")),
+          wrong.isEmpty)
+}
 
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)

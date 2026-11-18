@@ -2238,20 +2238,42 @@ do {
           "pressed and released for S and ←")
     check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
 }
-// Priority key commands for system-intercepted ⌘ shortcuts (#129: ⌘W, ⌘C, ⌘V, ⌘X, ⌘Z, ⌘A, ⌘, on iPad-on-Mac and iPadOS):
-// each maps its UIKeyCommand input to its HID usage and goes through `commanded` once, leaving nothing held on either Mac.
+// The ⌘ shortcuts' key commands on a Mac running the iPad app (#129: ⌘W, ⌘C, ⌘V, ⌘X, ⌘Z, ⌘A and the rest,
+// each with ⇧, ⌃ and ⌥): each command's character and the key a US keyboard types it with, sent through
+// `commanded` once whichever channel brings the press, and nothing left held on either Mac.
 do {
     check(ForwardedKeys.shortcutUsage(forInput: "w") == 0x1A && ForwardedKeys.shortcutUsage(forInput: "W") == 0x1A
           && ForwardedKeys.shortcutUsage(forInput: "c") == uC && ForwardedKeys.shortcutUsage(forInput: "v") == 0x19
           && ForwardedKeys.shortcutUsage(forInput: "x") == 0x1B && ForwardedKeys.shortcutUsage(forInput: "z") == uZ
           && ForwardedKeys.shortcutUsage(forInput: "a") == uA && ForwardedKeys.shortcutUsage(forInput: ",") == 0x36
-          && ForwardedKeys.shortcutUsage(forInput: nil) == nil && ForwardedKeys.shortcutUsage(forInput: "?") == nil,
-          "shortcutUsage: maps menu-intercepted shortcut inputs to HID usages (#129)")
+          && ForwardedKeys.shortcutUsage(forInput: nil) == nil && ForwardedKeys.shortcutUsage(forInput: "?") == nil
+          && ForwardedKeys.shortcutUsage(forInput: "") == nil && ForwardedKeys.shortcutUsage(forInput: "ww") == nil,
+          "shortcutUsage: a command's character, either case, to its key; nothing for any other input (#129)")
     check(ForwardedKeys.shortcutCommandKeys.allSatisfy {
               $0.input.count == 1 && ForwardedKeys.characterUsages.contains($0.usage)
                   && KeyStrokes.virtualKeys[$0.usage] != nil
                   && ForwardedKeys.shortcutUsage(forInput: $0.input) == $0.usage
           }, "every shortcut command key is a character usage every Sill for Mac answers to (#129)")
+    // Each entry against a US keyboard's own keys, written out another way: the letters from A's usage on,
+    // the digits from 1's with 0 last, the punctuation keys one by one. A wrong usage sends another key.
+    func usKey(_ c: Character) -> UInt16? {
+        if let a = c.asciiValue, (97...122).contains(a) { return 0x04 + UInt16(a - 97) }
+        if let a = c.asciiValue, (49...57).contains(a) { return 0x1E + UInt16(a - 49) }
+        let others: [Character: UInt16] = ["0": 0x27, "-": 0x2D, "=": 0x2E, "[": 0x2F, "]": 0x30, "\\": 0x31,
+                                           ";": 0x33, "'": 0x34, "`": 0x35, ",": 0x36, ".": 0x37, "/": 0x38]
+        return others[c]
+    }
+    let table = ForwardedKeys.shortcutCommandKeys
+    let offKey = table.filter { $0.input.count != 1 || usKey(Character($0.input)) != $0.usage }
+    check(offKey.isEmpty, "each command's character goes as the key a US keyboard types it with (#129): "
+          + offKey.map { "\($0.input) as \(String($0.usage, radix: 16))" }.joined(separator: ", "))
+    check(Set(table.map(\.input)).count == table.count && Set(table.map(\.usage)).count == table.count,
+          "each character once, each key once (#129)")
+    check(table.allSatisfy { $0.input == $0.input.lowercased() }, "each character as UIKit names a key command's: lowercase, ⇧ a flag (#129)")
+    check(["w", "c", "v", "x", "z", "a"].allSatisfy { ForwardedKeys.shortcutUsage(forInput: $0) != nil },
+          "the shortcuts #129 named: ⌘W, ⌘C, ⌘V, ⌘X, ⌘Z and ⌘A")
+    check(ForwardedKeys.shortcutUsage(forInput: "q") == nil, "never ⌘Q: it quits Sill on this Mac (#129)")
+
     var f = ForwardedKeys()
     let cmdW = f.commanded(0x1A, modifiers: command, at: 3.0)
     let pressW = f.pressed(0x1A, modifiers: command, at: 2.999, typing: .keys)
@@ -2259,6 +2281,96 @@ do {
     check(cmdW == [key(0x1A, true, command), key(0x1A, false, 0)] && pressW == .swallow && upW == .swallow,
           "⌘W via priority key command: sent once, duplicate press and release swallowed (#129): \(cmdW)")
     _ = onBothMacs(cmdW, "⌘W via priority key command")
+
+    // As a Mac hands them over: ⌘, and ⇧, ⌃ or ⌥ with it, down through pressesBegan (each its own key, or
+    // ⇧ the text system's while iPadOS types), then the key's command fires (with its own flags, which
+    // carry no caps lock), and pressesBegan may or may not get the same press after it, then everything
+    // comes up: the Mac gets the shortcut once, its key carrying every flag of the command, then nothing
+    // is left down on this Mac or on one from before, and nothing waits in `ForwardedKeys`. Every key,
+    // every combination of the three, both typists, Caps Lock off and on, and both orders.
+    let combos: [(name: String, keys: [UInt16], flags: UInt64)] = (0..<8).map { mask in
+        var name = "", keys: [UInt16] = [uLCmd], flags = command
+        if mask & 1 != 0 { name += "⇧"; keys.append(uLShift); flags |= shift }
+        if mask & 2 != 0 { name += "⌃"; keys.append(uLCtrl); flags |= control }
+        if mask & 4 != 0 { name += "⌥"; keys.append(uLOpt); flags |= option }
+        return (name + "⌘", keys, flags)
+    }
+    var sequences = 0, wrong: [String] = []
+    for entry in table {
+        guard let virtualKey = KeyStrokes.virtualKeys[entry.usage] else { continue }
+        for combo in combos {
+            for typing in [KeyTyping.keys, .text] {
+                for capsOn in [false, true] {
+                    for pressAfter in [false, true] {
+                        var kb = Keyboard(); kb.typing = typing; kb.capsLockOn = capsOn
+                        var events: [InputEvent] = []
+                        for m in combo.keys { events += kb.press(m) }
+                        kb.time += 0.2
+                        let firedAt = kb.time
+                        events += kb.forwarded.commanded(entry.usage, modifiers: combo.flags, at: firedAt)
+                        let what = "\(combo.name)\(entry.input) (\(typing), caps lock \(capsOn ? "on" : "off"), "
+                            + (pressAfter ? "its press after the command)" : "the command alone)")
+                        if pressAfter {
+                            let press = kb.forwarded.pressed(entry.usage, modifiers: kb.flags, at: firedAt - 0.002, typing: typing)
+                            let up = kb.forwarded.released(entry.usage)
+                            if press != .swallow || up != .swallow { wrong.append("\(what): the press \(press), its up \(up)") }
+                        }
+                        for m in combo.keys.reversed() { events += kb.release(m) }
+                        sequences += 1
+                        // onBothMacs' test, without a check of its own for each of these sequences.
+                        var mac = Mac(), old = OldMac(); let a = Conn()
+                        mac.send(events, from: a); old.send(events)
+                        let posted = mac.log
+                        mac.send(tap, from: a); old.send(tap)
+                        if !(mac.table == 0 && mac.broken.isEmpty && mac.down.isEmpty && old.table == 0 && old.down.isEmpty
+                             && old.log.last == .pointer(0)) {
+                            wrong.append("\(what) left something on a Mac: \(mac.log) / \(old.log)")
+                        }
+                        let downs = posted.filter { if case .key(virtualKey, true, _) = $0 { return true } else { return false } }
+                        let ups = posted.filter { if case .key(virtualKey, false, _) = $0 { return true } else { return false } }
+                        if downs.count != 1 || ups.count != 1 {
+                            wrong.append("\(what): \(downs.count) downs and \(ups.count) ups of key \(virtualKey): \(posted)")
+                        } else if case .key(_, _, let carried) = downs[0], carried & modifierBits != combo.flags {
+                            wrong.append("\(what): its key carried \(names(carried)), not \(names(combo.flags))")
+                        }
+                        if !kb.forwarded.down.isEmpty || !kb.forwarded.swallowed.isEmpty {
+                            wrong.append("\(what): left \(kb.forwarded.down) down and \(kb.forwarded.swallowed) swallowed")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    check(wrong.isEmpty && sequences == table.count * 64,
+          "\(sequences) shortcut sequences as a Mac hands them over: each the shortcut once, every flag on its key, nothing left (#129)"
+            + (wrong.isEmpty ? "" : ": " + wrong.prefix(3).joined(separator: "; ")))
+
+    // The press first (pressesBegan has ⌘W, as on an iPad), then the command: the command sends nothing,
+    // and the press's own up follows; then W alone is a new press, sent as it is.
+    do {
+        var kb = Keyboard(); kb.typing = .keys
+        var events = kb.press(uLCmd) + kb.press(0x1A)
+        let late = kb.forwarded.commanded(0x1A, modifiers: command, at: kb.time + 0.002)
+        events += late + kb.release(0x1A) + kb.release(uLCmd)
+        check(late.isEmpty && events == [key(uLCmd, true, command), key(0x1A, true, command), key(0x1A, false, command), key(uLCmd, false, 0)],
+              "⌘W, the press first: the command sends nothing, the press's up follows (#129): \(events)")
+        let w = kb.press(0x1A) + kb.release(0x1A)
+        check(w == [key(0x1A, true, 0), key(0x1A, false, 0)], "then W alone while the Mac types: sent as it is (#129): \(w)")
+        _ = onBothMacs(events + w, "⌘W, the press first, then W")
+    }
+    // The command first and alone (the press never reaches pressesBegan), then W typed alone later: a new
+    // press, never swallowed for the command's.
+    for typing in [KeyTyping.keys, .text] {
+        var kb = Keyboard(); kb.typing = typing
+        kb.time += 0.2
+        var events = kb.press(uLCmd)
+        kb.time += 0.2
+        events += kb.forwarded.commanded(0x1A, modifiers: command, at: kb.time) + kb.release(uLCmd)
+        let w = kb.press(0x1A) + kb.release(0x1A)
+        check(events == [key(uLCmd, true, command), key(0x1A, true, command), key(0x1A, false, command), key(uLCmd, false, 0)]
+              && w == (typing == .keys ? [key(0x1A, true, 0), key(0x1A, false, 0)] : [.text("x")]),
+              "⌘W by its command alone, then W (\(typing)): the shortcut once, then W as it is (#129): \(events) \(w)")
+    }
 }
 
 // MARK: Who types a hardware keyboard's characters (KeyTyping, #162's letters)
