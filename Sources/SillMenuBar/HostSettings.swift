@@ -52,8 +52,8 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
+        static let lockAfterSession = "lockAfterSession"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
-        static let privacyMode = "privacyMode", lockOnDisconnect = "lockOnDisconnect"
     }
 
     var config: HostConfig {
@@ -98,23 +98,6 @@ final class HostSettings {
         }
     }
     @ObservationIgnored var onUpdateCheckChange: (@MainActor () -> Void)?
-    /// Privacy Mode (issues #133 and #141): blanks the Mac's physical displays while a device is
-    /// connected, and optionally locks the Mac when the last connected device disconnects.
-    var privacyMode: Bool {
-        didSet {
-            guard privacyMode != oldValue else { return }
-            defaults.set(privacyMode, forKey: Key.privacyMode)
-            onPrivacyChange?()
-        }
-    }
-    var lockOnDisconnect: Bool {
-        didSet {
-            guard lockOnDisconnect != oldValue else { return }
-            defaults.set(lockOnDisconnect, forKey: Key.lockOnDisconnect)
-            onPrivacyChange?()
-        }
-    }
-    @ObservationIgnored var onPrivacyChange: (@MainActor () -> Void)?
 
     /// "Show the pairing window to screen sharing" (Settings › Devices; issue #108): Screen Sharing,
     /// Apple Remote Desktop and VNC apps show the pairing window, its QR code and its code, so a Mac
@@ -161,10 +144,10 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off, like the CLI: a Mac off console shows nothing of this session unless its user says so here.
             Key.offConsoleView: base.offConsoleView,
+            // Off, like the CLI: a Mac locks by itself after a device leaves only once its user says so here.
+            Key.lockAfterSession: base.lockAfterSession,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
-            Key.privacyMode: false,
-            Key.lockOnDisconnect: false,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -183,12 +166,11 @@ final class HostSettings {
                             requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
-                            offConsoleView: defaults.bool(forKey: Key.offConsoleView)).validated()
+                            offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            lockAfterSession: defaults.bool(forKey: Key.lockAfterSession)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
-        privacyMode = defaults.bool(forKey: Key.privacyMode)
-        lockOnDisconnect = defaults.bool(forKey: Key.lockOnDisconnect)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
@@ -213,6 +195,7 @@ final class HostSettings {
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
+        if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
     }
 
     // MARK: Remote devices seen (display only)

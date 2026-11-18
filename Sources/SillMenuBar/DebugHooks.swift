@@ -16,7 +16,8 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, offConsoleView, remoteAddressName=host[:port],
+///                                              shareClipboard, offConsoleView, lockAfterSession,
+///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
@@ -179,20 +180,15 @@ enum DebugHooks {
                     var requirePairing: Bool?
                     var updateCheck: Bool?
                     var pairingSharing: Bool?
-                    var privacyMode: Bool?
-                    var lockOnDisconnect: Bool?
                     for change in changes {
-                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing,
-                              updateCheck: &updateCheck, pairingSharing: &pairingSharing,
-                              privacyMode: &privacyMode, lockOnDisconnect: &lockOnDisconnect)
+                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck,
+                              pairingSharing: &pairingSharing)
                     }
                     print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                     model.settings.config = config    // one assignment: several keys, one apply
                     if let addressName { model.settings.remoteAddressName = addressName }
                     if let updateCheck { model.settings.updateCheck = updateCheck }
                     if let pairingSharing { model.settings.showPairingWindowToScreenSharing = pairingSharing }
-                    if let privacyMode { model.settings.privacyMode = privacyMode }
-                    if let lockOnDisconnect { model.settings.lockOnDisconnect = lockOnDisconnect }
                     // Through the identity store first, as the Devices pane's switch goes.
                     if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
@@ -355,8 +351,7 @@ enum DebugHooks {
     }
 
     private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?,
-                              updateCheck: inout Bool?, pairingSharing: inout Bool?,
-                              privacyMode: inout Bool?, lockOnDisconnect: inout Bool?) {
+                              updateCheck: inout Bool?, pairingSharing: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -376,12 +371,11 @@ enum DebugHooks {
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
         case "offConsoleView": config.offConsoleView = flag
+        case "lockAfterSession": config.lockAfterSession = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
         case "showPairingWindowToScreenSharing": pairingSharing = flag
-        case "privacyMode": privacyMode = flag
-        case "lockOnDisconnect": lockOnDisconnect = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -411,7 +405,9 @@ enum DebugHooks {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
                                    showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
                                    offConsoleView: .constant(sample.offConsoleView),
-                                   requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
+                                   lockAfterSession: .constant(sample.lockAfterSession),
+                                   requirePairingProblem: nil, privacyLock: sample.privacyLock,
+                                   actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -1016,6 +1012,21 @@ extension DebugHooks {
         var requirePairing = true
         var showPairingWindowToScreenSharing = false
         var offConsoleView = false
+        var lockAfterSession = false
+        var privacyLock = PrivacyLockStatus()
+    }
+
+    /// pane-devices-{lock,locknodisplay,lockfailed}: Lock this Mac when the last device leaves on (docs/privacy-mode-plan.md,
+    /// part 1), as it is; with this Mac's displays none a lock screen could take a password at (#298); after a lock
+    /// macOS did not let Sill make.
+    static func privacyLockSamples() -> [(name: String, status: PrivacyLockStatus)] {
+        var on = PrivacyLockStatus()
+        on.on = true
+        var noDisplay = on
+        noDisplay.noDisplay = true
+        var failed = on
+        failed.failure = PrivacyPolicy.Words.unavailableReason
+        return [("lock", on), ("locknodisplay", noDisplay), ("lockfailed", failed)]
     }
 
     /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
@@ -1040,6 +1051,9 @@ extension DebugHooks {
             DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
                               showPairingWindowToScreenSharing: true),
             DevicesPaneSample(name: "offconsoleview", status: RemoteStatus(homeDoor: .pairingRequired), offConsoleView: true),
+        ] + privacyLockSamples().map {
+            DevicesPaneSample(name: $0.name, status: RemoteStatus(homeDoor: .pairingRequired), lockAfterSession: true, privacyLock: $0.status)
+        } + [
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

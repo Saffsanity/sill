@@ -56,6 +56,19 @@ config.sendAudio = audioFlag
 // acts on it. Off by default, as in Sill.app (Settings › Devices): such a Mac shows nothing of this session.
 config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
 
+// `SillHost --lock-after-session`, with --synthetic only: Lock this Mac when the last device leaves for this run, as a
+// test host's dry run (docs/privacy-mode-plan.md, part 1): 30 s after the last session ends the host says it would lock
+// this Mac and put its display to sleep, and does neither. The switch is Sill.app's (Settings › Devices), whose lock is
+// the only one that locks a Mac; without --synthetic this run ignores it with one line. Without it the output is what
+// it always was.
+if CommandLine.arguments.contains("--lock-after-session") {
+    if synthetic {
+        config.lockAfterSession = true
+    } else {
+        print("--lock-after-session ignored: it is Sill.app's (Settings › Devices). SillHost takes it only with --synthetic, where it locks nothing and says what it would do.")
+    }
+}
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);

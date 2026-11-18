@@ -5,8 +5,10 @@ import StreamProtocol
 
 /// Settings › Devices, live: Require pairing, which the model keeps in the identity store beside
 /// the trust list (never in UserDefaults), the pairing window's switch for screen sharing (in
-/// UserDefaults, HostSettings), and the paired devices from the host's status (pushed, so nothing
-/// polls), with the model's actions.
+/// UserDefaults, HostSettings), Lock this Mac when the last device leaves with its warning from the
+/// host's status, and the paired devices from the host's status (pushed, so nothing polls), with the
+/// model's actions. Opening the pane looks again at whether this Mac has a display to type its
+/// password at (the lock's warning).
 struct LiveDevicesPane: View {
     let model: AppModel
     @Bindable var settings: HostSettings
@@ -16,18 +18,22 @@ struct LiveDevicesPane: View {
                     requirePairing: Binding(get: { settings.config.requirePairing }, set: { model.setRequirePairing($0) }),
                     showPairingWindowToScreenSharing: $settings.showPairingWindowToScreenSharing,
                     offConsoleView: $settings.config.offConsoleView,
+                    lockAfterSession: $settings.config.lockAfterSession,
                     requirePairingProblem: model.requirePairingProblem,
+                    privacyLock: model.coordinator?.status.snapshot.privacyLock ?? PrivacyLockStatus(),
                     actions: DevicesPane.Actions(pair: { model.pairDevice() },
                                                  remove: { model.removeDevice($0) },
                                                  rename: { model.renameDevice($0, to: $1) }))
+            .onAppear { model.coordinator?.lookAtDisplaysForLock() }
     }
 }
 
 /// The Devices pane (docs/home-pairing-plan.md §6.1): Require pairing; Show the pairing window to
-/// screen sharing (issue #108, PairingWindowSharing); and the devices paired with this Mac at home
-/// and from afar (one trust list), each with how it paired and how it last connected, Remove, rename
-/// and Pair iPhone or iPad…. Values in, actions out, so the previews can draw every state. Errors
-/// show inline, never in alerts.
+/// screen sharing (issue #108, PairingWindowSharing); Show this account while another user is on the
+/// screen (docs/off-console-plan.md); Lock this Mac when the last device leaves (docs/privacy-mode-plan.md,
+/// part 1); and the devices paired with this Mac at home and from afar (one trust list), each with how
+/// it paired and how it last connected, Remove, rename and Pair iPhone or iPad…. Values in, actions
+/// out, so the previews can draw every state. Errors show inline, never in alerts.
 struct DevicesPane: View {
     struct Actions {
         var pair: () -> Void = {}
@@ -42,8 +48,13 @@ struct DevicesPane: View {
     @Binding var showPairingWindowToScreenSharing: Bool
     /// Show this account while another user is on the screen (HostConfig.offConsoleView; docs/off-console-plan.md).
     @Binding var offConsoleView: Bool
+    /// Lock this Mac when the last device leaves (HostConfig.lockAfterSession; docs/privacy-mode-plan.md, part 1).
+    @Binding var lockAfterSession: Bool
     /// The last Require pairing change the identity store did not keep.
     var requirePairingProblem: AppModel.RequirePairingProblem?
+    /// The lock's state as the host runs it: its warning (no display to type the password at, or the last lock
+    /// that failed).
+    var privacyLock = PrivacyLockStatus()
     let actions: Actions
     /// "Last connected 2 minutes ago" counts from here (fixed in the previews).
     var now: Date?
@@ -95,6 +106,17 @@ struct DevicesPane: View {
                 Toggle("Show this account while another user is on the screen", isOn: $offConsoleView)
             } footer: {
                 Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
+            }
+            // Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283, #275): at once, no
+            // restart; the Mac's alone. Its warning only while the switch is on (the host's status, which lags the
+            // switch by one main-actor turn, so the switch's own value decides).
+            Section {
+                Toggle(PrivacyPolicy.Words.toggle, isOn: $lockAfterSession)
+                if lockAfterSession, let warning = privacyLock.warning {
+                    Warning(warning)
+                }
+            } footer: {
+                Footnote(lockAfterSession ? PrivacyPolicy.Words.footnoteOn(PrivacyPolicy.grace) : PrivacyPolicy.Words.footnoteOff)
             }
             pairedDevices
         }
