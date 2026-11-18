@@ -94,8 +94,8 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   shows ringed in the accent and checked, and under the group "The icon Sill shows on this iPad’s Home Screen.
   You can switch back to Original here whenever you’re connected to a Mac." (Settings is a session's, so the way
   back needs a Mac connected; until the review of #390 it said Original was "always here", which held only in a
-  session.) A tap asks iOS, which shows its own alert ("You have changed the icon
-  for “Sill”."); while iOS answers the pictures wait; a refusal shows an orange line under them. VoiceOver: each
+  session.) A tap asks iOS, which shows its own alert ("You have changed the icon for “Sill”."); while iOS
+  answers the pictures wait; a refusal shows an orange line under them. VoiceOver: each
   icon one button, "Community icon, by grub-basket", selected when it is the one. The pictures are a grid that
   wraps, so more icons fit. The previews are each document's iOS Default look rendered by ictool at 288 pixels
   (`Scripts/app-icon-previews.sh`, committed beside the documents).
@@ -113,11 +113,11 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
 The rule is **the last sentence of guideline 2.3.8**: an app's name and icons, alternate icons among them, are to be
 "similar to avoid creating confusion". Nothing else in Apple's App Review Guidelines (last updated October 16, 2026;
 read 2026-11-18) is about alternate icons. Guideline 4.6 was (a change only at the person's request, a setting to go
-back to the original, no automatic or serial changes), but it is now marked as intentionally omitted; this plan
-cited it until the review of #390. Apple's Human Interface Guidelines (App icons, on alternate app icons) say the
-same in design terms: each alternate stays closely related to the app's content and experience and is not one
-people could take for another app; on iPhone and iPad each has its own dark, clear and tinted looks; and each is
-reviewed like the primary icon.
+back to the original, icons related to the app's content, no automatic or serial changes), but it is now marked as
+intentionally omitted; this plan cited it until the review of #390. Apple's Human Interface Guidelines (App icons,
+on alternate app icons) say the same in design terms: each alternate stays closely related to the app's content
+and experience and is not one people could take for another app; on iPhone and iPad each has its own dark, clear
+and tinted looks; and each is reviewed like the primary icon.
 
 - **Against 2.3.8 and the HIG**: both icons show what Sill does, a Mac's window carried to an iPhone or iPad, under
   the same name, and both are Icon Composer documents, so each has every look. They differ in drawing as well as
@@ -183,13 +183,20 @@ and Original, first in the list, switches it back."
   Apple's pages on 2026-11-18 (4.6 is omitted there); the footnote and every "always offered" say the way back is
   in a session, since `HostSettingsPanel` is made only by `StreamScreen`, which `ContentView` shows only while
   `client.connected`; and the merge order below, since the repository does not delete merged branches
-  (`delete_branch_on_merge` false), so GitHub will not move this pull request's base to main by itself.
+  (`delete_branch_on_merge` false), so GitHub will not move this pull request's base to main by itself. CI's
+  build again, locally through heavy.sh at 967e0526 (with `settings-pane`'s 988b3a08 merged): `swift build -c
+  release`, `Tests/checks/run-all.sh` (76 checks, all passed), the iOS app for the generic simulator (its
+  Info.plist's alternate icon for iPhone and iPad as before), `SillHost --internet` exiting 2. Harness photos of
+  967e0526 on the agents' Duo (iOS 27.1): the new footnote under the pictures on the inner display, an iPhone
+  upright and the cover, and with `-SillSettingsEnd 1` an upright iPhone's pane reaching the version and
+  Disconnect (`settings-pane`'s review fixed the end that stopped short before).
 - Harness photos of the group on the agents' Duo (iOS 27.1) and iPad, against `settings-pane`: every arrangement
   of the pane, each mark, the refusal, large type, right to left; the stream screens pixel for pixel the
   baseline's. With `-SillAppIconSet community`, iOS's own alert on the simulator ("You have changed the icon for
   “Sill”.", the community icon in it), and at the next launch the icon iOS kept, read as Community; then the
   original set back the same way. So the alternate declared by an Icon Composer document is one iOS 27.1 sets.
-- GitHub's CI passed on the pull request at each head (19b5be75, a649177c, daa4c6a9, 26047fd3).
+- GitHub's CI passed on the pull request at each head before the review round (19b5be75, a649177c, daa4c6a9,
+  26047fd3, 9d2829f0); the review round's run is in the pull request's description.
 
 ## What only Noah can try
 
