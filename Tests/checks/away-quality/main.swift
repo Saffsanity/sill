@@ -94,7 +94,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, shareFiles: true, filesFolder: nil)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -114,13 +114,31 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, shareFiles: false, filesFolder: "/tmp/x")
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(on.applying(all).offConsoleView && on.applyingAway(all).offConsoleView
           && !standard.applying(all).offConsoleView && !standard.applyingAway(all).offConsoleView,
           "a device's change never moves it, at home or away")
+}
+
+// Share files with devices and where they are kept (docs/files-plan.md §9), the Mac's alone: on in `standard` and
+// `app` (Downloads › Sill), named in the log's line, kept by `validated`, and never moved by a device's change.
+do {
+    check(standard.shareFiles && HostConfig.app.shareFiles && standard.filesFolder == nil && HostConfig.app.filesFolder == nil,
+          "standard and app: files shared, into Downloads › Sill")
+    var off = standard
+    off.shareFiles = false
+    eq(standard.changes(to: off), "share files on → off", "changes: the files' switch")
+    var moved = standard
+    moved.filesFolder = "/Volumes/Stick/In"
+    eq(standard.changes(to: moved), "files folder Downloads/Sill → another", "changes: the folder, never its path in the log")
+    check(!off.validated().shareFiles && moved.validated().filesFolder == "/Volumes/Stick/In", "validated keeps both")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true)
+    check(!off.applying(all).shareFiles && !off.applyingAway(all).shareFiles && moved.applying(all).filesFolder == "/Volumes/Stick/In",
+          "a device's change never moves them, at home or away")
 }
 
 // Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual

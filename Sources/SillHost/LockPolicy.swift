@@ -376,8 +376,9 @@ enum LockPolicy {
 
     /// What the server drops at `r`: every picture of the Mac but the placeholder (the display too,
     /// unless it streams at a locked screen), its thumbnails, icons and installed apps, its sound, its
-    /// clipboard, its pointer and cursor shape. The window list, settings, the Mac's identity, the
-    /// menus' answers (none has items while locked), pongs and ticks go as ever.
+    /// clipboard, its pointer and cursor shape, and files (kinds 34 and 49; a refusal or a cancel of kind 49
+    /// still goes, `passesLocked`). The window list, settings, the Mac's identity, the menus' answers (none
+    /// has items while locked), pongs and ticks go as ever.
     static func withheld(_ kind: StreamMessageKind, picture: Picture?, reading r: Reading, offConsoleView view: Bool = false) -> Bool {
         // The off-console view: its pictures, thumbnails, icons and apps go; nothing of the console's.
         if view, r == .offConsole { return viewWithholds(kind) }
@@ -389,18 +390,30 @@ enum LockPolicy {
             case .display: return !allowed(r).display
             case .window: return true
             }
-        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer:
+        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer, .fileChunk, .fileTransfer:
             return true
         default:
             return false
         }
     }
 
+    /// The one kind 49 the gate lets go while it withholds files (docs/files-plan.md §11): a refusal or a
+    /// cancel, which says only that a device's own transfer stopped, so the device hears why at once instead
+    /// of after its 30 s without progress. Never an offer, an acknowledgement or a result.
+    static func passesLocked(_ t: FileTransfer) -> Bool {
+        switch t.knownOp {
+        case .cancel?: return true
+        case .answer?: return t.accept != true
+        default: return false
+        }
+    }
+
     /// The off-console view's gate (`offConsoleViewAllowed`): the sound, the clipboard, the pointer and the
-    /// cursor shape; every picture (a window's, the display's, the placeholder's) and the catalog go.
+    /// cursor shape, and files (a refusal or a cancel still goes, `passesLocked`); every picture (a window's,
+    /// the display's, the placeholder's) and the catalog go.
     static func viewWithholds(_ kind: StreamMessageKind) -> Bool {
         switch kind {
-        case .audio, .clipboard, .cursorShape, .macPointer: return true
+        case .audio, .clipboard, .cursorShape, .macPointer, .fileChunk, .fileTransfer: return true
         default: return false
         }
     }
@@ -428,6 +441,9 @@ enum LockPolicy {
         case clipboardText
         /// Kind 32 without text: a subscription, or a stop.
         case clipboardSubscription
+        /// Kinds 34 and 49 from a device: a file's part or a transfer's message (docs/files-plan.md §11).
+        /// `cancels`: a cancel, which only stops what runs, and is taken whatever the reading.
+        case files(cancels: Bool)
         /// Kind 8. `letsGo`: it is the up of a key or a button this device holds down on the Mac.
         case input(letsGo: Bool)
         /// Anything else: settings (17), the viewport (9), a keyframe (44), Pair This iPad… (21, whose
@@ -437,7 +453,7 @@ enum LockPolicy {
 
     /// What the lock refuses, one line each a minute at most.
     enum Refusal: String, CaseIterable, Equatable {
-        case pick, launch, windowCommand, menus, gesture, clipboard, input
+        case pick, launch, windowCommand, menus, gesture, clipboard, input, files
     }
 
     enum Decision: Equatable {
@@ -464,6 +480,7 @@ enum LockPolicy {
         case .menuRequest: return .refuse(.menus)
         case .gesture: return .refuse(.gesture)
         case .clipboardText: return .refuse(.clipboard)
+        case .files(let cancels): return cancels ? .take : .refuse(.files)
         case .input(let letsGo): return takesInput(r, paired: paired) ? .take : (letsGo ? .letGo : .refuse(.input))
         case .menuSubscription, .clipboardSubscription, .other: return .take
         }
@@ -488,8 +505,9 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
-    /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
+    /// then, and offers no Paste), no `files` (it offers no file), no `desktopDisplays`, `desktopDisplay` or
+    /// `desktopDisplayNames` (one stop, the main display: no kind 47, and nothing of the Mac's screens),
+    /// `locked` true and, off
     /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
     /// were before this change.
     /// `offConsoleView`: the off-console view, for a device whose hello said it shows it
@@ -503,6 +521,7 @@ enum LockPolicy {
         l.desktopDisplays = nil
         l.desktopDisplay = nil
         l.desktopDisplayNames = nil
+        l.files = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         if view, r == .offConsole { l.windows = list.windows; l.offConsoleView = true }
@@ -690,6 +709,9 @@ enum LockPolicy {
         case .input:
             return "Locked: dropped " + (n == 1 ? "an input event" : "\(n) input events")
                 + "; only a paired device types at a locked Mac, and no device at one switched to another user."
+        case .files:
+            return "Locked: refused " + (n == 1 ? "a device's file transfer" : "\(n) file transfers from devices")
+                + "; files wait for this Mac to be unlocked."
         }
         return "Locked: refused \(what); devices see none of this Mac until it is unlocked."
     }

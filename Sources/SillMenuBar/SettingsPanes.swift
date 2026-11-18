@@ -162,6 +162,8 @@ private struct GeneralPane: View {
             ClipboardSection(shareClipboard: $settings.config.shareClipboard,
                              access: previewClipboardAccess ?? model.permissions.clipboardAccess,
                              allow: { model.permissions.allowClipboard() })
+            // Files from devices (FileHub, docs/files-plan.md §9): at once, no restart; off stops every transfer.
+            FilesSection(shareFiles: $settings.config.shareFiles, folder: StreamCoordinator.filesFolder(settings.config))
             if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
@@ -287,6 +289,35 @@ struct ClipboardSection: View {
             }
         } footer: {
             Footnote(ClipboardPolicy.Copy.macFootnote)
+        }
+    }
+}
+
+// MARK: Files
+
+/// Share files with devices (FileHub, docs/files-plan.md §9): the switch, where files from devices are kept
+/// (Downloads › Sill unless another folder is set), Show in Finder, and the footnote. Sill never opens or reveals
+/// a file by itself; Show in Finder is the Mac's person's own click. Choosing another folder comes later
+/// (the plan's Other Folder…); `filesFolder` already takes one.
+struct FilesSection: View {
+    @Binding var shareFiles: Bool
+    let folder: URL
+
+    var body: some View {
+        Section {
+            Toggle("Share files with devices", isOn: $shareFiles)
+            LabeledContent("Save files from devices in") {
+                HStack(spacing: 8) {
+                    Text(folder == FileStore.defaultDestination ? FilesCopy.defaultPlace : folder.lastPathComponent)
+                        .foregroundStyle(.secondary)
+                    Button("Show in Finder") {
+                        try? FileStore(destination: folder).prepare()
+                        NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    }
+                }
+            }
+        } footer: {
+            Footnote("A paired iPhone or iPad can send files to this Mac. Files from devices are marked as downloaded, so macOS checks them before they open. Never while this Mac is locked.")
         }
     }
 }

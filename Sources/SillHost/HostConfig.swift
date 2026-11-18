@@ -75,11 +75,23 @@ package struct HostConfig: Equatable, Sendable {
     /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on. Applied at once
     /// (`StreamCoordinator.setTarget`: the lock's gate takes it), never by a restart of its own.
     package var offConsoleView: Bool
+    /// Share files with devices (docs/files-plan.md, FileHub): a paired device sends files to this Mac, which
+    /// keeps them in `filesFolder`, marked as downloaded. On in `standard` and `app` (the plan's question 1:
+    /// every transfer is a person's act on a paired device, as the clipboard), and only on a host with an
+    /// identity (the CLI's plain door, which no device can pair with, takes none: `WindowList.files` is left
+    /// out there). The Mac's alone, like Share clipboard: absent from StreamSettings, HostSettingsChange,
+    /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on. Applied at once
+    /// (`StreamCoordinator.setTarget`): off stops every transfer.
+    package var shareFiles: Bool
+    /// Where files from devices are kept: a folder's path, nil for Downloads › Sill (FileStore.defaultDestination),
+    /// a folder Sill makes, so macOS asks nothing. The Mac's alone, as `shareFiles`.
+    package var filesFolder: String?
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
+                 shareFiles: Bool, filesFolder: String?) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -95,6 +107,8 @@ package struct HostConfig: Equatable, Sendable {
         self.shareClipboard = shareClipboard
         self.sendAudio = sendAudio
         self.offConsoleView = offConsoleView
+        self.shareFiles = shareFiles
+        self.filesFolder = filesFolder
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -113,7 +127,7 @@ package struct HostConfig: Equatable, Sendable {
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
-                                             offConsoleView: false)
+                                             offConsoleView: false, shareFiles: true, filesFolder: nil)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -171,6 +185,8 @@ package struct HostConfig: Equatable, Sendable {
         if shareClipboard != new.shareClipboard { parts.append("share clipboard \(onOff(shareClipboard)) → \(onOff(new.shareClipboard))") }
         if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
         if offConsoleView != new.offConsoleView { parts.append("off-console view \(onOff(offConsoleView)) → \(onOff(new.offConsoleView))") }
+        if shareFiles != new.shareFiles { parts.append("share files \(onOff(shareFiles)) → \(onOff(new.shareFiles))") }
+        if filesFolder != new.filesFolder { parts.append("files folder \(filesFolder == nil ? "Downloads/Sill" : "another") → \(new.filesFolder == nil ? "Downloads/Sill" : "another")") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 
