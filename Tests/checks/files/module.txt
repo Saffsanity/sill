@@ -1,0 +1,2 @@
+# Compiled as one module by ../module.py, with main.swift.
+Sources/StreamProtocol/*.swift

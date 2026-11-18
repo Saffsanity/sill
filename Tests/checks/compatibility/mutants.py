@@ -46,7 +46,8 @@ MUTANTS = [
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
     ("kind 34 as 36", "StreamMessage.swift", "case fileChunk = 34", "case fileChunk = 36"),
-    ("FileChunk offset read at wrong byte", "Clipboard.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),
+    ("FileChunk offset read at wrong byte", "Files.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),
+    ("kind 49 as 48", "StreamMessage.swift", "case fileTransfer = 49", "case fileTransfer = 48"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

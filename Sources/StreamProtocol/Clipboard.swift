@@ -38,34 +38,3 @@ public struct Clipboard: Codable, Hashable, Sendable {
     /// be more than 1 MiB as JSON, and then it is not sent.
     public static let maxTextBytes = 256 * 1024
 }
-
-/// A part of a file (kind 34, pull request #66's layout, kept from #189): the file's ID (`UInt32` BE),
-/// its name (`UInt16` BE length, then UTF-8), its whole size and this part's offset (`UInt64` BE each),
-/// then the bytes.
-public enum FileChunk {
-    public static let maxBytes = 512 * 1024
-
-    public static func pack(id: UInt32, name: String, total: UInt64, offset: UInt64, bytes: Data) -> Data {
-        let n = Data(name.utf8.prefix(1024))
-        var d = Data(capacity: 22 + n.count + bytes.count)
-        d.appendBigEndian(id)
-        d.appendBigEndian(UInt16(n.count))
-        d.append(n)
-        d.appendBigEndian(total)
-        d.appendBigEndian(offset)
-        d.append(bytes)
-        return d
-    }
-
-    public static func unpack(_ d: Data) -> (id: UInt32, name: String, total: UInt64, offset: UInt64, bytes: Data)? {
-        guard d.count >= 6 else { return nil }
-        let id = d.readBigEndian(UInt32.self, at: 0)
-        let n = Int(d.readBigEndian(UInt16.self, at: 4))
-        guard d.count >= 6 + n + 16,
-              let name = String(data: d.subdata(in: (d.startIndex + 6)..<(d.startIndex + 6 + n)), encoding: .utf8)
-        else { return nil }
-        let total = d.readBigEndian(UInt64.self, at: 6 + n)
-        let offset = d.readBigEndian(UInt64.self, at: 14 + n)
-        return (id, name, total, offset, d.subdata(in: (d.startIndex + 22 + n)..<d.endIndex))
-    }
-}

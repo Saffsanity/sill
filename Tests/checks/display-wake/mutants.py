@@ -46,6 +46,8 @@ MUTANTS = {
     "M24c the Desktop's next display said as a gesture": ("            case .nextDisplay: return .nextDisplay\n", "            case .nextDisplay: return .gesture\n"),
     "M24d the next display's words those of a gesture": ('case .nextDisplay: return "stepped the Desktop to the next display"',
                                                        'case .nextDisplay: return "made a trackpad gesture"'),
+    "M24e files offered are no person's (docs/files-plan.md)": ("        case .files:\n            return .files\n", "        case .files:\n            return nil\n"),
+    "M24f files offered said as input": ("        case .files:\n            return .files\n", "        case .files:\n            return .input\n"),
     # The device's own move after a stream change
     "M25 no window: the re-centre counts": (WINDOW, WINDOW.replace("now - changed < Self.recentre", "now - changed < 0")),
     "M26 the window 1 s": ("static let recentre: TimeInterval = 2", "static let recentre: TimeInterval = 1"),
