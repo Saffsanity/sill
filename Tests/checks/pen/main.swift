@@ -257,7 +257,7 @@ for (phase, down, up) in [(PenInput.hover, false, false), (PenInput.down, false,
     check(PenTablet.stillGoes(message(phase, sample(0.5, 0.5)), tipDown: false) == up, "nowhere to land, its tip up: \(phase) \(up ? "goes" : "is dropped")")
 }
 
-// MARK: The Mac's cursor: standard, or an app's own (CursorClass, kind 46)
+// MARK: The Mac's cursor: standard, or an app's own (CursorClass, kind 50)
 
 do {
     let standards: Set<Int> = [11, 22, 33]

@@ -14,10 +14,10 @@ device keeps working with Macs from the first public build on, or each says why
   the plain-TCP `_sill._tcp` door, which only development builds and the CLI without `--pairing`
   keep; the ALPNs `sill/1` and `sill-pair/1`, which every host offers for good at both doors
   (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
-  header; kinds 0–28, 32, 44, 45 and 46 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
+  header; kinds 0–28, 32, 44, 45 and 50 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
   Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture, Clipboard and
   Pen; 44, a device's keyframe request after its picture was interrupted, empty, which a host from
-  before skips; 45 an Apple Pencil's and 46 the cursor's kind, below; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
+  before skips; 45 an Apple Pencil's and 50 the cursor's kind, below; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
   below), inside `sill/1` at both doors (19 and 20 on their own `sill-pair/1` connection, the
   next bullet); the ping echo; a viewport (kind 9) within `ViewportBounds`, each side 1 to
   16384 points and a text scale 0.25 to 4 or none: every device build's is, a host from
@@ -70,7 +70,7 @@ device keeps working with Macs from the first public build on, or each says why
   or more, as the phases `hover`, `down`, `move`, `up`, `cancel` and `leave` with at most 32 samples
   (`PenInput.checked()` is what a host acts on), and a later generation says 2; kind 26's `seen`
   counts every input message the host read on that connection, kinds 8 and 45 (SessionLink's
-  `inputsOnSession` counts the same on the device); kind 46 (Viewport.swift's CursorKind, `standard`)
+  `inputsOnSession` counts the same on the device); kind 50 (Viewport.swift's CursorKind, `standard`)
   goes just before the kind 14 it describes, and a device that gets none takes the cursor as standard.
 - Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");

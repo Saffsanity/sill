@@ -13,7 +13,7 @@ import StreamProtocol
 /// fingerprint is the hotspot, the point size and the pixels of the smallest bitmap (a few KB);
 /// the PNG is only made when the shape actually changes, from the representation nearest 2×.
 ///
-/// Each shape also says whether it is one of macOS's standard cursors or an app's own (kind 46,
+/// Each shape also says whether it is one of macOS's standard cursors or an app's own (kind 50,
 /// CursorClass), sent just before it.
 @MainActor
 final class CursorShapeWatcher {

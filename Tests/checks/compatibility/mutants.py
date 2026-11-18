@@ -29,7 +29,7 @@ MUTANTS = [
     ("pencil 1 by default", "Switcher.swift", "clipboard: Int? = nil,\n                pencil: Int? = nil) {", "clipboard: Int? = nil,\n                pencil: Int? = 1) {"),
     ("pencil never stored", "Switcher.swift", "self.pencil = pencil", "self.pencil = nil"),
     ("kind 45 as 251", "StreamMessage.swift", "case pen = 45", "case pen = 251"),
-    ("kind 46 as 252", "StreamMessage.swift", "case cursorKind = 46", "case cursorKind = 252"),
+    ("kind 50 as 252", "StreamMessage.swift", "case cursorKind = 50", "case cursorKind = 252"),
     ("the cursor's kind under another name", "Viewport.swift", "    public var standard: Bool?\n    public init(standard: Bool?) { self.standard = standard }",
      "    public var isStandard: Bool?\n    public init(standard: Bool?) { self.isStandard = standard }"),
     ("a phase misspelt", "Pen.swift", 'public static let cancel = "cancel"', 'public static let cancel = "cancelled"'),

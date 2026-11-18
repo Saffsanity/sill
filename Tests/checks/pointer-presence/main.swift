@@ -59,10 +59,10 @@ for (portrait, layout) in layouts {
 }
 check(P.pencilShowsPointerByDefault == false && P().pencilShowsPointer == false, "Q2's default: no Pencil arrow")
 // This device, the Pencil hovering as a pen (kind 29): shown in every layout, Q2's flip or not, while
-// the Mac's cursor is an app's own (kind 46), so a drawing app's brush outline is under it; hidden
-// over a standard cursor, and when no kind 46 said (an older Mac); the tip landing makes it
+// the Mac's cursor is an app's own (kind 50), so a drawing app's brush outline is under it; hidden
+// over a standard cursor, and when no kind 50 said (an older Mac); the tip landing makes it
 // `.pencil` again, hidden.
-check(P().cursorIsAppOwn == false, "no kind 46 yet: a standard cursor, as far as the Pencil goes")
+check(P().cursorIsAppOwn == false, "no kind 50 yet: a standard cursor, as far as the Pencil goes")
 for (portrait, layout) in layouts {
     for flip in [false, true] {
         var p = presence(.here, own: ownAt, origin: .penHover, portrait: portrait)

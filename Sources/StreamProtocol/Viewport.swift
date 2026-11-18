@@ -138,11 +138,11 @@ public struct ClientStats: Codable, Hashable {
     }
 }
 
-/// Host → device (kind 46), sent just before each kind 14: whether that cursor is one of macOS's
+/// Host → device (kind 50), sent just before each kind 14: whether that cursor is one of macOS's
 /// standard cursors (the arrow, the I-beam, a hand, a resize arrow…) or an app's own (a drawing app's
 /// brush outline, a tool's cursor). A device shows a hovering Apple Pencil's pointer only over an
 /// app's own, so a brush preview is under the Pencil and an arrow never is (PointerPresence). A
-/// device that gets no kind 46 before a kind 14 (a Mac from before it) takes that cursor as standard.
+/// device that gets no kind 50 before a kind 14 (a Mac from before it) takes that cursor as standard.
 /// Optional for later fields, as HostSettings.swift's rules say.
 public struct CursorKind: Codable, Equatable, Sendable {
     public var standard: Bool?

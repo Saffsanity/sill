@@ -470,7 +470,7 @@ final class StreamClient: ObservableObject {
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
-    /// On `queue`: the kind 46 just read, until the kind 14 it comes before.
+    /// On `queue`: the kind 50 just read, until the kind 14 it comes before.
     private var pendingCursorKind: CursorKind?
 
     /// What this device measured over the last second: frames, frame age and round trip. The
@@ -4636,7 +4636,7 @@ final class StreamClient: ObservableObject {
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
             DispatchQueue.main.async {
                 self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size)
-                // None before it (a Mac from before kind 46): a standard cursor, as far as the Pencil goes.
+                // None before it (a Mac from before kind 50): a standard cursor, as far as the Pencil goes.
                 let appOwn = kind?.standard == false
                 if self.presence.cursorIsAppOwn != appOwn { self.presence.cursorIsAppOwn = appOwn; self.renderPointer() }
             }

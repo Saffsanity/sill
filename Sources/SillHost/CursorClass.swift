@@ -1,6 +1,6 @@
 import Foundation
 
-/// Whether the Mac's current cursor is one of macOS's standard cursors or an app's own (kind 46,
+/// Whether the Mac's current cursor is one of macOS's standard cursors or an app's own (kind 50,
 /// CursorKind): a device shows a hovering Apple Pencil's pointer only over an app's own, a drawing
 /// app's brush outline, and never an arrow under the Pencil (docs/pencil-pressure-plan.md, Q1).
 /// Pure: CursorShapeWatcher reads the cursor and fingerprints it, this decides.
@@ -19,7 +19,7 @@ package enum CursorClass {
     /// whose widest is 10× its width: the window server's own arrow and I-beam carry 1×, 2×, 5× and
     /// 10×, and in a process without an NSApplication (the CLI) AppKit's copies of those two have no
     /// image to fingerprint. Anything else is an app's own; when unsure, so: the pointer then shows,
-    /// as it did before kind 46.
+    /// as it did before kind 50.
     package static func isStandard(fingerprint: Int, standards: Set<Int>, bitmapWidths: [Int], pointWidth: Double) -> Bool {
         if standards.contains(fingerprint) { return true }
         guard pointWidth > 0, bitmapWidths.count >= 4, let widest = bitmapWidths.max() else { return false }

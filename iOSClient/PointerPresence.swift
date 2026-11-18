@@ -35,7 +35,7 @@ import Foundation
 ///
 /// The last row is Hunter's (2026-10-14, docs/pencil-pressure-plan.md Q1): a Pencil hovering as a pen
 /// shows a drawing app's brush preview under it, and still no arrow, I-beam or hand anywhere else, as
-/// Q2 wants (the Mac says which, kind 46: `cursorIsAppOwn`). It hides as the tip lands (`.pencil`
+/// Q2 wants (the Mac says which, kind 50: `cursorIsAppOwn`). It hides as the tip lands (`.pencil`
 /// again: a stroke draws nothing under the tip) until the next hover.
 ///
 /// Nothing shows while nothing streams. The shape is kind 14's in every row. A value; main thread.
@@ -61,9 +61,9 @@ struct PointerPresence: Equatable {
     /// Q2: the Pencil draws no pointer, hovering or touching (the request, by its letter). True draws
     /// it again, in any layout (the harness's `-SillPencilPointer 1`).
     var pencilShowsPointer = PointerPresence.pencilShowsPointerByDefault
-    /// The Mac's current cursor is an app's own, not one of macOS's standard ones (kind 46 said
+    /// The Mac's current cursor is an app's own, not one of macOS's standard ones (kind 50 said
     /// `standard: false` for the kind 14 that made it the shape). False when nothing said so (a Mac
-    /// from before kind 46): a hovering Pencil then shows nothing, as Q2 has it.
+    /// from before kind 50): a hovering Pencil then shows nothing, as Q2 has it.
     var cursorIsAppOwn = false
     /// Q1: the trackpad's pointer stays until another input takes over: in the laptop layout it is the
     /// only way to aim a tap. A number of seconds hides it that long after the last finger lifts.

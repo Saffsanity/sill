@@ -657,7 +657,7 @@ package final class StreamCoordinator {
             }
         }
         cursorShapes.onChange = { [weak self] blob, standard in
-            // Whether it is a standard cursor goes first (kind 46), so a device applies both together.
+            // Whether it is a standard cursor goes first (kind 50), so a device applies both together.
             let now = Date().timeIntervalSince1970
             self?.server.broadcast(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
                                                  payload: Wire.encode(CursorKind(standard: standard))))
@@ -3697,7 +3697,7 @@ package final class StreamCoordinator {
                                       payload: Wire.encode(catalog.installedApps)), to: connection)
         }
         // The cursor's shape says what is under it: none while locked (the gate withholds it too), and
-        // whether it is a standard one (kind 46) just before it.
+        // whether it is a standard one (kind 50) just before it.
         if lockAllowed.pointer, let shape = cursorShapes.current {
             server.send(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
                                       payload: Wire.encode(CursorKind(standard: cursorShapes.currentIsStandard))), to: connection)
