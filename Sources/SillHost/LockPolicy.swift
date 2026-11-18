@@ -31,6 +31,12 @@ import StreamProtocol
 /// - The stream (`Restore`): what streamed at the lock comes back after the unlock.
 ///
 /// Unlocked, nothing is changed: the list is the one given, every request is taken, nothing is withheld.
+///
+/// The off-console view (docs/off-console-plan.md, issue #316): with the Mac's own switch, Show this account
+/// while another user is on the screen (`HostConfig.offConsoleView`), a Mac off console whose console's user
+/// says so (`consoleTaken`: never a notification or the session dictionary) shows the devices this session's
+/// own desktop and windows, to look at (`offConsoleView`, `offConsoleViewAllowed`), and nothing they send acts
+/// on it. The switch off, or any other reading, everything here is as before.
 /// Pure (Foundation, os and StreamProtocol's types), checked with swiftc (Tests/checks/lock-policy).
 enum LockPolicy {
     // MARK: The readings
@@ -157,6 +163,23 @@ enum LockPolicy {
     /// reading at once (and the settle for its unlock); after that only to confirm an unlock.
     static func readsSession(_ w: Witnesses) -> Bool {
         w.session == .notRead || wantsSessionRead(w)
+    }
+
+    // MARK: The off-console view (docs/off-console-plan.md)
+
+    /// Whether another user's session, the login window or nobody holds the console, by the console's own
+    /// witness (SCDynamicStore's State:/Users/ConsoleUser, watched and read at each look) or a test host's
+    /// file. Never by a notification (any process can post one: a spurious one must never show this session in
+    /// place of its lock screen) nor by the session dictionary (read at start and to confirm an unlock: a stale
+    /// "off console" could outlast the return to the console). An unread or unreadable witness: no.
+    static func consoleTaken(_ w: Witnesses) -> Bool {
+        w.console == .otherUser || w.console == .nobody || w.test == .offConsole
+    }
+
+    /// Whether the devices get the off-console view now: the Mac's switch on, the gate's reading established
+    /// and off console, and the console's own witness saying another session holds it (`consoleTaken`).
+    static func offConsoleView(reading r: Reading, established: Bool, consoleTaken: Bool, switchOn: Bool) -> Bool {
+        switchOn && established && r == .offConsole && consoleTaken
     }
 
     // MARK: The effective reading
@@ -299,9 +322,16 @@ enum LockPolicy {
         var wakeOnConnect: Bool
         /// A person's activity a device sends, once taken, declares it.
         var wakeOnActivity: Bool
+        /// The off-console view (docs/off-console-plan.md): what shows is only to look at.
+        var viewOnly = false
+        /// What acts on a window through Accessibility: raised and made key at a pick, sized by Aa, its
+        /// buttons pressed (kind 15), its app's menus read and chosen. Never in the off-console view.
+        var actsOnWindows: Bool { windows && !viewOnly }
     }
 
-    static func allowed(_ r: Reading) -> Allowed {
+    /// `offConsoleView`: the off-console view applies (the gate's `offConsoleView`); it changes only what off
+    /// console allows.
+    static func allowed(_ r: Reading, offConsoleView view: Bool = false) -> Allowed {
         switch r {
         case .unlocked:
             return Allowed(display: true, windows: true, appsAndIcons: true, launches: true, sound: true, clipboard: true,
@@ -312,11 +342,21 @@ enum LockPolicy {
                            clipboard: false, pointer: false, gestures: false, virtualDisplay: false, input: .paired,
                            wakeOnConnect: lockScreenStreams, wakeOnActivity: true)
         case .offConsole:
+            if view { return offConsoleViewAllowed }
             return Allowed(display: false, windows: false, appsAndIcons: false, launches: false, sound: false, clipboard: false,
                            pointer: false, gestures: false, virtualDisplay: false, input: .nobody,
                            wakeOnConnect: false, wakeOnActivity: false)
         }
     }
+
+    /// The off-console view: this session's own desktop and windows, their thumbnails, the icons and the
+    /// installed apps, to look at; nothing that acts (no input, launch, window's button, menu, gesture, raise or
+    /// size), and nothing that is the console's or reaches it: no sound (the whole Mac's, the other user's
+    /// too), no clipboard, no pointer or cursor shape (the console's), no virtual display (it would join the
+    /// other user's displays), no display activity (it would light their screen).
+    static let offConsoleViewAllowed = Allowed(display: true, windows: true, appsAndIcons: true, launches: false, sound: false,
+                                               clipboard: false, pointer: false, gestures: false, virtualDisplay: false, input: .nobody,
+                                               wakeOnConnect: false, wakeOnActivity: false, viewOnly: true)
 
     /// Whether a session's input lands (whole, downs too) at `r`. `paired`: its key is on the trust
     /// list now (the coordinator's `sessionPaired`).
@@ -338,7 +378,9 @@ enum LockPolicy {
     /// unless it streams at a locked screen), its thumbnails, icons and installed apps, its sound, its
     /// clipboard, its pointer and cursor shape. The window list, settings, the Mac's identity, the
     /// menus' answers (none has items while locked), pongs and ticks go as ever.
-    static func withheld(_ kind: StreamMessageKind, picture: Picture?, reading r: Reading) -> Bool {
+    static func withheld(_ kind: StreamMessageKind, picture: Picture?, reading r: Reading, offConsoleView view: Bool = false) -> Bool {
+        // The off-console view: its pictures, thumbnails, icons and apps go; nothing of the console's.
+        if view, r == .offConsole { return viewWithholds(kind) }
         guard r.locked else { return false }
         switch kind {
         case .frame, .parameterSets:
@@ -354,12 +396,24 @@ enum LockPolicy {
         }
     }
 
+    /// The off-console view's gate (`offConsoleViewAllowed`): the sound, the clipboard, the pointer and the
+    /// cursor shape; every picture (a window's, the display's, the placeholder's) and the catalog go.
+    static func viewWithholds(_ kind: StreamMessageKind) -> Bool {
+        switch kind {
+        case .audio, .clipboard, .cursorShape, .macPointer: return true
+        default: return false
+        }
+    }
+
     // MARK: A device's requests
 
     /// What a device asks, as the lock weighs it.
     enum Request: Equatable {
         /// Kind 6: a window, the Desktop or nothing.
         case pick(StreamSource)
+        /// Kind 47: the Desktop on the Mac's next display. Refused as a window pick is: it would show
+        /// another of the Mac's screens and move its pointer.
+        case nextDisplay
         /// Kind 7.
         case launch
         /// Kind 15: a window's traffic lights.
@@ -396,11 +450,15 @@ enum LockPolicy {
     /// `paired`: the session's key is on the Mac's trust list now. Locked, a pick of the Desktop (the
     /// placeholder, which a device asks for by itself) or of nothing is taken; input from whom the
     /// reading lets type; the subscriptions and the rest; nothing else.
-    static func decide(_ request: Request, reading r: Reading, paired: Bool) -> Decision {
+    static func decide(_ request: Request, reading r: Reading, paired: Bool, offConsoleView view: Bool = false) -> Decision {
+        // The off-console view: a pick is taken (a window to look at, as a restart: nothing raised); the rest
+        // as off console.
+        if view, r == .offConsole, case .pick = request { return .take }
         guard r.locked else { return .take }
         switch request {
         case .pick(.window): return .refuse(.pick)
         case .pick: return .take
+        case .nextDisplay: return .refuse(.pick)
         case .launch: return .refuse(.launch)
         case .windowCommand: return .refuse(.windowCommand)
         case .menuRequest: return .refuse(.menus)
@@ -411,18 +469,43 @@ enum LockPolicy {
         }
     }
 
+    /// A request judged at the reading it arrived at and at the reading now, the off-console view as it is
+    /// now, the stricter answer winning (`stricter`): nothing sent while the Mac read locked acts after an
+    /// unlock, and a pick sent at a locked screen is refused even if the view applies when it is handled. With
+    /// the view off it is `decide` at `restrictive(arrived, now)`.
+    static func decide(_ request: Request, arrived: Reading, now: Reading, paired: Bool, offConsoleView view: Bool = false) -> Decision {
+        stricter(decide(request, reading: arrived, paired: paired, offConsoleView: view),
+                 decide(request, reading: now, paired: paired, offConsoleView: view))
+    }
+
+    /// The stricter of two decisions: a refusal, then letting go of what is held, then taking it.
+    static func stricter(_ a: Decision, _ b: Decision) -> Decision {
+        if case .refuse = a { return a }
+        if case .refuse = b { return b }
+        return a == .letGo || b == .letGo ? .letGo : .take
+    }
+
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), `locked` true and, off console, `offConsole` true; unlocked, `list`
-    /// as it is, both left out, so the bytes are what they were before this change.
-    static func list(_ list: WindowList, reading r: Reading) -> WindowList {
+    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
+    /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
+    /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
+    /// were before this change.
+    /// `offConsoleView`: the off-console view, for a device whose hello said it shows it
+    /// (`Hello.offConsoleView`): the windows stay and `offConsoleView` says so; the displays stay out (one
+    /// stop: this session's main display). Any other device is sent the list without windows, as before.
+    static func list(_ list: WindowList, reading r: Reading, offConsoleView view: Bool = false) -> WindowList {
         guard r.locked else { return list }
         var l = list
         l.windows = []
         l.clipboard = nil
+        l.desktopDisplays = nil
+        l.desktopDisplay = nil
+        l.desktopDisplayNames = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
+        if view, r == .offConsole { l.windows = list.windows; l.offConsoleView = true }
         return l
     }
 
@@ -443,7 +526,9 @@ enum LockPolicy {
     /// coalesce (a lock and an unlock, or an unlock and a lock, both before it ran), and a select that
     /// finished in between started what `r` does not allow (a window or the display while locked; the
     /// placeholder while unlocked), or a locked list went out meanwhile.
-    static func reconciles(_ r: Reading, streams: Streams, lockedListSent: Bool) -> Bool {
+    static func reconciles(_ r: Reading, streams: Streams, lockedListSent: Bool, offConsoleView view: Bool = false) -> Bool {
+        // The off-console view: a window or the display fits it; the placeholder does not.
+        if view, r == .offConsole { return streams == .placeholder }
         if r.locked {
             switch streams {
             case .window: return true
@@ -480,8 +565,10 @@ enum LockPolicy {
         /// `select` was asked for `source` while `active` streams, at `r`. `pick`: a pick (a device's,
         /// the command line's, a launched app's first window), not a restart. Locked, a window becomes the
         /// Desktop and is what comes back; unlocked, a pick forgets what would have come back.
-        mutating func select(_ source: StreamSource, active: StreamSource, pick: Bool, reading r: Reading) -> Select {
-            guard r.locked else {
+        /// `offConsoleView`: the off-console view, where windows stream and a pick is a pick, as unlocked.
+        mutating func select(_ source: StreamSource, active: StreamSource, pick: Bool, reading r: Reading,
+                             offConsoleView view: Bool = false) -> Select {
+            guard r.locked, !(view && r == .offConsole) else {
                 if pick { comesBack = nil }
                 return .proceed
             }
@@ -558,7 +645,8 @@ enum LockPolicy {
 
     /// The line for a change of the effective reading; none for the first reading when it is unlocked
     /// (a host that starts on an unlocked Mac says nothing new).
-    static func line(_ c: Change) -> String? {
+    static func line(_ c: Change, offConsoleView view: Bool = false) -> String? {
+        if view, c.to == .offConsole { return offConsoleViewLine }
         switch c.to {
         case .unlocked:
             return c.from == nil ? nil : unlockedLine
@@ -570,6 +658,18 @@ enum LockPolicy {
     }
 
     static let unlockedLine = "Unlocked: this Mac's screen is unlocked; devices see its windows again."
+
+    /// Off console with the off-console view: at the change, and when the view starts while off console.
+    static let offConsoleViewLine = "Locked: another user, or the login window, is on this Mac's screen; devices see this session's own desktop and windows instead, but nothing they send reaches it until it is back."
+
+    /// At start with the switch on (one line; none with it off, so the output is what it was).
+    static let offConsoleViewStartLine = "Off-console view: while another user, or the login window, is on this Mac's screen, devices see this session's own desktop and windows, to look at."
+
+    /// The off-console view started (`view`) or ended while the Mac stayed off console: the switch turned on or
+    /// off, or the console's witness came to say, or no longer says, that another session holds it.
+    static func viewChangedLine(_ view: Bool) -> String {
+        view ? offConsoleViewLine : (line(Change(from: .screenLocked, to: .offConsole)) ?? "")
+    }
 
     /// The menus' note for a fetch or a choice refused while locked.
     static let menuNote = "The Mac is locked."
@@ -608,21 +708,50 @@ enum LockPolicy {
 /// change it (LockPolicy.Reader) and read on any queue: the network queue drops what `withholds` says
 /// from that moment, whatever the main actor is doing. A gate made unestablished reads off console
 /// until its first reading (SessionLock's); the server's own default never locks (its harnesses).
+///
+/// The off-console view (docs/off-console-plan.md) is the gate's too: beside the reading it keeps the Mac's
+/// switch (the coordinator's target, `setOffConsoleView`) and the console's own witness (SessionLock's every
+/// look, `setConsoleTaken`), so the server sends by the view from the moment either changes.
 final class LockGate: @unchecked Sendable {
-    private let state: OSAllocatedUnfairLock<(reading: LockPolicy.Reading, established: Bool)>
+    private struct State {
+        var reading: LockPolicy.Reading
+        var established: Bool
+        /// Show this account while another user is on the screen (`HostConfig.offConsoleView`).
+        var switchOn = false
+        /// LockPolicy.consoleTaken, as SessionLock last read it.
+        var consoleTaken = false
+        var view: Bool { LockPolicy.offConsoleView(reading: reading, established: established, consoleTaken: consoleTaken, switchOn: switchOn) }
+    }
+    private let state: OSAllocatedUnfairLock<State>
 
     init(_ reading: LockPolicy.Reading = .unlocked, established: Bool = true) {
-        state = OSAllocatedUnfairLock(initialState: (reading, established))
+        state = OSAllocatedUnfairLock(initialState: State(reading: reading, established: established))
     }
 
     var reading: LockPolicy.Reading { state.withLock { $0.reading } }
     var established: Bool { state.withLock { $0.established } }
     var locked: Bool { reading.locked }
+    /// The off-console view applies now (LockPolicy.offConsoleView).
+    var offConsoleView: Bool { state.withLock { $0.view } }
+    /// What the devices may see and do now: the reading, with the off-console view (LockPolicy.allowed).
+    var allowed: LockPolicy.Allowed { state.withLock { LockPolicy.allowed($0.reading, offConsoleView: $0.view) } }
 
-    func set(_ reading: LockPolicy.Reading) { state.withLock { $0 = (reading, true) } }
+    func set(_ reading: LockPolicy.Reading) { state.withLock { $0.reading = reading; $0.established = true } }
 
-    /// The server's rule (LockPolicy.withheld) at the reading now.
+    /// The Mac's switch: whether the view applied before and after.
+    @discardableResult
+    func setOffConsoleView(_ on: Bool) -> (was: Bool, now: Bool) {
+        state.withLock { s in let was = s.view; s.switchOn = on; return (was, s.view) }
+    }
+
+    /// The console's own witness (LockPolicy.consoleTaken): whether the view applied before and after.
+    @discardableResult
+    func setConsoleTaken(_ taken: Bool) -> (was: Bool, now: Bool) {
+        state.withLock { s in let was = s.view; s.consoleTaken = taken; return (was, s.view) }
+    }
+
+    /// The server's rule (LockPolicy.withheld) at the reading and the view now.
     func withholds(_ kind: StreamMessageKind, picture: LockPolicy.Picture? = nil) -> Bool {
-        LockPolicy.withheld(kind, picture: picture, reading: reading)
+        state.withLock { LockPolicy.withheld(kind, picture: picture, reading: $0.reading, offConsoleView: $0.view) }
     }
 }

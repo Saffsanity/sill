@@ -1,0 +1,5 @@
+# `gestures`
+
+**Checks:** which stroke on the device's glass goes silent (three fingers down before any has moved 24 pt, no button held, however slowly and beside a resting thumb), which of those arms (the three that landed last, within 0.15 s), how long the silence lasts (until the next stroke's first touch), and what the first lift of one of the three decides: each swipe at, under and over its distances, the flick, the axis rule both ways, the fingers moving together (a pinch led by the thumb, a grab, the Mac's thumb-and-three-finger pinch are no swipe), pinch and spread at their ratio, travel winning over a spread, a fourth finger (moving with them, against them, still), a fifth, a brief extra contact, a cancel, a swipe taken back, one decision a stroke; a Pencil's touch ending a finished stroke's silence; whether a decided gesture goes to the Mac (the switch, the Mac's `gestures`) and whether the Desktop is picked first; 5,000 random strokes against a model
+
+**Compiles:** `iOSClient/TrackpadGestures.swift`
