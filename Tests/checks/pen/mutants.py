@@ -87,12 +87,12 @@ MUTANTS = [
     ("an up with nowhere to land always goes", TABLET, "case PenInput.up, PenInput.cancel: return tipDown", "case PenInput.up, PenInput.cancel: return true"),
     ("a cancel with nowhere to land is dropped", TABLET, "case PenInput.up, PenInput.cancel: return tipDown", "case PenInput.up: return tipDown"),
     ("a leave with nowhere to land is dropped", TABLET, "case PenInput.leave: return true", "case PenInput.leave: return false"),
-    ("everything with nowhere to land goes", TABLET, "        default: return false\n        }\n    }\n}", "        default: return true\n        }\n    }\n}"),
+    ("everything with nowhere to land goes", TABLET, "        case PenInput.leave: return true\n        default: return false\n", "        case PenInput.leave: return true\n        default: return true\n"),
     # The device: a pen's stroke or the mouse's
     ("as a pen with the switch off", STROKES, MODE, "guard connected, let takes = hostPencil else { return false }"),
     ("as a pen when not connected", STROKES, MODE, "guard switchOn, let takes = hostPencil else { return false }"),
-    ("as a pen to a Mac that says 0", STROKES, "return takes >= generation", "return takes >= 0"),
-    ("as a pen only to this build's generation", STROKES, "return takes >= generation", "return takes == generation"),
+    ("as a pen to a Mac that says 0", STROKES, MODE + "\n        return takes >= generation", MODE + "\n        return takes >= 0"),
+    ("as a pen only to this build's generation", STROKES, MODE + "\n        return takes >= generation", MODE + "\n        return takes == generation"),
     ("a mouse's stroke tells the Mac of a pen", STROKES, "if mode == .pen { told = true }", "told = true"),
     ("a stroke's end forgets its mode", STROKES, "        let mode = stroke\n        stroke = nil\n", "        stroke = nil\n        let mode = stroke\n"),
     ("a stroke never ends", STROKES, "        let mode = stroke\n        stroke = nil\n", "        let mode = stroke\n"),
@@ -117,14 +117,8 @@ MUTANTS = [
     ("a time at the down written out, or one before it", STROKES, "t: ms.flatMap { $0 > 0.05 ? $0 : nil })", "t: ms)"),
     ("a move's readings reversed", STROKES, "chunk.map { sample($0, since: began) }", "chunk.reversed().map { sample($0, since: began) }"),
     ("an up's time dropped", STROKES, "PenInput(phase: phase, samples: [sample(reading, since: began)])", "PenInput(phase: phase, samples: [sample(reading, since: nil)])"),
-    ("the stroke's start not kept", STROKES, "        stroke = mode
-        strokeBegan = time
-", "        stroke = mode
-"),
-    ("the stroke's start kept after its end", STROKES, "        stroke = nil
-        strokeBegan = nil
-        checkAt", "        stroke = nil
-        checkAt"),
+    ("the stroke's start not kept", STROKES, "        stroke = mode\n        strokeBegan = time\n", "        stroke = mode\n"),
+    ("the stroke's start kept after its end", STROKES, "        stroke = nil\n        strokeBegan = nil\n        checkAt", "        stroke = nil\n        checkAt"),
     ("the surface going keeps the stroke's start", STROKES, "defer { stroke = nil; strokeBegan = nil; hovering = false; told = false; checkAt = nil }",
      "defer { stroke = nil; hovering = false; told = false; checkAt = nil }"),
     # The device: the leave
@@ -136,7 +130,7 @@ MUTANTS = [
     ("a leave leaves the Mac told", STROKES, LEAVE + "\n        told = false\n", LEAVE + "\n"),
     ("no wait before a leave", STROKES, "static let leaveDelay = 0.1", "static let leaveDelay = 0.0"),
     ("a hover's end checks nothing", STROKES, "        hovering = false\n        checkAt = now + Self.leaveDelay\n", "        hovering = false\n"),
-    ("a stroke's end checks nothing", STROKES, "        stroke = nil\n        checkAt = now + Self.leaveDelay\n", "        stroke = nil\n"),
+    ("a stroke's end checks nothing", STROKES, "        strokeBegan = nil\n        checkAt = now + Self.leaveDelay\n", "        strokeBegan = nil\n"),
     ("the surface going tells of nothing", STROKES, "told = false; checkAt = nil }\n        return told", "told = false; checkAt = nil }\n        return false"),
     ("the surface going keeps the Mac told", STROKES, "defer { stroke = nil; strokeBegan = nil; hovering = false; told = false; checkAt = nil }",
      "defer { stroke = nil; strokeBegan = nil; hovering = false; checkAt = nil }"),
