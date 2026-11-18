@@ -24,13 +24,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   host's LockPolicy) and image blob framing. `Viewport.swift` —
   `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
-  packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
+  packets, which never traps, and `recording`, true while the device records the
+  stream, display only, #284), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
   none, any other refused; what a device sends, `held`; and `whole`, a number
   for a log line as Int() printed it, without its trap; pure,
   `Tests/checks/viewport-bounds`).
   (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
-  `gestures`, `clipboard`, `keyRepeat`; `WindowInfo`, `AppInfo`, `StreamSource`) and
+  `gestures`, `clipboard`, `keyRepeat`, `recordings` (1: its menu and log say that
+  a device records the stream, #284); `WindowInfo`, `AppInfo`, `StreamSource`) and
   image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
@@ -104,7 +106,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   keyframe request (kind 44) with `HEVCEncoder.requestKeyframe`, at most one a
   second per connection, never a restart (a synthetic host ignores the first n
   with the TEST ONLY SILL_TEST_KEYFRAME_IGNORE=<n>, as a Mac from before kind 44
-  ignores every one), and writes `HostStatus`),
+  ignores every one), shows a device recording the stream (#284: its
+  `ClientStats.recording` into its `HostStatus` device, the log's lines by
+  `RecordingNotice`, `recordings` in every window list), and writes `HostStatus`),
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
@@ -304,7 +308,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size; `reconciles`; `Restore`, the window that comes back; the lines; and
   `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
-  `lockedMidSwitch` and `lockDecision`), `StillCapture` (SyntheticCapture.swift:
+  `lockedMidSwitch` and `lockDecision`), `RecordingNotice` (#284,
+  docs/recording-plan.md: a device recording the stream, as the Mac says it;
+  `generation`, said in every window list as `recordings`, a locked Mac's too;
+  each connection's log lines from its device's `ClientStats.recording`,
+  "Recording: ‹device› started recording the stream." and its stop, at most one
+  every 10 s with the changes in between counted in the next, and "left while
+  recording" as the connection closes; a courtesy the host acts on nothing for;
+  pure, `Tests/checks/recording-notice`; the menu's words are StatusText's:
+  the headline's subtitle "‹iPad› is recording the stream." and the device's row
+  starting "Recording · ", the bare app's preview samples `recording` and
+  `recording-two`), `StillCapture` (SyntheticCapture.swift:
   a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
@@ -571,7 +585,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
   and each second's frames with their kB (the encoder's output);
   `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
-  `--stop-read@T`, `--pairing-wanted@T`, `--keyframe@T` (kind 44); the remote door with `--tls
+  `--stop-read@T`, `--pairing-wanted@T`, `--keyframe@T` (kind 44), `--recording@T` and
+  `--recording-off@T` (its stats' `recording`, #284, a report at once; each list's `recordings=`,
+  `--expect=recordings=N`); the remote door with `--tls
   --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
   `--expect-tls-fail`, printing kinds 18, 20 and 22; pairing at home with
   `--pair-ask[=cable]`, `--then-code=FILE`, `--pair-hold=S`, `--pair-cancel`,
@@ -999,6 +1015,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
+  `StreamRecorder` (#284, addhumal's #303, merged as it is on the `recording` branch and being
+  rewritten by docs/recording-plan.md): the stream recorded on the device as a movie in
+  Documents/Sill Recordings, which Files shows as On My iPad › Sill › Sill Recordings (both
+  Info.plists' `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`); the panel's Record
+  Sound (`Sill.recordSound`, on) and Start or Stop Recording after Send Audio, the 3, 2, 1 count and
+  the light (`RecordingBadge`) over both stream screens, DEBUG `-SillRecordFor S`; pbxproj AE90/FE90.
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
