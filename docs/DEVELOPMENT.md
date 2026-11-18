@@ -1430,9 +1430,13 @@ chip until then; the console's "clipboard: …" lines say what happened.
 
 ## Files and photos
 
-Files go from a paired iPhone or iPad to the Mac (kinds 34 and 49; the plan is docs/files-plan.md, and this
-first part has the Mac's side and the protocol; the device's rows, pickers and chip come next, then the Mac's
-files to the device). On the Mac, Settings › General's "Share files with devices" (saved as `shareFiles`, on by
+Files go from a paired iPhone or iPad to the Mac (kinds 34 and 49; the plan is docs/files-plan.md: the Mac's
+receiving, the protocol and the device's sending are in; the drop on the picture and the Mac's files to the device
+come next). On the device, Settings › This iPad has Send Files to ‹Mac›… (the system's Files picker) and Send Photos
+to ‹Mac›… (the Photos picker, originals, no library access), and Sill is in other apps' share sheets for any file;
+the chip over the stream follows the transfer, with Cancel. The device's sender (`DeviceFiles`) reads each file in
+place 64 KiB at a time, and SessionLink hands a file's parts to the connection only into what the person's input,
+pings and stats leave. On the Mac, Settings › General's "Share files with devices" (saved as `shareFiles`, on by
 default, applied at once; `-SillSetAfter '<s> shareFiles=0'` in the bare app) and the CLI's `--no-files`; the CLI
 takes files only with an identity (`--pairing` or `--remote`), since files come only from a paired session. A
 device offers its files (kind 49 `offer`: names and sizes before any byte); the Mac answers by FilePolicy (off,
@@ -1452,6 +1456,9 @@ Headless (TEST ONLY, on a test host): a synthetic host keeps files in `$TMPDIR/s
 `--cancel-files@T`, `--raw49`, `--raw34`, `--expect-files=OP[:REASON]`) and prints each kind 49 but the
 acknowledgements. `python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]` runs the gates
 (docs/files-plan.md §12.2, H3 to H5) against synthetic `--pairing` hosts on loopback, each under a minute.
+`Tests/checks/device-files/run.sh` runs the device's sender against the Mac's own FileHub over loopback, with no host
+and no simulator. In the app's layout harness, `-SillFilesHost` and `-SillFiles` show the rows and the chip in each
+state (docs/BUILD-AND-RUN.md).
 
 ## The Mac's menus on the device
 

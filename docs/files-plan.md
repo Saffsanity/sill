@@ -801,3 +801,17 @@ The first building run (2026-11-18), draft pull request #391:
 - Next: the gates H2 to H5 recorded in the step file; then step 5 (the device's sending: DeviceFiles, the uplink
   ledger in SessionLink, the rows, the pickers, the chip), step 6 (the drop), and the second pull request (Mac to
   device).
+
+The second building run (2026-11-18):
+
+- Done: step 5, the device's sending: `DeviceFiles` (iOSClient, on `sill.files`) and its check `device-files` (the
+  plan's C3, against the Mac's own FileHub rather than a stand-in); the uplink ledger in SessionLink (`UplinkLedger`,
+  `sendFile`, `onRoom`; the overview's §2.3); `StreamClient+Files` (the session's glue, the background task, auto-lock
+  through `DeviceIdlePolicy.Uses.transfer`, the moves a transfer holds); the rows (in today's panel, before the
+  clipboard's; they move with This ‹device› into settings-pane's pane), `FilePickers` (Files and Photos), `FileChip`,
+  the share sheet (document type, a question on the stream, a line on the connect screen); `FilesCopy+Device.swift`
+  (the device's words, in the `files` check); the harness's `-SillFilesHost`, `-SillFiles`, `-SillSettingsScroll
+  files`. The pbxproj pairs A188-A18C / F188-F18C.
+- Not yet: `PictureDrop` and the rest of step 6; `Hello.files` and everything of the device's receiving (step 7);
+  §8.1's `PhotoSaver`; the status menu's card.
+- Next: step 6 (the drop), then the second pull request (Mac to device).
