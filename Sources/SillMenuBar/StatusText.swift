@@ -18,6 +18,8 @@ struct StatusPresentation: Equatable {
     struct Attention: Equatable, Identifiable {
         enum Action: Equatable {
             case allowScreenRecording, allowAccessibility, showRemoteAccess, showDevices
+            /// Settings › General, where the macOS firewall's line has the command that unblocks Sill.
+            case showGeneral
             /// "‹device› Wants to Pair": its window forward while it shows the code (`showing`), else
             /// a window opened on the Mac, asked by that device (its paired-style name).
             case pairingRequest(name: String, showing: Bool)
@@ -104,11 +106,19 @@ enum StatusText {
             attention.append(.init(title: "Devices Can’t Connect", subtitle: "Sill couldn’t use its key in your keychain.",
                                    action: .showDevices))
         }
+        // The macOS firewall blocks Sill (FirewallRule): its line and command are in Settings › General.
+        // Not beside the keychain's: with no home door there is nothing for the firewall to block.
+        let firewallBlocks = !homeDoorClosed ? s.firewall.flatMap(FirewallRule.Copy.menuSubtitle) : nil
+        if let firewallBlocks {
+            attention.append(.init(title: "Devices Can’t Connect", subtitle: firewallBlocks, action: .showGeneral))
+        }
 
         // The attention glyph means "Sill needs you". The test pattern needs no permission. A device
-        // waiting to pair and a closed home door need the user too; an older device is only news.
+        // waiting to pair, a closed home door and a firewall that blocks Sill need the user too; an
+        // older device is only news.
         let glyph: StatusGlyph.State
         if startupError != nil || isFailed(s.network) || remotePortTaken != nil || request != nil || homeDoorClosed
+            || firewallBlocks != nil
             || (!s.synthetic && !(permissions.screenRecording && permissions.accessibility)) {
             glyph = .attention
         } else if s.stream != nil {
@@ -208,15 +218,19 @@ enum StatusText {
         let count = s.devices.count
         if count > 0 {
             let who = count == 1 ? (s.devices[0].name.map(shortName) ?? "a Device") : "\(count) Devices"
-            if s.stream != nil { return ("Streaming to \(who)", nil) }
+            // The off-console view (docs/off-console-plan.md): what the devices see is not this Mac's screen.
+            if s.stream != nil { return ("Streaming to \(who)", s.offConsoleView ? offConsoleViewSubtitle : nil) }
             let connected = count == 1 ? (s.devices[0].name.map(shortName) ?? "Device") : "\(count) Devices"
-            return ("\(connected) Connected", "Pick a window on the device to start streaming.")
+            return ("\(connected) Connected", s.offConsoleView ? offConsoleViewSubtitle : "Pick a window on the device to start streaming.")
         }
         if case .advertising(let name) = s.network {
             return ("Waiting for a Device", "Open Sill on your iPhone or iPad. This Mac appears as “\(name)”.")
         }
         return ("Waiting for a Device", "Registering on the local network…")
     }
+
+    /// Under the header while the off-console view applies (HostStatusSnapshot.offConsoleView).
+    static let offConsoleViewSubtitle = "Another user is on this Mac’s screen. Devices see this account, and can’t click or type in it."
 
     private static func isFailed(_ n: HostStatusSnapshot.Network) -> Bool {
         if case .failed = n { return true }

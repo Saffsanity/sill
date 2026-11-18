@@ -15,10 +15,22 @@ extension StreamClient {
     /// A viewport that leaves `localCursor` nil (StreamScreen measures panels and knows nothing
     /// about pointers) gets the current flag filled in, so a rotation or an Aa change never puts
     /// the Mac cursor back under a client-drawn one. Remembers what went out in `lastViewport`.
-    /// A no-op on the wire without a connection. Main thread.
+    /// Held to what a Mac takes (ViewportBounds.held: each side 1 to 16384 points, a scale 0.25 to 4),
+    /// so no Mac refuses it; a panel not measured yet sends nothing. A no-op on the wire without a
+    /// connection. Main thread.
     func sendViewport(_ v: Viewport) {
-        var v = v
+        guard var v = ViewportBounds.held(v) else { return }
         if v.localCursor == nil { v.localCursor = localCursorState.wanted }
+        // While the picture shows only in Picture in Picture (#291), a layout iOS makes for its snapshots
+        // must not resize the Mac's window or restart its stream: the viewport waits for Sill's window
+        // (`pictureBackInSill`), the last one sent standing meanwhile.
+        if shownOnlyInPictureInPicture {
+            viewportHeld = v
+            #if DEBUG
+            print("viewport: held while the picture shows only in Picture in Picture")
+            #endif
+            return
+        }
         lastViewport = v
         send(.viewport, payload: Wire.encode(v))
     }
@@ -35,7 +47,8 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.localCursorState.pending = nil
-            guard var v = self.lastViewport, (v.localCursor ?? false) != wanted else { return }
+            // The newest viewport: one held while the picture showed only in Picture in Picture, else the last sent.
+            guard var v = self.viewportHeld ?? self.lastViewport, (v.localCursor ?? false) != wanted else { return }
             v.localCursor = wanted
             self.sendViewport(v)
         }
@@ -45,6 +58,22 @@ extension StreamClient {
 
     private static let localCursorDebounce: TimeInterval = 0.2
 
+    /// Whether Aa's ruler has Off (`TextScale.offersOff`): not while the window streams on the Mac's
+    /// virtual display, by the running stream the Mac reports while a window streams (Virtual Display
+    /// can be on while the window streams in place), else by the Mac's Virtual Display setting as this
+    /// device knows it. Every bar's Aa asks here.
+    var textScaleOffersOff: Bool {
+        TextScale.offersOff(virtualDisplay: settings.displayed?.virtualDisplay, streaming: active,
+                            onVirtualDisplay: settings.host?.stream?.onVirtualDisplay)
+    }
+
+    /// Whether Aa can be used now: only while a window streams (`TextScale.selectable`; Noah,
+    /// 2026-10-29). Every bar's Aa asks here, and the harness's `-SillScaleOpen`.
+    var textScaleSelectable: Bool { TextScale.selectable(streaming: active) && !lockView }
+
+    /// What VoiceOver hears after a dimmed Aa: in the off-console view no window is sized (docs/off-console-plan.md).
+    var textScaleUnavailableHint: String { lockView ? LockedMac.viewTextScaleHint : TextScale.unavailableHint }
+
     /// The session ended (`tearDown`): its last viewport and a pointer re-send still waiting go with
     /// it, so neither reaches the next connection, whose stream screen sends a viewport of its own
     /// once connected. The pointer flag stays, for that viewport to carry. Main thread.
@@ -52,6 +81,7 @@ extension StreamClient {
         localCursorState.pending?.cancel()
         localCursorState.pending = nil
         lastViewport = nil
+        viewportHeld = nil
     }
 
     /// The rate the host should stream at for this device: the panel's ceiling (120 on ProMotion

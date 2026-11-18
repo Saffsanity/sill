@@ -12,11 +12,14 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
                      virtualDisplay, directWireless, sendAudio; booleans accept 1/0/true/false/on/off
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
+  --raw9=JSON@T      send this literal kind 9 payload (a viewport) T seconds in (split on the last @);
+                     a host refuses one outside 1 to 16384 points a side or 0.25 to 4 for its scale,
+                     and one that does not decode, with a "Viewport from … refused" line
   --pick=SRC@T       a timed selectSource: none, desktop or window:ID
   --stats            send ClientStats (kind 12) once a second as device "sillclient", so the host
                      logs a name for this client
-  --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
-                     and virtualDisplayAvailable; away from home, docs/remote-bundle-plan.md: its
+  --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent,
+                     virtualDisplayAvailable and sessionPaired; away from home, docs/remote-bundle-plan.md: its
                      away's homeBitrate, homeCaptureScale, awayBitrate, awayCaptureScale,
                      thisConnectionAway and awayRunning, missing when the host sent no away; and
                      linkState, its link's state, "fine" when it sent none): prints EXPECT ok or
@@ -28,12 +31,20 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      bytes (and none of them); the host should close the connection
   --flood=N          before the session, open N connections to the same door and reset each one
                      (SO_LINGER 0) before sending a byte
+  --ping=S           a ping (kind 10) every S seconds (0.05 to 10; 1 when left out): 0.25 pings as a
+                     device does, which a host's key repeat needs to hear a held key's device (KeyRepeat)
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
   --keyframe@T       send kind 44 (a keyframe request, empty: a device's picture was interrupted) T
                      seconds in: the host's encoder makes a keyframe, which every client gets (the
                      summary's "keyframes at"), at most one request a second per connection
+  --next-display@T   send kind 47 (the Desktop button's tap while the Desktop streams, empty) T seconds in:
+                     the Desktop moves to the Mac's next stop (DesktopDisplays). Only to a --synthetic host on
+                     this Mac, whose stops are SILL_TEST_DISPLAYS' (any other host would step this Mac's own
+                     displays and move its pointer). Each window list prints desktopDisplays=, desktopDisplay=
+                     and names= when it says them; --expect=desktopDisplay=N (or none) and desktopDisplays=N
+                     check the last list's at exit
   --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
                      swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
   --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
@@ -46,6 +57,8 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --hello-delay=S    with --hello (or --audio): send it S seconds after the connection is up (TLS
                      included), and nothing before it: a device whose hello a host's device gate waits
                      for while the Mac changes something (its gate gives up after 2 s)
+  --off-console-view the hello (sent even without --hello) says offConsoleView 1: this client shows a Mac's
+                     off-console view (docs/off-console-plan.md); lists print offConsoleView=1 when they say it.
   --audio            the hello (sent even without --hello) lists "aac-eld": this client plays the Mac's
                      sound, so a host with Send Audio on sends it kind 43. Each format (type 1) is printed
                      on one line; the packets (type 2) are counted each second (aud=) with their seq
@@ -74,6 +87,9 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
   --move=X,Y@T       a pointer move (kind 8) to the frame fractions X, Y, T seconds in
   --tap=X,Y@T        a move there, a left down and a left up: three kind 8 messages
   --key=USAGE@T      a key down and up (a USB HID usage, no modifiers): two kind 8 messages
+  --key=USAGE,HOLD@T the down T seconds in and the up HOLD seconds later (a held key, which the Mac
+                     repeats: KeyRepeat); meanwhile pings go four a second, as a device sends them (a
+                     host repeats a key only while its device is heard from)
   --input=JSON@T     this literal kind 8 payload T seconds in (split on the last @), as written: an
                      input the flags above do not make, such as a scroll or a scroll gesture's phase
                      ({"scrollGesture":{"_0":"began","x":0.5,"y":0.5}}); one kind 8 message
@@ -90,6 +106,19 @@ The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printe
   --copy-bytes=N@T   the same with N bytes of "x" (the cap is 262,144)
   --raw32=JSON@T     this literal kind 32 payload T seconds in (split on the last @), as written:
                      {"stop":true} ends the subscription
+A locked Mac (docs/locked-mac-plan.md): the window list's line ends in locked=1 while the host says it is
+locked (its lists then have no windows and no clipboard), and offConsole=1 while it says another user, the
+login window or nobody is on its console; and these send what a locked Mac refuses:
+  --dump=DIR         every message's arrival in DIR/messages.tsv (seconds in, kind, keyframe, bytes, and a
+                     window list's windows, locked and offConsole), each parameter sets payload as
+                     DIR/ps-N.bin and each keyframe as DIR/key-N.bin (N in arrival order, and DIR/index.tsv
+                     says which parameter sets each keyframe came after): Scripts/lock-check/frames.swift
+                     decodes them
+  --raw7=JSON@T      this literal kind 7 payload (an app launch) T seconds in; its bundleID must start with
+                     me.saffer.sill.test., which no app has, so an unlocked host launches nothing either
+  --raw15=JSON@T     this literal kind 15 payload (a window's traffic light, {"id":N,"action":"close"}) T
+                     seconds in, only to a --synthetic host on this Mac; one without SILL_TEST_NO_SCREEN lists
+                     this Mac's windows and would press the button of the one with that id
   --expect=clipboard=TEXT  (with --expect's other keys, or alone) at exit, the last kind 32's text;
                      clipboard=none: none came
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
@@ -131,32 +160,36 @@ same clock when both run on one Mac).
 Once a second it prints the frames, their payload in kB (the encoder's output), ticks, cursor
 shapes and the last ping's round trip. Every kind 16 (host settings) is printed on one line with
 its arrival time; dw= is Direct Wireless
-(1, 0, or - when the host did not report it: an older host); away= (only when the host sent it) is
+(1, 0, or - when the host did not report it: an older host); paired= is sessionPaired, whether this
+session's key is on the Mac's trust list, the one kind of session it takes Direct Wireless from (1, 0,
+or - from a host before 2026-10-29); away= (only when the host sent it) is
 h:HOME_BITRATE/SCALE,a:AWAY_BITRATE/SCALE,this=1|0,run=1|0, and link= (only while the host reports
 the link behind or stalled) STATE,withheld=N,bitrate=B,carried=KBPS|-,suggested=B/SCALE|-. Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
-with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
+with status 2 (--raw17, --raw9 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",43:"audio"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "persistent", "virtualDisplayAvailable",
-             "thisConnectionAway", "awayRunning"}
+             "thisConnectionAway", "awayRunning", "sessionPaired"}
 # What --set may send: HostSettingsChange's seven fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio"}
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState", "clipboard"} | AWAY_KEYS
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
+# The Desktop's stops (DesktopDisplays), from the last window list: a number, or none for a list without it.
+LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
+TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -183,6 +216,8 @@ def value(k, v):
         return v
     if k == "clipboard":
         return None if v == "none" else unescape(v)
+    if k in LIST_KEYS:
+        return None if v == "none" else number(v, k)
     if k in ("captureScale", "homeCaptureScale", "awayCaptureScale"):
         f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
     return number(v, k)
@@ -216,6 +251,14 @@ def usage(text):
     u = number(text, "--key")
     if not 0 <= u <= 65535: raise ValueError(f"--key: a HID usage from 0 to 65535, got {u}")
     return u
+
+def held_key(text):
+    """--key's USAGE[,HOLD]: the usage, and how long it is held (None: down and up at once)."""
+    u, comma, hold = text.partition(",")
+    if not comma: return usage(u), None
+    h = number(hold, "--key's HOLD", float)
+    if not (h == h and 0 < h < 3600): raise ValueError(f"--key: HOLD is seconds, more than 0, got {hold!r}")
+    return usage(u), h
 
 def synthetic_listener(port):
     """Whether every process listening on this Mac's TCP `port` is a --synthetic host (lsof, ps): the only
@@ -457,17 +500,18 @@ flags = [a for a in args if a.startswith("--")]
 # order given. Every body is parsed here, before connecting, so a bad one fails at once instead of
 # after the stream has started.
 events = []
+holds = []     # (from, to) seconds in: a key held (--key=USAGE,HOLD@T), while pings go four a second
 try:
     if not pos: raise ValueError("no PORT (usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...])")
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display") and text: raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -487,12 +531,20 @@ try:
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
                           else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
-                          else usage(text) if name == "key" else text)
-            events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
+                          else held_key(text) if name == "key" else text)
+            at_t = number(t, f"--{name}'s @T", float)
+            if name == "key" and parsed[1] is not None:
+                # A held key: its down now and its up HOLD seconds later, pinging as a device meanwhile.
+                events.append((at_t, i, name, text, (parsed[0], "down")))
+                events.append((at_t + parsed[1], i, name, text, (parsed[0], "up")))
+                holds.append((at_t, at_t + parsed[1]))
+            else:
+                events.append((at_t, i, name, text, (parsed[0], None) if name == "key" else parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
+                       "--off-console-view",
                        "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -501,6 +553,8 @@ try:
     def valued(name, default=None):
         return next((a.partition("=")[2] for a in flags if a.startswith(f"--{name}=")), default)
     host = valued("host", "127.0.0.1")
+    dump_dir = valued("dump")
+    if dump_dir is not None: os.makedirs(dump_dir, exist_ok=True)
     device = unescape(valued("device")) if valued("device") is not None else None
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
     flood = number(valued("flood"), "--flood") if valued("flood") else 0
@@ -538,6 +592,8 @@ try:
         if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
         if hp: number(hp, "--hello's protocol")
     hello_delay = number(valued("hello-delay"), "--hello-delay", float) if valued("hello-delay") else 0
+    ping_every = number(valued("ping"), "--ping", float) if valued("ping") else 1
+    if not (ping_every == ping_every and 0.05 <= ping_every <= 10): raise ValueError("--ping=S: seconds from 0.05 to 10")
     if hello_delay and hello_arg is None and "--audio" not in flags: raise ValueError("--hello-delay needs --hello or --audio")
     if hello_delay < 0: raise ValueError("--hello-delay must be 0 or more")
     # Input reaches only a host that never posts it: a --synthetic host on this Mac (every one is a
@@ -551,6 +607,23 @@ try:
     if any(e[2] in ("gesture", "raw28") for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--gesture and --raw28 only go to a --synthetic host on this Mac, which posts no gesture; nothing on port {port} is one.")
+    # A step likewise: a --synthetic host steps through its SILL_TEST_DISPLAYS and moves nothing; any other
+    # host would step this Mac's own displays and move its pointer to the next one's centre.
+    if any(e[2] == "next-display" for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--next-display only goes to a --synthetic host on this Mac; nothing on port {port} is one.")
+    # A launch is real on any host (a --synthetic one too): only a bundle no app has.
+    for e in events:
+        if e[2] == "raw7":
+            try:
+                bundle = json.loads(e[3]).get("bundleID", "")
+            except (ValueError, AttributeError):
+                bundle = ""
+            if not isinstance(bundle, str) or not bundle.startswith("me.saffer.sill.test."):
+                raise ValueError("--raw7's bundleID must start with me.saffer.sill.test. (no app has one), so nothing is ever launched.")
+    if any(e[2] == "raw15" for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--raw15 only goes to a --synthetic host on this Mac; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -567,6 +640,10 @@ elif hello_arg is not None:
 plays_audio = "--audio" in flags
 if plays_audio:
     hello = dict(hello if hello is not None else {"device": device}, audio=["aac-eld"])
+# --off-console-view: this client shows a Mac's off-console view (the hello says offConsoleView 1, as a device from
+# 0.6.1 on: docs/off-console-plan.md), so a host with the switch on sends it the view's list (windows, offConsoleView).
+if "--off-console-view" in flags:
+    hello = dict(hello if hello is not None else {"device": device}, offConsoleView=1)
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -579,7 +656,8 @@ if flood:
 mac_pin = None
 if pair_hold is not None:
     # A pairing connection still pending: TLS up (ALPN sill-pair/1), then silence. The host's
-    # admission deadline (10 s) or a Direct Wireless change may close it first.
+    # deadline for its kind 19 (4 s after the handshake, 10 s at most from accept, a TLS door's
+    # DoorPolicy.deadline) or a Direct Wireless change may close it first.
     ensure_identity(identity_dir)
     hs, _ = tls_connect("sill-pair/1", b64u_decode(pin_arg) if pin_arg and pin_arg != "none" else None)
     t_hold = time.time(); closed_at = None
@@ -670,6 +748,7 @@ def describe(d):
     note = d.get("virtualDisplayNote")
     dw = "-" if st.get("directWireless") is None else b(st.get("directWireless"))   # "-": an older host
     au = "-" if st.get("sendAudio") is None else b(st.get("sendAudio"))             # "-": a host without sound
+    sp = "-" if d.get("sessionPaired") is None else b(d.get("sessionPaired"))       # "-": a host before 2026-10-29
     away = d.get("away"); link = d.get("link")
     dash = lambda x: "-" if x is None else x
     extra = ""
@@ -681,12 +760,17 @@ def describe(d):
         extra += (f" link={link.get('state')},withheld={link.get('withheldPerSecond')},bitrate={link.get('bitrate')},"
                   f"carried={dash(link.get('carriedKbps'))},suggested={suggested}")
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
-            f"vd={b(st.get('virtualDisplay'))} dw={dw} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
+            f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
             + (f" audioNote={d['audioNote']!r}" if d.get("audioNote") else "") + extra)
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
+# --dump: what arrived when, and the parameter sets and keyframes themselves (a locked Mac's tests).
+dump_log = open(os.path.join(dump_dir, "messages.tsv"), "w") if dump_dir is not None else None
+dump_index = open(os.path.join(dump_dir, "index.tsv"), "w") if dump_dir is not None else None
+dump_ps = 0; dump_keys = 0
+if dump_log is not None: dump_log.write(f"# t0 {t0:.6f}\n"); dump_log.flush()    # this run's start, epoch seconds
 token = 2 if "--menus" in flags else 1; last_state = None; settings_msgs = 0
 # The Mac's menus: the last top level (its version and titles), every title an answer listed by id,
 # and what each token asked for (a fetch's id, a press's id).
@@ -701,6 +785,7 @@ def menu_line(it):
     return t
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
 clipboards = []        # every kind 32's text, in order (--expect=clipboard checks the last)
+last_list = None       # the last window list (--expect=desktopDisplay checks it)
 # The Mac's sound (kind 43): packets this second, and in all; each epoch's next seq; gaps; the arrival
 # times of the first and the last packet; each packet's age (arrival minus its stamp: the same clock
 # when the host runs on this Mac).
@@ -717,6 +802,8 @@ def fire(e, now):
         s.sendall(msg(17, json.dumps(change).encode())); print(f"  sent change {json.dumps(change)} at {at}")
     elif name == "raw17":
         s.sendall(msg(17, text.encode())); print(f"  sent raw kind 17 {text} at {at}")
+    elif name == "raw9":
+        s.sendall(msg(9, text.encode())); print(f"  sent raw kind 9 {text} at {at}")
     elif name == "pick":
         s.sendall(msg(6, json.dumps(parsed).encode())); print(f"  sent pick {text} at {at}")
     elif name == "fps-after":
@@ -729,6 +816,8 @@ def fire(e, now):
         s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
     elif name == "keyframe":
         s.sendall(msg(44)); print(f"  sent kind 44 (keyframe request) at {at}")
+    elif name == "next-display":
+        s.sendall(msg(47)); print(f"  sent kind 47 (next display) at {at}")
     elif name == "fetch":
         mid, n, ftitle = parsed
         ftitle = ftitle if ftitle is not None else menu_titles.get(mid)
@@ -751,7 +840,13 @@ def fire(e, now):
         s.sendall(pointer_input("move", *parsed) + pointer_input("leftDown", *parsed) + pointer_input("leftUp", *parsed))
         print(f"  sent tap {text} (move, down, up) at {at}")
     elif name == "key":
-        s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
+        u, part = parsed
+        if part is None:
+            s.sendall(key_input(u, True) + key_input(u, False)); print(f"  sent key {u} (down, up) at {at}")
+        else:
+            s.sendall(key_input(u, part == "down")); print(f"  sent key {u} {part} at {at}")
+            if part == "down":
+                global nextping; nextping = min(nextping, now + 0.25)   # a device's next ping is at most 0.25 s off
     elif name == "input":
         s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
     elif name == "gesture":
@@ -763,13 +858,20 @@ def fire(e, now):
         s.sendall(msg(32, body)); print(f"  sent clipboard text, {len(parsed.encode())} bytes ({len(body)} of JSON) at {at}")
     elif name == "raw32":
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
+    elif name in ("raw7", "raw15"):
+        s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
-    while events and now - t0 >= events[0][0]:
-        fire(events.pop(0), now)
+    try:
+        while events and now - t0 >= events[0][0]:
+            fire(events.pop(0), now)
+    except OSError as e:
+        print(f"send failed at {now - t0:.2f}s: {e}"); break
     try:
         if pinging and now >= nextping:
-            s.sendall(msg(10, struct.pack(">d", now))); nextping = now + 1
+            # Four a second while a key is held, as a device pings (StreamClient.pingInterval), else one.
+            s.sendall(msg(10, struct.pack(">d", now)))
+            nextping = now + (min(0.25, ping_every) if any(a <= now - t0 < b for a, b in holds) else ping_every)
         if pinging and stats and now >= nextstats:
             s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
     except OSError as e:
@@ -781,6 +883,7 @@ while time.time() - t0 < dur:
         continue
     # Wake in time for the next timed send (a few ms matter for the race checks).
     wait = 0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now))
+    if (holds or ping_every < 1) and pinging: wait = min(wait, max(0.001, nextping - now))    # pings on time
     s.settimeout(wait)
     try:
         chunk = s.recv(1 << 20)
@@ -795,6 +898,21 @@ while time.time() - t0 < dur:
         payload = buf[14:14+ln]; buf = buf[14+ln:]
         name = KIND.get(kind, str(kind)); bump(name); served = True
         if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13, 26, 43): first_kinds.append(kind)
+        if dump_log is not None and kind not in (11, 13):
+            at = time.time() - t0
+            extra = ""
+            if kind == 2:
+                try:
+                    d = json.loads(payload)
+                    extra = f"\twindows={len(d.get('windows', []))} locked={1 if d.get('locked') else 0} offConsole={1 if d.get('offConsole') else 0} offConsoleView={1 if d.get('offConsoleView') else 0} active={json.dumps(d.get('active'))}"
+                except ValueError:
+                    extra = "\tundecodable"
+            elif kind == 0:
+                dump_ps += 1; open(os.path.join(dump_dir, f"ps-{dump_ps}.bin"), "wb").write(payload); extra = f"\tps-{dump_ps}.bin"
+            elif kind == 1 and key:
+                dump_keys += 1; open(os.path.join(dump_dir, f"key-{dump_keys}.bin"), "wb").write(payload); extra = f"\tkey-{dump_keys}.bin"
+                dump_index.write(f"key-{dump_keys}.bin\tps-{dump_ps}.bin\t{at:.3f}\n"); dump_index.flush()
+            dump_log.write(f"{at:.3f}\t{kind}\t{key}\t{ln}{extra}\n"); dump_log.flush()
         if kind == 1:
             frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
@@ -808,8 +926,15 @@ while time.time() - t0 < dur:
             rtt = (time.time() - struct.unpack(">d", payload)[0]) * 1000; rtts.append(rtt)
         elif kind == 2:
             d = json.loads(payload)
+            last_list = d
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
-                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else ""))
+                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
+                  + (f" desktopDisplays={d['desktopDisplays']}" if "desktopDisplays" in d else "")
+                  + (f" desktopDisplay={d['desktopDisplay']}" if "desktopDisplay" in d else "")
+                  + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
+                  + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
+                  + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
@@ -930,13 +1055,16 @@ if expect is not None:
     if "clipboard" in expect:
         want = expect.pop("clipboard"); got = clipboards[-1] if clipboards else None
         if got != want: problems.append(f"clipboard: want {want!r}, got {got!r} ({len(clipboards)} received)")
+    for k in sorted(LIST_KEYS & set(expect)):
+        want = expect.pop(k); got = (last_list or {}).get(k)
+        if got != want: problems.append(f"{k}: want {want}, got {got}" + ("" if last_list is not None else " (no window list)"))
     if not expect:
         pass
     elif last_state is None:
         problems.append("no settings received")
     else:
         for k, want in expect.items():
-            if k in ("persistent", "virtualDisplayAvailable"): got = last_state.get(k)
+            if k in ("persistent", "virtualDisplayAvailable", "sessionPaired"): got = last_state.get(k)
             elif k in AWAY_KEYS: got = (last_state.get("away") or {}).get(k)
             elif k == "linkState": got = (last_state.get("link") or {}).get("state", "fine")
             else: got = last_state.get("settings", {}).get(k)

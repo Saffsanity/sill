@@ -611,10 +611,16 @@ struct Model {
     /// For what the model's first version did not have (full-screen answers, windows that cannot be
     /// resized), so each session keeps its windows and steps.
     var side: RNG
+    /// Which of two devices sends each viewport (Aa's Off, issue #179): its own generator, so `rng`'s
+    /// steps and `side`'s draws stay what they were before it.
+    var devices: RNG
     var ledger = WindowRestore.Ledger<CGWindowID>()
     var active: Source = .none
     var panel: CGSize? = nil
     var scale: CGFloat? = nil
+    /// Each device's last viewport scale (the coordinator's `fitScales`): Aa going from a scale to Off
+    /// on the device that had one puts the fitted window back (TextScale.endsFit, issue #179).
+    var fitScales: [Int: CGFloat] = [:]
     var vd = false
     var staged: (id: CGWindowID, home: CGRect)? = nil
     var encoderSize: CGSize? = nil
@@ -633,6 +639,7 @@ struct Model {
         self.seed = seed
         rng = RNG(s: seed)
         side = RNG(s: seed ^ 0x5EED_5EED)
+        devices = RNG(s: seed ^ 0xDE71_CE5)
         mac.fullScreenWritesDone = side.chance(0.5)
         mac.dice = RNG(s: side.next())
         let kinds = [AppKind(minSize: S(200, 150), grid: 1, late: false), AppKind(minSize: S(700, 450), grid: 1, late: false),
@@ -934,7 +941,22 @@ struct Model {
             let scales: [CGFloat?] = [nil, 0.5, 0.75, 1, 1.25, 1.5]
             panel = panels[rng.int(panels.count)]
             scale = scales[rng.int(scales.count)]
-            log.append("viewport \(panel!) at \(scale.map { "\($0)" } ?? "nil")")
+            // One of two devices (`devices`, so each session keeps its steps): the host's viewport is
+            // the last one's, and only the device whose own scale it was can end a fit by going to Off.
+            let device = devices.int(2)
+            let previous = fitScales[device]
+            fitScales[device] = scale
+            log.append("viewport \(panel!) at \(scale.map { "\($0)" } ?? "nil") from device \(device)")
+            // The coordinator's `.viewport`: Aa set to Off by the device that had a scale puts the
+            // windows Sill sized back now (`restoreFits`), and a window put back is looked at again at
+            // once (`catalog.refreshWindows`), so the stream restarts at its own size, unfitted.
+            if previous != nil && scale == nil {
+                note(ledger.isEmpty ? "Off with nothing fitted" : "Off with a window fitted")
+                restoreFits(keeping: nil, why: "off")
+                poll()
+            } else if previous == nil, scale == nil, !ledger.isEmpty {
+                note("no scale from a device that had none: the fit stays")
+            }
             if case .window(let a) = active {
                 if vd, staged?.id == a { _ = mac.put(a, at: CGRect(origin: Mac.virtualDisplay.origin, size: S((panel!.width / (scale ?? 1)).rounded(), (panel!.height / (scale ?? 1)).rounded()))) }
                 else { fit(a) }       // the encoder keeps its size: the next poll restarts
@@ -964,7 +986,7 @@ struct Model {
                 if case .window = active { select(active) }
             }
         case 82..<88:
-            log.append("last device left"); panel = nil; scale = nil
+            log.append("last device left"); panel = nil; scale = nil; fitScales = [:]
             if active != .none { select(.none) }
         default:
             break
@@ -999,7 +1021,8 @@ for n in 0..<sessions {
 let needed = ["first fit", "re-fit", "fit refused", "fit: full screen", "fit: no answer", "read-back failed", "person resized from an edge",
               "compound changes between fits", "re-fit after a resize from an edge", "entering full screen, off the list",
               "leaving full screen, off the list", "kept streaming off the list", "stop during a full-screen transition",
-              "went back after leaving full screen while it streamed", "stop: switch", "stop: desktop", "stop: none", "stop: quit", "stop: gone", "decision: whole", "decision: moved", "decision: resized", "decision: full screen", "decision: home", "decision: settle",
+              "went back after leaving full screen while it streamed", "stop: switch", "stop: desktop", "stop: none", "stop: quit", "stop: gone",
+              "stop: off", "Off with a window fitted", "Off with nothing fitted", "no scale from a device that had none: the fit stays", "decision: whole", "decision: moved", "decision: resized", "decision: full screen", "decision: home", "decision: settle",
               "staged: with a home", "staged: as found", "stage released", "poll restart"]
 for k in needed { check((globalSeen[k] ?? 0) > 0, "model: never came up: \(k)") }
 print("window-restore: the model, \(sessions) sessions: " + needed.map { "\($0) \(globalSeen[$0] ?? 0)" }.joined(separator: ", "))

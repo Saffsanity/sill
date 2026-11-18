@@ -1,0 +1,5 @@
+# `catalog-windows`
+
+**Checks:** which on-screen windows the catalog lists, the tiles in a device's window strip (#114): an app's window by its owner (none, or the window server's nameless one), its layer (the desktop's icons, the wallpaper, widgets, the Dock's, the menu bar's), its size (100 and 101 points each way) and its process (Sill's own); the helpers' windows left out: LayerProbeParent in any case, macOS's own interface whatever the title (each of the six owners, in any case, never an identifier that only starts or ends with one; the open and save panel service and other Apple helpers stay listed), a tool's untitled window (no title, an empty one, spaces, a newline and a tab; a tool's titled window and an app's untitled ones stay); this Mac's list as a read-only probe saw it on macOS 27.0.1 (the same seven tiles as before and no line; the probe's own window left out, with its line); Stage Manager's strip (four tiles before, none now, one line); the lines, once per owner and none for what was never a tile; 20,000 seeded random windows against the rule written out
+
+**Compiles:** `Sources/SillHost/CatalogWindows.swift`

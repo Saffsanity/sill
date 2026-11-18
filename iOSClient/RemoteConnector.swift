@@ -199,8 +199,8 @@ final class RemoteConnector {
         guard !finished else { return }
         finished = true
         staggerItem?.cancel(); wholeItem?.cancel()
-        let worst = RemoteDialPolicy.worst(results.map(\.0)) ?? .noAnswer
-        onFailed?(Failed(failure: worst, candidate: results.first { $0.0 == worst }?.1 ?? candidates.first))
+        let outcome = RemoteDialPolicy.failed(results, candidates: candidates)
+        onFailed?(Failed(failure: outcome.failure, candidate: outcome.candidate))
     }
 
     /// Network.framework's error as the policy reads it.

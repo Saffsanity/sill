@@ -28,6 +28,19 @@ Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
 and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
 and you can also build it from source (below).
 
+From 0.6.2 on, Sill for Mac updates itself from Settings › General with Update Now, or by
+itself when you turn on Automatically update Sill (off unless you do; it installs
+only while no iPhone or iPad is connected). Either way it checks a new version two
+ways before installing it: Apple's signature and notarization for Sill's
+developer, and the release signed with Sill's own update key.
+
+To try the next version before it ships: Sill for iPhone and iPad has a
+[public beta on TestFlight](https://testflight.apple.com/join/6v7nqyn3), and Sill for Mac
+has [nightly builds](https://github.com/Saffsanity/sill/releases/tag/nightly) on
+GitHub, notarized like a release but not supported. Your devices stay paired
+(a nightly uses the release's identity). Sill offers a nightly as an update only
+with Use nightly builds on: otherwise the release above is the one to use.
+
 ## Screenshots
 
 These are the iPad screenshots from the App Store; on iPhone and iPhone Duo,
@@ -39,7 +52,7 @@ Sill has layouts of its own.
 
 ## Requirements
 
-- A Mac with Apple silicon, on macOS 14 or later.
+- A Mac with Apple silicon or an Intel processor, on macOS 14 or later.
 - An iPhone or iPad with iOS 17 or iPadOS 17 or later.
 - On your Mac, Sill asks for Screen Recording, to show your windows, and
   Accessibility, to click, scroll and type for you and to move and size the
@@ -74,6 +87,9 @@ Sill has layouts of its own.
   Three fingers swipe and pinch as on a Mac's trackpad: Mission Control, App
   Exposé, the Spaces, Apps and Show Desktop, through the keyboard shortcuts
   your Mac has for them.
+  Pinch the picture to zoom it, up to 5×, around the point between your
+  fingers; two fingers move a zoomed picture, and a pinch all the way out
+  shows the whole picture again.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes
@@ -82,9 +98,9 @@ Sill has layouts of its own.
   picture; with it off, once you set the window's text size with Aa.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
-  Sill sends what you copied on your device to your Mac's clipboard, where you
-  press ⌘V. Sill never reads your device's clipboard by itself, and copies a
-  password manager marks as concealed stay on your Mac.
+  Sill pastes what you copied on your device where your Mac's cursor is (with
+  Paste on … Right Away off, it only goes to your Mac's clipboard, where you
+  press ⌘V). Sill never reads your device's clipboard by itself.
 - **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
   Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
   your iPhone or iPad, turns it off and on. Sill for Mac captures the sound of
@@ -96,6 +112,9 @@ Sill has layouts of its own.
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
   sits on the fold.
+- **The Desktop** on a Mac with more than one screen: tap Desktop while it
+  shows to step to the next screen, starting from your main one. The button
+  shows which screen is up.
 - **The menus** of the app you use reach your device too: in the iPad's own
   menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
   Sill for Mac reads each menu from the app as you open it and chooses the
@@ -105,6 +124,9 @@ Sill has layouts of its own.
   with its screen as your last session with it ended. The picture stays on
   your device until you remove it or forget the Mac. The button beside
   "Connect to a Mac" lists them instead, and Sill remembers which you chose.
+- **A short tour** shows Sill's controls the first time your device shows a
+  Mac's picture, and once more after an update that adds controls, with
+  what's new marked New; Take the Tour, in the settings panel, shows it again.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
@@ -125,7 +147,9 @@ Sill has layouts of its own.
   Access on. A device away from home gets a quality of its own, Low at Standard
   resolution until you pick another there or in Sill's settings, so a slow
   connection never starts at your home quality; your home quality comes back
-  as soon as a device at home connects. When your device comes home and your
+  as soon as a device at home connects. A device that reaches your Mac through
+  a relay or tunnel running on the Mac itself, such as a userspace Tailscale
+  node or an SSH tunnel, counts as away too. When your device comes home and your
   network lists your Mac, the session moves to your network by itself.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
@@ -136,7 +160,9 @@ Sill has layouts of its own.
   Mac's screen. The window goes back to its own size and place when Sill stops
   showing it: you pick another window or the Desktop, your last device
   disconnects, or you quit Sill. With the virtual display off, a window you
-  moved on your Mac meanwhile keeps its new place.
+  moved on your Mac meanwhile keeps its new place, and Aa starts at Off, which
+  leaves the window as it is: slide Aa back to Off and a window Sill resized
+  goes back at once. Aa sizes a window, so it's dimmed while the Desktop shows.
 - **The virtual display**, on unless you turn it off in the Sill menu or in
   Sill's Settings on your Mac, or in the settings panel of Sill on your iPhone
   or iPad, moves the window you stream onto a display of
@@ -163,13 +189,23 @@ version number for each release. With Sill for Mac 0.3.1 or earlier,
 connections on your local network, over the cable and over Direct Wireless
 Connection are not encrypted, and anything that reaches your Mac there can
 connect without pairing: update it.
+Nightly builds: every night main changes, a notarized Sill for Mac built from it
+goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/tag/nightly),
+and Sill for iPhone and iPad to TestFlight's testers. A nightly is tested less
+than a release and can break, and going back from a nightly Sill for Mac to the
+release keeps its settings and paired devices.
+Or turn on Use nightly builds in Sill for Mac's Settings › General (0.6.2 or later): Sill then
+offers each night's build too, built and signed by GitHub from Sill's newest code with nobody
+looking at it first. A nightly installs only when you click Update Now; Automatically update Sill
+installs releases only. A nightly is offered the release it led up to once that is out.
 
 ## Tips
 
 Sill is free, with no ads, no tracking and no subscription. If it is useful to
 you, a tip through [GitHub Sponsors](https://github.com/sponsors/Saffsanity)
 helps pay for the developer account. A tip unlocks nothing: every feature is
-free.
+free. Who sponsors Sill, who has contributed, and how to join
+them: [getsill.app/contribute](https://getsill.app/contribute).
 
 ## Building from source
 
@@ -225,7 +261,8 @@ Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about five minutes and with no device.
 Contributions are accepted under the project's license. Please report a
 security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
-public issue.
+public issue. These rules, with the sponsors and the contributors, are at
+[getsill.app/contribute](https://getsill.app/contribute).
 
 ## License
 

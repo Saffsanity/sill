@@ -1,7 +1,8 @@
 #!/bin/bash
 # Away from home on the host (docs/remote-bundle-plan.md §5): HostConfig's away pair (standard,
 # validated(), changes(to:), effective(away:)), DeviceSettings' streamSettings(away:), applyingAway and
-# accepted, and AwayPolicy (who is away, when the away quality is the target, its two log lines).
+# accepted (Direct Wireless only from a paired session at home, and `paired`: 2026-10-29), and
+# AwayPolicy (who is away, when the away quality is the target, its two log lines).
 # Compiled as one module with StreamProtocol's HostSettings.swift (build.sh).
 #   Tests/checks/away-quality/run.sh             compile and run the check
 #   Tests/checks/away-quality/run.sh --mutants   one-line mutants of those files; each must fail it

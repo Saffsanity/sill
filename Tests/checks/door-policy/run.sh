@@ -2,7 +2,9 @@
 # DoorPolicy (Sources/SillHost), who each door admits: both doors, each origin, each ALPN, Require
 # pairing on and off, paired or not, a window or not; the ask rule's six steps in order; what the
 # device gate's hold is judged by again (afterGate); which hosts take the test hooks
-# (docs/home-pairing-plan.md §4.2).
+# (docs/home-pairing-plan.md §4.2); the places waiting for admission (Places: what waiting costs, the
+# backoffs by address and by IPv6 /64, the places kept for known addresses), with a model of the
+# security scan's attack (2026-10-18, finding 9) against the rule before and this one.
 # Compiled with the files in module.txt as one module (../module.py drops their `import StreamProtocol`).
 #   Tests/checks/door-policy/run.sh             compile and run the check
 #   Tests/checks/door-policy/run.sh --mutants   one-line mutants of DoorPolicy.swift; each must fail it

@@ -1,0 +1,5 @@
+# `stream-zoom`
+
+**Checks:** the stream picture's pinch zoom (issue #65; Noah's decisions of 2026-10-19 and 2026-10-20): 1× to 5×, a pinch's step keeping the point of the picture under the fingers' last midpoint under their midpoint now, the zoomed picture always covering its pane, the whole picture only all the way out (no snap on a slight pinch out; the lift within 2 % of it), a pane of another size keeping the zoom and the point at its middle, the mapping a touch and a scroll go through and its inverse, what shows; who a stroke on the picture belongs to (`Stroke`): one finger the Mac's, two at 1× the Mac's scroll unless they pinch first (their spacing more than their midpoint, before or as the finger pan begins), any two on a zoomed picture the picture's, a decided stroke keeping its owner to its last finger (no scroll from a pinch's fingers, no zoom from a scroll's), three fingers the gesture's with the picture back as the stroke found it; 20,000 random strokes (the PR's own nine cases and seven mutants, #196, among them)
+
+**Compiles:** `iOSClient/StreamZoom.swift`

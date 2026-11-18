@@ -127,6 +127,20 @@ before); a window still listed (a pick that failed), nothing: the person's to re
 10 s of the last automatic request (as before), so a Mac that cannot start the Desktop is asked at
 most every 10 s, as it already was at its next window list. No host change.
 
+Since 2026-10-28 (branch `idle-display-refresh`; the black screen in sill-handoff's triage,
+glitch-wired-black-2026-10-28.md): those 10 s only defer, for the device's own request. Sill.app
+could not start the Desktop the iPad asked for on its first list (a display gone while no device
+was connected), its next lists came 0.18 and 0.25 s after the request, within the spacing, and no
+list came after: nothing asked again and the panel stayed black. Now a list within the spacing that
+says nothing streams, after the device's own request and with no choice of the person's since (a
+pick, a launch, a pick made again after a move), sets one re-check when the spacing ends
+(`autoDesktop`'s `askIn`), which asks only while nothing streams still, nobody chose and no other
+automatic request went out (`autoDesktopRecheck`): a Desktop that failed is asked for once more 10 s
+after, a Mac that keeps failing every 10 s, never faster, and a Desktop the Mac stopped within the
+spacing is asked for when it ends. A window that closes within it is left as before. On the host,
+the catalog looks at the displays again before it builds a capture from an old look, and a failed
+Desktop start tries once more (`Sources/SillHost/CatalogLook.swift`).
+
 ### 4. The words
 
 - site/support.html, "Your Mac isn’t listed" (outside the Remote Access markers, which stay as they

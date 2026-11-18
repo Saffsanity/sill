@@ -3,6 +3,7 @@ import CoreVideo
 import CoreMedia
 import CoreGraphics
 import ImageIO
+import CoreText
 
 /// `SillHost --synthetic`: a moving test pattern stands in for ScreenCaptureKit, so the encoder,
 /// its software fallback and the network path can be exercised without Screen Recording.
@@ -20,6 +21,10 @@ import ImageIO
 /// that looks like one, for photographs of the device (docs/iphone-duo-plan.md). A picture that does
 /// not load gives the pattern, with one line.
 ///
+/// TEST ONLY: `label` (the coordinator's, under SILL_TEST_DISPLAYS: "display 2 of 3 (DELL U2723QE)") is
+/// drawn in the top-left corner of every frame, white on black, so a photo or a look at the device shows
+/// which test stop the Desktop is on (DesktopDisplaysHook).
+///
 /// TEST ONLY: `SILL_TEST_STILL_AFTER=<s>` delivers no frame from s seconds after a capture starts, as
 /// a window that stopped changing (ScreenCaptureKit sends a frame only when it repaints): what a
 /// device got last is all it gets until a keyframe is asked for, which the encoder makes from the
@@ -34,6 +39,9 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         return String(raw.dropFirst("picture:".count))
     }()
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    /// What the next `start` draws on its frames (TEST ONLY, SILL_TEST_DISPLAYS); nil for nothing. Set by
+    /// the main actor while stopped.
+    var label: String?
     private let queue = DispatchQueue(label: "sill.synthetic", qos: .userInteractive)
     private var timer: DispatchSourceTimer?
     private var pool: CVPixelBufferPool?
@@ -42,6 +50,8 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
     private var startedAt: TimeInterval = 0
     /// The picture's planes at the frame's size (`SILL_TEST_PATTERN=picture:`), nil for the pattern.
     private var picture: SyntheticPicture?
+    /// `label`'s luma, drawn once at `start`, nil for none.
+    private var drawnLabel: SyntheticLabel?
 
     func start(width: Int, height: Int, fps: Int) {
         timer?.cancel()
@@ -52,8 +62,9 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
         let picture = Self.picturePath.flatMap { SyntheticPicture(path: $0, width: width, height: height) }
         if let path = Self.picturePath, picture == nil { print("Synthetic capture: \(path) did not load; the pattern instead (SILL_TEST_PATTERN)") }
+        let drawn = label.flatMap { SyntheticLabel(text: $0, frameHeight: height) }
         queue.async { [weak self] in
-            self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture
+            self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture; self?.drawnLabel = drawn
             self?.startedAt = ProcessInfo.processInfo.systemUptime
         }   // ordered before the timer's first tick
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -84,6 +95,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         CVPixelBufferLockBaseAddress(pb, [])
         let w = CVPixelBufferGetWidthOfPlane(pb, 0), h = CVPixelBufferGetHeightOfPlane(pb, 0)
         if let picture, picture.fill(pb) {
+            drawnLabel?.draw(into: pb)
             CVPixelBufferUnlockBaseAddress(pb, [])
             Stats.shared.bump("cap.complete")
             onFrame?(pb, CMClockGetTime(CMClockGetHostTimeClock()))
@@ -110,9 +122,112 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         if let uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1) {
             memset(uv, 128, CVPixelBufferGetBytesPerRowOfPlane(pb, 1) * CVPixelBufferGetHeightOfPlane(pb, 1))
         }
+        drawnLabel?.draw(into: pb)
         CVPixelBufferUnlockBaseAddress(pb, [])
         Stats.shared.bump("cap.complete")
         onFrame?(pb, CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+}
+
+/// TEST ONLY (SILL_TEST_DISPLAYS): a line of text as luma, white on a black box, drawn once with Core Text
+/// a tenth of the frame's height tall, then copied into each frame's top-left corner (its chroma stays the
+/// pattern's grey).
+private struct SyntheticLabel {
+    let width: Int, height: Int
+    let luma: [UInt8]
+
+    init?(text: String, frameHeight: Int) {
+        let size = CGFloat(max(12, frameHeight / 10))
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, size, nil)
+        let attributes: [CFString: Any] = [kCTFontAttributeName: font, kCTForegroundColorFromContextAttributeName: true]
+        guard let attributed = CFAttributedStringCreate(nil, text as CFString, attributes as CFDictionary) else { return nil }
+        let line = CTLineCreateWithAttributedString(attributed)
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let pad = Int(size / 3)
+        let width = (Int(textWidth.rounded(.up)) + 2 * pad + 1) & ~1
+        let height = (Int((ascent + descent).rounded(.up)) + 2 * pad + 1) & ~1
+        guard width > 0, height > 0, width <= 16_384,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        context.setFillColor(gray: 0.06, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(gray: 1, alpha: 1)
+        context.textPosition = CGPoint(x: CGFloat(pad), y: CGFloat(pad) + descent)
+        CTLineDraw(line, context)
+        guard let data = context.data else { return nil }
+        // A bitmap context's memory runs top to bottom, as the frame's does (SyntheticPicture reads it so too).
+        let bytes = data.bindMemory(to: UInt8.self, capacity: width * height)
+        self.width = width; self.height = height
+        self.luma = Array(UnsafeBufferPointer(start: bytes, count: width * height))
+    }
+
+    /// Into `pb`'s luma plane (its base address locked), at the top-left corner, clipped to the frame.
+    func draw(into pb: CVPixelBuffer) {
+        guard let y = CVPixelBufferGetBaseAddressOfPlane(pb, 0) else { return }
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0)
+        let w = min(width, CVPixelBufferGetWidthOfPlane(pb, 0)), h = min(height, CVPixelBufferGetHeightOfPlane(pb, 0))
+        guard w > 0, h > 0 else { return }
+        luma.withUnsafeBytes { src in
+            for row in 0 ..< h { memcpy(y.advanced(by: row * stride), src.baseAddress! + row * width, w) }
+        }
+    }
+}
+
+/// A locked Mac's placeholder (LockPolicy, docs/locked-mac-plan.md): one black frame, made here and given
+/// to the encoder at the start and once more half a second later, then nothing. No ScreenCaptureKit and
+/// nothing of the Mac: the frame is zeros. Its keyframe replaces every device's last picture, an older
+/// device's too; a device that connects later gets it from the encoder's keyframe request, which encodes
+/// the last frame again. `onFrame` is set by the main actor while stopped; the rest lives on `queue`.
+final class StillCapture: @unchecked Sendable {
+    var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    private let queue = DispatchQueue(label: "sill.still", qos: .userInitiated)
+    /// Bumped by each start and stop, so a late second delivery of an older one does nothing.
+    private var generation = 0
+
+    func start(width: Int, height: Int) {
+        queue.async { [self] in
+            generation += 1
+            let mine = generation
+            guard let frame = Self.black(width: width, height: height) else {
+                print("Placeholder: could not make a \(width)×\(height) frame")
+                return
+            }
+            deliver(frame)
+            queue.asyncAfter(deadline: .now() + 0.5) { [self] in if generation == mine { deliver(frame) } }
+        }
+    }
+
+    /// Returns once nothing more is delivered, so no late frame reaches the next encoder.
+    func stop() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            queue.async { [self] in
+                generation += 1
+                c.resume()
+            }
+        }
+    }
+
+    private func deliver(_ frame: CVPixelBuffer) {
+        Stats.shared.bump("cap.placeholder")
+        onFrame?(frame, CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+
+    /// Full-range 4:2:0, the test pattern's format: luma 0, chroma 128 (black).
+    private static func black(width: Int, height: Int) -> CVPixelBuffer? {
+        let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
+        var pb: CVPixelBuffer?
+        guard CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, attrs as CFDictionary, &pb) == kCVReturnSuccess,
+              let pb else { return nil }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let y = CVPixelBufferGetBaseAddressOfPlane(pb, 0) {
+            memset(y, 0, CVPixelBufferGetBytesPerRowOfPlane(pb, 0) * CVPixelBufferGetHeightOfPlane(pb, 0))
+        }
+        if let uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1) {
+            memset(uv, 128, CVPixelBufferGetBytesPerRowOfPlane(pb, 1) * CVPixelBufferGetHeightOfPlane(pb, 1))
+        }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
     }
 }
 

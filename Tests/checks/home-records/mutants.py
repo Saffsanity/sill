@@ -42,5 +42,13 @@ M = [
      "        return Data(\"0\".utf8)\n"),
     ("require pairing: an empty signature saved", H, "        guard let signature = sign(offMessage(macID: macID)), !signature.isEmpty else { return nil }",
      "        guard let signature = sign(offMessage(macID: macID)) else { return nil }"),
+    ("applyingLink: over a record a kind 18 refreshed (#140)", S, "        guard mac.infoIssuedAt == 0 else { return mac }\n", ""),
+    ("applyingLink: the link's addresses not taken (#140)", S, "        if !kept.isEmpty { next.addresses = kept }\n", ""),
+    ("applyingLink: unfiltered addresses (#140)", S, "        if !kept.isEmpty { next.addresses = kept }", "        if !kept.isEmpty { next.addresses = addresses }"),
+    ("applyingLink: an empty list taken (#140)", S, "        if !kept.isEmpty { next.addresses = kept }", "        next.addresses = kept"),
+    ("applyingLink: the link's port not taken (#140)", S, "        if (1...65535).contains(port) { next.remotePort = port }\n        return next\n    }\n}",
+     "        return next\n    }\n}"),
+    ("applyingLink: any port taken (#140)", S, "        if (1...65535).contains(port) { next.remotePort = port }\n        return next\n    }\n}",
+     "        next.remotePort = port\n        return next\n    }\n}"),
 ]
 sys.exit(0 if module.mutate("home-records", M, sys.argv[1]) else 1)

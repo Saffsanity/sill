@@ -65,7 +65,9 @@ struct PhonePortraitLayout: Equatable {
     /// From row 1 to the drawer and the Settings panel, which hang under it.
     static let panelGap: CGFloat = 8
     /// The Aa ruler's finger travel per detent at most, and `TextScaleControl.sliderInset`, the room
-    /// either side of its four detent spans.
+    /// either side of its four detent spans: the ruler's frame shows two detents either side of the
+    /// thumb (`TextScaleControl.detentsEachSide`), whatever the detents (Off, since issue #179, is a
+    /// sixth that slides in as the finger nears it).
     static let maxRulerStep: CGFloat = 36
     static let rulerInset: CGFloat = 30
     static let rulerSpans: CGFloat = 4

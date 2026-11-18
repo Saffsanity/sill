@@ -1,6 +1,6 @@
 #!/bin/bash
 # AskLimits (Sources/SillHost/PairingWindow.swift), the limits on a device's asks to pair at home: 10
-# minutes of quiet by key and by address, 3 device-opened windows in any 10 minutes, the test
+# minutes of quiet by key and by address (an IPv6 one by its /64), 3 device-opened windows in any 10 minutes, the test
 # override (docs/home-pairing-plan.md §4.2, §4.7).
 # Compiled with the files in module.txt as one module (../module.py drops their `import StreamProtocol`).
 #   Tests/checks/ask-limits/run.sh             compile and run the check

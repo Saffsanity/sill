@@ -1,0 +1,12 @@
+# Harness photos: a name, then the app's launch arguments (ContentView's harness contract, CLAUDE.md's
+# "Debug harness"). Every case has -SillLayout and nothing that dials a host; --wait=S sets one photo's
+# wait, --pose=NAME the Duo's pose (flat-portrait by default: the inner display, 669x951 points; the
+# closed poses photograph the cover). The Duo's sizes run on "Sill agents Duo" (iOS 27.1), the default.
+#   Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main
+duo-stream            -SillLayout 951x669 -SillHinge flat
+duo-drawer            -SillLayout 951x669 -SillHinge flat -SillDrawer 1
+duo-settings-end      -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsEnd 1 --wait=5
+duo-connect           -SillLayout 951x669 -SillHinge flat -SillConnectCase methods
+duo-laptop            -SillLayout 669x951 -SillHinge half
+duo-cover             -SillLayout 466x678 -SillHinge closed
+duo-cover-on-cover    -SillLayout 466x678 -SillHinge closed --pose=closed-upright

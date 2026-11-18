@@ -18,7 +18,9 @@ import StreamProtocol
 /// after its device has stopped waiting (`RequestDeadline`) is not read, a choice that late is
 /// refused, and only a subscriber is served: a request from any other connection is answered at
 /// once, and one whose connection left before its turn is dropped (a choice still runs: a move's
-/// new connection counts on the Mac acting on what the old one carried).
+/// new connection counts on the Mac acting on what the old one carried). A connection the Mac no
+/// longer serves (`clientRevoked`: Remove, Require pairing, Remote Access or internet access) has
+/// nothing of its still waiting read or made, its choice included: no move carries it on.
 ///
 /// Within one version an id names one item for every device (§3.3). A fetch and a choice carry the
 /// title the device showed, and nothing is read or pressed where that title is not the item's now.
@@ -79,6 +81,9 @@ final class MenuMirror {
     private var topReadAt = -Double.infinity
     private var topElements: [Int: AXUIElement] = [:]
     private var subscribers: [ObjectIdentifier: NWConnection] = [:]
+    /// Connections the Mac no longer serves (`clientRevoked`), until one of the same identifier
+    /// subscribes (a later connection) or it leaves with nothing waiting.
+    private var cutOff: Set<ObjectIdentifier> = []
     private var rates: [ObjectIdentifier: RequestRate] = [:]
     /// Each subscriber's worst round trip of a recent second (its client stats), in ms: how long its
     /// device waits for an answer (`RequestDeadline`).
@@ -186,6 +191,25 @@ final class MenuMirror {
         enqueue { await self.servePress(r, to: c, who: who, arrived: now) }
     }
 
+    /// The lock's gate now (the coordinator's: SessionLock's, LockPolicy): a fetch or a choice whose turn
+    /// comes while it says locked reads, activates and presses nothing (it may have waited behind others
+    /// since before the lock). Unset: never locked (the menu checks' harness).
+    var isLocked: () -> Bool = { false }
+
+    /// This Mac's screen is locked (the coordinator's LockPolicy, docs/locked-mac-plan.md): a kind 27
+    /// with an id, or a kind 25, answered at once with `note` (a choice: not pressed), nothing read,
+    /// pressed, activated or queued. The subscription itself (kind 27 without an id) is served as ever:
+    /// the coordinator gives the mirror no app while locked, so its top level is empty.
+    func refuse(_ r: FetchMenu, from c: NWConnection, note: String) {
+        Stats.shared.bump("menu.refused")
+        send(MacMenu(version: version, answering: r.token, menu: r.id.flatMap(MenuPath.init)?.id, items: [], note: note), to: c)
+    }
+
+    func refuse(_ r: PressMenuItem, from c: NWConnection, note: String) {
+        Stats.shared.bump("menu.refused")
+        send(MacMenu(version: version, answering: r.token, pressed: false, note: note), to: c)
+    }
+
     /// A connection's client stats, about once a second: its worst round trip of that second (a
     /// negative one: none measured, and the last one measured stands).
     func clientStats(_ c: NWConnection, rttMs: Int) {
@@ -194,11 +218,20 @@ final class MenuMirror {
         roundTrips[id] = rttMs
     }
 
+    /// The Mac no longer serves this connection (StreamCoordinator, as it cuts the device off: security
+    /// scan finding 10, the review of PR #254): its requests still waiting for their turn are neither
+    /// read nor made when it comes, a choice included (`servePress`), so its app is not brought forward
+    /// for it either. Nothing new of it reaches the mirror: the coordinator drops it.
+    func clientRevoked(_ id: ObjectIdentifier) {
+        cutOff.insert(id)
+    }
+
     /// A connection closed.
     func clientLeft(_ c: NWConnection) {
         let id = ObjectIdentifier(c)
         rates[id] = nil
         roundTrips[id] = nil
+        if queued == 0 { cutOff.remove(id) }
         guard subscribers.removeValue(forKey: id) != nil else { return }
         if subscribers.isEmpty {
             // Nobody to answer: let go of the app's elements and of what was read; the next subscriber
@@ -237,6 +270,7 @@ final class MenuMirror {
 
     private func subscribe(_ c: NWConnection, token: Int?) {
         let id = ObjectIdentifier(c)
+        cutOff.remove(id)                   // a later connection that took a cut-off one's identifier
         let first = subscribers.isEmpty
         subscribers[id] = c
         if first {
@@ -247,7 +281,7 @@ final class MenuMirror {
             if t != target { _ = adopt(t) }
         }
         enqueue {
-            guard self.subscribers[id] != nil else { return }
+            guard self.subscribers[id] != nil, !self.cutOff.contains(id) else { return }
             // Read even when this version's top level is known: nobody may have watched it change.
             if self.target != nil { _ = await self.readTop(version: self.version) }
             guard self.subscribers[id] != nil else { return }
@@ -258,14 +292,17 @@ final class MenuMirror {
 
     private func serveFetch(_ r: FetchMenu, id menuID: String, to c: NWConnection, arrived: Double) async {
         let cid = ObjectIdentifier(c)
-        // The device left before this fetch's turn: nobody to answer, so nothing is activated or read.
-        guard subscribers[cid] != nil else { return }
+        // The device left before this fetch's turn, or the Mac no longer serves it: nobody to answer,
+        // so nothing is activated or read.
+        guard subscribers[cid] != nil, !cutOff.contains(cid) else { return }
         let path = MenuPath(menuID)
         func answer(_ m: MacMenu) { send(m, to: c) }
         func refuse(_ note: String) {
             Stats.shared.bump("menu.refused")
             answer(MacMenu(version: version, answering: r.token, menu: path?.id, items: [], note: note))
         }
+        // A locked Mac reads no menu (LockPolicy): this fetch came before the lock and waited its turn.
+        if isLocked() { refuse(LockPolicy.menuNote); return }
         // What the device showed for the menu: the item at the id must still have it (an id is a place).
         let shown = r.title ?? ""
         guard r.version == version, let path, let t = target, !shown.isEmpty else { refuse(MenuRefusal.changedNote); return }
@@ -297,7 +334,8 @@ final class MenuMirror {
             guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
         }
         // The activation and the wait can take a second and a half: the same checks again, now.
-        guard subscribers[cid] != nil else { return }
+        guard subscribers[cid] != nil, !cutOff.contains(cid) else { return }
+        if isLocked() { refuse(LockPolicy.menuNote); return }
         if RequestDeadline.expired(waited: CFAbsoluteTimeGetCurrent() - arrived, rttMs: roundTrips[cid]) {
             refuse(MenuRefusal.tooManyNote)
             return
@@ -418,6 +456,24 @@ final class MenuMirror {
             print("Menu from \(who) refused: \(what): \(why.logReason(app: app))")
             send(MacMenu(version: version, answering: r.token, pressed: false, note: why.note(app: app)), to: c)
         }
+        // The Mac no longer serves its device (`clientRevoked`): a choice it made before that is not
+        // made after it, nor its app brought forward for it.
+        func cutOffNow() -> Bool {
+            guard cutOff.contains(cid) else { return false }
+            Stats.shared.bump("menu.refused")
+            print("Menu from \(who) refused: \(shownID): the Mac no longer serves it")
+            return true
+        }
+        // A locked Mac presses nothing and brings nothing forward (LockPolicy): this choice came before
+        // the lock and waited its turn.
+        func lockedNow() -> Bool {
+            guard isLocked() else { return false }
+            Stats.shared.bump("menu.refused")
+            print("Menu from \(who) refused: \(shownID): this Mac is locked")
+            send(MacMenu(version: version, answering: r.token, pressed: false, note: LockPolicy.menuNote), to: c)
+            return true
+        }
+        if cutOffNow() || lockedNow() { return }
         guard r.version == version, let path, let t = target else { refuse(.changed, what: shownID); return }
         // One of the bar's menus: AXPress there would open it on the Mac, which then sits in menu
         // tracking. A device never sends one; refused before anything is activated or read.
@@ -429,6 +485,7 @@ final class MenuMirror {
         if RequestDeadline.expired(waited: waited, rttMs: roundTrips[cid]) { refuse(.late(waited), what: logPath(path, app: t.app)); return }
         let v = version
         _ = await prepare()
+        if cutOffNow() || lockedNow() { return }           // cut off, or locked, while its app came forward
         guard v == version, target?.pid == t.pid else { refuse(.changed, what: shownID); return }
         let reader = self.reader
         let kept = elements[path]?.element

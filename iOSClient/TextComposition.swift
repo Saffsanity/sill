@@ -13,7 +13,8 @@ import StreamProtocol
 // later: backspaces on the Mac, then the new text; Korean's syllables built again as each letter comes,
 // through a selection: `selection`), all but what went before a Return or a Tab typed, which is final
 // on the Mac (`fence`). Beside it, `TextInputRules`: which input moves the Mac's caret, where a Return
-// or a Tab typed ends, and whose ⌃Space it is.
+// or a Tab typed ends, and whose ⌃Space it is; and `KeyTyping`: who types a hardware keyboard's characters,
+// the Mac (as keys) or iPadOS's text system.
 //
 // Pure: Foundation and StreamProtocol's InputEvent only, checked on its own with swiftc
 // (Tests/checks/text-composition). Offsets are UTF-16, as UITextInput's are; the Mac is sent whole
@@ -385,4 +386,78 @@ enum TextInputRules {
         guard usage == space, modifiers & (shift | control | option | command) == control else { return false }
         return Set(languages().filter(isKeyboard)).count >= 2
     }
+}
+
+/// Who types a hardware keyboard's characters (#162: Noah, 2026-10-29, on the iPad mini with a Bluetooth
+/// keyboard and with the Mac's own through Universal Control, "hold p didnt work … When I held down e it
+/// showed the keyboard options for Spanish characters"): the Mac, which is sent them as keys, or iPadOS's
+/// text system, which types them into the stream's input view and hands over what it typed, sent as text.
+/// A key the text system takes reaches the Mac as typed text, never as a key held down, so the Mac, which
+/// repeats keys (KeyRepeat, on the host), never repeats it: iPadOS types a held letter once and its press
+/// and hold then shows the letter's accents, or nothing (in the iPad simulator with Tests/keyrig, one
+/// insertText for P held 2.3 s, and E's accent popover over the picture), and it repeats Delete and Space
+/// itself at its own timing, each repeat a separate press on the Mac. Asked as each key goes down
+/// (InputOverlayView.pressesBegan; ForwardedKeys sends the key the way it says, and the key's up follows
+/// that way), from the keyboard iPadOS has selected (UIResponder.textInputMode's primary language), whether
+/// an input method or dictation is composing, the key row's latch, and whether the Mac repeats a held key
+/// (`WindowList.keyRepeat`: a Mac from before key repeat would type each key once, where iPadOS repeats
+/// Delete and Space, so it is sent nothing new).
+enum KeyTyping: Equatable {
+    /// An input method or dictation is composing (marked text): every key is its own until what it
+    /// composes is chosen (the arrows move through its candidates, Return chooses, a shortcut goes to it).
+    case composing
+    /// iPadOS's text system types the characters, as it did before: for a Mac that repeats no key (a Sill
+    /// for Mac from before key repeat, whose window list says no `keyRepeat`), for a keyboard in another
+    /// script than the Latin alphabet (Russian, Greek, Arabic, Hindi…: the keyboard chosen on the iPad says
+    /// which script is meant, and the Mac's own layout would not give it), for one whose input method
+    /// composes or may (Chinese, Japanese, Korean, Vietnamese, Hawaiian: its first letter has to reach it),
+    /// for one it cannot tell, and while the key row has a modifier latched (the character then makes the
+    /// latched shortcut, as it always has: `InputOverlayView.insertText`). The keys the text system never
+    /// delivers still go to the Mac as keys (ForwardedKeys.keyUsages, and any key with ⌘, ⌃ or ⌥ held).
+    case text
+    /// The Mac types them: the keyboard chosen on the iPad types the Latin alphabet directly (English,
+    /// French, German, Spanish…). Letters, digits, punctuation, Space, Delete, Return, Tab and Shift reach
+    /// the Mac as keys, as from a keyboard plugged into it (ForwardedKeys.characterUsages): a held one
+    /// repeats at the Mac's own Delay Until Repeat and Key Repeat Rate, the Mac's own keyboard layout and
+    /// dead keys apply (⌥E, then E, is é), and iPadOS's press and hold never sees them, so no accent popover
+    /// comes up.
+    case keys
+
+    /// Whether the session's Mac repeats a key held down, by its window list's `keyRepeat` (KeyRepeat's
+    /// generation on the host: 1, nil from every Mac before key repeat): any generation from 1, so a later
+    /// one (one that also has the ISO keyboards' extra keys, say) is sent the characters as keys too. The
+    /// stream screens' `macRepeatsKeys`.
+    static func macRepeats(keyRepeat: Int?) -> Bool { (keyRepeat ?? 0) >= 1 }
+
+    /// The typing for a key going down now: `inputMode`, the selected keyboard's primary language (nil when
+    /// iPadOS gives none), `keyboards`, the primary languages of every keyboard set up (asked only when it
+    /// gives none: the Mac then types only if every keyboard set up, Emoji and dictation aside, would have
+    /// it type), `composing` (marked text), `latched` (a modifier latched on the key row) and `macRepeats`
+    /// (the session's Mac repeats a held key: `WindowList.keyRepeat` 1 or more).
+    static func of(inputMode: String?, keyboards: @autoclosure () -> [String], composing: Bool, latched: Bool,
+                   macRepeats: Bool) -> KeyTyping {
+        if composing { return .composing }
+        if !macRepeats || latched { return .text }
+        if let inputMode { return typesOnMac(inputMode) ? .keys : .text }
+        let set = keyboards().filter(TextInputRules.isKeyboard)
+        return !set.isEmpty && set.allSatisfy(typesOnMac) ? .keys : .text
+    }
+
+    /// Whether a keyboard, by its primary language, types the Latin alphabet directly, so that the Mac may
+    /// type its keys: its language is written in the Latin script (Foundation's likely script for it:
+    /// "en-US" and "sr-Latn" are Latn, "sr" Cyrl, "zh-Hant" Hant, "hi" Deva, "ain" Kana, "crk" Cans), and
+    /// its input method does not compose (`composingLatin`). Emoji and dictation have no script, nor a
+    /// language Foundation does not know.
+    static func typesOnMac(_ language: String) -> Bool {
+        let lang = Locale.Language(identifier: language)
+        return lang.script?.identifier == "Latn" && !composingLatin.contains(lang.languageCode?.identifier ?? "")
+    }
+
+    /// The languages written in the Latin alphabet whose iPadOS keyboards have an input method of their own
+    /// that composes what is typed (its input manager says it composes text, TextInput's doesComposeText, in
+    /// the iOS 27.0 simulator runtime's TextInput bundles): Vietnamese (Telex, VNI and VIQR) and Hawaiian.
+    /// Every other keyboard with an input manager of its own is in another script, which `typesOnMac`
+    /// leaves to iPadOS (Chinese, Cantonese, Japanese, Korean, Thai, Burmese, Tamil, Cherokee, Ainu, and the
+    /// Indic, Arabic, Urdu and Cree transliteration keyboards), but Turkish's, which is the plain one.
+    static let composingLatin: Set<String> = ["vi", "haw"]
 }

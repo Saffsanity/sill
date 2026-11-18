@@ -56,6 +56,8 @@ final class Conn {}
 // HID usages the device sends, and the Mac's keycodes for them.
 let uSpace: UInt16 = 0x2C, uEsc: UInt16 = 0x29, uS: UInt16 = 0x16, uC: UInt16 = 0x06
 let uLeft: UInt16 = 0x50, uRight: UInt16 = 0x4F, uReturn: UInt16 = 0x28
+let uA: UInt16 = 0x04, uE: UInt16 = 0x08, uP: UInt16 = 0x13, uZ: UInt16 = 0x1D, u1: UInt16 = 0x1E, u0: UInt16 = 0x27
+let uDelete: UInt16 = 0x2A, uTab: UInt16 = 0x2B, uMinus: UInt16 = 0x2D, uSlash: UInt16 = 0x38, uCapsLock: UInt16 = 0x39
 let uLCtrl: UInt16 = 0xE0, uLShift: UInt16 = 0xE1, uLOpt: UInt16 = 0xE2, uLCmd: UInt16 = 0xE3
 let uRCtrl: UInt16 = 0xE4, uRShift: UInt16 = 0xE5, uROpt: UInt16 = 0xE6, uRCmd: UInt16 = 0xE7
 let kSpace: UInt16 = 49, kEsc: UInt16 = 53, kS: UInt16 = 1, kC: UInt16 = 8, kLeft: UInt16 = 123, kRight: UInt16 = 124
@@ -608,6 +610,8 @@ func tripwire(_ events: [InputEvent], _ want: [String], ignoring ups: Mac.Ignore
 
 // This device's Spotlight key: ⌘'s key up is checked for command (Space's up keeps it: ⌘ is down).
 tripwire(KeyChord.spotlight, ["55: command"], ignoring: .modifierUps, "this device's Spotlight key")
+// The clipboard's ⌘V (paste right away): the same, V's up keeping command while ⌘ is down.
+tripwire(KeyChord.paste, ["55: command"], ignoring: .modifierUps, "Paste right away's ⌘V")
 // The key row's ⌘esc, a latched ⌘S on the software keyboard, and ⌃⇧→: each modifier key's up.
 tripwire(KeyChord.press(uEsc, with: .command), ["55: command"], ignoring: .modifierUps, "the key row's ⌘esc")
 tripwire(KeyChord.press(uS, with: .command), ["55: command"], ignoring: .modifierUps, "a latched ⌘S")
@@ -830,6 +834,654 @@ do {
     check(bad == 0, "input with nowhere to land: \(bad) of 2000 runs left something down")
 }
 
+// MARK: A device the Mac no longer serves (RevokedInput: StreamServer, StreamCoordinator)
+//
+// Security scan finding 10: when the Mac's user removed a paired device (or turned Remote Access or
+// internet access off, or Require pairing on), its input kept landing until its connection closed (the
+// goodbye handed to the network, or 0.25 s), and the input held for it while an app came forward (up to
+// 0.6 s) was replayed, even once it had left. Now StreamServer marks its session revoked as it says
+// goodbye: the receive loop hands on only a key's or a button's up (`mayLetGo`), and the coordinator,
+// told in the same queue turn, posts only the up of a key or a button that device pressed and the Mac
+// still has down (`stillGoes`), a button's where the pointer is; the replay of the held input and a
+// switch's drop of it judge a revoked device, and one that left while it waited, the same way, and
+// neither posts their gestures' shortcuts. The model is that glue (a copy: StreamServer and
+// StreamCoordinator are not compiled here), over InputInjector's keys and buttons with their owners; the
+// oracle reads who holds what off the events posted, not off RevokedInput.
+
+/// A device: a new connection's identifier, the connection kept for the whole run, so no two devices
+/// ever share one (a connection let go of at once can hand its address to the next one made).
+var devicesMade: [Conn] = []
+func newDevice() -> ObjectIdentifier { let c = Conn(); devicesMade.append(c); return ObjectIdentifier(c) }
+
+/// One event posted (or a gesture's shortcut) for a device: whether it lets go of something, and what
+/// (a key by its Mac keycode, a button; else "pointer", "text", "scroll" or "chord").
+struct Posted { let what: String; let device: ObjectIdentifier; let up: Bool; let thing: String }
+
+/// InputInjector as the coordinator reaches it: its keys (KeyStrokes) and its buttons with the device
+/// whose down of each went last, and every event posted.
+struct Board {
+    var keys = KeyStrokes()
+    var leftOwner: ObjectIdentifier?, rightOwner: ObjectIdentifier?     // while the button is down
+    var posted: [Posted] = []
+    /// InputInjector.releasesWhatItHolds.
+    func letsGo(_ e: InputEvent, from d: ObjectIdentifier) -> Bool {
+        RevokedInput.stillGoes(e, from: d, keyOwner: { keys.down[$0] }, leftOwner: leftOwner, rightOwner: rightOwner)
+    }
+    /// InputInjector.isUpOfSomethingDown.
+    func upOfSomethingDown(_ e: InputEvent) -> Bool {
+        DroppedInput.stillGoes(e, keyDown: keys.isDown, leftDown: leftOwner != nil, rightDown: rightOwner != nil)
+    }
+    /// The ups of what `d` holds down: its keys, its buttons.
+    func ups(of d: ObjectIdentifier) -> [InputEvent] {
+        keys.down.filter { $0.value == d }.keys.sorted().map { key($0, false, 0) }
+            + (leftOwner == d ? [.pointer(.leftUp, x: 0.4, y: 0.4)] : []) + (rightOwner == d ? [.pointer(.rightUp, x: 0.4, y: 0.4)] : [])
+    }
+    mutating func post(_ s: KeyStroke, for d: ObjectIdentifier) {
+        posted.append(Posted(what: "key \(s.virtualKey) \(s.down ? "down" : "up") (\(names(s.flags)))", device: d, up: !s.down,
+                             thing: "key \(s.virtualKey)"))
+    }
+    mutating func apply(_ e: InputEvent, from d: ObjectIdentifier, placed: Bool = true) {
+        let at = placed ? "" : " where the pointer is"
+        switch e {
+        case .pointer(.move, _, _):
+            posted.append(Posted(what: leftOwner != nil ? "left drag" : rightOwner != nil ? "right drag" : "move", device: d, up: false, thing: "pointer"))
+        case .pointer(.leftDown, _, _): leftOwner = d; posted.append(Posted(what: "left down", device: d, up: false, thing: "left"))
+        case .pointer(.leftUp, _, _): leftOwner = nil; posted.append(Posted(what: "left up" + at, device: d, up: true, thing: "left"))
+        case .pointer(.rightDown, _, _): rightOwner = d; posted.append(Posted(what: "right down", device: d, up: false, thing: "right"))
+        case .pointer(.rightUp, _, _): rightOwner = nil; posted.append(Posted(what: "right up" + at, device: d, up: true, thing: "right"))
+        case .key(let u, let down, let m):
+            for s in keys.key(usage: u, down: down, modifiers: m, from: d) ?? [] { post(s, for: d) }
+        case .text:
+            for s in keys.text(from: d) { post(s, for: d) }
+            posted.append(Posted(what: "text", device: d, up: false, thing: "text"))
+        case .scroll, .scrollGesture: posted.append(Posted(what: "scroll", device: d, up: false, thing: "scroll"))
+        }
+    }
+    /// A gesture's shortcut (InputInjector.chord): none of a device's keys, down and up at once.
+    mutating func chord(for d: ObjectIdentifier) { posted.append(Posted(what: "chord", device: d, up: false, thing: "chord")) }
+    /// A device left (the coordinator's onClientDisconnected): its keys go up, and a button it holds
+    /// when the Mac no longer served it (InputInjector.releaseKeys, RevokedInput.buttonsLetGo), where the
+    /// pointer is.
+    var buttonsLetGo = 0
+    mutating func leave(_ d: ObjectIdentifier, revoked: Bool = false) {
+        for s in keys.release(d) { post(s, for: d) }
+        for a in RevokedInput.buttonsLetGo(by: d, revoked: revoked, leftOwner: leftOwner, rightOwner: rightOwner) {
+            apply(.pointer(a, x: 0.4, y: 0.4), from: d, placed: false); buttonsLetGo += 1
+        }
+    }
+}
+
+/// What waits in the coordinator's hold for an activation: a device's input, or a gesture's shortcut.
+enum HeldItem { case input(InputEvent, ObjectIdentifier), chord(ObjectIdentifier) }
+
+/// StreamServer's receive loop and StreamCoordinator's handling, hold, replay and a switch's drop, around
+/// RevokedInput (`fixed`), or as they were before it. What the receive loop hands on waits for the main
+/// actor in order (`inbox`: a Task each), and so does the server's mark of a device it cut off, behind what
+/// it had already handed on. The Mac decides to cut a device off on the main actor (RemoteAccess), and
+/// since the review of PR #254 the coordinator marks it there and then (`marksAtDecision`, `onCutOff`): every
+/// session of its key the coordinator has registered. A session the door admits waits for the main actor to
+/// be registered (`admitLate`, `unregistered`), ahead of its messages; one admitted while the Mac decided
+/// registers only behind the decision, and since the resumed review it is cut off as it registers
+/// (`checksAtRegistration`, RemoteAccess.stillServes: its key was cut, `cutKeys`). Sessions share a key
+/// through `keyOf` (a move's second connection, or one a device opens when it sees the removal coming).
+struct Host {
+    let fixed: Bool
+    var marksAtDecision = true
+    var checksAtRegistration = true
+    enum Job { case input(InputEvent, ObjectIdentifier), gesture(ObjectIdentifier), mark(ObjectIdentifier), register(ObjectIdentifier) }
+    var inbox: [Job] = []
+    var unregistered: Set<ObjectIdentifier> = []  // admitted by the server, its registration still waiting
+    var keyOf: [ObjectIdentifier: ObjectIdentifier] = [:]   // a session's key, by default its own
+    var cutKeys: Set<ObjectIdentifier> = []       // keys a decision cut off (the trust as it is now)
+    var board = Board()
+    var connected: Set<ObjectIdentifier> = []
+    var marked: Set<ObjectIdentifier> = []        // StreamServer: Client.revoked
+    var revoked: Set<ObjectIdentifier> = []       // StreamCoordinator.revoked
+    var holding = false                            // an activation's hold (holdUntil not passed yet)
+    var held: [HeldItem] = []
+    var leftWhileHeld: [(device: ObjectIdentifier, revoked: Bool)] = []
+    var dropped: [ObjectIdentifier: Int] = [:]     // in.revoked, by device
+    init(fixed: Bool) { self.fixed = fixed }
+
+    mutating func drop(_ d: ObjectIdentifier) { dropped[d, default: 0] += 1 }
+    /// A device's input read off its connection (the receive loop), then handled (the coordinator), the
+    /// main actor free.
+    mutating func receive(_ e: InputEvent, from d: ObjectIdentifier) { read(e, from: d); drain() }
+    /// A device's gesture (kind 28): its shortcut, behind what is held.
+    mutating func gesture(from d: ObjectIdentifier) { readGesture(from: d); drain() }
+    /// Read off its connection (the network queue): dropped there once the server has marked the device,
+    /// but a key's or a button's up; else it waits for the main actor.
+    mutating func read(_ e: InputEvent, from d: ObjectIdentifier) {
+        guard connected.contains(d) else { return }                      // its connection has closed
+        if fixed, marked.contains(d), !RevokedInput.mayLetGo(e) { drop(d); return }
+        inbox.append(.input(e, d))
+    }
+    mutating func readGesture(from d: ObjectIdentifier) {
+        guard connected.contains(d) else { return }
+        if fixed, marked.contains(d) { drop(d); return }
+        inbox.append(.gesture(d))
+    }
+    /// The main actor gets to what waits for it, in order (StreamCoordinator.handle, clientRevoked).
+    mutating func drain() {
+        while !inbox.isEmpty {
+            switch inbox.removeFirst() {
+            case .input(let e, let d):
+                if fixed, revoked.contains(d) {
+                    if board.letsGo(e, from: d) { deliver(.input(e, d), placed: false) } else { drop(d) }
+                } else {
+                    deliver(.input(e, d))
+                }
+            case .gesture(let d):
+                if fixed, revoked.contains(d) { drop(d) } else { deliver(.chord(d)) }
+            case .mark(let d):
+                if fixed, connected.contains(d) { revoked.insert(d) }   // ignored once it has left (no route)
+            case .register(let d):
+                unregistered.remove(d)
+                if fixed, checksAtRegistration, cutKeys.contains(key(d)) { revoked.insert(d) }
+            }
+        }
+    }
+    mutating func deliver(_ item: HeldItem, placed: Bool = true) {
+        if holding || !held.isEmpty { held.append(item); return }
+        switch item {
+        case .input(let e, let d): board.apply(e, from: d, placed: placed)
+        case .chord(let d): board.chord(for: d)
+        }
+    }
+    func gone(_ d: ObjectIdentifier) -> Bool { fixed && (revoked.contains(d) || leftWhileHeld.contains { $0.device == d }) }
+    /// The app came up, or the 0.6 s ran out (releaseHeldInput): what was held goes in order, a gone
+    /// device's only as the up of what it holds and none of its shortcuts; then the keys of the devices
+    /// that left meanwhile.
+    mutating func replay() {
+        drain()                                                          // what was read before it comes first
+        holding = false
+        let h = held; held = []
+        for item in h {
+            switch item {
+            case .input(let e, let d):
+                if !gone(d) { board.apply(e, from: d) }
+                else if board.letsGo(e, from: d) { board.apply(e, from: d, placed: false) }
+                else { drop(d) }
+            case .chord(let d):
+                if gone(d) { drop(d) } else { board.chord(for: d) }
+            }
+        }
+        releaseLeft()
+    }
+    /// A switch drops what was held (StreamCoordinator.select): only the up of a key or a button the Mac
+    /// has down goes (DroppedInput), a gone device's only if it holds it (RevokedInput), where the
+    /// pointer is; a shortcut unless its device is gone; then the keys of the devices that left meanwhile.
+    mutating func switchDrop() {
+        drain()
+        holding = false
+        let h = held; held = []
+        for item in h {
+            switch item {
+            case .input(let e, let d):
+                if gone(d) ? board.letsGo(e, from: d) : board.upOfSomethingDown(e) { board.apply(e, from: d, placed: false) }
+            case .chord(let d):
+                if gone(d) { drop(d) } else { board.chord(for: d) }
+            }
+        }
+        releaseLeft()
+    }
+    mutating func releaseLeft() { let left = leftWhileHeld; leftWhileHeld = []; for l in left { board.leave(l.device, revoked: l.revoked) } }
+    /// The Mac cuts the device off, deciding on the main actor (RemoteAccess): the coordinator marks it there
+    /// and then (`onCutOff`, since the review); the server marks its session as it says goodbye
+    /// (closeSessions), and that mark reaches the coordinator behind what the receive loop had already
+    /// handed on, but before anything it hands on later (`onClientRevoked`).
+    mutating func revoke(_ d: ObjectIdentifier) {
+        guard connected.contains(d) else { return }
+        let k = key(d)
+        cutKeys.insert(k)
+        for c in connected.sorted() where key(c) == k {
+            if fixed, marksAtDecision, !unregistered.contains(c) { revoked.insert(c) }   // the coordinator's routes
+            marked.insert(c)                                                            // the server's clients
+            inbox.append(.mark(c))
+        }
+    }
+    func key(_ d: ObjectIdentifier) -> ObjectIdentifier { keyOf[d] ?? d }
+    /// A session the server admits now (another connection of `as`'s key): its registration waits for the
+    /// main actor, ahead of anything it sends.
+    mutating func admitLate(_ d: ObjectIdentifier, as k: ObjectIdentifier) {
+        connected.insert(d); keyOf[d] = key(k); unregistered.insert(d); inbox.append(.register(d))
+    }
+    /// Its connection closes (the goodbye handed to the network, or 0.25 s): onClientDisconnected, behind
+    /// what was read before it.
+    mutating func leave(_ d: ObjectIdentifier) {
+        drain()
+        guard connected.remove(d) != nil else { return }
+        marked.remove(d)
+        let cut = fixed && revoked.contains(d)        // read before it is forgotten, as the coordinator does
+        if holding || !held.isEmpty { leftWhileHeld.append((d, cut)) } else { board.leave(d, revoked: cut) }
+        revoked.remove(d)
+    }
+}
+
+/// Who holds each key (by its keycode) and each button down, by the events posted alone: the device
+/// whose down of it was posted last, until its up.
+func owners(_ posted: ArraySlice<Posted>) -> [String: ObjectIdentifier] {
+    var owner: [String: ObjectIdentifier] = [:]
+    for p in posted where p.thing.hasPrefix("key") || p.thing == "left" || p.thing == "right" { owner[p.thing] = p.up ? nil : p.device }
+    return owner
+}
+/// What was posted for `d` from `from` on: each must let go of something `d` held down then, by the
+/// posted events alone. Nil when each does; else the first that does not.
+func onlyLetsGo(_ posted: [Posted], of d: ObjectIdentifier, from: Int) -> String? {
+    var owner: [String: ObjectIdentifier] = [:]
+    for (i, p) in posted.enumerated() {
+        if i >= from, p.device == d, !(p.up && owner[p.thing] == d) {
+            return "\(p.what) at \(i), " + (p.up ? "which it did not hold down" : "not an up")
+        }
+        if p.thing.hasPrefix("key") || p.thing == "left" || p.thing == "right" { owner[p.thing] = p.up ? nil : p.device }
+    }
+    return nil
+}
+/// What a device's key or button up lets go of, as `owners` names it; nil for any other input.
+func thing(_ e: InputEvent) -> String? {
+    switch e {
+    case .key(let u, false, _): return KeyStrokes.virtualKeys[u].map { "key \($0)" }
+    case .pointer(.leftUp, _, _): return "left"
+    case .pointer(.rightUp, _, _): return "right"
+    default: return nil
+    }
+}
+func whats(_ posted: [Posted], from: Int, of d: ObjectIdentifier? = nil) -> [String] {
+    posted[from...].filter { d == nil || $0.device == d! }.map(\.what)
+}
+
+// What the receive loop hands on: a key's or a button's up, nothing else.
+check(RevokedInput.mayLetGo(key(uC, false, 0)) && RevokedInput.mayLetGo(key(uLCmd, false, command))
+      && RevokedInput.mayLetGo(.pointer(.leftUp, x: 0.5, y: 0.5)) && RevokedInput.mayLetGo(.pointer(.rightUp, x: 0.5, y: 0.5)),
+      "a key's up and a button's up go on to the coordinator")
+check(!RevokedInput.mayLetGo(key(uC, true, 0)) && !RevokedInput.mayLetGo(key(uLCmd, true, command))
+      && !RevokedInput.mayLetGo(.pointer(.leftDown, x: 0.5, y: 0.5)) && !RevokedInput.mayLetGo(.pointer(.rightDown, x: 0.5, y: 0.5))
+      && !RevokedInput.mayLetGo(.pointer(.move, x: 0.5, y: 0.5)) && !RevokedInput.mayLetGo(.text("x"))
+      && !RevokedInput.mayLetGo(scroll) && !RevokedInput.mayLetGo(.scrollGesture(.began, x: 0.5, y: 0.5))
+      && !RevokedInput.mayLetGo(.scrollGesture(.ended, x: 0.5, y: 0.5)) && !RevokedInput.mayLetGo(.scrollGesture(.momentumEnded, x: 0.5, y: 0.5)),
+      "downs, moves, text, scrolls and a scroll gesture's phases go no further")
+// What the coordinator posts of it: the up of what that device pressed and the Mac has down.
+do {
+    let a = newDevice(), b = newDevice()
+    check(a != b, "two devices, two identifiers")
+    let holders: [UInt16: ObjectIdentifier] = [uC: a, uLShift: b]
+    let goes = { (e: InputEvent, l: ObjectIdentifier?, r: ObjectIdentifier?) in
+        RevokedInput.stillGoes(e, from: a, keyOwner: { holders[$0] }, leftOwner: l, rightOwner: r)
+    }
+    check(goes(key(uC, false, 0), nil, nil) && goes(key(uC, false, command), nil, nil), "the up of a key it pressed goes")
+    check(!goes(key(uLShift, false, 0), nil, nil), "the up of a key another device pressed last does not")
+    check(!goes(key(uS, false, 0), nil, nil), "the up of a key that is not down does not")
+    check(!goes(key(uC, true, 0), nil, nil) && !goes(key(uS, true, 0), nil, nil), "a key's down never goes")
+    check(goes(.pointer(.leftUp, x: 0, y: 0), a, nil) && !goes(.pointer(.leftUp, x: 0, y: 0), b, nil)
+          && !goes(.pointer(.leftUp, x: 0, y: 0), nil, a), "the left button's up: only while it pressed it, the right's owner says nothing")
+    check(goes(.pointer(.rightUp, x: 0, y: 0), nil, a) && !goes(.pointer(.rightUp, x: 0, y: 0), nil, b)
+          && !goes(.pointer(.rightUp, x: 0, y: 0), a, nil), "the right button's up likewise")
+    check(!goes(.pointer(.leftDown, x: 0, y: 0), a, a) && !goes(.pointer(.move, x: 0, y: 0), a, a) && !goes(.text("x"), a, a)
+          && !goes(scroll, a, a) && !goes(.scrollGesture(.ended, x: 0, y: 0), a, a),
+          "downs, moves, text and scrolls never go, whatever it holds")
+}
+// Removed while it holds C, beside a device holding shift: what it sends until its connection closes
+// lands not at all, but C's up (with B's shift, which it leaves down), and its leaving lets go of
+// nothing more.
+do {
+    var h = Host(fixed: true); let A = newDevice(), B = newDevice()
+    h.connected = [A, B]
+    h.receive(key(uLShift, true, shift), from: B)
+    h.receive(key(uC, true, 0), from: A)
+    h.receive(move, from: A)
+    let mark = h.board.posted.count
+    h.revoke(A)
+    for e in [move, .pointer(.leftDown, x: 0.2, y: 0.2), .pointer(.move, x: 0.3, y: 0.3), .pointer(.leftUp, x: 0.3, y: 0.3), .text("rm -rf"),
+              key(uS, true, command), key(uS, false, command), scroll, key(uLShift, false, 0), key(uC, false, 0), key(uC, false, 0)] as [InputEvent] {
+        h.receive(e, from: A)
+    }
+    h.gesture(from: A)
+    h.leave(A)
+    check(whats(h.board.posted, from: mark) == ["key 8 up (shift)"], "a removed device's input until it left: \(whats(h.board.posted, from: mark))")
+    check(h.board.keys.down == [uLShift: B], "the other device still holds shift: \(h.board.keys.down)")
+    check(h.dropped[A] == 11, "the rest dropped and counted: \(h.dropped[A] ?? 0)")
+    // As it was before (no mark, no revoked set): all of it landed, the other's shift let go of by it.
+    var old = Host(fixed: false); old.connected = [A, B]
+    old.receive(key(uLShift, true, shift), from: B); old.receive(key(uC, true, 0), from: A)
+    let oldMark = old.board.posted.count
+    old.revoke(A)
+    for e in [move, .pointer(.leftDown, x: 0.2, y: 0.2), .text("rm -rf"), key(uLShift, false, 0)] as [InputEvent] { old.receive(e, from: A) }
+    old.gesture(from: A)
+    check(whats(old.board.posted, from: oldMark) == ["move", "left down", "text", "key 56 up (none)", "chord"],
+          "before the fix all of it landed: \(whats(old.board.posted, from: oldMark))")
+}
+// Its button: the up of a drag it began goes, where the pointer is; once another device pressed the
+// button, its up does not (that device lets go of it); a down after the removal never went, so its up
+// has nothing to let go of.
+do {
+    var h = Host(fixed: true); let A = newDevice(), B = newDevice()
+    h.connected = [A, B]
+    h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: A)
+    var mark = h.board.posted.count
+    h.revoke(A)
+    h.receive(.pointer(.move, x: 0.6, y: 0.6), from: A)
+    h.receive(.pointer(.leftUp, x: 0.6, y: 0.6), from: A)
+    check(whats(h.board.posted, from: mark) == ["left up where the pointer is"], "a removed device's drag: \(whats(h.board.posted, from: mark))")
+    h.leave(A)
+    let C = newDevice(); h.connected.insert(C)
+    h.receive(.pointer(.rightDown, x: 0.5, y: 0.5), from: C)
+    h.receive(.pointer(.rightDown, x: 0.5, y: 0.5), from: B)
+    mark = h.board.posted.count
+    h.revoke(C)
+    h.receive(.pointer(.rightUp, x: 0.5, y: 0.5), from: C)
+    h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: C)
+    h.receive(.pointer(.leftUp, x: 0.5, y: 0.5), from: C)
+    check(whats(h.board.posted, from: mark).isEmpty && h.board.rightOwner == B,
+          "its up of a button another device pressed since, and of one it pressed after the removal: \(whats(h.board.posted, from: mark))")
+    h.receive(.pointer(.rightUp, x: 0.5, y: 0.5), from: B)
+    check(h.board.rightOwner == nil, "the other device lets go of it")
+}
+// Removed while it holds a button, and gone before it lets go (its user dragging when the Mac's user clicked
+// Remove, its connection closed first): the button goes up as it leaves, where the pointer is, so another
+// device's next move is a move, not a drag (the review of PR #254: before it, the button stayed down until
+// the host's end). Only its own; after its held input when it leaves while input is held; and a device that
+// leaves unremoved keeps its button down, as before (its session may go on over a move's connection, whose
+// up lets go of it).
+do {
+    var h = Host(fixed: true); let A = newDevice(), B = newDevice()
+    h.connected = [A, B]
+    h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: A)
+    h.revoke(A)
+    h.receive(.pointer(.move, x: 0.6, y: 0.6), from: A)
+    var mark = h.board.posted.count
+    h.leave(A)
+    h.receive(move, from: B)
+    check(whats(h.board.posted, from: mark) == ["left up where the pointer is", "move"],
+          "a removed device's drag cut off: its button up as it left, the other's next move a move: \(whats(h.board.posted, from: mark))")
+    // As the branch had it before the review: nothing let go of but its keys, and the other's move a drag.
+    var pr = Board(); let P = newDevice(), Q = newDevice()
+    pr.apply(.pointer(.leftDown, x: 0.5, y: 0.5), from: P)
+    pr.leave(P, revoked: false)
+    let prMark = pr.posted.count
+    pr.apply(move, from: Q)
+    check(pr.leftOwner == P && whats(pr.posted, from: prMark) == ["left drag"],
+          "before the review its button stayed down and the next move dragged: \(whats(pr.posted, from: prMark))")
+    // Its right button, while B holds the left: only its own goes up.
+    let C = newDevice(); h.connected.insert(C)
+    h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: B)
+    h.receive(.pointer(.rightDown, x: 0.5, y: 0.5), from: C)
+    h.revoke(C)
+    mark = h.board.posted.count
+    h.leave(C)
+    check(whats(h.board.posted, from: mark) == ["right up where the pointer is"] && h.board.leftOwner == B,
+          "a removed device lets go of its own button as it leaves, never another's: \(whats(h.board.posted, from: mark))")
+    // Removed and gone while input is held: its held move dropped, its button up after the replay.
+    let E = newDevice(); h.connected.insert(E)
+    h.receive(.pointer(.leftUp, x: 0.5, y: 0.5), from: B)
+    h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: E)
+    h.holding = true
+    h.receive(.pointer(.move, x: 0.7, y: 0.7), from: E)
+    h.revoke(E)
+    h.leave(E)
+    mark = h.board.posted.count
+    h.replay()
+    check(whats(h.board.posted, from: mark) == ["left up where the pointer is"] && h.board.leftOwner == nil,
+          "removed and gone while its input was held: its button up after the replay: \(whats(h.board.posted, from: mark))")
+    // Not removed: a device that leaves keeps its button down, as before.
+    let F = newDevice(); h.connected.insert(F)
+    h.receive(.pointer(.rightDown, x: 0.5, y: 0.5), from: F)
+    mark = h.board.posted.count
+    h.leave(F)
+    check(whats(h.board.posted, from: mark).isEmpty && h.board.rightOwner == F, "a device that leaves unremoved keeps its button down, as before")
+    check(RevokedInput.buttonsLetGo(by: F, revoked: true, leftOwner: F, rightOwner: F) == [.leftUp, .rightUp]
+          && RevokedInput.buttonsLetGo(by: F, revoked: true, leftOwner: nil, rightOwner: nil).isEmpty
+          && RevokedInput.buttonsLetGo(by: F, revoked: false, leftOwner: F, rightOwner: F).isEmpty
+          && RevokedInput.buttonsLetGo(by: F, revoked: true, leftOwner: A, rightOwner: B).isEmpty,
+          "buttonsLetGo: both of a removed device's own buttons, none of another's, none when not removed")
+}
+// Input held for an activation: removed while it waited, the device's held input and its gesture go no
+// further but the up of a key it pressed before; another device's held input goes as it would.
+do {
+    var h = Host(fixed: true); let A = newDevice(), B = newDevice()
+    h.connected = [A, B]
+    h.receive(key(uLCmd, true, command), from: A)
+    h.holding = true
+    for e in [.pointer(.leftDown, x: 0.5, y: 0.5), .pointer(.leftUp, x: 0.5, y: 0.5), key(uS, true, command), key(uS, false, command),
+              key(uLCmd, false, 0), .text("x")] as [InputEvent] {
+        h.receive(e, from: A)
+    }
+    h.gesture(from: A)
+    h.receive(move, from: B); h.receive(key(uC, true, 0), from: B); h.receive(key(uC, false, 0), from: B); h.gesture(from: B)
+    let mark = h.board.posted.count
+    h.revoke(A)
+    h.receive(move, from: A)
+    h.replay()
+    check(whats(h.board.posted, from: mark, of: A) == ["key 55 up (none)"], "a removed device's held input: \(whats(h.board.posted, from: mark, of: A))")
+    check(whats(h.board.posted, from: mark, of: B) == ["move", "key 8 down (none)", "key 8 up (none)", "chord"],
+          "the other device's held input: \(whats(h.board.posted, from: mark, of: B))")
+    h.leave(A)
+    check(h.board.keys.down.isEmpty, "nothing down after it left: \(h.board.keys.down)")
+}
+// The same hold dropped by a switch (the stream moved to another source meanwhile): a removed device's
+// own ups still go, where the pointer is (its command with B's shift, which B lets go of after it in the
+// hold), and nothing else of it; another device's up of a key the Mac has down goes as before, its
+// gesture too.
+do {
+    var h = Host(fixed: true); let A = newDevice(), B = newDevice()
+    h.connected = [A, B]
+    h.receive(key(uLCmd, true, command), from: A); h.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: A)
+    h.receive(key(uLShift, true, shift), from: B)
+    h.holding = true
+    for e in [.pointer(.move, x: 0.6, y: 0.6), .pointer(.leftUp, x: 0.6, y: 0.6), key(uS, true, command), key(uLCmd, false, 0)] as [InputEvent] {
+        h.receive(e, from: A)
+    }
+    h.gesture(from: A)
+    h.receive(key(uLShift, false, 0), from: B); h.gesture(from: B)
+    let mark = h.board.posted.count
+    h.revoke(A)
+    h.switchDrop()
+    check(whats(h.board.posted, from: mark, of: A) == ["left up where the pointer is", "key 55 up (shift)"],
+          "a removed device's held input at a switch: \(whats(h.board.posted, from: mark, of: A))")
+    check(whats(h.board.posted, from: mark, of: B) == ["key 56 up (none)", "chord"], "the other device's at the switch: \(whats(h.board.posted, from: mark, of: B))")
+    check(h.board.keys.down.isEmpty && h.board.leftOwner == nil, "nothing down after the switch")
+}
+// A device that left while its input was held (its pairing never removed: a lost connection, Direct
+// Wireless turned off): its held downs and clicks never land after it left; the up of a key it pressed
+// before goes, then its other keys are let go, as before.
+do {
+    var h = Host(fixed: true); let A = newDevice()
+    h.connected = [A]
+    h.receive(key(uLShift, true, shift), from: A)
+    h.receive(key(uC, true, shift), from: A)
+    h.holding = true
+    for e in [.pointer(.leftDown, x: 0.5, y: 0.5), key(uS, true, shift), key(uC, false, shift)] as [InputEvent] { h.receive(e, from: A) }
+    let mark = h.board.posted.count
+    h.leave(A)
+    h.replay()
+    check(whats(h.board.posted, from: mark) == ["key 8 up (shift)", "key 56 up (none)"], "a departed device's held input: \(whats(h.board.posted, from: mark))")
+    check(h.board.leftOwner == nil && h.board.keys.down.isEmpty, "nothing of it down")
+    var old = Host(fixed: false); old.connected = [A]
+    old.holding = true
+    old.receive(.pointer(.leftDown, x: 0.5, y: 0.5), from: A)
+    old.leave(A); old.replay()
+    check(old.board.leftOwner == A, "before the fix its held click's down landed after it left, and the button stayed down")
+}
+// The Mac decides to remove a device (RemoteAccess, on the main actor) while messages of it wait for the
+// main actor: read off the network while the Mac saved the change (the keychain's write; with a locked login
+// keychain, while its prompt showed). The review of PR #254: the decision marks the device at once
+// (`onCutOff`), so none of them lands but the up of a key it holds; marked only by the server, which says
+// goodbye after the decision, the coordinator learned it behind them, and they all landed after it.
+do {
+    for atDecision in [true, false] {
+        var h = Host(fixed: true); h.marksAtDecision = atDecision
+        let A = newDevice(); h.connected = [A]
+        h.receive(key(uC, true, 0), from: A)
+        h.read(move, from: A); h.read(key(uS, true, 0), from: A); h.read(.text("x"), from: A); h.readGesture(from: A)
+        h.read(key(uC, false, 0), from: A)
+        let mark = h.board.posted.count
+        h.revoke(A)
+        h.read(.pointer(.leftDown, x: 0.5, y: 0.5), from: A)      // after the server's mark: dropped at the receive loop
+        h.drain()
+        let got = whats(h.board.posted, from: mark)
+        if atDecision {
+            check(got == ["key 8 up (none)"], "decided while its input waited: only the up of the key it held: \(got)")
+            check(h.dropped[A] == 5, "what waited dropped and counted, and what came after the server's mark: \(h.dropped[A] ?? 0)")
+        } else {
+            check(got == ["move", "key 1 down (none)", "text", "chord", "key 8 up (none)"],
+                  "marked only by the server (before the review), what waited landed after the decision: \(got)")
+        }
+    }
+}
+// A second connection of the device's key (a move's, or one a device opens when it sees the removal coming),
+// admitted while the Mac decided: its registration waits on the main actor behind that decision, which cannot
+// name it (the resumed review of PR #254). Cut off as it registers (RemoteAccess.stillServes), nothing it sent
+// lands; registered unmarked, what it sent while the Mac saved the change landed after the decision, until the
+// server's mark.
+do {
+    for atRegistration in [true, false] {
+        var h = Host(fixed: true); h.checksAtRegistration = atRegistration
+        let A = newDevice(); h.connected = [A]
+        h.receive(key(uC, true, 0), from: A)                                 // A holds C
+        let A2 = newDevice(); h.admitLate(A2, as: A)                          // while the Mac decides
+        h.read(move, from: A2); h.read(key(uS, true, 0), from: A2); h.read(.pointer(.leftDown, x: 0.5, y: 0.5), from: A2)
+        h.read(.text("x"), from: A2); h.readGesture(from: A2)
+        let mark = h.board.posted.count
+        h.revoke(A)                                                           // the decision: A marked, A2 not yet registered
+        h.read(key(uS, false, 0), from: A2); h.read(.pointer(.leftUp, x: 0.5, y: 0.5), from: A2)   // after the server's mark
+        h.drain()
+        let got = whats(h.board.posted, from: mark)
+        if atRegistration {
+            check(got.isEmpty, "a connection admitted while the Mac decided, cut off as it registers: nothing of it lands: \(got)")
+            check(h.dropped[A2] == 7, "its input dropped and counted: \(h.dropped[A2] ?? 0)")
+        } else {
+            check(got == ["move", "key 1 down (none)", "left down", "text", "chord", "key 1 up (none)", "left up where the pointer is"],
+                  "registered unmarked (the review's branch), what it sent while the Mac decided landed after the decision: \(got)")
+        }
+        h.leave(A); h.leave(A2)
+        check(h.board.keys.down.isEmpty && h.board.leftOwner == nil, "nothing of either down once both left")
+    }
+}
+// Random sessions: A, removed at a random moment and gone a few events later (its connection closed),
+// B alongside, C leaving at a random moment, holds for activations coming and going, each ended by the
+// app coming up or by a switch; spells in which the main actor is busy and what is read waits for it, one
+// of them ending with the Mac's decision to remove A (its keychain write); each sends downs, ups (its own,
+// strays, and another's), moves, text, scrolls and gestures, and A, once removed, often the up of
+// something it holds. In half the sessions a second connection of A's key (A2: a move's, or one a device
+// opens when it sees the removal coming) is admitted as that spell begins, so it registers only behind the
+// decision, and sends as A does. From the decision on nothing lands for A or A2 but the up of something each
+// holds down by the posted events; the same for C's held input once it has left; A's own up of what it holds
+// goes at once while nothing is held or waits; nothing of B's is dropped; once A, A2 and C have left, no key
+// of theirs is down, and no button of A's or A2's. Without the check at registration (the review's branch),
+// A2's input lands after the decision in many of the sessions that have it; marked only by the server (the
+// branch before its review), A's input read while the Mac decided lands after the decision in many sessions;
+// as the glue was before the fix, most sessions land A's input after its removal.
+do {
+    var rng = Rng(state: 0x0010_EE0E)
+    var bad = 0, oldLanded = 0, serverMarkLanded = 0, lateLanded = 0, ownUps = 0, removed = 0, buttonsAtLeaving = 0, waited = 0
+    var lateAtReview = 0, lateWithoutCheck = 0
+    let things: [UInt16] = [uLCmd, uLShift, uLCtrl, uC, uS, uEsc]
+    for (fixed, atDecision, atRegistration) in [(true, true, true), (true, true, false), (true, false, false), (false, false, false)] {
+        for run in 0..<3000 {
+            var h = Host(fixed: fixed); h.marksAtDecision = atDecision; h.checksAtRegistration = atRegistration
+            let review = fixed && atDecision && atRegistration
+            let A = newDevice(), B = newDevice(), C = newDevice()
+            h.connected = [A, B, C]
+            let revokeAt = 3 + rng.below(30), goneAfter = 1 + rng.below(12), cLeavesAt = 2 + rng.below(50)
+            let busyBefore = rng.below(5)          // the decision's own spell: the keychain's write
+            let late = busyBefore > 0 && rng.chance(50)
+            var A2: ObjectIdentifier? = nil
+            var mark: Int? = nil, cMark: Int? = nil
+            var problem: String? = nil
+            var busy = false
+            for step in 0..<60 {
+                if step == revokeAt - busyBefore {
+                    busy = true
+                    if late { let a2 = newDevice(); A2 = a2; h.admitLate(a2, as: A) }   // admitted while the Mac decides
+                }
+                if step == revokeAt {
+                    if review, h.inbox.contains(where: { if case .input(_, let x) = $0 { return x == A } else { return false } }) { waited += 1 }
+                    mark = h.board.posted.count; h.revoke(A); busy = false; h.drain()
+                }
+                if step == revokeAt + goneAfter { busy = false; h.leave(A); if let A2 { h.leave(A2) } }
+                if step == cLeavesAt { busy = false; h.drain(); cMark = h.board.posted.count; h.leave(C) }   // what it sent before it left first
+                if busy, step < revokeAt - busyBefore || step > revokeAt { if rng.chance(40) { busy = false; h.drain() } }
+                else if !busy, rng.chance(6) { busy = true }
+                if !busy, rng.chance(12) {
+                    if !h.holding { h.holding = true } else if rng.chance(70) { h.replay() } else { h.switchDrop() }
+                }
+                let d = A2.map { rng.pick([A, A, $0, $0, B, C]) } ?? rng.pick([A, A, A, B, C])
+                if rng.chance(5) { if busy { h.readGesture(from: d) } else { h.gesture(from: d) }; continue }
+                var e: InputEvent
+                let mine = h.board.ups(of: d)
+                if d == A, h.marked.contains(A), !mine.isEmpty, rng.chance(50) {
+                    e = rng.pick(mine)                                              // removed, it lets go of what it holds
+                } else {
+                    switch rng.below(9) {
+                    case 0, 1:
+                        let u = rng.pick(things)
+                        let down = h.board.keys.down[u] != d || rng.chance(15)
+                        e = key(u, down, rng.chance(30) ? command : 0)
+                        if rng.chance(20) { e = key(u, false, 0) }                     // a stray or another's up
+                    case 2:
+                        let left = rng.chance(70)
+                        let owner = left ? h.board.leftOwner : h.board.rightOwner
+                        let down = owner != d || rng.chance(15)
+                        e = .pointer(left ? (down ? .leftDown : .leftUp) : (down ? .rightDown : .rightUp), x: 0.4, y: 0.4)
+                    case 3: e = .pointer(rng.chance(50) ? .leftUp : .rightUp, x: 0.4, y: 0.4)
+                    case 4, 5: e = move
+                    case 6: e = .text("z")
+                    case 7: e = scroll
+                    default: e = .scrollGesture(rng.pick([.began, .ended, .momentumBegan, .momentumEnded]), x: 0.4, y: 0.4)
+                    }
+                }
+                // A's own up of what it holds (by what was posted), after its removal and while nothing
+                // waits: it goes at once.
+                let before = h.board.posted.count
+                let lets = thing(e)
+                let expectNow = fixed && !busy && d == A && h.marked.contains(A) && !h.holding && h.held.isEmpty
+                    && lets != nil && owners(h.board.posted[...])[lets!] == A
+                if busy { h.read(e, from: d) } else { h.receive(e, from: d) }
+                if expectNow {
+                    ownUps += 1
+                    if !h.board.posted[before...].contains(where: { $0.device == A && $0.up && $0.thing == lets! }), problem == nil {
+                        problem = "step \(step): A's own up \(e) did not go"
+                    }
+                }
+            }
+            h.drain()
+            if h.holding || !h.held.isEmpty { if rng.chance(70) { h.replay() } else { h.switchDrop() } }
+            h.leave(A); h.leave(C); if let A2 { h.leave(A2) }
+            if mark != nil { removed += 1 }
+            if A2 != nil, review { lateAtReview += 1 }
+            if A2 != nil, fixed, atDecision, !atRegistration { lateWithoutCheck += 1 }
+            if let mark, let p = onlyLetsGo(h.board.posted, of: A, from: mark) {
+                if fixed && atDecision { problem = problem ?? "A after its removal: \(p)" } else if fixed { serverMarkLanded += 1 } else { oldLanded += 1 }
+            }
+            if fixed, atDecision, let mark, let A2, let p = onlyLetsGo(h.board.posted, of: A2, from: mark) {
+                if review { problem = problem ?? "A2 (A's key, admitted while the Mac decided) after the decision: \(p)" } else { lateLanded += 1 }
+            }
+            if fixed, let cMark, let p = onlyLetsGo(h.board.posted, of: C, from: cMark), problem == nil { problem = "C after it left: \(p)" }
+            if fixed, h.board.keys.down.values.contains(where: { $0 == A || $0 == C || $0 == A2 }), problem == nil {
+                problem = "a key of a device that left is still down: \(h.board.keys.down)"
+            }
+            if fixed, [h.board.leftOwner, h.board.rightOwner].contains(where: { $0 != nil && ($0 == A || $0 == A2) }), problem == nil {
+                problem = "a button of the removed device is still down after it left"
+            }
+            if review { buttonsAtLeaving += h.board.buttonsLetGo }
+            if fixed, let n = h.dropped[B], problem == nil { problem = "\(n) of B's events dropped, though the Mac still served it" }
+            if fixed, let problem {
+                bad += 1
+                if bad <= 3 { print("FAIL: revoked run \(run)\(review ? "" : atDecision ? " (no check at registration)" : " (marked by the server alone)"): \(problem)") }
+            }
+        }
+    }
+    check(removed == 12000, "every session removed A: \(removed) of 12000")
+    check(bad == 0, "random sessions with a removal: \(bad) of 9000 landed input of a device the Mac no longer served, or left something down")
+    check(waited > 1000, "the decision found A's input waiting for the main actor in many sessions: \(waited) of 3000")
+    check(lateAtReview > 500, "a second connection of A's key admitted while the Mac decided, in many sessions: \(lateAtReview) of 3000")
+    check(lateLanded > lateWithoutCheck / 5, "without the check at registration (the review's branch), its input landed after the decision in many of them: \(lateLanded) of \(lateWithoutCheck)")
+    check(serverMarkLanded > 500, "marked by the server alone (before the review), A's input read while the Mac decided landed after the decision: \(serverMarkLanded) of 3000")
+    check(ownUps > 500, "its own ups were tried at once in many sessions: \(ownUps)")
+    check(oldLanded > 2000, "as the glue was before, most sessions landed its input after its removal: \(oldLanded) of 3000")
+    check(buttonsAtLeaving > 100, "the removed device's buttons let go of as it left in many sessions: \(buttonsAtLeaving)")
+    print("revoked: 3000 sessions with a removal and a departure, its input waiting at the decision in \(waited), a second connection of its key admitted while the Mac decided in \(lateAtReview); its own ups at once \(ownUps) times; its buttons let go of as it left \(buttonsAtLeaving) times; without the check at registration such a connection's input landed after the decision in \(lateLanded) of \(lateWithoutCheck); marked by the server alone \(serverMarkLanded) of 3000, before the fix \(oldLanded) of 3000 landed its input after the removal")
+}
+
 // MARK: Random sessions
 //
 // Two devices sending what devices from before this fix send: shortcuts as one key down and up with
@@ -1050,6 +1702,24 @@ check(ksCommand == command && ksShift == shift && ksControl == control && ksOpti
 // The Spotlight key: ⌘'s own key down, Space down and up with command, ⌘ up with nothing.
 check(KeyChord.spotlight == [key(uLCmd, true, command), key(uSpace, true, command), key(uSpace, false, command), key(uLCmd, false, 0)],
       "the Spotlight key sends \(KeyChord.spotlight)")
+// The clipboard's ⌘V after a Paste's receipt (paste right away, docs/clipboard-plan.md): the same shape,
+// V for Space; on this Mac command for V alone and nothing held after, nor on a Mac from before
+// 2026-09-27 (which posts each key's flags as they come), and ⌘'s up is the one up checked.
+do {
+    let uV: UInt16 = 0x19, kV: UInt16 = 9
+    check(ClipboardPolicy.pasteKey == uV && KeyStrokes.virtualKeys[uV] == kV, "⌘V's key is V, the Mac's virtual key 9")
+    check(KeyChord.paste == [key(uLCmd, true, command), key(uV, true, command), key(uV, false, command), key(uLCmd, false, 0)],
+          "Paste right away sends \(KeyChord.paste)")
+    var mac = Mac(); let a = Conn()
+    mac.send(KeyChord.paste + tap, from: a)
+    check(Array(mac.log.prefix(4)) == [.key(kCmd, true, command), .key(kV, true, command), .key(kV, false, command), .key(kCmd, false, 0)]
+          && mac.log.dropFirst(4).allSatisfy { $0 == .pointer(0) } && mac.table == 0 && mac.down.isEmpty && mac.broken.isEmpty,
+          "⌘V on this Mac, then a tap that is no ⌘-click: \(mac.log)")
+    var old = OldMac()
+    old.send(KeyChord.paste + tap)
+    check(old.log.contains(.key(kV, true, command)) && old.table == 0 && old.down.isEmpty && old.log.last == .pointer(0),
+          "⌘V on a Mac from before 2026-09-27 leaves nothing: \(old.log)")
+}
 // A key with nothing latched: the key alone, as before.
 check(KeyChord.press(uEsc, with: []) == bare(uEsc, 0), "escape with nothing latched: \(KeyChord.press(uEsc, with: []))")
 // Two latched: each modifier's key down in the trackpad's order with the flags so far, the key, the
@@ -1104,6 +1774,203 @@ do {
     check(fixed.table == 0 && fixed.log.last == .pointer(0), "this device's Spotlight key leaves nothing on an older Mac: \(fixed.log)")
 }
 
+// MARK: The key row's caps held (HeldCap, #162)
+//
+// Escape, tab and the arrows of the key row go down when a finger lands on them and up when it leaves
+// (HeldCap), so the Mac repeats a cap held down (KeyRepeat, Tests/checks/key-repeat); what is latched
+// goes down with the key, its modifiers' own keys first, and is spent at the touch; one cap at a time;
+// the Button's own action after a touch sends nothing, and an assistive technology's activation (no
+// touch) the whole press, as before.
+
+let uUp: UInt16 = 0x52, uDown: UInt16 = 0x51
+
+// A key going down and up with what is latched: `press` is exactly `down` then `up`.
+check(KeyChord.down(uLeft, with: [.option]) == [key(uLOpt, true, option), key(uLeft, true, option)]
+      && KeyChord.up(uLeft, with: [.option]) == [key(uLeft, false, option), key(uLOpt, false, 0)],
+      "⌥←'s down and up: \(KeyChord.down(uLeft, with: [.option])) then \(KeyChord.up(uLeft, with: [.option]))")
+check(KeyChord.down(uEsc, with: []) == [key(uEsc, true, 0)] && KeyChord.up(uEsc, with: []) == [key(uEsc, false, 0)],
+      "escape with nothing latched: its down, its up")
+do {
+    var all = true
+    for bits in 0..<16 {
+        var latched: KeyModifiers = []
+        if bits & 1 != 0 { latched.insert(.control) }
+        if bits & 2 != 0 { latched.insert(.shift) }
+        if bits & 4 != 0 { latched.insert(.option) }
+        if bits & 8 != 0 { latched.insert(.command) }
+        for u in [uEsc, uTab, uLeft, uRight, uUp, uDown] where KeyChord.press(u, with: latched) != KeyChord.down(u, with: latched) + KeyChord.up(u, with: latched) {
+            all = false
+        }
+    }
+    check(all, "a press is its down then its up, for every latch")
+}
+
+// A finger on escape, then off: its down at the touch, its up at the release; the Button's action as
+// the finger lifts sends nothing more, before the press ends or after it.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uEsc, latched: [], at: 1.0) == [key(uEsc, true, 0)] && h.down?.usage == uEsc, "escape's touch: its down")
+    check(h.touchUp(uEsc, at: 1.8) == [key(uEsc, false, 0)] && h.down == nil, "the release: its up")
+    check(h.activated(uEsc, latched: [], at: 1.81).isEmpty, "the action just after: nothing")
+    check(h.activated(uEsc, latched: [], at: 1.85) == KeyChord.press(uEsc, with: []), "a second activation after it is a press of its own")
+    var g = HeldCap()
+    _ = g.touchDown(uTab, latched: [.option], at: 1.0)
+    check(g.activated(uTab, latched: [.shift], at: 1.5) == [key(uTab, false, option), key(uLOpt, false, 0)] && g.down == nil,
+          "the action before the press's end is told: it is the release, the key and its ⌥ up")
+    check(g.touchUp(uTab, at: 1.51).isEmpty, "then the press's end: nothing more")
+    check(g.activated(uTab, latched: [], at: 3.0) == KeyChord.press(uTab, with: []), "a later activation: the whole press")
+    // The latch is spent when a key goes down with it: a touch's down, a whole press; never by an up.
+    check(HeldCap.spendsLatch(KeyChord.down(uEsc, with: [])) && HeldCap.spendsLatch(KeyChord.press(uTab, with: [.shift]))
+          && !HeldCap.spendsLatch(KeyChord.up(uLeft, with: [.option])) && !HeldCap.spendsLatch([]),
+          "the latch: spent by a down or a press, not by an up or nothing")
+}
+// With ⌥ latched: ⌥'s own key and ← go down at the touch, ← and then ⌥ come up at the release; a
+// modifier latched meanwhile is not the held cap's (touchUp takes no latch).
+do {
+    var h = HeldCap()
+    check(h.touchDown(uLeft, latched: [.option], at: 1.0) == [key(uLOpt, true, option), key(uLeft, true, option)], "⌥ latched: ⌥ and ← down")
+    check(h.down?.modifiers == [.option], "the cap holds what it went down with")
+    check(h.touchUp(uLeft, at: 2.0) == [key(uLeft, false, option), key(uLOpt, false, 0)], "the release: ← up, then ⌥ up")
+}
+// VoiceOver, Switch Control or a keyboard activates a cap with no touch: the whole press with what is
+// latched, as before; also long after a touch that slid off the cap (no action came for it).
+do {
+    var h = HeldCap()
+    check(h.activated(uTab, latched: [.shift], at: 5.0) == KeyChord.press(uTab, with: [.shift]), "an activation with no touch: ⇧Tab pressed")
+    _ = h.touchDown(uEsc, latched: [], at: 6.0)
+    _ = h.touchUp(uEsc, at: 6.2)
+    check(h.activated(uEsc, latched: [], at: 7.0) == KeyChord.press(uEsc, with: []), "0.8 s after a slid-off touch: the whole press")
+    _ = h.touchDown(uEsc, latched: [], at: 8.0)
+    check(h.activated(uEsc, latched: [], at: 8.4) == [key(uEsc, false, 0)], "the action with the finger still on it, as told: its up")
+    check(h.activated(uEsc, latched: [], at: 8.45) == KeyChord.press(uEsc, with: []), "a second activation: its own press")
+    check(h.touchUp(uEsc, at: 8.5).isEmpty, "the press's end after: nothing more")
+}
+// A finger on a second cap: the first comes up first (one key at a time), then the second goes down;
+// the first's own release and action later send nothing.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uLeft, latched: [.command], at: 1.0) == [key(uLCmd, true, command), key(uLeft, true, command)], "⌘←'s touch")
+    check(h.touchDown(uRight, latched: [], at: 1.5) == [key(uLeft, false, command), key(uLCmd, false, 0), key(uRight, true, 0)],
+          "a finger on →: ← and ⌘ up, then → down")
+    check(h.touchUp(uLeft, at: 1.7).isEmpty && h.activated(uLeft, latched: [], at: 1.7).isEmpty, "←'s release and action: nothing")
+    check(h.down?.usage == uRight, "→ is the cap down")
+    check(h.touchUp(uRight, at: 2.0) == [key(uRight, false, 0)] && h.activated(uRight, latched: [], at: 2.0).isEmpty, "→'s release, its action")
+}
+// The same cap's press told twice (no release between): one down. Off the cap and back: up, then down.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uUp, latched: [], at: 1.0) == [key(uUp, true, 0)] && h.touchDown(uUp, latched: [.shift], at: 1.1).isEmpty,
+          "a second press of the cap down: nothing, and the latch stays (nothing came back)")
+    check(h.touchUp(uUp, at: 1.2) == [key(uUp, false, 0)] && h.touchDown(uUp, latched: [], at: 1.3) == [key(uUp, true, 0)]
+          && h.touchUp(uUp, at: 1.4) == [key(uUp, false, 0)] && h.activated(uUp, latched: [], at: 1.4).isEmpty,
+          "slid off and back on: up, down again, up, and its action nothing")
+}
+// The key row leaves the screen with a cap held: it comes up, with its modifiers; its release after
+// sends nothing.
+do {
+    var h = HeldCap()
+    check(h.releaseAll().isEmpty, "nothing held: nothing to let go")
+    _ = h.touchDown(uDown, latched: [.shift, .control], at: 1.0)
+    check(h.releaseAll() == [key(uDown, false, shift | control), key(uLShift, false, control), key(uLCtrl, false, 0)] && h.down == nil,
+          "⌃⇧↓ held as the row goes: ↓, ⇧ and ⌃ up")
+    check(h.touchUp(uDown, at: 1.5).isEmpty, "the release after: nothing")
+}
+// Held on this Mac and on one from before 2026-09-27 (which posts each key's flags as they come): the
+// key is down on the Mac from the touch to the release, carrying what was latched, and nothing is left
+// held after; for every latch and every held cap.
+do {
+    var combos = 0, ok = true
+    for bits in 0..<16 {
+        var latched: KeyModifiers = []
+        if bits & 1 != 0 { latched.insert(.control) }
+        if bits & 2 != 0 { latched.insert(.shift) }
+        if bits & 4 != 0 { latched.insert(.option) }
+        if bits & 8 != 0 { latched.insert(.command) }
+        for u in [uEsc, uTab, uLeft, uRight, uUp, uDown] {
+            var mac = Mac(), old = OldMac(); let a = Conn()
+            var h = HeldCap()
+            let downs = h.touchDown(u, latched: latched, at: 1.0)
+            mac.send(downs, from: a); old.send(downs)
+            let k = KeyStrokes.virtualKeys[u]!
+            let heldNow = mac.down[k] == latched.rawValue && old.down[k] == latched.rawValue
+            let ups = h.touchUp(u, at: 2.0) + tap
+            mac.send(ups, from: a); old.send(ups)
+            if !(heldNow && mac.down.isEmpty && mac.table == 0 && mac.broken.isEmpty && old.down.isEmpty && old.table == 0) {
+                ok = false; print("FAIL: \(u) held with \(names(latched.rawValue)): this Mac \(mac.log), older \(old.log)")
+            }
+            combos += 1
+        }
+    }
+    check(ok && combos == 96, "96 held caps on this Mac and an older one: down while held, nothing left after")
+}
+// Random key row sessions: fingers landing on and leaving the six caps (two at once), their actions in
+// the window or not, activations with no touch, latches made and spent as the key row spends them, and
+// the row leaving the screen. Whenever no cap is down, nothing is held on this Mac or an older one;
+// while one is down its key is the one down on the Mac, with what it went down with.
+do {
+    var rng = Rng(state: 0xCA95_4E1D)
+    var broken = 0, sessions = 0, holds = 0, presses = 0
+    let caps: [UInt16] = [uEsc, uTab, uLeft, uRight, uUp, uDown]
+    for run in 0..<2000 {
+        var mac = Mac(), old = OldMac(); let a = Conn()
+        var h = HeldCap()
+        var latched: KeyModifiers = []
+        var t = 1.0
+        var fingers: [UInt16] = []
+        var problem: String?
+        func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
+        for step in 0..<(10 + rng.below(40)) {
+            t += Double(rng.below(400)) / 1000
+            switch rng.below(9) {
+            case 0, 1, 2:
+                let u = rng.pick(caps)
+                let events = h.touchDown(u, latched: latched, at: t)
+                send(events)
+                if HeldCap.spendsLatch(events) { latched = []; holds += 1 }
+                if !fingers.contains(u) { fingers.append(u) }
+            case 3, 4:
+                if let u = fingers.isEmpty ? nil : fingers[rng.below(fingers.count)] {
+                    // The release: the press's end and the Button's action, in either order, or the end alone
+                    // (the finger slid off the cap).
+                    let action = rng.chance(70), first = rng.chance(50)
+                    if action && first { send(h.activated(u, latched: latched, at: t)) }
+                    send(h.touchUp(u, at: t))
+                    fingers.removeAll { $0 == u }
+                    if action && !first { t += Double(rng.below(30)) / 1000; send(h.activated(u, latched: latched, at: t)) }
+                }
+            case 5:
+                let u = rng.pick(caps)
+                if !fingers.contains(u) {
+                    let events = h.activated(u, latched: latched, at: t + 1)
+                    t += 1
+                    send(events)
+                    if HeldCap.spendsLatch(events) { latched = []; presses += 1 }
+                }
+            case 6, 7:
+                latched.formSymmetricDifference(rng.pick([KeyModifiers.control, .shift, .option, .command]))
+            default:
+                if rng.chance(30) { send(h.releaseAll()); fingers = [] }
+            }
+            let modifierKeysDown = mac.down.keys.filter { macModifiers[$0] != nil }
+            if let held = h.down {
+                let k = KeyStrokes.virtualKeys[held.usage]!
+                let others = mac.down.keys.filter { macModifiers[$0] == nil && $0 != k }
+                if mac.down[k] != held.modifiers.rawValue || !others.isEmpty || old.down[k] != held.modifiers.rawValue {
+                    problem = "step \(step): cap \(held.usage) down with \(names(held.modifiers.rawValue)), the Mac has \(mac.down)"
+                }
+            } else if !mac.down.isEmpty || mac.table & modifierBits != 0 || !old.down.isEmpty || old.table & modifierBits != 0 || !modifierKeysDown.isEmpty {
+                problem = "step \(step): no cap down, yet this Mac has \(mac.down) (\(names(mac.table))), an older one \(old.down)"
+            }
+            if !mac.broken.isEmpty { problem = "step \(step): " + mac.broken[0] }
+            if problem != nil { break }
+        }
+        if let problem { broken += 1; if broken <= 3 { print("FAIL: key row run \(run): \(problem)") } }
+        sessions += 1
+    }
+    check(broken == 0, "key row sessions: \(broken) of \(sessions) left something held or the wrong key down")
+    check(holds > 10_000 && presses > 1_000, "the sessions hold caps and press them: \(holds) holds, \(presses) presses")
+}
+
 // MARK: The device's hardware keyboard (ForwardedKeys)
 
 /// A hardware keyboard on this device and what UIKit tells InputOverlayView: the modifiers held after
@@ -1113,28 +1980,37 @@ struct Keyboard {
     var physical: [UInt16] = []
     var before = false
     var forwarded = ForwardedKeys()
+    /// Who types the characters as each key goes down (KeyTyping: the overlay asks it at each press):
+    /// iPadOS's text system, as before, unless a test says the Mac.
+    var typing = KeyTyping.text
+    /// Caps Lock on: the iPad's own state, which its key toggles (that key is the text system's whoever
+    /// types, and types nothing), carried in UIKit's flags as alphaShift.
+    var capsLockOn = false
     /// The clock UIPress timestamps and the key commands' firing share (systemUptime).
     var time: Double = 1000
-    var flags: UInt64 { physical.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
+    var flags: UInt64 {
+        physical.reduce(capsLockOn ? capsLock : 0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) }
+    }
     /// What the overlay does with an answer of `pressed` or `released`: to the Mac, to the text system
-    /// (a character typed; a modifier alone or a key's up types nothing), or nowhere.
+    /// (a character typed; a modifier alone, Caps Lock or a key's up types nothing), or nowhere.
     func outcome(_ p: ForwardedKeys.Press, _ u: UInt16, down: Bool) -> [InputEvent] {
         switch p {
         case .send(let e): return [e]
-        case .text: return down && KeyModifiers.flag(forKey: u) == nil ? [.text("x")] : []
+        case .text: return down && KeyModifiers.flag(forKey: u) == nil && u != uCapsLock ? [.text("x")] : []
         case .swallow: return []
         }
     }
     /// A key pressed, as pressesBegan has it (`pressed`): its down if it goes to the Mac as a key, else
-    /// a character typed. Unseen (the overlay not taking keys), nothing.
+    /// a character typed. Unseen (the overlay not taking keys), nothing. Caps Lock's press toggles it.
     mutating func press(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard !physical.contains(u) else { return [] }
         let was = flags
         physical.append(u)
         time += 0.2
         if u == uEsc { escSeen = seen }
+        if u == uCapsLock { capsLockOn.toggle() }
         guard seen else { return [] }
-        return outcome(forwarded.pressed(u, modifiers: before ? was : flags, at: time), u, down: true)
+        return outcome(forwarded.pressed(u, modifiers: before ? was : flags, at: time, typing: typing), u, down: true)
     }
     mutating func release(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard let i = physical.firstIndex(of: u) else { return [] }
@@ -1172,12 +2048,12 @@ struct Keyboard {
             return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
         case .pressFirst:
             escSeen = true
-            return outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+            return outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt, typing: typing), uEsc, down: true)
                 + forwarded.commanded(uEsc, modifiers: held, at: firedAt)
         case .commandFirst:
             escSeen = true
             return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
-                + outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+                + outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt, typing: typing), uEsc, down: true)
         }
     }
     /// Whether pressesBegan saw the last Esc, so pressesEnded sees its release too.
@@ -1190,13 +2066,14 @@ struct Keyboard {
 // any key while ⌘, ⌃ or ⌥ is held, and return and tab with shift (their "\n" and "\t" carry none);
 // shift alone otherwise makes characters.
 check([uLeft, uRight, 0x51, 0x52, uEsc, 0x4C, 0x4A, 0x4D, 0x4B, 0x4E, 0x3A, 0x45, uLCmd, uRCmd, uLCtrl, uRCtrl, uLOpt, uROpt]
-        .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0) },
+        .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .text) },
       "arrows, escape, forward delete, home, end, page up and down, F1 and F12, ⌘, ⌃, ⌥: as keys")
-check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .text) },
       "letters, space, delete, shift and caps lock with shift: to the text system")
-check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift) && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift, typing: .text)
+                                   && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .text) },
       "return and tab with shift: as keys (the text system's \\n and \\t carry no shift)")
-check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0) || ForwardedKeys.goesAsKey($0, modifiers: capsLock) },
+check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .text) || ForwardedKeys.goesAsKey($0, modifiers: capsLock, typing: .text) },
       "return and tab alone, or with caps lock: to the text system (an IME's return confirms its text)")
 // ⇧Return and ⇧Tab: the key's down carries shift (the text system's, so no shift key went), its up
 // the keys down: none; either Mac is left nothing.
@@ -1208,8 +2085,9 @@ for (u, name) in [(uReturn, "⇧Return"), (UInt16(0x2B), "⇧Tab")] {
     mac.send(events + tap, from: a); old.send(events + tap)
     check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "\(name) leaves nothing on either Mac")
 }
-check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command) && ForwardedKeys.goesAsKey($0, modifiers: option)
-                                                  && ForwardedKeys.goesAsKey($0, modifiers: control) },
+check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command, typing: .text)
+                                                  && ForwardedKeys.goesAsKey($0, modifiers: option, typing: .text)
+                                                  && ForwardedKeys.goesAsKey($0, modifiers: control, typing: .text) },
       "any key while ⌘, ⌃ or ⌥ is held: as a key")
 
 // ⌘C, ⌘ let go last: the ⌘ key's up goes to the Mac although UIKit no longer says command.
@@ -1329,7 +2207,7 @@ do {
     var f = ForwardedKeys()
     let first = f.commanded(uEsc, modifiers: 0, at: 5.0)
     let repeated = f.commanded(uEsc, modifiers: 0, at: 5.5)
-    let press = f.pressed(uEsc, modifiers: 0, at: 4.999)
+    let press = f.pressed(uEsc, modifiers: 0, at: 4.999, typing: .text)
     let up = f.released(uEsc)
     check(first == [key(uEsc, true, 0), key(uEsc, false, 0)] && repeated == first && press == .swallow && up == .swallow,
           "a repeating command and its one press: \(first) \(repeated) \(press) \(up)")
@@ -1338,7 +2216,7 @@ do {
 // Esc down through pressesBegan (held): the command sends nothing while it is down.
 do {
     var f = ForwardedKeys()
-    let down = f.pressed(uEsc, modifiers: 0, at: 1.0)
+    let down = f.pressed(uEsc, modifiers: 0, at: 1.0, typing: .text)
     let command = f.commanded(uEsc, modifiers: 0, at: 1.1)
     let up = f.released(uEsc)
     check(down == .send(key(uEsc, true, 0)) && command.isEmpty && up == .send(key(uEsc, false, 0)),
@@ -1348,34 +2226,316 @@ do {
 do {
     var f = ForwardedKeys()
     _ = f.commanded(uEsc, modifiers: 0, at: 2.0)
-    _ = f.pressed(uEsc, modifiers: 0, at: 1.99)
+    _ = f.pressed(uEsc, modifiers: 0, at: 1.99, typing: .text)
     check(f.swallowed == [uEsc], "a swallowed press is remembered")
     check(f.releaseAll().isEmpty && f.swallowed.isEmpty, "releaseAll forgets it")
 }
 // `pressed` and `released` are `began` and `ended` for every other key.
 do {
     var f = ForwardedKeys()
-    check(f.pressed(uS, modifiers: 0, at: 1) == .text && f.pressed(uLeft, modifiers: 0, at: 1) == .send(key(uLeft, true, 0))
+    check(f.pressed(uS, modifiers: 0, at: 1, typing: .text) == .text && f.pressed(uLeft, modifiers: 0, at: 1, typing: .text) == .send(key(uLeft, true, 0))
           && f.released(uLeft) == .send(key(uLeft, false, 0)) && f.released(uS) == .text,
           "pressed and released for S and ←")
     check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
 }
 
+// MARK: Who types a hardware keyboard's characters (KeyTyping, #162's letters)
+
+// While the Mac types them (`.keys`: a keyboard in the Latin alphabet selected on the iPad, nothing
+// composed, nothing latched), every key that types a character goes to the Mac as a key, so the Mac
+// repeats a held one and its own layout and dead keys apply; otherwise (`.text`) they go to iPadOS's text
+// system, as before, and while an input method composes (`.composing`) the overlay hands every key to it
+// before ForwardedKeys is asked (here, as the text system's).
+let characterKeys = Set(0x04...0x1D).union(0x1E...0x27).union([uReturn, uDelete, uTab, uSpace]).union(0x2D...0x31)
+    .union(0x33...0x38).union([uLShift, uRShift])
+check(ForwardedKeys.characterUsages == characterKeys,
+      "the character keys: the letters, the digits, Return, Delete, Tab, Space, - = [ ] \\ ; ' ` , . / and Shift's two: "
+        + "\(ForwardedKeys.characterUsages.sorted().map { String($0, radix: 16) })")
+check(characterKeys.allSatisfy { KeyStrokes.virtualKeys[$0] != nil },
+      "every character key is a key every Sill for Mac answers to (none is dropped by a Mac from before)")
+check(characterKeys.allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .keys)
+                                 && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .keys) },
+      "while the Mac types: every character key as a key, with shift or caps lock too")
+check(!characterKeys.subtracting(ForwardedKeys.keyUsages).contains { u in
+          [KeyTyping.text, .composing].contains { ForwardedKeys.goesAsKey(u, modifiers: 0, typing: $0)
+                                                  || (u != uReturn && u != uTab && ForwardedKeys.goesAsKey(u, modifiers: shift | capsLock, typing: $0)) } },
+      "while iPadOS types: the character keys to the text system, as before (⇧Return and ⇧Tab aside)")
+check(ForwardedKeys.keyUsages.allSatisfy { u in [KeyTyping.keys, .text, .composing].allSatisfy { ForwardedKeys.goesAsKey(u, modifiers: 0, typing: $0) } },
+      "the keys the text system never delivers: as keys whoever types")
+check(characterKeys.allSatisfy { u in [KeyTyping.keys, .text].allSatisfy { ForwardedKeys.goesAsKey(u, modifiers: command, typing: $0)
+                                                                         && ForwardedKeys.goesAsKey(u, modifiers: option, typing: $0) } },
+      "a character key with ⌘ or ⌥: a shortcut, as a key whoever types")
+// Caps Lock, the keypad, the ISO keyboards' Non-US # and \ and the international keys: no Sill for Mac
+// before has a key for the last three (KeyStrokes.virtualKeys), and Caps Lock is the iPad's own state.
+let textAlways: [UInt16] = [uCapsLock, 0x32, 0x64, 0x53, 0x54, 0x58, 0x59, 0x62, 0x63, 0x67, 0x85, 0x87, 0x89]
+check(!textAlways.contains { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .keys) || ForwardedKeys.goesAsKey($0, modifiers: shift, typing: .keys) },
+      "Caps Lock, the keypad, Non-US # and \\, the international keys: the text system's whoever types")
+check(textAlways.filter { $0 != uCapsLock }.allSatisfy { KeyStrokes.virtualKeys[$0] == nil },
+      "the keys left to the text system are ones a Mac from before has no key for (but Caps Lock)")
+
+/// A key's events on this Mac and on one from before (each left nothing held, the tap after plain): what
+/// the Mac posted.
+func onBothMacs(_ events: [InputEvent], _ what: String, line: Int = #line) -> [Mac.Event] {
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events, from: a); old.send(events)
+    let posted = mac.log
+    mac.send(tap, from: a); old.send(tap)
+    check(mac.table == 0 && mac.broken.isEmpty && mac.down.isEmpty && old.table == 0 && old.down.isEmpty && old.log.last == .pointer(0),
+          "\(what) leaves nothing on either Mac: \(mac.log) / \(old.log)", line: line)
+    return posted
+}
+
+// A held P, the reported key (Noah, 2026-10-29: "hold p didnt work"): its down goes at the press and its
+// up at the release, so the Mac repeats it between them (KeyRepeat); the text system never sees it.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uP) + kb.release(uP)
+    check(events == [key(uP, true, 0), key(uP, false, 0)], "P held while the Mac types: \(events)")
+    expect(onBothMacs(events, "P held"), [.key(35, true, 0), .key(35, false, 0)], "P held: the Mac's P (kVK_ANSI_P)")
+    var text = Keyboard()
+    check(text.press(uP) + text.release(uP) == [.text("x")], "P while iPadOS types: the text system's, as before")
+}
+// E, which iPadOS's press and hold gave its accent popover: a key, the text system never sees it.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uE) + kb.release(uE)
+    check(events == [key(uE, true, 0), key(uE, false, 0)], "E held while the Mac types: \(events)")
+}
+// Every character key alone: down and up as a key, nothing left down on the device.
+do {
+    var bad: [UInt16] = []
+    for u in characterKeys.sorted() {
+        var kb = Keyboard(); kb.typing = .keys
+        let events = kb.press(u) + kb.release(u)
+        let isShift = KeyModifiers.flag(forKey: u) == .shift
+        let want = isShift ? [key(u, true, shift), key(u, false, 0)] : [key(u, true, 0), key(u, false, 0)]
+        if events != want || !kb.forwarded.down.isEmpty { bad.append(u) }
+    }
+    check(bad.isEmpty, "each character key alone while the Mac types: \(bad.map { String($0, radix: 16) })")
+}
+// ⇧A: Shift's own key goes first (so the Mac knows it is held: the repeats of a held A follow it), then
+// A with shift, A's up with shift still held, Shift's up with nothing.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uA, false, shift), key(uLShift, false, 0)], "⇧A: \(events)")
+    expect(onBothMacs(events, "⇧A"), [.key(56, true, shift), .key(0, true, shift), .key(0, false, shift), .key(56, false, 0)],
+           "⇧A on the Mac: Shift's flags-changed, A with shift, Shift let go")
+}
+// Shift let go before A: Shift's up first (the Mac's repeats of A go on without it), then A's up.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uLShift) + kb.release(uA)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uLShift, false, 0), key(uA, false, 0)], "⇧A, ⇧ let go first: \(events)")
+    _ = onBothMacs(events, "⇧A with ⇧ let go first")
+}
+// The right Shift, and both: the left's up keeps shift while the right is down.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uRShift) + kb.press(uZ) + kb.release(uLShift) + kb.release(uZ) + kb.release(uRShift)
+    check(events == [key(uLShift, true, shift), key(uRShift, true, shift), key(uZ, true, shift), key(uLShift, false, shift),
+                     key(uZ, false, shift), key(uRShift, false, 0)], "both Shifts around Z: \(events)")
+    _ = onBothMacs(events, "both Shifts around Z")
+}
+// Caps Lock on (the iPad's): a letter goes down with shift too, so the Mac types a capital whatever it
+// makes of a posted caps lock flag; its up with nothing held. Caps Lock's own key types nothing.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let toggle = kb.press(uCapsLock) + kb.release(uCapsLock)
+    check(toggle.isEmpty && kb.capsLockOn, "Caps Lock's key: the text system's, nothing typed: \(toggle)")
+    let events = kb.press(uA) + kb.release(uA)
+    check(events == [key(uA, true, capsLock | shift), key(uA, false, 0)], "A with Caps Lock on: \(events)")
+    expect(onBothMacs(events, "A with Caps Lock on"), [.key(0, true, capsLock | shift), .key(0, false, 0)], "A with Caps Lock on, on the Mac")
+    // A digit and a punctuation key: Caps Lock changes neither on a Mac, so no shift.
+    let digit = kb.press(u1) + kb.release(u1) + kb.press(uSlash) + kb.release(uSlash)
+    check(digit == [key(u1, true, capsLock), key(u1, false, 0), key(uSlash, true, capsLock), key(uSlash, false, 0)],
+          "1 and / with Caps Lock on: no shift: \(digit)")
+    // ⇧A with Caps Lock on: shift once.
+    let shifted = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(shifted == [key(uLShift, true, shift), key(uA, true, capsLock | shift), key(uA, false, shift), key(uLShift, false, 0)],
+          "⇧A with Caps Lock on: \(shifted)")
+    // ⌘A, ⌥E and ⌃A with Caps Lock on: the shortcut as it is, never ⌘⇧A.
+    let chords = kb.press(uLCmd) + kb.press(uA) + kb.release(uA) + kb.release(uLCmd)
+        + kb.press(uLOpt) + kb.press(uE) + kb.release(uE) + kb.release(uLOpt)
+        + kb.press(uLCtrl) + kb.press(uA) + kb.release(uA) + kb.release(uLCtrl)
+    check(chords == [key(uLCmd, true, command), key(uA, true, capsLock | command), key(uA, false, command), key(uLCmd, false, 0),
+                     key(uLOpt, true, option), key(uE, true, capsLock | option), key(uE, false, option), key(uLOpt, false, 0),
+                     key(uLCtrl, true, control), key(uA, true, capsLock | control), key(uA, false, control), key(uLCtrl, false, 0)],
+          "⌘A, ⌥E and ⌃A with Caps Lock on: no shift added: \(chords)")
+    _ = onBothMacs(events + digit + shifted + chords, "Caps Lock's keys")
+    // Off again: plain letters.
+    _ = kb.press(uCapsLock) + kb.release(uCapsLock)
+    check(!kb.capsLockOn && kb.press(uA) + kb.release(uA) == [key(uA, true, 0), key(uA, false, 0)], "Caps Lock off again: a plain A")
+    // While iPadOS types, Caps Lock's letters are the text system's as before.
+    var text = Keyboard(); text.capsLockOn = true
+    check(text.press(uA) + text.release(uA) == [.text("x")], "A with Caps Lock on while iPadOS types: the text system's")
+}
+check(ForwardedKeys.carried(uA, modifiers: capsLock) == capsLock | shift && ForwardedKeys.carried(uA, modifiers: 0) == 0
+      && ForwardedKeys.carried(uZ, modifiers: capsLock) == capsLock | shift && ForwardedKeys.carried(0x1E, modifiers: capsLock) == capsLock
+      && ForwardedKeys.carried(uA, modifiers: capsLock | command) == capsLock | command
+      && ForwardedKeys.carried(uLeft, modifiers: capsLock) == capsLock,
+      "carried: shift for a letter A to Z with Caps Lock on and no shortcut, nothing else")
+check(KeyModifiers.capsLock.rawValue == capsLock, "the device's caps lock bit is the Mac's")
+// ⌥E, then E: both keys, so the Mac's dead key makes é (as a keyboard plugged into it does); before,
+// ⌥E went as a key and E as typed text.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLOpt) + kb.press(uE) + kb.release(uE) + kb.release(uLOpt) + kb.press(uE) + kb.release(uE)
+    check(events == [key(uLOpt, true, option), key(uE, true, option), key(uE, false, option), key(uLOpt, false, 0),
+                     key(uE, true, 0), key(uE, false, 0)], "⌥E, then E while the Mac types: \(events)")
+    expect(onBothMacs(events, "⌥E, E"), [.key(58, true, option), .key(14, true, option), .key(14, false, option), .key(58, false, 0),
+                                       .key(14, true, 0), .key(14, false, 0)], "⌥E, then E on the Mac")
+    var text = Keyboard()
+    check(text.press(uLOpt) + text.press(uE) + text.release(uE) + text.release(uLOpt) + text.press(uE) + text.release(uE)
+          == [key(uLOpt, true, option), key(uE, true, option), key(uE, false, option), key(uLOpt, false, 0), .text("x")],
+          "⌥E, then E while iPadOS types: as before, E typed as text")
+}
+// Return, Delete, Tab and Space as keys; ⇧Return and ⇧Tab with Shift's own key around them.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = [uReturn, uDelete, uTab, uSpace].flatMap { kb.press($0) + kb.release($0) }
+    check(events == [uReturn, uDelete, uTab, uSpace].flatMap { [key($0, true, 0), key($0, false, 0)] }, "Return, Delete, Tab, Space: \(events)")
+    expect(onBothMacs(events, "Return, Delete, Tab, Space"), [36, 51, 48, 49].flatMap { [Mac.Event.key($0, true, 0), .key($0, false, 0)] },
+           "Return, Delete, Tab, Space on the Mac")
+    let shifted = kb.press(uLShift) + kb.press(uReturn) + kb.release(uReturn) + kb.press(uTab) + kb.release(uTab) + kb.release(uLShift)
+    check(shifted == [key(uLShift, true, shift), key(uReturn, true, shift), key(uReturn, false, shift), key(uTab, true, shift),
+                      key(uTab, false, shift), key(uLShift, false, 0)], "⇧Return, ⇧Tab while the Mac types: \(shifted)")
+    _ = onBothMacs(shifted, "⇧Return, ⇧Tab")
+}
+// ⌘S, Esc and ← are as they were.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLCmd) + kb.press(uS) + kb.release(uS) + kb.release(uLCmd) + kb.press(uLeft) + kb.release(uLeft)
+        + kb.esc(.commandFirst) + kb.releaseEsc() + kb.press(uEsc) + kb.release(uEsc)
+    var was = Keyboard()
+    let before = was.press(uLCmd) + was.press(uS) + was.release(uS) + was.release(uLCmd) + was.press(uLeft) + was.release(uLeft)
+        + was.esc(.commandFirst) + was.releaseEsc() + was.press(uEsc) + was.release(uEsc)
+    check(events == before, "⌘S, ←, Esc by both channels and by its press: the same whoever types: \(events)")
+}
+// A key's way is decided at its down: A down while the Mac types, the keyboard switched to one iPadOS
+// types (by the Globe key, say: ⌃Space lets the keys held come up at its Space, below), A's up still to the
+// Mac; and the other way, nothing to the Mac.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    var events = kb.press(uA)
+    kb.typing = .text
+    events += kb.release(uA)
+    check(events == [key(uA, true, 0), key(uA, false, 0)], "A down while the Mac types, up after a switch: \(events)")
+    var other = Keyboard(); other.typing = .text
+    var typed = other.press(uA)
+    other.typing = .keys
+    typed += other.release(uA)
+    check(typed == [.text("x")] && other.forwarded.down.isEmpty, "A down while iPadOS types, up after a switch: no stray up: \(typed)")
+    // Shift held across a switch: its up follows its down to the Mac; a letter in between is the text system's.
+    var held = Keyboard(); held.typing = .keys
+    var around = held.press(uLShift)
+    held.typing = .text
+    around += held.press(uA) + held.release(uA) + held.release(uLShift)
+    check(around == [key(uLShift, true, shift), .text("x"), key(uLShift, false, 0)], "Shift held across a switch: \(around)")
+    _ = onBothMacs(events + around, "keys across a switch")
+}
+// ⌃Space as iPadOS's own switch between keyboards (two languages set up: TextInputRules.isKeyboardSwitch, judged
+// in the overlay before `pressed`): the Space goes to iPadOS, so the Mac never hears a key go down, which on a Mac
+// stops the key repeating before it (KeyRepeat). Every key down on the Mac but the modifiers' own comes up at the
+// Space (ForwardedKeys.keyboardSwitch), the last pressed first, ⌃ (and ⇧) at their own releases; the keys' own
+// releases later are the text system's. Before, a letter held across the switch went on repeating on the Mac, with
+// control while ⌃ was down (⌃P, a line up), then plain until it came up.
+extension Keyboard {
+    /// The Space of ⌃Space taken by iPadOS (InputOverlayView.forward's switch): a key down the Mac never hears,
+    /// and the ups the switch sends.
+    mutating func iPadOSSwitch() -> [InputEvent] {
+        guard !physical.contains(uSpace) else { return [] }
+        physical.append(uSpace)
+        time += 0.2
+        return forwarded.keyboardSwitch()
+    }
+}
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    var events = kb.press(uP) + kb.press(uLCtrl) + kb.iPadOSSwitch()
+    kb.typing = .text                                      // now Zhuyin, say
+    events += kb.release(uSpace) + kb.release(uLCtrl) + kb.release(uP)
+    check(events == [key(uP, true, 0), key(uLCtrl, true, control), key(uP, false, control), key(uLCtrl, false, 0)],
+          "P held across iPadOS's ⌃Space: P up at the Space, ⌃ at its own release, P's release nothing: \(events)")
+    check(kb.forwarded.down.isEmpty, "P held across iPadOS's ⌃Space: nothing left down")
+    expect(onBothMacs(events, "P held across iPadOS's ⌃Space"),
+           [.key(35, true, 0), .key(59, true, control), .key(35, false, control), .key(59, false, 0)],
+           "P held across iPadOS's ⌃Space on the Mac: P's up while ⌃ is down, before any other key")
+    // ⇧, P and ← held: both keys up, the last pressed first, with what the modifier keys hold; ⇧ stays down for
+    // its own release.
+    var two = Keyboard(); two.typing = .keys
+    var held = two.press(uLShift) + two.press(uP) + two.press(uLeft) + two.press(uLCtrl) + two.iPadOSSwitch()
+    held += two.release(uSpace) + two.release(uLCtrl) + two.release(uLeft) + two.release(uP) + two.release(uLShift)
+    check(held == [key(uLShift, true, shift), key(uP, true, shift), key(uLeft, true, shift), key(uLCtrl, true, shift | control),
+                   key(uLeft, false, shift | control), key(uP, false, shift | control), key(uLCtrl, false, shift), key(uLShift, false, 0)],
+          "⇧, P and ← held across iPadOS's ⌃Space: \(held)")
+    _ = onBothMacs(held, "⇧, P and ← held across iPadOS's ⌃Space")
+    // An arrow held while iPadOS types the characters (it repeats on every Mac with key repeat): the same.
+    var arrow = Keyboard()
+    let a = arrow.press(uRight) + arrow.press(uLCtrl) + arrow.iPadOSSwitch() + arrow.release(uSpace) + arrow.release(uLCtrl)
+        + arrow.release(uRight)
+    check(a == [key(uRight, true, 0), key(uLCtrl, true, control), key(uRight, false, control), key(uLCtrl, false, 0)],
+          "→ held across iPadOS's ⌃Space: \(a)")
+    // Nothing held but ⌃: ⌃'s own keys alone, as before.
+    var bare = Keyboard(); bare.typing = .keys
+    let b = bare.press(uLCtrl) + bare.iPadOSSwitch() + bare.release(uSpace) + bare.release(uLCtrl)
+    check(b == [key(uLCtrl, true, control), key(uLCtrl, false, 0)], "⌃Space with nothing held: \(b)")
+    // A key pressed again after the switch goes down and up as any key does.
+    var again = Keyboard(); again.typing = .keys
+    _ = again.press(uP) + again.press(uLCtrl) + again.iPadOSSwitch() + again.release(uSpace) + again.release(uLCtrl) + again.release(uP)
+    let next = again.press(uP) + again.release(uP)
+    check(next == [key(uP, true, 0), key(uP, false, 0)], "P again after the switch: \(next)")
+}
+// Two letters held, one let go: each down and up once, the Mac repeating the last pressed (KeyRepeat).
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uP) + kb.press(uE) + kb.release(uP) + kb.release(uE)
+    check(events == [key(uP, true, 0), key(uE, true, 0), key(uP, false, 0), key(uE, false, 0)], "P and E held: \(events)")
+}
+// The overlay letting go (Settings, the tour) with Shift and P down: both come up, the last pressed first.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    _ = kb.press(uLShift) + kb.press(uP)
+    let ups = kb.forwarded.releaseAll()
+    check(ups == [key(uP, false, shift), key(uLShift, false, 0)], "releaseAll with ⇧P down: \(ups)")
+    check(kb.release(uP).isEmpty && kb.release(uLShift).isEmpty, "the releases after it: nothing")
+    // Cancelled presses (the app going to the background): the same ups.
+    var c = Keyboard(); c.typing = .keys
+    let cancelled = c.press(uLShift) + c.press(uP) + c.cancel(uP) + c.cancel(uLShift)
+    check(cancelled == [key(uLShift, true, shift), key(uP, true, shift), key(uP, false, shift), key(uLShift, false, 0)], "⇧P cancelled: \(cancelled)")
+}
+// A key no Sill for Mac has (the keypad's 1) stays the text system's while the Mac types.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    check(kb.press(0x59) + kb.release(0x59) == [.text("x")], "the keypad's 1 while the Mac types: the text system's")
+}
+// UIKit's flags from before each change (a modifier's press not yet in its own flags): Shift's down still
+// carries shift, as every modifier key's own down carries what the keys down hold.
+do {
+    var kb = Keyboard(); kb.typing = .keys; kb.before = true
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uA, false, shift), key(uLShift, false, 0)],
+          "⇧A with UIKit's flags from before each change: \(events)")
+}
+
 // Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
 // clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, Return
-// and Tab among its keys (⇧Return and ⇧Tab go as keys), and Esc through its key command in each
-// order), text and taps. This Mac keeps the invariant after every event; a Mac from before this fix
-// holds no modifier whenever nothing is pressed on the device, and at the end.
+// and Tab among its keys (⇧Return and ⇧Tab go as keys), Esc through its key command in each
+// order, letters, digits, Delete, Shift and Caps Lock, typed by the Mac or by iPadOS's text system and
+// the keyboard switched between the two mid-session), text and taps. This Mac keeps the invariant after
+// every event; a Mac from before this fix holds no modifier whenever nothing is pressed on the device,
+// and at the end; and once every key is let go nothing is down on the Mac.
 do {
     var rng = Rng(state: 0xDE71_CE5E)
-    var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0
+    var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0, leftDown = 0, macTyped = 0, switched = 0, ctrlSpaceSwitches = 0, switchLeftDown = 0
     var reported: [Mac.Ignore: Int] = [:]
     for (ignore, count) in [(Mac.Ignore.nothing, 2000), (.modifierUps, 500), (.keyUps, 500)] {
     for run in 0..<count {
         var mac = Mac(), old = OldMac(); let a = Conn()
         mac.ignore = ignore
         var tripwire = Tripwire()
-        var kb = Keyboard(); kb.before = rng.chance(40)
+        var kb = Keyboard(); kb.before = rng.chance(40); kb.typing = rng.chance(50) ? .keys : .text
+        if kb.typing == .keys { macTyped += 1 }
         var drag: KeyModifiers? = nil
         var overlay = true
         var oldHeld: String? = nil
@@ -1383,7 +2543,7 @@ do {
         func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
         for step in 0..<(20 + rng.below(60)) {
             defer { tripwire.step(&mac, "step \(step)") }
-            switch rng.below(12) {
+            switch rng.below(13) {
             case 0: send(KeyChord.press(rng.pick([uSpace, uEsc, uS, uLeft, uRight, uReturn]), with: latched()))
             case 1: send(KeyChord.spotlight)
             case 2:
@@ -1393,7 +2553,8 @@ do {
                 if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)); drag = nil }
                 else { let m = latched(); send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.2, y: 0.2)]); drag = m }
             case 4, 5, 6:
-                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace, uReturn, 0x2B])
+                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uRShift, uC, uS, uP, uA, u1, uDelete, uCapsLock, uLeft,
+                                  uEsc, uSpace, uReturn, 0x2B])
                 // Esc, half the time through its key command, in one of the three orders.
                 if u == uEsc, overlay, rng.chance(50) {
                     send(kb.esc(rng.pick([.commandOnly, .pressFirst, .commandFirst])))
@@ -1414,6 +2575,25 @@ do {
                 // The overlay stops taking keys, or takes them again.
                 if overlay { send(kb.forwarded.releaseAll()) }
                 overlay.toggle()
+            case 11:
+                // The keyboard switched between one the Mac types and one iPadOS's text system types: by the
+                // Globe key, keys down stay the way they went; by ⌃Space, iPadOS's switch (while the overlay
+                // takes keys), whose Space the Mac never hears, every key down on the Mac but a modifier's own
+                // comes up (ForwardedKeys.keyboardSwitch).
+                if overlay, rng.chance(50), !kb.physical.contains(uSpace) {
+                    let ctrl = !kb.physical.contains(uLCtrl)
+                    if ctrl { send(kb.press(uLCtrl)) }
+                    send(kb.iPadOSSwitch())
+                    if kb.forwarded.down.contains(where: { KeyModifiers.flag(forKey: $0) == nil }) {
+                        switchLeftDown += 1
+                        if switchLeftDown <= 3 { print("FAIL: device run \(run): after iPadOS's ⌃Space \(kb.forwarded.down) still down") }
+                    }
+                    send(kb.release(uSpace))
+                    if ctrl { send(kb.release(uLCtrl)) }
+                    ctrlSpaceSwitches += 1
+                }
+                kb.typing = kb.typing == .keys ? .text : .keys
+                switched += 1
             default: send([.text("y")] + tap)
             }
             if kb.physical.isEmpty, drag == nil, old.table & modifierBits != 0 {
@@ -1423,6 +2603,10 @@ do {
         }
         if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)) }
         for u in kb.physical { send(kb.release(u, seen: overlay && (u != uEsc || kb.escSeen))) }
+        if !mac.down.isEmpty || !kb.forwarded.down.isEmpty {
+            leftDown += 1
+            if leftDown <= 3 { print("FAIL: device run \(run): with every key let go, keys \(mac.down.keys.sorted()) are down on the Mac, \(kb.forwarded.down) forwarded") }
+        }
         if oldHeld == nil, old.table & modifierBits != 0 || !old.down.filter({ macModifiers[$0.key] != nil }).isEmpty {
             oldHeld = "at the end an older Mac holds \(names(old.table & modifierBits)), down \(old.down.keys.sorted())"
         }
@@ -1443,12 +2627,16 @@ do {
         sessions += 1
     }
     }
+    check(leftDown == 0, "device sessions: \(leftDown) of \(sessions) left a key down on the Mac once every key was let go")
+    check(macTyped > 1000 && switched > 1000, "the Mac typed in \(macTyped) sessions, and keyboards switched \(switched) times")
+    check(switchLeftDown == 0 && ctrlSpaceSwitches > 500,
+          "iPadOS's ⌃Space: \(switchLeftDown) of \(ctrlSpaceSwitches) left a key but a modifier down on the Mac")
     check(newBroken == 0, "device sessions on this Mac: \(newBroken) of 2000 broke the invariant")
     check(oldBroken == 0, "device sessions on a Mac from before this fix: \(oldBroken) of 2000 left a modifier held")
     check(missed == 0, "device sessions on a Mac keeping its table through some ups: \(missed) of 1000 left a modifier set that no check reported")
     check(falseReports == 0 && reported[.nothing] == nil, "device sessions on a Mac as the model says: \(falseReports) reported a modifier")
     check((reported[.modifierUps] ?? 0) > 250, "this device's modifier keys' ups are checked: \(reported)")
-    print("device: \(sessions) sessions; checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
+    print("device: \(sessions) sessions (the Mac typing in \(macTyped), \(switched) keyboard switches); checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")

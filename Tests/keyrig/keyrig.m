@@ -12,6 +12,7 @@
 //
 //   keyrig keys <spec> [settle] [hold]     spec: USAGE[:down|:up],… in hex (HID page 7): a bare USAGE is a
 //                                          press (down, 60 ms, up); steps 250 ms apart. 29 is Esc, e3 ⌘.
+//                                          wait:S waits S seconds more (a key held: 13:down,wait:2,13:up).
 //   keyrig point <script> [settle] [hold]  script: steps separated by ; or |: move DX,DY (a relative
 //                                          pointer move), wheel DY (one scroll event, lines), phase
 //                                          began|changed|ended DX,DY (a scroll event with that phase),
@@ -115,6 +116,12 @@ static int keys(NSString *spec, double settle, double hold) {
     int failures = 0;
     for (NSString *step in [spec componentsSeparatedByString:@","]) {
         NSArray *parts = [step componentsSeparatedByString:@":"];
+        if (parts.count == 2 && [parts[0] isEqualToString:@"wait"]) {
+            double seconds = [parts[1] doubleValue];
+            out([NSString stringWithFormat:@"keyrig: wait %.2f s", seconds]);
+            spin(seconds);
+            continue;
+        }
         unsigned usage = 0;
         if (![[NSScanner scannerWithString:parts[0]] scanHexInt:&usage]) { out([@"keyrig: cannot read " stringByAppendingString:step]); failures++; continue; }
         NSArray *phases = parts.count > 1 ? @[@([parts[1] isEqualToString:@"down"])] : @[@YES, @NO];
@@ -176,7 +183,7 @@ static int point(NSString *script, double settle, double hold) {
 }
 
 static int usage(void) {
-    out(@"usage: keyrig keys <USAGE[:down|:up],…> [settle] [hold] | point <move DX,DY|wheel DY|phase P DX,DY|momentum BITS DY|wait S;…> [settle] [hold]");
+    out(@"usage: keyrig keys <USAGE[:down|:up]|wait:S,…> [settle] [hold] | point <move DX,DY|wheel DY|phase P DX,DY|momentum BITS DY|wait S;…> [settle] [hold]");
     return 2;
 }
 
