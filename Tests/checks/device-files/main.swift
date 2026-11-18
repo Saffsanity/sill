@@ -424,6 +424,34 @@ do {
     other.cancel(); mac.stop()
 }
 
+// MARK: - A move's fenced hand-over mid-transfer: nothing of the file waits or rides onto the new connection
+
+do {
+    let mac = Mac("fence")
+    let dev = Device(mac)
+    let src = scratch.appendingPathComponent("src-fence")
+    let big = make(src, "big.bin", 30_000_000)
+    dev.files.windowOverride = 64 * 1024
+    dev.send([DeviceFiles.Source(url: big, name: "big.bin")])
+    check(waitFor(20) { (dev.last?.acked ?? 0) >= 500_000 }, "under way")
+    let old = dev.connection!
+    let new = dev.dial(mac)
+    // The stand-in never echoes pings, so this fence stays up: what is sent from now waits for it.
+    let nonce = Data((0..<8).map { _ in UInt8.random(in: 0 ... 255) })
+    dev.link.handOver(from: old, to: new, fencePing: StreamMessage(kind: .ping, timestamp: 0, isKeyframe: false, payload: nonce).serialized(),
+                      nonce: nonce)
+    for i in 0..<3 { dev.link.send(input(i)) }
+    let end = dev.end(5)
+    check(stopped(end).map { $0.reason == "lost" && !$0.byPeer } == true, "the session moved: stopped lost: \(String(describing: end?.phase))")
+    usleep(300_000)
+    check(mac.messages.filter { $0.conn == 2 && ($0.kind == .fileChunk || $0.kind == .fileTransfer) }.isEmpty,
+          "nothing of the file on the new connection")
+    check(dev.link.pendingBytes[.files] == 0, "nothing of the file handed to it")
+    check(mac.messages.filter { $0.conn == 2 && $0.kind == .input }.isEmpty, "the inputs wait for the fence, as before")
+    _ = dev.link.dropHandOver()
+    old.cancel(); new.cancel(); mac.stop()
+}
+
 // MARK: - What cannot be sent: a folder, a file gone, one that shrinks, too many
 
 do {
