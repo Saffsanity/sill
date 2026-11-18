@@ -1881,6 +1881,11 @@ package final class StreamCoordinator {
             if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
             return
         }
+        // A pick of a window the catalog lists is the person's choice of it as it shows now: a tab switch
+        // still held for it (owed while it streamed, its follow held back by a switch in flight) is not
+        // followed after the pick (#368's review). One the catalog no longer lists (hidden behind another
+        // tab since the device's list) keeps it, and the stream follows to the tab that shows.
+        if case .window(let id) = source, catalog.window(id: id) != nil { catalog.tabSwaps[id] = nil }
         await select(source, bringForward: true)
     }
 

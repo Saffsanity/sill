@@ -100,8 +100,9 @@ enum CatalogWindows {
     // MARK: Native tab switches (#366)
 
     /// An on-screen window's identity and frame, for spotting a macOS native tab switch (issue #366):
-    /// in a native tab group (Ghostty, Safari, Terminal, Chrome) each tab is its own NSWindow with its
-    /// own CGWindowID, and only the active tab is on screen, at the same frame.
+    /// in a group of macOS's own window tabs (Ghostty's, the issue's; any app that uses them) each tab
+    /// is its own NSWindow with its own CGWindowID, and only the active tab is on screen, at the same
+    /// frame. A browser that draws its own tabs (Chrome) keeps one window and needs none of this.
     struct Tab: Equatable {
         var id: UInt32
         var pid: Int32
@@ -152,19 +153,25 @@ enum CatalogWindows {
         return replaced
     }
 
-    /// Chains `next` onto `existing` (`A -> B` then `B -> C` is `A -> C`; `A -> B` then `B -> A` is
-    /// back on `A`, so removed).
-    static func mergedSwaps(existing: [UInt32: UInt32], next: [UInt32: UInt32]) -> [UInt32: UInt32] {
-        guard !next.isEmpty else { return existing }
-        let intermediates = Set(existing.values)
+    /// The tab switches still to follow after a look (`old -> newest`), from those the coordinator has
+    /// not taken (`existing`) and this look's (`next`). A chain leads to the tab that shows now (`A -> B`
+    /// then `B -> C`: `A -> C`, and `B -> C` for a device that picked B meanwhile); a switch back is the
+    /// switch it is (`A -> B` then `B -> A`: `B -> A`, so a device that streams B follows it to A), and
+    /// none goes from a tab to itself. One is kept only while its new tab is on the screen (`onScreen`,
+    /// this look's: one closed or minimized is nothing to follow) and its old window off it, but for the
+    /// window that streams (`streaming`), whose switch is owed to it while a switch in flight holds the
+    /// coordinator back. A window on the screen again that streams nothing was not replaced after all (a
+    /// tab moved into a window of its own): a device that picks it later must not follow a switch from
+    /// before. A switch owed stands against a later one of the same window, which only one on the screen
+    /// again can make: that tab moved into a window of its own, which is where the person went. Without
+    /// these, a switch made while another window streamed lost the one back to it (`A -> B` then `B -> A`
+    /// came to nothing), and a window picked after it was moved out of its tabs followed the switch made
+    /// before (#368's review).
+    static func mergedSwaps(existing: [UInt32: UInt32], next: [UInt32: UInt32], onScreen: Set<UInt32>,
+                            streaming: UInt32?) -> [UInt32: UInt32] {
         var out: [UInt32: UInt32] = [:]
-        for (old, mid) in existing {
-            let target = next[mid] ?? mid
-            if target != old { out[old] = target }
-        }
-        for (old, target) in next where !intermediates.contains(old) && out[old] == nil && old != target {
-            out[old] = target
-        }
-        return out
+        for (old, mid) in existing { out[old] = next[mid] ?? mid }
+        for (old, new) in next where out[old] == nil { out[old] = new }
+        return out.filter { $0.key != $0.value && onScreen.contains($0.value) && ($0.key == streaming || !onScreen.contains($0.key)) }
     }
 }

@@ -1,5 +1,5 @@
 // CatalogWindows (Sources/SillHost/CatalogWindows.swift): which on-screen windows the catalog lists,
-// the tiles in a device's window strip (issue #114).
+// the tiles in a device's window strip (issue #114), and native tab switches (issue #366).
 //
 //   swiftc -O Sources/SillHost/CatalogWindows.swift Tests/checks/catalog-windows/main.swift \
 //       -o .build/checks/catalog-windows/check && .build/checks/catalog-windows/check
@@ -223,12 +223,301 @@ let swappedOrder = CatalogWindows.orderedIDs(seenOrder: [3508, 2000], currentIDs
 check(swappedOrder == [3509, 2000], "#366: the new tab keeps the old tab's slot in the bar: \(swappedOrder)")
 let plainOrder = CatalogWindows.orderedIDs(seenOrder: [3508, 2000], currentIDs: [2000, 4001], swaps: [:])
 check(plainOrder == [2000, 4001], "#366: an ordinary new window still goes at the end of the bar: \(plainOrder)")
-check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3510]) == [3508: 3510],
-      "#366: chaining two tab swaps before the coordinator consumes the first reaches the newest tab")
-check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3508]).isEmpty,
-      "#366: switching right back to the original tab leaves no pending swap")
-check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:]) == [3508: 3509],
-      "#366: an empty poll keeps an unconsumed swap")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3510], onScreen: [2000, 3510], streaming: 3508)
+        == [3508: 3510, 3509: 3510],
+      "#366: two switches before the coordinator takes the first lead to the newest tab, from either tab before it")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:], onScreen: [2000, 3509], streaming: 3508) == [3508: 3509],
+      "#366: a look with no switch keeps one not yet followed")
+
+// #368's review: the switches kept are those still to follow, and only those.
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3508], onScreen: [2000, 3508], streaming: 3509) == [3509: 3508],
+      "#366: a switch right back: the second tab leads back to the first (a device that picked the tab group after a "
+      + "switch made while another window streamed follows the switch back)")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3508], onScreen: [3508], streaming: 3508) == [3509: 3508],
+      "#366: and nothing from the first tab to itself, while a switch in flight held its follow back")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:], onScreen: [2000, 3509, 3508], streaming: 2000).isEmpty,
+      "#366: a tab on the screen again (moved into a window of its own) that streams nothing was not replaced: a device "
+      + "that picks it follows nothing")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:], onScreen: [2000, 3509, 3508], streaming: 3508) == [3508: 3509],
+      "#366: but the window that streams keeps the switch owed to it (its follow held back by a switch in flight)")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:], onScreen: [2000], streaming: 3508).isEmpty,
+      "#366: a tab no longer on the screen (closed, minimized) is nothing to follow")
+check(CatalogWindows.mergedSwaps(existing: [108: 107], next: [108: 101], onScreen: [110, 107, 101], streaming: 108) == [108: 107],
+      "#366: the switch owed to the window that streams stands against a later one of it (the tab it went to was moved "
+      + "into a window of its own meanwhile, and its old tab shown again, then replaced)")
+let stackedFront = T(id: 5001, pid: 900, x: 0, y: 25, width: 1512, height: 920)
+let stackedBack = T(id: 5002, pid: 900, x: 0, y: 25, width: 1512, height: 920)
+check(CatalogWindows.tabSwaps(from: [stackedFront, stackedBack], to: [stackedBack]).isEmpty,
+      "#366: of two windows of one app at one frame (both filling the screen), the one closed was not replaced by the other, there before")
+let sameFrameAsTab1 = T(id: 3600, pid: 900, x: 120, y: 80, width: 1000, height: 700)
+check(CatalogWindows.tabSwaps(from: [tab1, sameFrameAsTab1], to: [tab2]) == [3508: 3509],
+      "#366: one new tab replaces one window, not two")
+let groupB1 = T(id: 3700, pid: 900, x: 600, y: 300, width: 900, height: 600)
+let groupB2 = T(id: 3701, pid: 900, x: 600, y: 300, width: 900, height: 600)
+check(CatalogWindows.tabSwaps(from: [tab1, groupB1], to: [groupB2, tab2]) == [3508: 3509, 3700: 3701],
+      "#366: two tab groups of one app switching in one look: each its own")
+let chainedOrder = CatalogWindows.orderedIDs(seenOrder: [3509, 2000], currentIDs: [2000, 3510], swaps: [3509: 3510])
+check(chainedOrder == [3510, 2000], "#366: and the next tab keeps that slot in turn: \(chainedOrder)")
+
+// MARK: The model (#366, #368's review): a stand-in Mac with tab groups, the catalog's looks and the coordinator's follow
+
+/// A seeded generator (window-restore's), so a failing session can be run again.
+struct Dice {
+    var s: UInt64
+    mutating func next() -> UInt64 {
+        s &+= 0x9E3779B97F4A7C15
+        var z = s
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        return z ^ (z >> 31)
+    }
+    mutating func int(_ n: Int) -> Int { Int(next() % UInt64(n)) }
+}
+
+/// A window of the stand-in Mac as the person sees it: a tab group (a window without tabs is a group of
+/// one) of an app, at its place, showing one of its tabs, the only one of them on the screen.
+struct TabGroup { var tabs: [UInt32]; var shown: UInt32; var pid: Int32; var x: Double; var y: Double }
+
+/// The catalog's looks with a copy of WindowCatalog.refreshWindows' lines for tab switches (regular mode:
+/// nothing staged, so nothing pinned), and the coordinator's with a copy of followTabSwap's rule (from
+/// windowsChanged and catalogPolled: the streamed window's switch followed unless a switch is in flight,
+/// else a streamed window gone stops the stream), against the window the person expects to stream: the
+/// tab group they picked, on the tab it shows, wherever it goes; nothing once it closes.
+struct TabModel {
+    let seed: UInt64
+    var dice: Dice
+    var groups: [TabGroup] = []
+    var nextID: UInt32 = 100
+    var places = 0
+    var last: [CatalogWindows.Tab] = []
+    var pending: [UInt32: UInt32] = [:]
+    var seenOrder: [UInt32] = []
+    var listed: [UInt32] = []                   // the last look's windows: the tiles a device picks from
+    var active: UInt32? = nil
+    var switching = 0                           // looks a switch in flight still takes
+    var connected = true                        // the catalog looks only while a device is connected
+    var want: UInt32? = nil
+    var wantChange = ""
+    /// The windows whose stale switch was dropped as they came back on the screen (#368's review).
+    var backOnScreen: Set<UInt32> = []
+    /// The window that streams, moved out of its tabs while a switch in flight held back its follow:
+    /// right too at the next look (`moveTabOut`).
+    var eitherOK: UInt32? = nil
+    var problems: [String] = []
+    var seen: [String: Int] = [:]
+    var log: [String] = []
+
+    init(seed: UInt64) {
+        self.seed = seed
+        dice = Dice(s: seed)
+        for pid in [Int32(900), 900, 674] {
+            var tabs: [UInt32] = []
+            for _ in 0...dice.int(3) { tabs.append(newID()) }
+            let (x, y) = place()
+            groups.append(TabGroup(tabs: tabs, shown: tabs[dice.int(tabs.count)], pid: pid, x: x, y: y))
+        }
+    }
+
+    mutating func newID() -> UInt32 { nextID += 1; return nextID }
+    /// Each window a place of its own: two windows of one app at one frame that both change within one
+    /// look are #366's one ambiguity (`tabSwaps` pairs them in list order), left out here.
+    mutating func place() -> (Double, Double) { places += 1; return (Double(40 + 23 * places), Double(30 + 11 * places)) }
+    mutating func note(_ s: String) { seen[s, default: 0] += 1 }
+    mutating func problem(_ s: String) { if problems.count < 5 { problems.append("seed \(seed): \(s); \(log.suffix(10))") } }
+    func group(of id: UInt32) -> Int? { groups.firstIndex { $0.tabs.contains(id) } }
+
+    /// After a change on the Mac, the person expects the tab their window shows now.
+    mutating func settle(_ why: String) {
+        guard let w = want, let g = group(of: w), groups[g].shown != w else { return }
+        want = groups[g].shown
+        wantChange = why
+    }
+
+    mutating func switchTab() {
+        let multi = groups.indices.filter { groups[$0].tabs.count > 1 }
+        guard !multi.isEmpty else { return }
+        let g = multi[dice.int(multi.count)]
+        let others = groups[g].tabs.filter { $0 != groups[g].shown }
+        groups[g].shown = others[dice.int(others.count)]
+        log.append("switch to \(groups[g].shown) of \(groups[g].tabs)")
+        settle("a switch")
+    }
+    mutating func newTab() {
+        guard !groups.isEmpty else { return }
+        let g = dice.int(groups.count), id = newID()
+        groups[g].tabs.append(id)
+        groups[g].shown = id
+        log.append("new tab \(id) in \(groups[g].tabs)")
+        settle("a new tab")
+    }
+    mutating func closeTab() {
+        guard !groups.isEmpty else { return }
+        let g = dice.int(groups.count), gone = groups[g].shown
+        if groups.count == 1, groups[g].tabs.count == 1 { return }       // a window of the Mac's stays open
+        groups[g].tabs.removeAll { $0 == gone }
+        log.append("close tab \(gone)")
+        if groups[g].tabs.isEmpty {
+            groups.remove(at: g)
+            if want == gone { want = nil }
+        } else {
+            groups[g].shown = groups[g].tabs[dice.int(groups[g].tabs.count)]
+            if want == gone { want = groups[g].shown; wantChange = "a tab closed" }
+        }
+    }
+    /// Window › Move Tab to New Window, or a tab dragged out: a window of its own at another place. Looked
+    /// at on both sides, the one thing here a look 2 s apart cannot tell from another: a tab moved out and
+    /// closed (or picked from a tile drawn before it was hidden, then moved out) within one look is a tab
+    /// closed in its group (a tab hidden behind another) to any look, and followed as one.
+    mutating func moveTabOut() {
+        let multi = groups.indices.filter { groups[$0].tabs.count > 1 }
+        guard !multi.isEmpty else { return }
+        look()
+        defer { look() }
+        let g = multi[dice.int(multi.count)]
+        let t = groups[g].tabs[dice.int(groups[g].tabs.count)]
+        groups[g].tabs.removeAll { $0 == t }
+        if groups[g].shown == t { groups[g].shown = groups[g].tabs[dice.int(groups[g].tabs.count)] }
+        let (x, y) = place()
+        groups.append(TabGroup(tabs: [t], shown: t, pid: groups[g].pid, x: x, y: y))
+        log.append("move tab \(t) out of \(groups[g].tabs)")
+        // The window that streams, moved out while a switch in flight holds back the follow owed to it:
+        // the stream staying with it is as right as the person's tab group (whatever they do next).
+        if switching > 0, active == t { eitherOK = t }
+        settle("a tab moved out")
+    }
+    mutating func newWindow() {
+        let (x, y) = place()
+        let id = newID()
+        groups.append(TabGroup(tabs: [id], shown: id, pid: dice.int(2) == 0 ? 900 : 674, x: x, y: y))
+        log.append("new window \(id)")
+    }
+    mutating func closeWindow() {
+        guard groups.count > 1 else { return }
+        let g = dice.int(groups.count)
+        if let w = want, groups[g].tabs.contains(w) { want = nil }
+        log.append("close window \(groups[g].tabs)")
+        groups.remove(at: g)
+    }
+
+    /// A device's pick of a tile from the last look: its tab may since have been hidden behind another
+    /// (the person means the window, and it shows another tab now). Never one closed since (a capture of
+    /// a window gone fails), and only between switches (one in flight queues it).
+    mutating func pick() {
+        guard connected, switching == 0, !listed.isEmpty else { return }
+        let id = listed[dice.int(listed.count)]
+        guard group(of: id) != nil else { return }
+        pending[id] = nil               // StreamCoordinator.handlePick: a listed window's held switch goes
+        active = id
+        want = id
+        log.append("pick \(id)")
+        if backOnScreen.contains(id) { note("picked a window on the screen again after a stale switch") }
+        settle("a pick of a tab hidden since the look")
+    }
+
+    /// One look of the catalog, then the coordinator.
+    mutating func look() {
+        guard connected else { return }
+        var current = groups.map { CatalogWindows.Tab(id: $0.shown, pid: $0.pid, x: $0.x, y: $0.y, width: 1000, height: 700) }
+        // ScreenCaptureKit's order is not front to back and shuffles between looks.
+        for i in stride(from: current.count - 1, to: 0, by: -1) { current.swapAt(i, dice.int(i + 1)) }
+        let ids = current.map(\.id), onScreen = Set(ids)
+        // WindowCatalog.refreshWindows.
+        let swaps = CatalogWindows.tabSwaps(from: last, to: current)
+        let before = pending
+        pending = CatalogWindows.mergedSwaps(existing: pending, next: swaps, onScreen: onScreen, streaming: active)
+        let oldOrder = seenOrder
+        seenOrder = CatalogWindows.orderedIDs(seenOrder: seenOrder, currentIDs: ids, swaps: swaps)
+        last = current
+        listed = ids
+        for (old, new) in before where pending[old] == nil && swaps[old] == nil {
+            if onScreen.contains(old), !swaps.values.contains(old) {
+                note("a stale switch dropped: its window on the screen again, not by a switch back")
+                backOnScreen.insert(old)
+            } else if !onScreen.contains(new) {
+                note("a stale switch dropped: its tab gone")
+            }
+        }
+        // The bar: every window once, and a new tab in its old tab's slot among the windows on both sides.
+        if seenOrder.count != ids.count || Set(seenOrder) != onScreen { problem("the bar \(seenOrder) is not the windows \(ids)") }
+        for (old, new) in swaps {
+            guard let o = oldOrder.firstIndex(of: old), let n = seenOrder.firstIndex(of: new) else { continue }
+            note("a new tab in its old tab's slot")
+            for other in seenOrder where other != new {
+                if let a = oldOrder.firstIndex(of: other), (a < o) != (seenOrder.firstIndex(of: other)! < n) {
+                    problem("tab \(new) is not in \(old)'s slot: \(oldOrder) → \(seenOrder)")
+                }
+            }
+        }
+        // StreamCoordinator: nothing while a switch is in flight; then followTabSwap, else a window gone stops.
+        if switching > 0 { switching -= 1; return }
+        if let id = active {
+            if let next = pending[id], onScreen.contains(next) {
+                pending[id] = nil
+                note("followed \(wantChange)")
+                if swaps[id] == nil { note("followed a switch from an earlier look (one was in flight)") }
+                if before[next] == id { note("followed a switch back after one made while another window streamed") }
+                active = next
+            } else if !onScreen.contains(id) {
+                note(want == nil ? "the stream stopped: its window closed" : "the stream stopped")
+                active = nil
+            }
+        }
+        if active != want, let e = eitherOK, active == e {
+            note("stayed with the window that streams, moved out while its follow was held back")
+            want = active
+        }
+        if active != want { problem("streams \(active.map(String.init) ?? "nothing") where the person expects \(want.map(String.init) ?? "nothing")") }
+        if switching == 0 { eitherOK = nil }
+    }
+
+    mutating func step() {
+        switch dice.int(100) {
+        case 0..<22: switchTab()
+        case 22..<28: newTab()
+        case 28..<34: closeTab()
+        case 34..<40: moveTabOut()
+        case 40..<44: newWindow()
+        case 44..<47: closeWindow()
+        case 47..<60: pick()
+        case 60..<62:
+            if connected { active = nil; want = nil; log.append("pick desktop") }
+        case 62..<66:
+            if connected, active != nil, switching == 0 { switching = 1 + dice.int(3); log.append("a switch in flight for \(switching) looks") }
+        case 66..<68:
+            if connected { connected = false; active = nil; want = nil; switching = 0; log.append("the last device left") }
+            else {
+                // WindowCatalog.startPolling: no look from before, and one at once (the device's list).
+                connected = true; last = []; log.append("a device connected")
+                note("a device connected again")
+                look()
+            }
+        default:
+            look()
+        }
+    }
+}
+
+let tabSessions = 4_000
+var tabProblems: [String] = []
+var tabSeen: [String: Int] = [:]
+var tabProblemCount = 0
+for n in 0..<tabSessions {
+    var m = TabModel(seed: UInt64(n) &* 7919 &+ 366)
+    for _ in 0..<(40 + m.dice.int(80)) { m.step() }
+    tabProblemCount += m.problems.count
+    if tabProblems.count < 5 { tabProblems += m.problems.prefix(5 - tabProblems.count) }
+    for (k, v) in m.seen { tabSeen[k, default: 0] += v }
+}
+for p in tabProblems { print("     \(p)") }
+check(tabProblemCount == 0, "#366: the model, \(tabSessions) sessions: the stream on the window the person expects, the bar in order "
+      + "(\(tabProblemCount) problems)")
+let tabNeeded = ["followed a switch", "followed a new tab", "followed a tab closed", "followed a pick of a tab hidden since the look",
+                 "followed a switch from an earlier look (one was in flight)",
+                 "followed a switch back after one made while another window streamed",
+                 "a stale switch dropped: its window on the screen again, not by a switch back",
+                 "picked a window on the screen again after a stale switch", "a stale switch dropped: its tab gone",
+                 "the stream stopped: its window closed", "a new tab in its old tab's slot", "a device connected again"]
+for k in tabNeeded { check((tabSeen[k] ?? 0) > 0, "#366: the model came to: \(k) (\(tabSeen[k] ?? 0))") }
 
 print("catalog-windows: \(cases) checks, \(failures) failed")
 if failures > 0 { exit(1) }

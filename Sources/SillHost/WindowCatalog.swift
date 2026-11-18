@@ -172,8 +172,9 @@ final class WindowCatalog {
                            width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
-    /// The last look's on-screen windows, and native tab switches (`oldID -> newID`, #366) seen since
-    /// the coordinator last took them.
+    /// The last look's windows, and the native tab switches still to follow (`oldID -> newID`, #366):
+    /// each while its new tab is on the screen and its old window off it, or streams (CatalogWindows.
+    /// mergedSwaps). The coordinator takes the streamed window's (`followTabSwap`).
     private var lastTabs: [CatalogWindows.Tab] = []
     var tabSwaps: [CGWindowID: CGWindowID] = [:]
 
@@ -291,6 +292,11 @@ final class WindowCatalog {
     private func startPolling() {
         guard started, pollTask == nil else { return }
         thumbStamps = [:]
+        // A look from before a spell with no device is none to judge a tab switch by: anything happened
+        // meanwhile (a tab moved out and another shown where it was read as a switch, #368's review), so
+        // the first look after it sees none. The switches held from before are judged by that look
+        // (CatalogWindows.mergedSwaps), as at every look.
+        lastTabs = []
         pollTask = Task { @MainActor [weak self] in await self?.pollLoop() }
     }
 
@@ -339,12 +345,16 @@ final class WindowCatalog {
         let plain = content.windows.map(Self.plain)
         var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
         let currentTabs = visible.map(Self.tab)
+        let onScreen = Set(currentTabs.map(\.id))
         let swaps = CatalogWindows.tabSwaps(from: lastTabs, to: currentTabs)
         // The staged window, if the on-screen list dropped it without another tab of its window taking its
-        // place (#366): one extra SCShareableContent call per poll, and only then. Fetched before the
-        // sequence check so its await cannot let an older refresh overwrite a newer one.
+        // place, in this look or one the coordinator has not followed yet (#366): one extra
+        // SCShareableContent call per poll, and only then. Fetched before the sequence check so its await
+        // cannot let an older refresh overwrite a newer one.
         var pinned: SCWindow? = nil
-        if let id = stagedWindowID, swaps[id] == nil, !content.windows.contains(where: { $0.windowID == id }),
+        if let id = stagedWindowID,
+           CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps, onScreen: onScreen, streaming: activeWindowID)[id] == nil,
+           !content.windows.contains(where: { $0.windowID == id }),
            let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
             pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
             if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
@@ -355,7 +365,8 @@ final class WindowCatalog {
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         lookedDisplays = content.displays
         resolveDesktopDisplay()
-        tabSwaps = CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps)
+        // Merged again after the await above: the coordinator may have followed one meanwhile.
+        tabSwaps = CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps, onScreen: onScreen, streaming: activeWindowID)
         for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         lastTabs = visible.map(Self.tab)

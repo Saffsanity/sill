@@ -1,4 +1,4 @@
-"""Mutants of CatalogWindows.swift (issue #114): each changes it in one place, is compiled with the check
+"""Mutants of CatalogWindows.swift (issues #114 and #366): each changes it in one place, is compiled with the check
 and must make it fail. usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
@@ -47,8 +47,24 @@ MUTANTS = [
     ("another app's window at the same frame taken for a tab (#366)", "$0.pid == old.pid && $0.sameFrame(as: old)", "$0.sameFrame(as: old)"),
     ("any new window of the app taken for a tab regardless of frame", "$0.pid == old.pid && $0.sameFrame(as: old)", "$0.pid == old.pid"),
     ("a swapped tab sent to the end of the bar", "let mapped = swaps[id] ?? id", "let mapped = id"),
-    ("chained swaps not resolved", "let target = next[mid] ?? mid", "let target = mid"),
-    ("a round-trip swap back to the original tab kept", "if target != old { out[old] = target }", "out[old] = target"),
+    ("one new tab taken for two windows", "!used.contains($0.id) && ", ""),
+    ("a window that stayed taken for a new one", "let arrived = current.filter { !previousIDs.contains($0.id) }", "let arrived = current"),
+    ("a window still there taken for one gone", "let gone = previous.filter { !currentIDs.contains($0.id) }", "let gone = previous"),
+    ("2 pt across is not the same frame", "abs(x - other.x) <= 2", "abs(x - other.x) < 2"),
+    ("2 pt down is not the same frame", "abs(y - other.y) <= 2", "abs(y - other.y) < 2"),
+    ("2 pt wider is not the same frame", "abs(width - other.width) <= 2", "abs(width - other.width) < 2"),
+    ("2 pt taller is not the same frame", "abs(height - other.height) <= 2", "abs(height - other.height) < 2"),
+    # The switches still to follow (#368's review).
+    ("a chain not followed to the tab that shows now", "for (old, mid) in existing { out[old] = next[mid] ?? mid }",
+     "for (old, mid) in existing { out[old] = mid }"),
+    ("a look's own switches left out", "for (old, new) in next where out[old] == nil { out[old] = new }", ""),
+    ("a later switch of the window that streams wins over the one owed to it",
+     "for (old, new) in next where out[old] == nil { out[old] = new }", "for (old, new) in next { out[old] = new }"),
+    ("a switch from a tab to itself kept", "$0.key != $0.value && ", ""),
+    ("a switch to a tab no longer on the screen kept", "onScreen.contains($0.value) && ", ""),
+    ("a window on the screen again keeps its switch (the review's second defect)",
+     "($0.key == streaming || !onScreen.contains($0.key))", "true"),
+    ("the window that streams loses the switch owed to it", "$0.key == streaming || ", ""),
 ]
 caught = 0
 for name, old, new in MUTANTS:
