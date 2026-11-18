@@ -8,7 +8,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
   is a library target with no product, so the iOS project never sees it.
 - `Sources/SillAudio/` — the sound's code both apps link (AudioToolbox and Foundation only, public, nothing of
-  the wire): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; `Tests/checks/audio-codec`),
+  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; `Tests/checks/audio-codec`),
   `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time; the `audio-codec` check and the sound
   harness's device compile it too), `AudioPacketizer` (`PCMChunk` in, `AudioBlock`s out: blocks, stamps and
   segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the device's timing of the Mac's sound; pure,

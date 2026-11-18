@@ -1,4 +1,4 @@
-**SillAudio: the sound's encoder, decoder, packetizer and playout as one library both apps link, with no change in behaviour (2026-11-18, branch `sill-audio` from main at eb48ac9).**
+**SillAudio: the sound's encoder, decoder, packetizer and playout as one library both apps link, with no change in behaviour (2026-11-18, branch `sill-audio` from main at eb48ac9, #394).**
 Noah, 2026-11-18, of the six features (#200's display, the microphone, recording, the camera, files,
 privacy mode): "Any tasks that were opened by me that are mentioned above should have an agent assigned
 and wip". This is the overview's item 5 (`sill-handoff/next/OVERVIEW.md` §4.1 and §2.3) and the
@@ -37,3 +37,27 @@ decoder in StreamRecorder and its rig) can both take it, before either starts.
 - **Docs.** docs/LAYOUT.md (the new folder, the host's AudioSourceRule, the iOS entries and the IDs),
   CLAUDE.md's list of the code's folders, and a note atop docs/audio-plan.md that its paths are those
   of before.
+- **Verified.**
+  - CI on #394 (run 44281228153): `swift build -c release`, all 74 pure checks, the iOS app for the
+    simulator (`** BUILD SUCCEEDED **`, SillAudio built as a package product), no new warning (only
+    StreamClient's known capture warning and CaptureProbe's).
+  - The three moved checks print exactly what main's print (89, 21 and 218 checks; the playout's 5,000
+    random runs too), main's from a `git archive` of origin/main. Their mutants: `audio-packetizer` 27
+    of 27, `audio-codec` 9 of 9, `audio-playout` 38 of 38.
+  - The sound harness (`Scripts/audio/run.sh`, every case): every gate passes but H12, the CPU gate that
+    fails on every full run (its header). H12 then ran twice more on each side, main's harness (a `git
+    archive`) and this branch's in turn: main +1.9 and +1.5 points, this branch +1.9 and +4.5 (+3.9 in
+    the full run). The readings move from run to run with the Mac's load; the encode path itself does
+    not: 30 s of the test tone through main's packetizer and encoder in one module, and through
+    SillAudio's built as a module of its own, gave the same packets (2,029,015 bytes, FNV-1a
+    518481e1053403fa) for the same CPU time (medians of five rounds 263.5 and 255.8 ms on main's, 261.9
+    and 259.7 ms on SillAudio's: 0.85 to 0.88% of a core).
+  - `Scripts/pacing/build.sh` builds both sides: origin/main's "with the sound" as before, and this
+    tree's "with the sound (SillAudio)".
+  - `git merge-tree` against this branch: #367 merges cleanly; #303, #156, #124, #191, #193, #189, #184
+    and `settings-pane` conflict only where they already conflict with main.
+- **Not run here:** docs/audio-plan.md's live simulator gate S2 needs `-SillLive`, which the agents'
+  simulators refuse (next/OVERVIEW.md §4.3), so the device's engine with SillAudio's decoder and
+  playout is Noah's to hear: Send Audio on, the Mac's sound plays as before.
+- **Proposed words** for What's New, the site and the review notes: none, since nothing a person sees
+  or hears changes.
