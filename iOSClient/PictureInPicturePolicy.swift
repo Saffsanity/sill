@@ -175,22 +175,23 @@ enum PictureInPicturePolicy {
     /// (AVKit's didStop, or a start that failed), and the app is in the background, so nothing keeps Sill
     /// running now (`running`) and nobody sees the picture. Whatever ended it: the device's lock, the
     /// window's close button, ten minutes paused, a failed start. Left open, the session ran on until iOS
-    /// stopped Sill (about 38 s after a lock ended it on an iPhone 15 Pro), Sill reading the stream at a
-    /// trickle meanwhile: the Mac kept capturing for a device nobody looked at, frames up to 35 s late, and
-    /// read the backlog as a link too slow for its quality. StreamClient closes the connection itself instead, so the Mac stops at once and
-    /// blames nothing, and holds the automatic reconnect until Sill is back, as after a stay in the
-    /// background that iOS suspended. Never with Sill in the foreground (its window back in front, opened
-    /// while it showed), never at a pause (the connection is kept: `frozen`), never in a stay in the
-    /// background without it (iOS suspends Sill as before). Looked at as it ends and again `endSettle`
-    /// later, and the session ends only if both say so.
+    /// stopped Sill, Sill reading the stream at a trickle meanwhile (an iPhone 15 Pro locked during it, #379:
+    /// about 40 s from the lock, the last 38 at a trickle; when in those 40 s it ended is not known): the
+    /// Mac kept capturing for a device nobody looked at, frames up to 35 s late, and read the backlog as a
+    /// link too slow for its quality. StreamClient closes the connection itself instead, so the Mac stops
+    /// at once and blames nothing, and holds the automatic reconnect until Sill is back, as after a stay in
+    /// the background that iOS suspended. Never with Sill in the foreground (its window back in front,
+    /// opened while it showed), never at a pause (the connection is kept: `frozen`), never in a stay in the
+    /// background without it (iOS suspends Sill as before). StreamClient looks again `endSettle` later
+    /// (`endSessionIfAway`, which no check runs), and the session ends only if both looks say so.
     static func endsSession(from old: State, to new: State, appForeground: Bool) -> Bool {
         old.active && !new.active && !appForeground
     }
 
     /// How long after Picture in Picture ends with Sill in the background the rule is looked at again
-    /// (`endsSession`): the window's return button stops it as iOS brings Sill forward, in iOS's order, and
-    /// a return that lands a moment after the stop keeps its session. Half a second, as long as the look
-    /// at a start with the window in front (PictureInPicture's `settle`).
+    /// (`endsSession`): the window's return button stops it as iOS brings Sill forward, in an order iOS does
+    /// not document, and a return that lands within this of the stop keeps its session. Half a second, as
+    /// long as the look at a start with the window in front (PictureInPicture's `settle`).
     static let endSettle: Double = 0.5
 
     // MARK: - One window's Picture in Picture over time
