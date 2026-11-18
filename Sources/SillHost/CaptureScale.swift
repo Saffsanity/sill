@@ -150,6 +150,19 @@ enum VirtualDisplaySize {
     /// 4096 keeps the 2x backing store at or under 8192 pixels, VirtualDisplay's ceiling.
     static let maxSide: CGFloat = 4096
 
+    /// Preserve the requested aspect while accommodating the size the app actually accepted.
+    /// Return nil when the display cannot contain it; never crop or distort to force a fit.
+    static func aspectSize(wanted: CGSize, accepted: CGSize) -> CGSize? {
+        guard wanted.width.isFinite, wanted.height.isFinite,
+              accepted.width.isFinite, accepted.height.isFinite,
+              wanted.width > 0, wanted.height > 0,
+              accepted.width > 0, accepted.height > 0 else { return nil }
+        let scale = max(1, accepted.width / wanted.width, accepted.height / wanted.height)
+        let result = CGSize(width: ceil(wanted.width * scale), height: ceil(wanted.height * scale))
+        guard result.width <= maxSide, result.height <= maxSide - 100 else { return nil }
+        return result
+    }
+
     /// Each side held to `minSide`…`maxSide`.
     static func clamp(_ s: CGSize) -> CGSize {
         CGSize(width: min(max(s.width, minSide), maxSide), height: min(max(s.height, minSide), maxSide))
@@ -229,5 +242,19 @@ enum InputLanding {
     /// A fraction held to 0…1; NaN (which no JSON carries) to 0.
     static func unit(_ v: Double) -> Double {
         v.isNaN ? 0 : min(max(v, 0), 1)
+    }
+}
+
+/// A single observed frame may be an animation midpoint or the old size after an AX write.
+/// Wait for both a minimum observation interval and a quiet period before trusting its size.
+struct WindowFrameSettling {
+    private var last: CGRect?
+    private var changedAt: TimeInterval = 0
+
+    mutating func observe(_ frame: CGRect?, elapsed: TimeInterval) -> Bool {
+        guard let frame else { last = nil; changedAt = elapsed; return false }
+        if last != frame { changedAt = elapsed }
+        last = frame
+        return elapsed >= 0.2 && elapsed - changedAt >= 0.15
     }
 }
