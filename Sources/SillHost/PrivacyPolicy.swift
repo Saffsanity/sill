@@ -276,7 +276,7 @@ package enum PrivacyPolicy {
         package static let toggle = "Lock this Mac when the last device leaves"
         package static let footnoteOff = "For a Mac you use from afar: once you’re done, it locks itself, so whoever walks up to it finds its lock screen."
         package static func footnoteOn(_ grace: Double) -> String {
-            "This Mac locks \(seconds(grace)) after the last iPhone or iPad leaves, so a connection that drops and comes back doesn’t lock it, and then its display goes to sleep. A paired device can unlock it again with your password."
+            "This Mac locks \(seconds(grace)) after the last iPhone or iPad leaves (a connection that drops and comes back within that time doesn’t lock it), and its display goes to sleep. A paired device can unlock it again with your password."
         }
         package static let noDisplayWarning = "This Mac has no display to show its lock screen on, so Sill won’t lock it: you couldn’t type its password from a device."
         package static func failedWarning(_ why: String) -> String { "Sill couldn’t lock this Mac the last time: \(why)." }
