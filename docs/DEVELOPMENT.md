@@ -477,7 +477,8 @@ them.
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
-(below; off unless turned on), Reverse Scrolling (below; off unless turned on),
+(below; off unless turned on), Touch Mode (below; Direct Touch unless Trackpad
+is chosen), Reverse Scrolling (below; off unless turned on),
 Hold to Show Window Controls (below, Holding a window's thumbnail; 0.5 s unless
 changed) and Three-Finger Gestures (below, Trackpad gestures; on unless turned
 off), none of them ever sent to the Mac, and last Take the Tour.
@@ -913,6 +914,29 @@ logs the shortcut it would post with "(not posted: a test host)", so
 `python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
 without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
 such a host a table of its own instead of this Mac's shortcuts.
+
+## Touch Mode
+
+A finger on the picture is the pointer where it touches: a tap clicks there, a
+drag scrolls, a hold right-clicks (Direct Touch). Touch Mode, in the Settings
+panel's This iPad group (This iPhone on a phone; issue #178, contributed in
+#222), offers Trackpad instead: the whole picture works as the Mac's trackpad,
+the portrait trackpad's own surface laid over it (`TrackpadView`'s
+`overPicture`). Drag to move the pointer, tap to click, tap with two fingers to
+right-click, touch and hold then drag to drag, drag two fingers to scroll; three
+fingers make the Mac's gestures as on the portrait trackpad. This device's own
+arrow shows in every layout, full screen included, and the tour's picture card
+says what the trackpad does. In the layouts that already have a trackpad below
+the picture, the picture is a second one. A pinch does not zoom the picture in
+Trackpad mode (the zoom goes back to the whole picture when the mode changes);
+the Apple Pencil, and a trackpad or mouse connected to an iPad, still click,
+drag, hover and scroll where they point, as in Direct Touch
+(`TouchMode.taker`). It is Direct Touch unless Trackpad is chosen
+(`Sill.touchMode`), the device's own, never sent to the Mac: nothing goes out
+that the portrait trackpad does not already send, so it works with every Sill
+for Mac. `iOSClient/PointerPresence.swift`'s `TouchMode` is the rule, checked in
+`Tests/checks/pointer-presence`, and `Tests/touchrig` (`RIG_ONLY=pad`) drives
+the pad over the picture with full screen's swipe in listening.
 
 ## Reverse Scrolling
 
@@ -2326,6 +2350,9 @@ simulator:
   fraction of the frame (where the zoom shows it), only to a test host on this
   Mac. `-SillHitTest '6 500,40; 500,300'` prints what UIKit's hit test finds at
   those window points at 6 s (the zoomed picture is never a touch's target).
+- `-Sill.touchMode trackpad` sets the device's Touch Mode to Trackpad for one
+  run (in the normal app too), and `-SillSettingsScroll touch` opens the
+  Settings panel at its row.
 - `-Sill.reverseScroll 1` turns the device's Reverse Scrolling on for one run
   (in the normal app too), and `-SillSettingsScroll reverse` opens the Settings
   panel at its switch. Under `-SillLive 1`, in a layout with the portrait
