@@ -180,28 +180,35 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
 
 // Headless Mac / closed-lid MacBook virtual Desktop fallback (issue #61):
 typealias HDP = HeadlessDesktopPolicy
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false) == true,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == true,
       "headless with connected client, AppKit loop and API available needs virtual Desktop")
-check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == false,
       "Mac with a display already does not need a headless fallback display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == false,
       "0 connected clients does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == false,
       "without AppKit loop does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == false,
       "synthetic test host does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false, screenRecording: true, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false, screenRecording: true, onConsole: true, guardHolds: false, switchOn: true) == false,
       "when CGVirtualDisplay API is unavailable does not create a headless display")
 // Without Screen Recording, never (VirtualStage.prepare's rule): SCShareableContent never returns in a process without it
 // once a virtual display exists (measured 2026-09-22), and the catalog's look right after the display is made has no timeout.
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: false, onConsole: true, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: false, onConsole: true, guardHolds: false, switchOn: true) == false,
       "without Screen Recording no headless display is made")
 // Never from a session another user has the screen from (off console): it would join their displays (#340's rule).
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: false, guardHolds: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: false, guardHolds: false, switchOn: true) == false,
       "off console no headless display is made")
 // Never while the guard for #380 holds (DisplayMakeGuard: two runs in a row ended while making a display).
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: true, switchOn: true) == false,
       "while the guard holds no headless display is made")
+// Never while the Mac's user has it off (HostConfig.headlessDisplay: Settings › Virtual Display's "A Mac with no screen", on by
+// default; the CLI's --no-headless-display): after #380's stops, or with a monitor #333's display changes turn off.
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true, guardHolds: false, switchOn: false) == false,
+      "with its switch off no headless display is made")
+check(HDP.switchedOffLine.hasPrefix("Headless display: ") && HDP.switchedOffLine.contains("turned off")
+      && HDP.switchedOffRemovedLine.hasPrefix("Headless display: ") && HDP.switchedOffRemovedLine.contains("removed Sill's display"),
+      "the switch's two lines are Headless display lines (Sill.log's grep), each saying what it did")
 
 // The lid opened (or a monitor plugged in) while the fallback display exists: macOS moved every window
 // onto it when the last real display went, so it goes at once and they come back, not when the last
@@ -350,7 +357,8 @@ func replay(screens: [Screens], cameBack: [Double], onConsole: (Double) -> Bool,
         w.saw(real: s.real, list: s.list, asleep: s.asleep, at: t)
         // The wake: the Desktop (wanted from `wanted` on) asks again, with no real screen and no Sill's display.
         let gate = HDP.needsVirtualDesktop(hasDisplay: w.real > 0, clientCount: 1, appKitLoop: true, synthetic: false,
-                                           apiAvailable: true, screenRecording: true, onConsole: onConsole(t), guardHolds: false)
+                                           apiAvailable: true, screenRecording: true, onConsole: onConsole(t), guardHolds: false,
+                                           switchOn: true)
         if was, !w.asleep, wakeUp == nil, t >= wanted,
            HDP.desktopAgainAtWake(streamsDesktop: true, sills: made != nil && released == nil, gate: gate) {
             wantedSince = t; wakeUp = t

@@ -35,10 +35,15 @@ Phase 2a (virtual-desktop-2a, 2026-11-18; Noah: "should default to resolution an
 - guardok: one stop kept and no marker: made as before, the marker gone, the count back to 0.
 - offconsole: Sill's display made on a screenless Mac, then another user on the screen: removed at once (it would be
   their displays); back on the console with no screen: made again after the return's two seconds.
+- kept: Sill's display made, then the device leaves: kept with no device connected (Watch.release keeps it while no real
+  screen works, which Settings' words say); a monitor back with nobody connected: gone two seconds after.
+- switchoff: its switch off (--no-headless-display; Sill.app's Settings › Virtual Display): a screenless, locked Mac's
+  Desktop, asked twice, makes nothing, waits for nothing and says why once; the Desktop streams as before.
 Each host lives under 40 s and is killed at the end.
 
     Scripts/headless-check/live.py OUT [switch|view|screenless|flicker|waiting|sleep|goneasleep|dropoff|after|nodevice|
-                                        lidclose|tapwake|size|nosize|guard|guardok|offconsole|all]
+                                        lidclose|tapwake|size|nosize|guard|guardok|offconsole|kept|
+                                        switchoff|all]
 
 Needs .build/release/SillHost (swift build -c release), or another build's in HEADLESS_CHECK_HOST. Exits 1 when a verdict
 fails."""
@@ -450,6 +455,38 @@ def run_offconsole(out):
     verdict(len(back) == 1 and 15.9 <= back[0] <= 18.5, f"back on the console with no screen: made again after the return's settle: {back}")
 
 
+
+def run_kept(out):
+    print("== kept: Sill's display made, the device leaves: kept with nobody connected; a monitor back: gone 2 s later", flush=True)
+    d, l = files(out, "kept", STANDIN, "1")
+    h = Host(out, "kept", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "kept-c1", 5, ["desktop"], start=1.0)
+    c.join()                                     # the device gone at about 6 s
+    h.at(12.0); write(d, ONE)                    # a monitor back, nobody connected
+    h.at(17.0); h.stop()
+    made = h.all(CREATED)
+    verdict(len(made) == 1 and made[0] < 6.0, f"made while the device showed the Desktop: {made}")
+    left = h.first(r"^Client left", 5.0)[0]
+    verdict(not h.all(REMOVED, 0.0, 12.0), f"kept after the device left ({left} s), nobody connected, no real screen: {h.all(REMOVED, 0.0, 12.0)}")
+    gone = h.all(REMOVED)
+    verdict(len(gone) == 1 and 13.9 <= gone[0] <= 15.0, f"a monitor back at 12 s with nobody connected: gone two seconds after: {gone}")
+
+
+SWITCHED_OFF = r"^Headless display: no real screen, but Sill's display for a Mac with no screen is turned off; none made\.$"
+
+
+def run_switchoff(out):
+    print("== switchoff: its switch off (--no-headless-display); a screenless Mac, locked (#298), the Desktop asked twice", flush=True)
+    d, l = files(out, "switchoff", STANDIN, "1")
+    h = Host(out, "switchoff", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l}, args=["--no-headless-display"])
+    c = client(h, out, "switchoff-c1", 8, ["desktop", "--pick=none@4.0", "--pick=desktop@4.05"], start=1.0)
+    c.join(); h.at(11.0); h.stop()
+    off = h.all(SWITCHED_OFF)
+    verdict(len(off) == 1, f"no real screen and the switch off: one line, asked twice: {off}")
+    verdict(not h.all(CREATED) and not h.all(LOOKING), f"nothing made, nothing waited for: {h.all(CREATED)} {h.all(LOOKING)}")
+    verdict(len(h.all(STREAMING, 1.0)) >= 2, f"the Desktop streams as before, at each ask: {h.all(STREAMING, 1.0)}")
+
+
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
@@ -459,7 +496,7 @@ def main():
                       ("waiting", run_waiting), ("sleep", run_sleep), ("goneasleep", run_goneasleep), ("dropoff", run_dropoff),
                       ("after", run_after), ("nodevice", run_nodevice), ("lidclose", run_lidclose), ("tapwake", run_tapwake),
                       ("size", run_size), ("nosize", run_nosize), ("guard", run_guard), ("guardok", run_guardok),
-                      ("offconsole", run_offconsole)):
+                      ("offconsole", run_offconsole), ("kept", run_kept), ("switchoff", run_switchoff)):
         if which in (name, "all"): run(out)
     bad = [w for ok, w in verdicts if not ok]
     print(f"{len(verdicts) - len(bad)} of {len(verdicts)} verdicts passed")

@@ -16,7 +16,8 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, offConsoleView, remoteAddressName=host[:port],
+///                                              shareClipboard, offConsoleView, headlessDisplay,
+///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
@@ -370,6 +371,7 @@ enum DebugHooks {
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
         case "offConsoleView": config.offConsoleView = flag
+        case "headlessDisplay": config.headlessDisplay = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -710,17 +712,21 @@ enum DebugHooks {
                 ("both", judged("both", installed)), ("all", judged("all", installed)), ("quoted", judged("executable", spaced))]
     }()
 
-    /// Virtual Display's states for a Mac with no working screen (PR #200): Sill's display showing for an iPad mini,
-    /// and the guard for #380 holding.
+    /// Virtual Display's states for a Mac with no working screen (PR #200): Sill's display sized to an iPad mini with the
+    /// Desktop streaming on it, the same kept after the iPad disconnected, and the guard for #380 holding.
     static func noScreenPaneSamples() -> [(String, HostStatusSnapshot)] {
         var showing = HostStatusSnapshot()
         showing.virtualDisplayOn = true
         showing.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: 1218, heightPt: 800, scale: 2, hz: 60, device: "iPad mini")
+        showing.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 2436, height: 1600, fps: 60,
+                                                   mbps: 15, onVirtualDisplay: false, softwareEncoder: false, onSillDisplay: true)
+        var kept = showing
+        kept.stream = nil
         var held = HostStatusSnapshot()
         held.virtualDisplayOn = true
         held.displayMakeHeld = true
         held.lastStageFailure = "Sill stopped twice while making its display"
-        return [("noscreen", showing), ("guard", held)]
+        return [("noscreen", showing), ("noscreen-kept", kept), ("guard", held)]
     }
 
     /// The remote device of `remote-device`, every connected device away: the away quality runs.

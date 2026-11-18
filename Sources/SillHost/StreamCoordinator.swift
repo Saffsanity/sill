@@ -251,6 +251,9 @@ package final class StreamCoordinator {
     private let displayGuard: DisplayMakeGuard.Store?
     /// Its line for a Desktop with no real screen, once a run.
     private var saidGuardHolds = false
+    /// The line for a Desktop with no real screen while the person's switch is off (HostConfig.headlessDisplay), once
+    /// until it is turned on again.
+    private var saidSwitchedOff = false
     /// The Desktop's display size in points as its capture was built (`desktopCapture`).
     private var desktopStreamPoints: CGSize?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
@@ -1143,6 +1146,28 @@ package final class StreamCoordinator {
         // in the background, before the first chunk needs it.
         if !old.sendAudio, next.sendAudio { audio.prepare() }
         if old.sendAudio != next.sendAudio, !switching { audioFollow() }
+        // A Mac with no screen's switch (Settings › Virtual Display), Sill's display's alone, never the pipeline's.
+        if old.headlessDisplay != next.headlessDisplay { headlessSwitched(on: next.headlessDisplay) }
+    }
+
+    /// The person turned "Make a display when this Mac has no screen" off or on (HostConfig.headlessDisplay; Sill.app's
+    /// alone at run time). Off: Sill's display goes at once, and a Desktop on it starts again on what macOS shows
+    /// (`removeHeadlessAtOnce`). On: a Desktop streaming with no real screen and no Sill's display asks again, so it is
+    /// made as `Watch` says, as after Try Again. A switch under way first, at most 5 s.
+    private func headlessSwitched(on: Bool) {
+        saidSwitchedOff = false
+        Task { @MainActor in
+            guard on else {
+                await self.removeHeadlessAtOnce(line: HeadlessDesktopPolicy.switchedOffRemovedLine) { !self.config.headlessDisplay }
+                return
+            }
+            for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+            guard self.config.headlessDisplay, self.active == .desktop, !self.switching, !self.shuttingDown,
+                  !self.hasHeadlessDisplay, !self.releasingHeadless else { return }
+            self.lookAtDisplays()
+            guard self.displayWatch.real == 0, self.headlessGateAllows() else { return }
+            await self.select(.desktop)
+        }
     }
 
     /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
@@ -1207,8 +1232,15 @@ package final class StreamCoordinator {
             saidAsleepNotGone = true
         }
         guard displayWatch.real == 0, headlessGateAllows() else {
-            // No real screen, and only the guard for #380 keeps Sill's display from being made: one line a run.
-            if displayWatch.real == 0, displayGuard?.holds == true, !saidGuardHolds, headlessGateAllows(guardHolds: false) {
+            // No real screen, and only the person's switch (Settings › Virtual Display, --no-headless-display), or the
+            // guard for #380, keeps Sill's display from being made: one line, the switch's until it is turned on again,
+            // the guard's once a run.
+            if displayWatch.real == 0, !config.headlessDisplay {
+                if !saidSwitchedOff, headlessGateAllows(guardHolds: false, switchOn: true) {
+                    print(HeadlessDesktopPolicy.switchedOffLine)
+                    saidSwitchedOff = true
+                }
+            } else if displayWatch.real == 0, displayGuard?.holds == true, !saidGuardHolds, headlessGateAllows(guardHolds: false) {
                 print(DisplayMakeGuard.headlessHeldLine)
                 saidGuardHolds = true
             }
@@ -1323,9 +1355,10 @@ package final class StreamCoordinator {
     }
 
     /// What `needsVirtualDesktop` asks of this host now, from the watch's last look (`screens`: whether a real screen
-    /// counts as there; `false` asks what it would say with none). A test host with SILL_TEST_HEADLESS stands in for a
-    /// Mac with an AppKit loop, the private API and Screen Recording: it makes no display, only says so.
-    private func headlessGateAllows(screens: Bool? = nil, guardHolds: Bool? = nil) -> Bool {
+    /// counts as there; `false` asks what it would say with none; `guardHolds` and `switchOn` likewise, for the lines that
+    /// say which keeps it from being made). A test host with SILL_TEST_HEADLESS stands in for a Mac with an AppKit loop,
+    /// the private API and Screen Recording: it makes no display, only says so.
+    private func headlessGateAllows(screens: Bool? = nil, guardHolds: Bool? = nil, switchOn: Bool? = nil) -> Bool {
         let scripted = testHeadlessFile != nil
         return HeadlessDesktopPolicy.needsVirtualDesktop(
             hasDisplay: screens ?? (displayWatch.real > 0),
@@ -1335,7 +1368,8 @@ package final class StreamCoordinator {
             apiAvailable: scripted || VirtualDisplay.checkPrivateAPI().isEmpty,
             screenRecording: scripted || CGPreflightScreenCaptureAccess(),  // never a display without it (VirtualStage.prepare's rule)
             onConsole: LockPolicy.makesDesktopDisplay(lockReading),         // locked too (#298); never off console
-            guardHolds: guardHolds ?? (displayGuard?.holds ?? false)        // two runs in a row ended making one (#380)
+            guardHolds: guardHolds ?? (displayGuard?.holds ?? false),       // two runs in a row ended making one (#380)
+            switchOn: switchOn ?? config.headlessDisplay                    // the person's switch, on by default
         )
     }
 
@@ -1874,7 +1908,11 @@ package final class StreamCoordinator {
         }
         // Off console (another user, or the login window, on the screen): Sill's own Desktop display goes at once
         // (LockPolicy.makesDesktopDisplay: never off console).
-        if now == .offConsole, hasHeadlessDisplay { await removeHeadlessOffConsole() }
+        if now == .offConsole, hasHeadlessDisplay {
+            await removeHeadlessAtOnce(line: "Headless display: this session is off the console; removed Sill's display (it would be the displays of the user on the screen).") {
+                self.lockReading == .offConsole
+            }
+        }
         menuTargetChanged()                  // no app's menus while locked, the source's again after
         audioFollow()                        // and no sound
         broadcastList()                      // the windows go now; they come back once looked at
@@ -3305,18 +3343,21 @@ package final class StreamCoordinator {
         print(line + (said ? " (TEST ONLY: none was made.)" : ""))
     }
 
-    /// Off console, Sill's display goes at once (docs/virtual-desktop-plan.md §2 and §10, LockPolicy.makesDesktopDisplay):
-    /// it would be the displays of the user now on the screen, and a Sill in their session would make one of its own
-    /// beside it, of the same identity. A switch under way first, at most 5 s; never while its release is under way,
-    /// which ends it anyway. Off console the Desktop streams the placeholder, which captures no display; with the
-    /// off-console view it streams the main display, so it starts again, once, on what is left. Back on the console with
-    /// no screen, the Desktop asks for it again and it is made two seconds after the return (`Watch.cameBack`).
-    private func removeHeadlessOffConsole() async {
+    /// Sill's display goes at once, not after a real screen's two seconds (`Watch.release`), with `line`, while `still`
+    /// holds after a switch under way (at most 5 s); never while its release is under way, which ends it anyway:
+    /// - off console (docs/virtual-desktop-plan.md §2 and §10, LockPolicy.makesDesktopDisplay): it would be the displays
+    ///   of the user now on the screen, and a Sill in their session would make one of its own beside it, of the same
+    ///   identity. Off console the Desktop streams the placeholder, which captures no display; with the off-console view
+    ///   it streams the main display, so it starts again, once, on what is left. Back on the console with no screen, the
+    ///   Desktop asks for it again and it is made two seconds after the return (`Watch.cameBack`);
+    /// - its switch turned off in Settings › Virtual Display (`headlessSwitched`): the Desktop starts again, once, on what
+    ///   macOS shows (its stand-in on a Mac with no screen), and none is made until the switch is on again.
+    private func removeHeadlessAtOnce(line: String, still: () -> Bool) async {
         for _ in 0..<100 where switching { try? await Task.sleep(for: .milliseconds(50)) }
-        guard hasHeadlessDisplay, !releasingHeadless, !shuttingDown, lockReading == .offConsole else { return }
+        guard hasHeadlessDisplay, !releasingHeadless, !shuttingDown, still() else { return }
         releaseCheck?.cancel(); releaseCheck = nil
         catalog.keepsSills = false
-        removeHeadlessDisplay(line: "Headless display: this session is off the console; removed Sill's display (it would be the displays of the user on the screen).")
+        removeHeadlessDisplay(line: line)
         guard active == .desktop, !placeholderStreams, !switching else { return }
         await catalog.refreshWindows()
         await select(.desktop)

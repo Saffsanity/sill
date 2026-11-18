@@ -277,8 +277,11 @@ enum StatusText {
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
-    /// Settings › Virtual Display's footnote on a Mac with no working screen (PR #200): automatic, no switch.
-    static let noScreenFootnote = "When this Mac has no working screen, such as a MacBook with its lid closed and nothing attached, Sill gives it a display of its own while a device shows the Desktop, the size of that device, so you can see the login screen and type your password. It goes once a screen works again."
+    /// Settings › Virtual Display's "A Mac with no screen" footnote, under its switch (PR #200; HostConfig.headlessDisplay):
+    /// made when a device shows the Desktop, and kept, devices or not, until a real screen has worked two seconds
+    /// (HeadlessDesktopPolicy.Watch.release), the switch is turned off or Sill quits. Off console it goes too, and comes
+    /// back with the session: too rare for the footnote.
+    static let noScreenFootnote = "When this Mac has no working screen, such as a MacBook with its lid closed and nothing attached, Sill gives it a display of its own when a device shows the Desktop, the size of that device, so you can see the login screen and type your password. The display stays after the device disconnects, until a screen works again, you turn this off, or you quit Sill."
 
     /// Settings › Virtual Display's status while the guard for #380 holds (DisplayMakeGuard), with Try Again.
     static let displayGuardHeld = "Sill stopped twice while making its display, so it makes none by itself now."
@@ -289,12 +292,14 @@ enum StatusText {
         return "Sill’s display · \(d.widthPt)×\(d.heightPt)"
     }
 
-    /// Settings › Virtual Display's line while Sill's own display exists: "Showing Sill’s display now: 1218 × 800 for
-    /// iPad (iPad14,1)." (no device: "…: 1920 × 1080, no device’s size known."); nil while there is none.
-    static func sillDisplayLine(_ d: HostStatusSnapshot.SillDisplay?) -> String? {
+    /// Settings › Virtual Display's "Sill’s display" row while it exists: "1218 × 800 for iPad (iPad14,1), streaming now"
+    /// while the Desktop streams on it (`showing`: HostStatusSnapshot.Stream.onSillDisplay), else "…, kept until a screen
+    /// works": it stays with no device connected, or one streaming a window (Watch.release keeps it while no real screen
+    /// works). Made before any device said its size: "1920 × 1080 (no device’s size known), …". Nil while there is none.
+    static func sillDisplayLine(_ d: HostStatusSnapshot.SillDisplay?, showing: Bool) -> String? {
         guard let d else { return nil }
-        let size = "\(d.widthPt) × \(d.heightPt)"
-        return d.device.map { "Showing Sill’s display now: \(size) for \($0)." } ?? "Showing Sill’s display now: \(size), no device’s size known."
+        let size = "\(d.widthPt) × \(d.heightPt)" + (d.device.map { " for \($0)" } ?? " (no device’s size known)")
+        return size + (showing ? ", streaming now" : ", kept until a screen works")
     }
 
     /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms · Wi-Fi" (from away: "… · through

@@ -15,7 +15,7 @@ import SillHostCore
 ///
 /// Defaults are registered from `HostConfig.app`: the CLI's (`HostConfig.standard`) with the virtual
 /// display and Send Audio on (Noah, 2026-10-27), so a fresh install streams like the CLI with
-/// `--virtual-display --audio`.
+/// `--virtual-display --audio`. A Mac with no screen's display (`headlessDisplay`) is on in both.
 /// Registered, never written: a key a change saved always wins over them (`virtualDisplay` 0 stays
 /// off whatever the default), and launch arguments override for one run without being saved
 /// (`-maxFPS 60`, `-virtualDisplay 0`), because a save writes only the keys a change touched. Launch
@@ -52,6 +52,7 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
+        static let headlessDisplay = "headlessDisplay"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -143,6 +144,9 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off, like the CLI: a Mac off console shows nothing of this session unless its user says so here.
             Key.offConsoleView: base.offConsoleView,
+            // On, like the CLI (Noah on #61: a Mac with no screen gets a display of its own); a saved key wins, so a
+            // Mac whose user turned it off in Settings › Virtual Display (#380's stops, a #333 monitor) keeps it off.
+            Key.headlessDisplay: base.headlessDisplay,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -163,7 +167,8 @@ final class HostSettings {
                             requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
-                            offConsoleView: defaults.bool(forKey: Key.offConsoleView)).validated()
+                            offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            headlessDisplay: defaults.bool(forKey: Key.headlessDisplay)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -191,6 +196,7 @@ final class HostSettings {
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
+        if config.headlessDisplay != old.headlessDisplay { defaults.set(config.headlessDisplay, forKey: Key.headlessDisplay) }
     }
 
     // MARK: Remote devices seen (display only)

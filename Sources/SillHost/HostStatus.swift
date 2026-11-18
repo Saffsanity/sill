@@ -126,9 +126,10 @@ package struct HostStatusSnapshot: Equatable {
     /// Why the last pick streamed the real window instead of the virtual display; cleared by the
     /// next successful stage.
     package var lastStageFailure: String?
-    /// Sill's own display for a Mac with no working screen, while it exists (PR #200: made by itself as a device shows
-    /// the Desktop, gone once a real screen works): its size as it came up, its rate, and whose screen it is sized to.
-    /// The card's source row and Settings › Virtual Display say so. Nil while there is none.
+    /// Sill's own display for a Mac with no working screen, while it exists (PR #200: made when a device shows the
+    /// Desktop, then kept with devices or none until a real screen has worked 2 s, its switch is turned off, the session
+    /// goes off console or Sill quits): its size as it came up, its rate, and whose screen it is sized to. The card's
+    /// source row and Settings › Virtual Display say so. Nil while there is none.
     package var sillDisplay: SillDisplay?
     /// The guard for #380 holds (DisplayMakeGuard): Sill stopped while making a display two runs in a row, and makes none
     /// by itself until the person chooses Try Again in Settings › Virtual Display.

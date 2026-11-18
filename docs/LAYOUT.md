@@ -393,7 +393,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable` and `--no-clipboard`.
+  on its own stdout), `--print-cable`, `--no-clipboard` and `--no-headless-display`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`

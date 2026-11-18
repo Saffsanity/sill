@@ -477,15 +477,21 @@ them.
 A Mac with no working screen (a MacBook with its lid closed and nothing
 attached, a Mac mini with no monitor; issues #61 and #298, addhumal's PR #200,
 finished as phase 2a of `docs/virtual-desktop-plan.md`) gets Sill's own display
-by itself while a device shows the Desktop, so the lock screen streams and takes
-the password; there is no switch (Noah on #61). It is made only in Sill.app and
-the CLI with `--virtual-display` (it needs the AppKit loop), with Screen
-Recording, on the console (at a locked screen too: the one display Sill makes
-while locked, `LockPolicy.makesDesktopDisplay`), once the display list has been
-steady 1 s and no real screen has worked for 2 s (3 s at most after the Desktop
-asked), never while the screens sleep (an asleep monitor counts as a screen, and
-a tap on the device wakes them), and goes 2 s after a real screen works, at
-once off console, and at Quit (`HeadlessDesktopPolicy.Watch`). Its size is the
+when a device shows the Desktop, so the lock screen streams and takes the
+password. It is on by default (Noah on #61) and has a switch, "Make a display
+when this Mac has no screen" in Settings › Virtual Display's section "A Mac with
+no screen" (`headlessDisplay` in `me.saffer.sill.mac`; the CLI's
+`--no-headless-display`; Noah, 2026-11-18: a toggle wherever it makes sense):
+turned off it makes none, and one that exists goes at once. It is made only in
+Sill.app and the CLI with `--virtual-display` (it needs the AppKit loop), with
+Screen Recording, on the console (at a locked screen too: the one display Sill
+makes while locked, `LockPolicy.makesDesktopDisplay`), once the display list has
+been steady 1 s and no real screen has worked for 2 s (3 s at most after the
+Desktop asked), never while the screens sleep (an asleep monitor counts as a
+screen, and a tap on the device wakes them). It stays after the devices leave,
+with whatever windows are on it, and goes 2 s after a real screen works, at
+once off console or when its switch is turned off, and at Quit
+(`HeadlessDesktopPolicy.Watch`). Its size is the
 device's (Noah, 2026-11-18): the panel of the device that asked for the Desktop,
 in its points at Retina, grown evenly to 800 points on its shorter side and held
 to 4096 (an iPad mini's 1133×744 is 1218×800), at that device's rate held to
@@ -499,9 +505,13 @@ screen." (the mode it came up at, and what was asked when that differs), "…: a
 real screen works again; none made.", "…: the 2 screens are asleep, not gone;
 none made (a tap on a device wakes them).", "…: a display is online again;
 removed the virtual Desktop display.", "…: this session is off the console;
-removed Sill's display …", and after each `Locked:` and `Unlocked:` line a
-`Displays:` line with the counts. The menu's card names it ("Sill’s display ·
-1218×800") and Settings › Virtual Display says "Showing Sill’s display now: …".
+removed Sill's display …", "…: turned off in Settings; removed Sill's display.",
+"…: no real screen, but Sill's display for a Mac with no screen is turned off;
+none made.", and in every host, the CLI too, after each `Locked:` and
+`Unlocked:` line a `Displays:` line with the counts. The menu's card names it
+("Sill’s display · 1218×800") and Settings › Virtual Display's row "Sill’s
+display" says "1218 × 800 for iPad mini, streaming now", or "…, kept until a
+screen works" while no device shows it.
 
 A guard for #380 (Sill for Mac stopping while it makes a display): Sill.app
 writes `~/Library/Application Support/Sill/making-display` just before it makes
@@ -518,8 +528,8 @@ Headless, on test hosts only (`--synthetic`, never Sill.app's own executable):
 `real asleep`, `standin`, `standin asleep`, `lid closed`, `screens asleep`), read
 at each change, with Sill's display only said to be made and removed; and
 `SILL_TEST_MAKE_GUARD=<folder>` gives it the guard in a folder of its own.
-`Scripts/headless-check/live.py OUT all` runs 17 scenarios on loopback test hosts
-(about 7 minutes; `swift build -c release` first), and
+`Scripts/headless-check/live.py OUT all` runs 19 scenarios on loopback test hosts
+(about 8 minutes; `swift build -c release` first), and
 `Tests/checks/virtual-display-api` and `virtual-desktop` check the rules. No agent
 or test makes a real display on a Mac someone uses: the steps that need one are
 Noah's, in the step file of 2026-11-18 (`docs/steps/2026-11-18-virtual-desktop-2a.md`).

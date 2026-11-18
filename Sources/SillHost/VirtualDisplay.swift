@@ -474,6 +474,9 @@ enum HeadlessDesktopPolicy {
     /// another user has the screen from would join that user's displays; the off-console view of #340 lets the
     /// Desktop stream off console, and makes no virtual display there for that reason. `guardHolds`: Sill stopped while
     /// making a display two runs in a row (DisplayMakeGuard, #380), and makes none by itself until Try Again.
+    /// `switchOn`: the Mac's user has it on (HostConfig.headlessDisplay: Settings › Virtual Display's "A Mac with no
+    /// screen", on by default; the CLI's --no-headless-display turns it off), so a Mac whose user turned it off, after
+    /// #380's stops or with a monitor that #333's display changes turn off, gets none.
     static func needsVirtualDesktop(
         hasDisplay: Bool,
         clientCount: Int,
@@ -482,10 +485,20 @@ enum HeadlessDesktopPolicy {
         apiAvailable: Bool,
         screenRecording: Bool,
         onConsole: Bool,
-        guardHolds: Bool
+        guardHolds: Bool,
+        switchOn: Bool
     ) -> Bool {
         !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole && !guardHolds
+            && switchOn
     }
+
+    /// No real screen, a device, and only the person's switch keeps Sill's display from being made: once a run until
+    /// the switch is turned on again.
+    static let switchedOffLine = "Headless display: no real screen, but Sill's display for a Mac with no screen is turned off; none made."
+
+    /// Its switch turned off (Settings › Virtual Display, Sill.app's alone at run time) while Sill's display exists: it
+    /// goes at once, and the Desktop starts again on what macOS shows.
+    static let switchedOffRemovedLine = "Headless display: turned off in Settings; removed Sill's display."
 
     /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
     /// and Sill's own are none). When it is made, and when it goes, is `Watch`'s.

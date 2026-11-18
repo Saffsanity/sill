@@ -101,7 +101,7 @@ it through `onChange` and acts on the reading as it is when it runs.
 | Icons, the installed apps, launches | yes | no (withheld, sent at the unlock) | no |
 | Sound, clipboard, pointer (26), cursor shape (14), gestures | yes | no | no |
 | Sill's virtual display (the stage's, a picked window's) | yes | none made; a staged window goes home | none |
-| Sill's own Desktop display for a Mac with no working screen (PR #200, #298; `makesDesktopDisplay`) | as `HeadlessDesktopPolicy.Watch` says | made as unlocked: the one display Sill makes while locked, carrying the lock screen through a display filter, never a window, so the password typed on a device lands there; never resized while locked | never; one that exists goes |
+| Sill's own Desktop display for a Mac with no working screen (PR #200, #298; `makesDesktopDisplay`; its switch, `headlessDisplay`, on) | as `HeadlessDesktopPolicy.Watch` says | made as unlocked: the one display Sill makes while locked, carrying the lock screen through a display filter, never a window, so the password typed on a device lands there; never resized while locked | never; one that exists goes |
 | Input (kind 8) | every session | a paired session's (the owner types the password); any other only the up of what it holds down | nobody's, but the up of a key or a button held down |
 | Display activity (DisplayWake) | as ever | a paired session's taken input only; never a session's start | never |
 

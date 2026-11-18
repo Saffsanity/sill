@@ -554,15 +554,23 @@ private struct VirtualDisplayPane: View {
                         Text("Streamed where it is: \(failure)").multilineTextAlignment(.trailing)
                     }
                 }
-                // A Mac with no working screen (PR #200, #61, #298): Sill's own display, made by itself, no switch
-                // (Noah on #61); a line while it exists.
-                if let line = StatusText.sillDisplayLine(snapshot.sillDisplay) {
-                    LabeledContent("No screen") {
+            } footer: {
+                Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is.")
+            }
+            // A Mac with no working screen (PR #200, #61, #298): Sill's own display, on by default (Noah on #61), with a
+            // switch of its own (Noah, 2026-11-18: "Anything that it would make sense to add a toggle to you should add a
+            // toggle"), apart from "Stream from a virtual display", which is the windows'. A row while the display exists.
+            Section {
+                Toggle("Make a display when this Mac has no screen", isOn: $settings.config.headlessDisplay)
+                if let line = StatusText.sillDisplayLine(snapshot.sillDisplay, showing: snapshot.stream?.onSillDisplay == true) {
+                    LabeledContent("Sill’s display") {
                         Text(line).multilineTextAlignment(.trailing)
                     }
                 }
+            } header: {
+                Text("A Mac with no screen")
             } footer: {
-                Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is. \(StatusText.noScreenFootnote)")
+                Footnote(StatusText.noScreenFootnote)
             }
         }
     }
