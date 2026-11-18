@@ -71,6 +71,7 @@
 		A1000001000000000000A402 /* TourOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F402 /* TourOverlay.swift */; };
 		A1000001000000000000AB01 /* DuoPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB01 /* DuoPosture.swift */; };
 		A1000001000000000000AB02 /* DuoPostureReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB02 /* DuoPostureReader.swift */; };
+		A1000001000000000000A090 /* PadCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F090 /* PadCanvasView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -140,6 +141,7 @@
 		A1000001000000000000F402 /* TourOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourOverlay.swift; sourceTree = "<group>"; };
 		A1000001000000000000FB01 /* DuoPosture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPosture.swift; sourceTree = "<group>"; };
 		A1000001000000000000FB02 /* DuoPostureReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPostureReader.swift; sourceTree = "<group>"; };
+		A1000001000000000000F090 /* PadCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadCanvasView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -196,6 +198,7 @@
 				A1000001000000000000F301 /* PointerPresence.swift */,
 				A1000001000000000000F004 /* HEVCDisplayView.swift */,
 				A1000001000000000000F009 /* InputOverlay.swift */,
+				A1000001000000000000F090 /* PadCanvasView.swift */,
 				A1000001000000000000F00B /* TrackpadView.swift */,
 				A1000001000000000000F701 /* TrackpadGestures.swift */,
 				A1000001000000000000FA01 /* AudioDecoder.swift */,
@@ -357,6 +360,7 @@
 				A1000001000000000000A301 /* PointerPresence.swift in Sources */,
 				A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */,
 				A1000001000000000000A008 /* InputOverlay.swift in Sources */,
+				A1000001000000000000A090 /* PadCanvasView.swift in Sources */,
 				A1000001000000000000A00A /* TrackpadView.swift in Sources */,
 				A1000001000000000000A701 /* TrackpadGestures.swift in Sources */,
 				A1000001000000000000AA01 /* AudioDecoder.swift in Sources */,

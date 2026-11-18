@@ -1804,21 +1804,26 @@ struct StreamScreen: View {
             Color.black
 
             ZStack {
-                // Scaled and moved by the picture's zoom, inside the clip below.
-                ZoomedStreamView(client: client, zoom: zoom)
-                // Same frame as the video, so a touch maps straight onto the streamed frame (through the
-                // zoom, StreamZoom.unzoomedPoint).
-                InputOverlay(videoSize: client.videoSize,
-                             send: { client.sendInput($0) },
-                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
-                             proxy: overlay,
-                             isKeyboardShown: $keyboardShown,
-                             latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) },
-                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
-                             readZoom: { [zoom] in zoom.zoom },
-                             writeZoom: { [zoom] in zoom.set($0) })
+                if client.padMode {
+                    PadCanvasView(client: client)
+                } else {
+                    // Scaled and moved by the picture's zoom, inside the clip below.
+                    ZoomedStreamView(client: client, zoom: zoom)
+                    // Same frame as the video, so a touch maps straight onto the streamed frame (through the
+                    // zoom, StreamZoom.unzoomedPoint).
+                    InputOverlay(videoSize: client.videoSize,
+                                 send: { client.sendInput($0) },
+                                 sendPen: client.hostPen != nil ? { client.sendPen($0) } : nil,
+                                 setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                                 proxy: overlay,
+                                 isKeyboardShown: $keyboardShown,
+                                 latchedModifiers: latched,
+                                 onModifiersConsumed: { latched = [] },
+                                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                                 macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                                 readZoom: { [zoom] in zoom.zoom },
+                                 writeZoom: { [zoom] in zoom.set($0) })
+                }
             }
             // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
             .background(hidden ? Color.black : Palette.panel)
@@ -2086,10 +2091,17 @@ private struct TopBar: View {
             // The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
             // (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams.
             let desktop = client.desktopButton
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label,
+            button(open: client.active == .desktop && !client.padMode, symbol: "desktopcomputer", label: desktop.label,
                    accessibilityLabel: desktop.accessibilityLabel,
                    action: { client.tapDesktop() })
                 .desktopStops(desktop, inset: metrics.buttonHeight >= 60 ? 5 : 3.5)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            // Screenless drawing tablet surface (Pad Mode).
+            button(open: client.padMode, symbol: "rectangle.and.pencil.and.ellipsis", label: "Tablet",
+                   accessibilityLabel: client.padMode ? "Switch back to screen stream" : "Switch to drawing tablet mode",
+                   action: { client.setPadMode(!client.padMode) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 

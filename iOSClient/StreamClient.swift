@@ -938,6 +938,24 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// Whether this session's Mac takes kind 45 pen tablet batches (`WindowList.pen`), and the main
+    /// display's point size. Cleared with the session.
+    @Published var hostPen: PenCapability?
+    /// Screenless drawing tablet mode: when true, the host stops video capture (`StreamSource.none`)
+    /// and the iPad shows `PadCanvasView` mapped 1:1 to the Mac's main display aspect ratio.
+    @Published var padMode = false
+    private var sourceBeforePadMode: StreamSource = .desktop
+
+    func setPadMode(_ on: Bool) {
+        guard padMode != on else { return }
+        padMode = on
+        if on {
+            if active != .none { sourceBeforePadMode = active }
+            select(.none)
+        } else {
+            select(sourceBeforePadMode == .none ? .desktop : sourceBeforePadMode)
+        }
+    }
     /// Whether this session's Mac repeats a key held down (`WindowList.keyRepeat`, KeyRepeat on the host):
     /// 1 from a Mac with key repeat, nil from one before it. The stream's input view sends a hardware
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
@@ -3728,6 +3746,8 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostPen = nil
+        padMode = false
         hostKeyRepeat = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
@@ -3831,6 +3851,9 @@ final class StreamClient: ObservableObject {
     /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
     /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        if source != .none, padMode {
+            padMode = false
+        }
         noteAction()
         request(source)
     }
@@ -4087,6 +4110,24 @@ final class StreamClient: ObservableObject {
             self.send(.gesture, payload)
         }
         return true
+    }
+
+    /// Sends a batch of coalesced Apple Pencil samples (kind 45) without the pointer's 8 ms move
+    /// throttle, flushing any queued pointer move first so cursor order never inverts.
+    func sendPen(_ batch: PenBatch) {
+        guard hostPen != nil, !batch.samples.isEmpty else { return }
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        lastPersonInputAt = lastInputAt
+        DeviceIdleTimer.shared.used()
+        if batch.samples.contains(where: { $0.phase == PenPhase.down }) {
+            onCaretMayMove?()
+        }
+        let payload = Wire.encode(batch)
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.flushPendingMove()
+            self.send(.pen, payload)
+        }
     }
 
     /// On `queue`.
@@ -4437,6 +4478,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                if self.hostPen != list.pen { self.hostPen = list.pen }
                 self.hostKeyRepeat = list.keyRepeat
                 self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the

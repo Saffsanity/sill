@@ -134,6 +134,7 @@ struct DisplayWake {
             case .windowCommand: return .windowButton
             case .pressMenuItem: return .menuItem
             case .gesture: return .gesture
+            case .pen: return .input
             case .nextDisplay: return .nextDisplay
             default: return nil                          // a pick (6), the viewport (9), settings (17), …
             }
