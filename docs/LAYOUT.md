@@ -299,10 +299,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
   `lockedMidSwitch` and `lockDecision`), Lock this Mac when the last device leaves
   (docs/privacy-mode-plan.md, part 1): `PrivacyPolicy` (which departures count, the
-  30 s wait, its end, the lock's confirmation, rule 10's displays, the words; pure,
-  `Tests/checks/privacy`), `PrivacyLock` (main actor: the rule's state and tick, the
-  status) and `ScreenLocker` (SACLockScreenImmediate and `pmset displaysleepnow` on
-  `sill.privacy.lock`; a test host's dry run), `StillCapture` (SyntheticCapture.swift:
+  30 s wait, its end, the lock's confirmation, its two switches, rule 10's displays, the
+  words; pure, `Tests/checks/privacy`; who acts: Sill.app itself alone), `PrivacyLock`
+  (main actor: the rule's state and tick, the status) and `ScreenLocker`
+  (SACLockScreenImmediate and `pmset displaysleepnow` on `sill.privacy.lock` in Sill.app
+  itself; the dry run anywhere else),
+  `StillCapture` (SyntheticCapture.swift:
   a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
@@ -393,7 +395,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session`
+  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session[=away][,nosleep]`
   (with `--synthetic` only: a dry run).
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
@@ -410,8 +412,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
   (Settings › Devices: Require pairing, Show the pairing window to screen
-  sharing, Lock this Mac when the last device leaves, the paired devices, Remove
-  and rename), `RemoteAccessPane`
+  sharing, Lock this Mac when the last device leaves with its two switches, the
+  paired devices, Remove and rename), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code; the window a device's ask opens, and the cable notice),
   `PairingWindowSharing` (whether screen sharing shows that window: hidden
@@ -632,7 +634,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,
   a return, a move, locked already, another user, no display, no lock call, a quit,
-  a crash, a pairing connection, a refused device. `Scripts/sillrelay.py` is a
+  a crash, a pairing connection, a refused device, its display left on, only after a
+  device away from home. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
