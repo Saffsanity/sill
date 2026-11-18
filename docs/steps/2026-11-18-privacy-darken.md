@@ -58,6 +58,9 @@ used)"; #323: "as a toggle".
   1.006 s, the wake counted after it in the same turn; home; away at the remote door from a relay on this Mac, and at
   home by address; wait, lit 3.1 s after the last departure; keys; pass; takeback, lit at the settled unlock; hold, lit
   0.5 s after the lock's outcome; quit). Not run: H2 (the CLI's stdout without the new flags, against main).
+- **Docs**: one entry each in docs/LAYOUT.md (DarkenPolicy and PrivacyScreen; the probe and darken.py) and
+  docs/BUILD-AND-RUN.md (the probe's command; the dry run), carried there from CLAUDE.md by `Scripts/migrate-notes.py`
+  when `privacy-lock` took main's #388 and was merged in here (a34c675d).
 - **Defaults taken** (the pull request lists them for Noah): the plan's recommendations for its open decisions; the
   black under the lock screen until G0; one key's lock may hold the dark up to 3 s past the wait; a failed key lock
   stops key locks until a lock shows or a switch changes; a change of scope lifts at once, a move home under "only away"
