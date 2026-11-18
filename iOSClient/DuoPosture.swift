@@ -528,8 +528,6 @@ extension DuoPosture {
         /// The strip's width, so that it ends a gap short of the band; nil when there is no band in
         /// the bar (the strip as before).
         var stripWidth: CGFloat?
-        /// The Settings panel's width: it hangs from the bar's trailing end, kept off the band.
-        var panelWidth: CGFloat
         /// Whether the right group begins past the band (false only when no step makes it).
         var clears: Bool
     }
@@ -541,10 +539,11 @@ extension DuoPosture {
     /// between everything, and a right group of `buttons` (Menus may come: count it). The group
     /// keeps its size while it begins past the band; else it takes `compactButtonWidth` (the
     /// approved step), then smaller gaps, down to `minimumGap`. The strip ends a gap short of the
-    /// band; the Settings panel is at most as wide as the room past the band.
+    /// band. (Settings, a panel under the bar's end until 0.6.3, is a whole-screen pane now, which keeps
+    /// off the band by itself: SettingsPane.)
     static func bookBar(width: CGFloat, fold: FoldInfo, padding: CGFloat, gap: CGFloat, buttonWidth: CGFloat,
-                        compactButtonWidth: CGFloat, buttons: Int, panelWidth: CGFloat) -> BookBar {
-        let unchanged = BookBar(buttonWidth: buttonWidth, gap: gap, stripWidth: nil, panelWidth: panelWidth, clears: true)
+                        compactButtonWidth: CGFloat, buttons: Int) -> BookBar {
+        let unchanged = BookBar(buttonWidth: buttonWidth, gap: gap, stripWidth: nil, clears: true)
         guard let band = fold.verticalBand, buttons > 0, band.minX > padding, band.maxX < width - padding else { return unchanged }
         let count = CGFloat(buttons)
         func start(_ button: CGFloat, _ g: CGFloat) -> CGFloat { width - padding - count * button - (count - 1) * g }
@@ -556,8 +555,7 @@ extension DuoPosture {
         }
         let stripStart = padding + button + g          // after Apps
         let strip = max(0, band.minX - g - stripStart)
-        let panel = min(panelWidth, max(0, width - padding - band.maxX))
-        return BookBar(buttonWidth: button, gap: g, stripWidth: strip, panelWidth: panel, clears: start(button, g) >= band.maxX)
+        return BookBar(buttonWidth: button, gap: g, stripWidth: strip, clears: start(button, g) >= band.maxX)
     }
 
     /// Something `width` wide at `x` on a screen `screenWidth` wide, kept off a vertical fold's band

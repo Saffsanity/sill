@@ -176,20 +176,19 @@ private struct DuoLogger: ViewModifier {
 
 extension BarMetrics {
     /// This bar in the book pose (DuoPosture.bookBar): the right group's buttons and gaps as they
-    /// clear the fold, the strip's width so that it ends short of it (nil: as before), the Settings
-    /// panel no wider than the room past it. Unchanged anywhere else.
+    /// clear the fold, the strip's width so that it ends short of it (nil: as before). Unchanged
+    /// anywhere else.
     func clearing(_ fold: FoldInfo, width: CGFloat) -> (bar: BarMetrics, stripWidth: CGFloat?) {
         // Menus, Aa, Keyboard, Desktop and Settings: Menus counted whether or not it shows, so the
         // bar never moves when the Mac's menus come and go.
         let book = DuoPosture.bookBar(width: width, fold: fold, padding: padding, gap: gap, buttonWidth: buttonWidth,
-                                      compactButtonWidth: BarMetrics.compact.buttonWidth, buttons: 5,
-                                      panelWidth: settingsWidth)
+                                      compactButtonWidth: BarMetrics.compact.buttonWidth, buttons: 5)
         guard book.stripWidth != nil else { return (self, nil) }
         let bar = BarMetrics(height: height, padding: padding, gap: book.gap,
                              buttonWidth: book.buttonWidth, buttonHeight: buttonHeight, buttonSpacing: buttonSpacing,
                              thumbWidth: thumbWidth, thumbHeight: thumbHeight, thumbRadius: thumbRadius,
                              thumbSpacing: thumbSpacing, thumbPad: thumbPad, thumbFade: thumbFade,
-                             showsTextSize: showsTextSize, settingsWidth: book.panelWidth)
+                             showsTextSize: showsTextSize)
         return (bar, book.stripWidth)
     }
 }
