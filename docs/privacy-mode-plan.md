@@ -277,6 +277,12 @@ Device: nothing. No usage string, background mode, privacy manifest entry, pbxpr
 | When (picker under it) | Settings › Devices | `darkenScreenScope` | Only while a device is away from home | (in `--darken`) | (in `darkenScreen`) |
 | A key or click on this Mac locks it | Settings › Devices, under the first, while it is on | `darkenKeysLock` | on | `--darken-keys=lock\|pass` | `darkenKeysLock=0\|1` |
 | Lock this Mac when the last device leaves | Settings › Devices | `lockAfterSession` | off | `--lock-after-session` | `lockAfterSession=0\|1` |
+| Turn off its display too | Settings › Devices, under the lock, while it is on | `lockSleepsDisplay` | on | `--lock-after-session=nosleep` | `lockSleepsDisplay=0\|1` |
+| Only after a device away from home | Settings › Devices, under the lock, while it is on | `lockOnlyAfterAway` | off | `--lock-after-session=away` | `lockOnlyAfterAway=0\|1` |
+
+The lock's two switches came with the review of #402 (Noah's "a toggle wherever sensible", 2026-11-18): open decisions
+5 and 6 as switches, at their recommendations. Only Sill.app itself locks or sleeps a display; the CLI and the bare
+binary make the dry run whatever the switch says (`PrivacyPolicy.locksForReal`).
 
 No device sets them. They let nobody in, so UserDefaults is enough (Require pairing, which would, lives in the
 keychain). A launch argument overrides one for one run, as for every key (`-darkenScreen 1`). No menu item (open
@@ -329,8 +335,9 @@ Sill.log ("Privacy:" lines, one per change):
 - "Privacy: Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; Sill quits so the screen
   isn’t left black, and opens again." / at the next launch: "Privacy: Sill opened again after it quit with this Mac’s
   screen dark (its main thread had stopped answering)."
-- A test host: "Privacy (test host): would darken 1 display; nothing is drawn." and the same "would lock", "would sleep
-  the display", "would quit Sill" forms.
+- Anything but Sill.app itself (a test host, the CLI, the bare binary): "Privacy (dry run): would darken 1 display;
+  nothing is drawn." and the same "would lock", "would sleep the display", "would quit Sill" forms (part 1's lock says
+  "Privacy (dry run): would lock this Mac now; nothing is locked." since the review of #402).
 
 The menu's card: nothing new (it is covered while dark; open decision 12).
 
@@ -543,7 +550,10 @@ The recommendation is what the work proceeds with if he says nothing.
 4. **The wait before locking after the last device leaves?** 30 s / 10 s / 2 minutes / none (#184). **Recommend 30 s**
    (a device's reconnect after a drop takes a few seconds; iOS suspends Sill some seconds after it leaves the screen).
 5. **Lock after which sessions?** Any (#283's words) / only one that had a device away from home. **Recommend any**.
-6. **Sleep the display after the lock?** Yes (#275, #184) / leave the lock screen lit. **Recommend yes.**
+   Since the review of #402 a switch under the lock, Only after a device away from home, off by default.
+6. **Sleep the display after the lock?** Yes (#275, #184) / leave the lock screen lit. **Recommend yes.** Since the
+   review of #402 a switch under the lock, Turn off its display too, on by default; a lock that fails still sleeps
+   the display either way.
 7. **What the person at the Mac sees?** Black with the two-line hint for 10 s after it darkens and after they touch it
    / pure black, as Apple's High Performance screen sharing (reported to look like a broken Mac) / the hint always
    (an OLED burn-in risk). **Recommend the 10 s hint.** And the device's name in it? **Recommend no.**
@@ -596,5 +606,7 @@ The recommendation is what the work proceeds with if he says nothing.
 
 - 2026-11-18, part 1 (branch `privacy-lock`): #184's head merged in as it is (main's four conflicts resolved, its
   check's README.md); then the lock alone, as rule 6 with `darken` off, rules 10, 11 and 14 (docs/steps/
-  2026-11-18-privacy-lock.md has what was built, proven and left for Noah). Draft pull request #402.
+  2026-11-18-privacy-lock.md has what was built, proven and left for Noah). Draft pull request #402. Its review: only
+  Sill.app itself locks (the bare binary had the real locker), open decisions 5 and 6 as switches under the lock, the
+  gate's reading moved into the rule.
 
