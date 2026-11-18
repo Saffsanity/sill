@@ -985,6 +985,11 @@ final class StreamClient: ObservableObject {
     @Published var clipboardChip = false
     /// "Sent to ‹Mac›’s clipboard…" or "Too long to send…", for a moment after a Paste.
     @Published var clipboardNote: ClipboardNote?
+    /// The stream's recording (#284, StreamRecorder): the count before it (3, 2, 1), and since when it runs.
+    @Published var recordingCount: Int?
+    @Published var recordingSince: Date?
+    var recorder: StreamRecorder?
+    var recordingBackground: NSObjectProtocol?
     /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription).
     var clipboardSubscribed = false
     /// When Sill last became active: a session that starts soon after gets the chip's look too.
@@ -3690,6 +3695,7 @@ final class StreamClient: ObservableObject {
         // Picture in Picture shows nothing of a session that has ended: it stops (PictureInPicturePolicy.stops;
         // the reconnect runs when Sill comes back, as after any stay in the background).
         pictureInPicture.end(.sessionEnded, why: "the session ended (\(status))")
+        stopRecording()
         abandonMove()
         resetPath()
         lastMoveAttempt = nil

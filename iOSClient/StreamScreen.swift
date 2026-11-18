@@ -729,6 +729,12 @@ struct StreamScreen: View {
         func after(_ seconds: Double, _ step: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
         }
+        // `-SillRecordFor 6`: a recording with sound 3 s in (after its count), stopped 6 s later (#284).
+        let recordFor = defaults.double(forKey: "SillRecordFor")
+        if recordFor > 0, live {
+            after(3) { client.startRecording(withSound: true) }
+            after(6 + recordFor) { client.stopRecording() }
+        }
         if defaults.bool(forKey: "SillKeyboard"), live {
             after(0.5) {
                 print("keyboard: -SillKeyboard 1, the input view takes first responder")
@@ -1824,6 +1830,7 @@ struct StreamScreen: View {
             .background(hidden ? Color.black : Palette.panel)
             // A locked Mac: its cover over the picture (LockedMac), under the link's line.
             .overlay { LockedMacShade(client: client) }
+            .overlay { RecordingBadge(client: client) }
             .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
             // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
             .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName,
