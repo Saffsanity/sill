@@ -102,7 +102,11 @@ Rules found in the steps that hold for all work (each where it is written):
   which change of the Mac's pasteboard the host sends and to whom, and only
   while macOS allows every read (`MacAccess`); the device's subscription,
   which text from the Mac it writes, a Paste's receipt, the chip and its time,
-  every word; pure, `Tests/checks/clipboard`). `Audio.swift` — the Mac's sound
+  every word; pure, `Tests/checks/clipboard`). `Files.swift` — files and photos
+  (docs/files-plan.md; kind 34 `FileChunk`, #66's layout, and kind 49
+  `FileTransfer`); `FilePolicy.swift` — their rules both ends (FilePolicy,
+  FileNames, FileFlow, the ledgers FileReceiver and FileSender, FilesCopy; pure,
+  `Tests/checks/files`). `Audio.swift` — the Mac's sound
   (kind 43, host → device; 29 to 31 and 33 to 42 are PR #66's):
   `AudioMessage`, type 1 a JSON `AudioFormat` (codec, rate, channels, packet
   size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
@@ -145,7 +149,11 @@ Rules found in the steps that hold for all work (each where it is written):
   line a subscription and none per copy; a synthetic host's own pasteboard,
   the TEST ONLY SILL_TEST_PASTEBOARD, SILL_TEST_CLIPBOARD_LOG and
   SILL_TEST_CLIPBOARD_ACCESS; `MacClipboard`, macOS's paste privacy for the
-  look and for Settings › General's `ClipboardSection`),
+  look and for Settings › General's `ClipboardSection`), `FileHub` (files from
+  devices on `sill.files`: answers, the ledgers, stops at a lock, a cut-off, a
+  leave and a quit; the TEST ONLY SILL_TEST_FILES_DIR, _LOG and _FREE) and
+  `FileStore` (Downloads › Sill and its hidden staging folder, quarantine,
+  `renamex_np(RENAME_EXCL)`; `Tests/checks/file-store`),
   `AwayPolicy` (who counts as away, when the away quality is the target, its
   two lines; pure, `Tests/checks/away-quality`), `LinkJudge` (each device's
   link judged once a second from the sweep: fine, behind, stalled, the carried
@@ -1233,6 +1241,7 @@ python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
+swift run -c release SillHost --pairing --no-files   # take no files from devices (on by default with an identity; docs/files-plan.md)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped

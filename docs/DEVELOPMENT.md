@@ -1427,6 +1427,31 @@ DEBUG `-SillPasteDelay <s>` moves it after the receipt (0: right behind it);
 `-SillSettings 1 -SillSettingsCloseAt <s>` holds the Settings panel over the
 chip until then; the console's "clipboard: …" lines say what happened.
 
+## Files and photos
+
+Files go from a paired iPhone or iPad to the Mac (kinds 34 and 49; the plan is docs/files-plan.md, and this
+first part has the Mac's side and the protocol; the device's rows, pickers and chip come next, then the Mac's
+files to the device). On the Mac, Settings › General's "Share files with devices" (saved as `shareFiles`, on by
+default, applied at once; `-SillSetAfter '<s> shareFiles=0'` in the bare app) and the CLI's `--no-files`; the CLI
+takes files only with an identity (`--pairing` or `--remote`), since files come only from a paired session. A
+device offers its files (kind 49 `offer`: names and sizes before any byte); the Mac answers by FilePolicy (off,
+not paired, locked, two offers a second, one transfer a device and four in all, 500 files, 100 GB, 2 GB left
+free); the device then sends 64 KiB parts (kind 34, #66's `FileChunk`) within a window of acknowledged bytes
+(512 KiB at home while idle, less while the person uses the stream or is away), each file's `end` with its
+SHA-256, and the Mac answers `done` once every file is kept. Kept files land in Downloads › Sill (`filesFolder`
+another folder), written first under a name of Sill's own in the hidden `.Sill Incoming` beside them, then
+quarantined with Sill as the agent, given a Where from, made 0644 and moved into place without replacing
+anything; nothing partial survives a cancel, a lock, a cut-off, the device leaving or a quit. Logs say counts and
+sizes ("Files: saved 2 files (12 MB) from iPad in Downloads/Sill in 4.1 s."), never a name.
+
+Headless (TEST ONLY, on a test host): a synthetic host keeps files in `$TMPDIR/sill-test-files-<pid>`, never
+~/Downloads; `SILL_TEST_FILES_DIR=<dir>` another folder, `SILL_TEST_FILES_LOG=1` each decision with its sizes,
+`SILL_TEST_FILES_FREE=<bytes>` the free space the rule reads. `sillclient.py` sends files as a device does
+(`--send-file=PATH[,X,Y]@T`, a folder's files as one transfer; `--files-window`, `--files-pace`,
+`--cancel-files@T`, `--raw49`, `--raw34`, `--expect-files=OP[:REASON]`) and prints each kind 49 but the
+acknowledgements. `python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]` runs the gates
+(docs/files-plan.md §12.2, H3 to H5) against synthetic `--pairing` hosts on loopback, each under a minute.
+
 ## The Mac's menus on the device
 
 The app a device streams keeps its menu bar on the Mac, and the device shows
