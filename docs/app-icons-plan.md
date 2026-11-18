@@ -156,7 +156,12 @@ original is always offered."
   generic simulator (Debug, arm64, unsigned), SillHost's `--internet` refusal; the built app's Info.plist and
   Assets.car as above.
 - `Tests/checks/app-icon` and its 50 mutants (32 of the source, 18 of the wiring in a copy of the files it reads).
-- Harness photos of the group on the agents' Duo (iOS 27.1) and iPad, against `settings-pane`.
+- Harness photos of the group on the agents' Duo (iOS 27.1) and iPad, against `settings-pane`: every arrangement
+  of the pane, each mark, the refusal, large type, right to left; the stream screens pixel for pixel the
+  baseline's. With `-SillAppIconSet community`, iOS's own alert on the simulator ("You have changed the icon for
+  “Sill”.", the community icon in it), and at the next launch the icon iOS kept, read as Community; then the
+  original set back the same way. So the alternate declared by an Icon Composer document is one iOS 27.1 sets.
+- GitHub's CI passed on the pull request at each head (19b5be75, a649177c, daa4c6a9, 26047fd3).
 
 ## What only Noah can try
 
