@@ -100,6 +100,9 @@ public struct WindowList: Codable {
     /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
     /// is (`LockedMac.viewLine`).
     public var offConsoleView: Bool?
+    /// What this host takes of the device's camera (kind 46, CameraMessage): 1 is JPEG / HEVC frames.
+    /// Nil from hosts before camera support or synthetic test hosts.
+    public var camera: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
