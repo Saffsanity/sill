@@ -371,7 +371,7 @@ func cover(_ c: Candidate, windowLog: String) async {
         }
     }
     let setup = Date().timeIntervalSince1970 - setupStarted
-    guard setup <= 3.5 else {
+    guard setup <= 2.5 else {
         for (s, _) in subjects { await s.stop() }
         fail("cover \(c.rawValue): setting up took \(String(format: "%.1f", setup)) s; nothing was darkened. Run it again.", 4)
     }

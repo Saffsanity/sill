@@ -421,6 +421,14 @@ Rules found in the steps that hold for all work (each where it is written):
   again by the Mac's own setting); the coordinator's `handle` forwards every
   message to the rule (`deviceActive`), and `parameterSetsSent` its stream
   changes.
+  Darken this Mac's screen (docs/privacy-mode-plan.md, part 2; moves to
+  docs/LAYOUT.md with main's #388): `DarkenPolicy` (which sessions darken, the
+  dark and its raise before the wake, the wait and the hold for the lock, under
+  the lock screen, a key on the dark Mac, taken back, the switches, the
+  watchdog's decisions, the screens, the words; pure, `Tests/checks/darken`)
+  and `PrivacyScreen` (main actor: the rule's state and tick; its seams
+  `Curtain` and `LocalInput`, a test host's dry runs `DryCurtain` and
+  `FileInput`, and nothing in Sill.app until the probe G0 fills them).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
@@ -649,7 +657,15 @@ Rules found in the steps that hold for all work (each where it is written):
   every window), frames before, during and after, fourteen steps (its app
   stopped with SIGSTOP at a fit and at a stop among them); the front app must
   not change. It needs Accessibility, Screen Recording and an unlocked screen,
-  and exits 2 saying which is missing. `Scripts/lock-check/` (TEST ONLY;
+  and exits 2 saying which is missing. `Scripts/privacy-probe/run.sh [REPORT]`
+  (TEST ONLY, G0 of docs/privacy-mode-plan.md; Noah's to run, never an agent's:
+  it darkens the screens in spells of at most 10 s, each under a hard 12 s kill)
+  measures what Sill's black windows would do: covered windows still drawing,
+  what shows in front of them, a killed or stopped process, Sill's own input
+  told apart, black on every screen; `--build-only` compiles it and runs
+  nothing. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST ONLY) runs
+  darkening's dry run on synthetic test hosts on loopback (moves to
+  docs/LAYOUT.md with main's #388). `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to
   another user, the unlock's settle, the flap and a start while locked, with the
@@ -1262,6 +1278,8 @@ python3 -m http.server 8000 --directory site   # the website at http://localhost
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
+Scripts/privacy-probe/run.sh ~/Downloads/sill-handoff/next/privacy-darken/probe-report.txt   # TEST ONLY, NOAH ONLY (darkens the screens in spells of at most 10 s): G0, in Terminal.app with Screen Recording and Accessibility, no device connected
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_INPUT=/tmp/sill-input .build/release/SillHost --synthetic --darken=any   # TEST ONLY dry run of Darken this Mac's screen: "would darken", nothing drawn; echo key > /tmp/sill-input is a key on the dark Mac (--darken=away, --darken-keys=pass, SILL_TEST_PRIVACY_LOG; Scripts/privacy-check/darken.py; moves to docs/BUILD-AND-RUN.md with main's #388)
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
