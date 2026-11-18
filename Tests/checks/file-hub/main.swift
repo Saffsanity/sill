@@ -197,8 +197,10 @@ do {
     rig.offer(.cancel(transfer: 99, reason: .cancelled), from: c)
     c = fresh()
     midway(rig, c, transfer: 7)
+    let sentBefore = rig.sent.count
     peers.removeValue(forKey: c); rig.context(peers: peers)
-    check(staged(rig.folder).isEmpty, "a session the coordinator no longer lists: its partial deleted")
+    check(staged(rig.folder).isEmpty && rig.sent.count == sentBefore,
+          "a session the coordinator no longer lists: its partial deleted, nothing sent to it (it is gone)")
     c = fresh()
     midway(rig, c, transfer: 8)
     rig.hub.quit()

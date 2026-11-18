@@ -135,20 +135,29 @@ package final class FileStore {
         guard fchmod(s.fd, 0o644) == 0 else { throw Self.failure(errno) }
         close(s.fd); s.fd = -1
         try mark(s.url, device: device)
-        let cleaned = FileNames.clean(name)
+        return try Self.place(FileNames.clean(name), exists: { self.exists($0) }) { candidate in
+            renamex_np(s.url.path, self.destination.appendingPathComponent(candidate).path, UInt32(RENAME_EXCL)) == 0 ? 0 : errno
+        }
+    }
+
+    /// A kept file moved into place under a free name: `cleaned`, or its next number (FileNames.unique) against what
+    /// `exists` sees and what was tried, never replacing anything. `rename` moves it there and returns 0 or its errno:
+    /// EEXIST (the name taken after all, in between or by what `exists` missed) tries the next number; any other
+    /// error is the file's failure (a full volume: noRoom).
+    static func place(_ cleaned: String, exists: (String) -> Bool, rename: (String) -> Int32) throws -> String {
         var tried = Set<String>()
         for _ in 0..<64 {
-            guard let candidate = FileNames.unique(cleaned, taken: { tried.contains($0.lowercased()) || self.exists($0) }) else { break }
-            let target = destination.appendingPathComponent(candidate)
-            if renamex_np(s.url.path, target.path, UInt32(RENAME_EXCL)) == 0 { return candidate }
-            guard errno == EEXIST else { throw Self.failure(errno) }
+            guard let candidate = FileNames.unique(cleaned, taken: { tried.contains($0.lowercased()) || exists($0) }) else { break }
+            let code = rename(candidate)
+            if code == 0 { return candidate }
+            guard code == EEXIST else { throw failure(code) }
             tried.insert(candidate.lowercased())      // taken in between: the next number
         }
         throw Failure.cantSave("no free name")
     }
 
     /// Whether anything is at `name` in the destination, a link included (lstat: a link to nothing counts).
-    private func exists(_ name: String) -> Bool {
+    func exists(_ name: String) -> Bool {
         var st = stat()
         return lstat(destination.appendingPathComponent(name).path, &st) == 0
     }

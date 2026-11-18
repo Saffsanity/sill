@@ -29,6 +29,9 @@ func listing(_ url: URL) -> [String] { ((try? fm.contentsOfDirectory(atPath: url
 func throwsFailure(_ want: FileStore.Failure, _ f: () throws -> Void) -> Bool {
     do { try f(); return false } catch let e as FileStore.Failure { return e == want } catch { return false }
 }
+func eq2<T: Equatable>(_ a: T?, _ b: T, _ what: @autoclosure () -> String, line: Int = #line) {
+    check(a == b, "\(what()): got \(a.map { "\($0)" } ?? "nil"), expected \(b)", line: line)
+}
 
 let dest = scratch.appendingPathComponent("Downloads/Sill", isDirectory: true)
 let store = FileStore(destination: dest, agentBundleID: "me.saffer.sill.check")
@@ -83,6 +86,19 @@ symlink("/nonexistent/target", dest.appendingPathComponent("b.pdf").path)
 check(keep("b.pdf", Data("b".utf8), transfer: 3, file: 1) == "b 2.pdf", "a link to nothing at the name: the next number")
 var linkSt = stat()
 check(lstat(dest.appendingPathComponent("b.pdf").path, &linkSt) == 0 && (linkSt.st_mode & S_IFMT) == S_IFLNK, "the link untouched")
+check(store.exists("b.pdf") && !store.exists("b 3.pdf"), "a link to nothing at a name counts as taken (lstat), a free name as free")
+// The move into place, its loop on its own: a name taken after all (EEXIST: made in between, or by what `exists` missed)
+// tries the next number, never replaces; any other error is the file's failure; and it gives up after 64 tries.
+var moves: [String] = []
+eq2(try? FileStore.place("x.pdf", exists: { _ in false }) { moves.append($0); return moves.count == 1 ? EEXIST : 0 }, "x 2.pdf",
+    "a name taken after all: the next number")
+eq2(moves, ["x.pdf", "x 2.pdf"], "tried in order")
+check(throwsFailure(.noRoom) { _ = try FileStore.place("y.pdf", exists: { _ in false }) { _ in ENOSPC } }, "a full volume: noRoom")
+check(throwsFailure(.cantSave(String(cString: strerror(EACCES)))) { _ = try FileStore.place("y.pdf", exists: { _ in false }) { _ in EACCES } },
+      "another error: the file's failure, never another name")
+var count = 0
+check(throwsFailure(.cantSave("no free name")) { _ = try FileStore.place("z", exists: { _ in false }) { _ in count += 1; return EEXIST } } && count == 64,
+      "every name taken: no free name, after 64 tries (\(count))")
 fm.createFile(atPath: dest.appendingPathComponent("Probe-X").path, contents: Data())
 let ignoresCase = fm.fileExists(atPath: dest.appendingPathComponent("probe-x").path)
 try? fm.removeItem(at: dest.appendingPathComponent("Probe-X"))
