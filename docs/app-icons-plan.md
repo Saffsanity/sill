@@ -75,7 +75,8 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   pictures for iOS 17 and 18, for iPhone and iPad.
 - **The cost**: that Assets.car is 10.1 MB (both idioms) against main's 0.58 MB; App Store thinning sends a device
   one idiom, about 5 MB: 2.6 MB the original in glass, 2.4 MB the community's. The pictures are what actool makes
-  of any Icon Composer icon for an iOS 17 deployment target; #386's document alone compiles to about the same.
+  of any Icon Composer icon, the same with an iOS 26 deployment target (measured: it keeps the 1024-pixel pictures
+  too); #386's document alone compiles to about the same.
 - **The rule** (`AppIconChoice`, pure, `Tests/checks/app-icon` with 50 mutants): the original is the primary icon
   (no alternate name) and the standard, first and always there; the community's is the alternate AppIconCommunity,
   credited "by grub-basket"; the Home Screen's icon is read from iOS's alternate icon name, which iOS keeps across
