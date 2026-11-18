@@ -147,13 +147,13 @@ no device update needed):
    applied at once: off removes the display (`removeHeadlessAtOnce`, which the off-console removal now shares), on asks
    again for a Desktop streaming with no screen. Checked: `virtual-display-api` (the gate with the switch off, the two
    lines; its 2 new mutants caught) and `away-quality` (on in both, its log words, kept by `validated`, never moved by a
-   device's change; 4 new mutants, AQ-O1 rewritten for the new `standard` line); the live gate gains `switchoff`
-   (written, not yet run: below).
+   device's change; 4 new mutants, AQ-O1 rewritten for the new `standard` line); the live gate's new `switchoff`
+   (below).
 2. *H2 skipped on a false premise* (confirmed: SessionLock prints the `Displays:` line after every `Locked:` and
    `Unlocked:` in every host, the plain CLI too, as plan §2 asks; and `followDesktopDisplay`'s "Desktop: the display is …
    now (was …); restarting at its size." is in every host but a synthetic one, #200's follower folded in). The claim is
-   corrected under Verified; `Scripts/desktop-check/live.py` and `Scripts/lock-check/live.py poll start paired view`
-   were run, H2 not yet (below).
+   corrected under Verified, and H2, `Scripts/desktop-check/live.py` and `Scripts/lock-check/live.py poll start paired
+   view` were run, on this branch's CLI and on main's (below).
 3. *The words misstate how long it stays* (confirmed: `Watch.release` answers `.keep` while no real screen works, devices
    or not; the screenless scenario of run2 kept it from the client's leaving at 5.06 s to the next one at 7.05 s). Fixed:
    the footnote ("…when a device shows the Desktop… The display stays after the device disconnects, until a screen works
@@ -161,25 +161,34 @@ no device update needed):
    "…, kept until a screen works"), the proposed support, README and release words, DEVELOPMENT.md and the snapshot's doc;
    the live gate's new `kept` (3 of 3, below) shows the rule they now describe.
 
-**Verified in the review round** (06:00–07:30; nothing made a display, posted input, locked, slept or switched anything):
+**Verified in the review round** (06:00–08:10; nothing made a display, posted input, locked, slept or switched anything):
 - `virtual-display-api` 284 checks, 81 of 81 mutants; `away-quality` all passed, 48 of 48 mutants; `stage-release` 847;
   `Tests/checks/run-all.sh` all 75 passed (576d86cb, at `nice -n 19` outside the heavy lock).
 - SillHostCore, SillMenuBar and SillHostCLI typecheck clean (`swiftc -typecheck` against the built StreamProtocol module;
   a planted error in a function body was caught, so it reads the bodies). GitHub's CI on 576d86cb (run 44294273593):
   every step of Build and check passed (the release build, run-all, the iOS app, the CLI's two paths).
-- On the pushed head's CLI from before this round (5786e36d's code, built 05:04, snapshotted in the scratchpad; the gates
-  and the test client are main's own, unchanged here): `Scripts/desktop-check/live.py` 24 of 24 (`followDesktopDisplay`
-  in place of #355's `followDesktopStop`); `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view
-  26 of 26 (`notify` left out: it posts a Darwin notification), the `Displays:` line after each `Locked:` and `Unlocked:`
-  in their hosts' logs; `Scripts/headless-check/live.py kept` 3 of 3 (made at 2.07 s, the client gone at 6.07 s, kept
-  with nobody connected, removed at 14.02 s, 2 s after a monitor came back at 12 s). No host of those two gates has
-  Sill's display, so this round's change to `lockChanged` (the shared `removeHeadlessAtOnce`) is off their paths.
-- Not run: the release build here, main's `SillHost` for H2, H2 itself (idle, a test client, and locked then unlocked by
-  the TEST ONLY lock file, where the `Displays:` line is the one expected difference), the `switchoff` scenario, the
-  gates on this round's CLI and the previews of the new section (they need the new SillMenuBar). The heavy lock's turn came at 07:18 after 63 minutes in a queue of fifteen, with 24 GB free
-  where the rule's floor is 25, so the job stopped before building (privacy-lock's had too). All of it is one command
-  away once the disk allows: `~/Downloads/sill-handoff/tools/heavy.sh "vd-2a: build, main's CLI" --
-  ~/Downloads/sill-handoff/next/vd-2a/verify/heavy-job.sh && ~/Downloads/sill-handoff/next/vd-2a/verify/gates-after-build.sh`.
+- `swift build -c release` through heavy.sh (its turn at 07:50, 36 GB free; the first turn, at 07:18, had found 24 GB
+  and stopped before building, under the 25 GB floor): no warning; `SillHost --internet` exits 2, `--print-reachability`
+  exits 0. Main's `SillHost` at eb48ac9f built beside it, from `git archive` in the scratchpad, for H2.
+- `Scripts/headless-check/live.py OUT all` on this round's CLI: 66 of 66 verdicts, 19 scenarios: the 17 as before, `kept`
+  (made at 2.06 s, the client gone at 6.06 s, kept with nobody connected, removed at 14.16 s, 2 s after a monitor came
+  back at 12 s; 3 of 3 on the pushed head's CLI too) and `switchoff` (`--no-headless-display`: "Headless display: no
+  real screen, but Sill's display for a Mac with no screen is turned off; none made." once for two asks, nothing made or
+  waited for, the Desktop streamed at each ask).
+- `Scripts/desktop-check/live.py`: 24 of 24 on this round's CLI and 24 of 24 on main's (`followDesktopDisplay` in place of
+  #355's `followDesktopStop`; 24 of 24 on the pushed head's CLI before this round too). `Scripts/lock-check/live.py`
+  poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26 on this round's CLI, the same on main's (and on the pushed
+  head's), with the `Displays:` line after each `Locked:` and `Unlocked:` in this branch's hosts' logs; `notify` left out,
+  as the plan has it: it posts a Darwin notification. The gates and the test client are main's own, unchanged here.
+- H2, this round's CLI against main's (masked, sorted; `~/Downloads/sill-handoff/next/vd-2a/verify/h2.py`): idle 8 s,
+  identical (7 distinct lines); 8 s with a test client on the Desktop, identical (14); started locked by the TEST ONLY lock
+  file, the one expected difference: "Displays: N online, N active, N asleep, N Sill's, N macOS's stand-in." (11 lines and
+  10). Order is not compared: on a host started locked, this branch's first `Locked:` line comes before the startup
+  lines, main's after them (SessionLock's first look runs on its own queue while `start` runs).
+- Previews from the bare binary (`-SillRenderPreviews`, no host): `pane-virtualDisplay-noscreen`, `-noscreen-kept` and
+  `-guard`, light and dark: the section "A Mac with no screen" under the Status section, its switch on, the row "1218 ×
+  800 for iPad mini, streaming now" (kept: "…, kept until a screen works"), the footnote as written above; with the guard,
+  the switch and no row.
 
 **For Noah** (only he can: each makes a display, locks or switches his Mac, or needs a Mac with no screen; the same list is
 in the pull request). Install this branch as a release is built (his grants and pairings kept): `cd ~/Downloads/wt-vd-2a &&
