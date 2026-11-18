@@ -15,6 +15,8 @@ struct PenLink {
     /// Whether a finger stroke that began at this time says nothing: a palm resting while the Pencil
     /// draws (PenStrokes.Palm), while Ignore Fingers While Drawing is on.
     var fingersSilent: (TimeInterval) -> Bool = { _ in false }
+    /// This device's Pencil switches, read as a stroke or a hover begins (PencilSettings).
+    var settings: () -> PencilSettings = { PencilSettings() }
 }
 
 /// The touch layer over the streamed video. Direct-touch model: where you touch is where the Mac's
@@ -125,6 +127,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// view's stroke and hover (PenStrokes), which say what goes to the Mac as kind 45.
     var pen = PenLink()
     private var penStrokes = PenStrokes()
+    /// Smooth Pencil Lines' filter for the stroke under way (PenSmoothing), nil while it is off or between
+    /// strokes.
+    private var penSmoothing: PenSmoothing?
     /// A finger stroke that says nothing because the Pencil's tip is, or just was, on the glass: a
     /// resting palm must not click, right-click, scroll or make a gesture (each finger handler).
     private var palm: Bool { pen.fingersSilent(strokes.strokeBeganAt) }
@@ -781,7 +786,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let p else { return }
         pen.send(PenStrokes.message(PenInput.hover, PenStrokes.Reading(x: p.x, y: p.y, pressure: nil, altitude: altitude, azimuth: azimuth,
                                                                       time: ProcessInfo.processInfo.systemUptime)))
-        setOwnPointer(CGPoint(x: p.x, y: p.y), .penHover)
+        // The brush outline only with its switch (Brush Outline While Hovering); else nothing under the
+        // hovering Pencil, as under one that is the mouse.
+        setOwnPointer(CGPoint(x: p.x, y: p.y), pen.settings().showsOutline(penMode: true) ? .penHover : .pencil)
     }
 
     /// The hover ended: the tip landed, or the Pencil left. Which, a moment later (`leaveCheck`).
@@ -797,7 +804,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private func pencilDown(_ reading: PenStrokes.Reading?, at time: TimeInterval) -> Bool {
         pen.touching(true, time)
         guard penStrokes.touchBegan(penMode: pen.asPen(), at: time) == .pen else { return false }
+        // Smooth Pencil Lines, read as the stroke begins: its moves through the filter, never its down or up.
+        penSmoothing = pen.settings().smooths(penMode: true)
+            ? PenSmoothing(aspect: videoSize.width > 0 ? Double(videoSize.height / videoSize.width) : 1) : nil
         guard let reading else { return true }
+        penSmoothing?.begin(reading)
         pen.send(PenStrokes.message(PenInput.down, reading))
         setOwnPointer(CGPoint(x: reading.x, y: reading.y), .pencil)
         return true
@@ -807,7 +818,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// callback comes once a frame), oldest first, so a stroke loses none.
     private func pencilMoved(_ readings: [PenStrokes.Reading]) -> Bool {
         guard penStrokes.stroke == .pen else { return false }
-        for message in PenStrokes.moves(readings, since: penStrokes.strokeBegan) { pen.send(message) }
+        let sent = penSmoothing == nil ? readings : readings.map { penSmoothing!.smooth($0) }
+        for message in PenStrokes.moves(sent, since: penStrokes.strokeBegan) { pen.send(message) }
         if let last = readings.last { setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil) }
         return true
     }
@@ -819,6 +831,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         pen.touching(false, time)
         let began = penStrokes.strokeBegan
         guard penStrokes.touchEnded(now: time) == .pen else { return false }
+        penSmoothing = nil
         if var reading {
             reading.pressure = nil
             pen.send(PenStrokes.message(phase, reading, since: began))

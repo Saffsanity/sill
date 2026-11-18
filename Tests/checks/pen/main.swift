@@ -631,6 +631,41 @@ do {
           "an aspect that is no number, or none: 1")
 }
 
+// MARK: This device's Pencil switches (PencilSettings)
+
+check(PencilSettings.pressureKey == "Sill.pencilPressure" && PencilSettings.ignoreFingersKey == "Sill.pencilIgnoreFingers"
+      && PencilSettings.smoothingKey == "Sill.pencilSmoothing" && PencilSettings.brushOutlineKey == "Sill.pencilBrushOutline", "the four keys")
+do {
+    let fresh = PencilSettings(stored: { _ in nil })
+    check(!fresh.pressure && fresh.ignoreFingers && !fresh.smoothing && !fresh.brushOutline,
+          "never set: Pencil Pressure and Tilt off, Ignore Fingers While Drawing on, Smooth Pencil Lines and Brush Outline off")
+    check(fresh == PencilSettings(), "the same as the defaults")
+    let all = PencilSettings(stored: { [PencilSettings.pressureKey: true, PencilSettings.ignoreFingersKey: false,
+                                        PencilSettings.smoothingKey: true, PencilSettings.brushOutlineKey: true][$0] })
+    check(all.pressure && !all.ignoreFingers && all.smoothing && all.brushOutline, "each as it was set")
+}
+check(PencilSettings.macTakes(1) && PencilSettings.macTakes(2) && !PencilSettings.macTakes(nil) && !PencilSettings.macTakes(0)
+      && !PencilSettings.macTakes(1, generation: 2), "the Mac takes this build's pen: its pencil at least this build's generation")
+check(!PencilSettings(pressure: false).showsRowsUnder(hostPencil: 1) && !PencilSettings(pressure: true).showsRowsUnder(hostPencil: nil)
+      && PencilSettings(pressure: true).showsRowsUnder(hostPencil: 1), "the rows under it only while it is on and the Mac takes a pen")
+for pen in [false, true] {
+    for on in [false, true] {
+        check(PencilSettings(ignoreFingers: on).palmRule(penMode: pen) == (pen && on), "the palm rule, pen \(pen), switch \(on)")
+        check(PencilSettings(smoothing: on).smooths(penMode: pen) == (pen && on), "smoothing, pen \(pen), switch \(on)")
+        check(PencilSettings(brushOutline: on).showsOutline(penMode: pen) == (pen && on), "the brush outline, pen \(pen), switch \(on)")
+    }
+}
+check(PencilSettings.pressureFootnote(on: false, hostPencil: 1, mac: "Studio") == "Apple Pencil works as a mouse while this is off.", "off: the mouse")
+check(PencilSettings.pressureFootnote(on: true, hostPencil: nil, mac: "Studio") == "Update Sill on Studio to use this.", "a Mac without it: update")
+check(PencilSettings.pressureFootnote(on: true, hostPencil: 1, mac: "Studio")
+      == "Apple Pencil draws with pressure and tilt in Mac apps that support drawing tablets.", "on: what it does")
+check(PencilSettings.pressureTitle == "Pencil Pressure and Tilt" && PencilSettings.ignoreFingersTitle == "Ignore Fingers While Drawing"
+      && PencilSettings.smoothingTitle == "Smooth Pencil Lines" && PencilSettings.brushOutlineTitle == "Brush Outline While Hovering", "the titles")
+check(PencilSettings.ignoreFingersFootnote == "While Apple Pencil touches the screen, and for half a second after it lifts, your hand and fingers send nothing to the Mac."
+      && PencilSettings.smoothingFootnote == "Steadies slow, shaky lines before they reach the Mac. The line follows the tip a little behind."
+      && PencilSettings.brushOutlineFootnote == "While Apple Pencil hovers, shows the drawing app’s own brush outline under it.", "the words under them")
+check(PenStrokes.palmLinger == 0.5, "the half second the palm rule's words say")
+
 // MARK: Random sessions against a model
 
 /// SplitMix64: the same sessions every run.

@@ -13,8 +13,9 @@
 # fixed as the tip lands; a touch's force and angles as the wire's samples, every reading of a
 # callback in messages of 32 at most; the leave, only when a Pencil that can hover is neither
 # touching nor hovering a moment later; and the fingers that say nothing while the tip is on the
-# glass (a resting palm); Smooth Pencil Lines (PenSmoothing, #381's 1€ filter). Then a Pencil's
-# session through both: what the device sends, as the Mac posts it. Compiled with StreamProtocol's sources as one module (build.sh).
+# glass (a resting palm); Smooth Pencil Lines (PenSmoothing, #381's 1€ filter) and the device's four
+# Pencil switches (PencilSettings). Then a Pencil's session through both: what the device sends, as
+# the Mac posts it. Compiled with StreamProtocol's sources as one module (build.sh).
 #   Tests/checks/pen/run.sh             compile and run the check
 #   Tests/checks/pen/run.sh --mutants   one-line mutants of PenTablet.swift, CursorClass.swift and PenStrokes.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

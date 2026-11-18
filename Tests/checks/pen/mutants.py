@@ -181,6 +181,20 @@ MUTANTS = [
     ("a reading that is no number kept as the filter's", STROKES, "        guard reading.x.isFinite, reading.y.isFinite else {\n            x = nil\n",
      "        guard reading.x.isFinite, reading.y.isFinite else {\n            begin(reading)\n"),
     ("an aspect that is no number taken", STROKES, "self.aspect = aspect.isFinite && aspect > 0 ? aspect : 1", "self.aspect = aspect"),
+    # This device's Pencil switches (PencilSettings)
+    ("Pencil Pressure and Tilt on unless turned off", STROKES, "pressure = stored(Self.pressureKey) ?? false", "pressure = stored(Self.pressureKey) ?? true"),
+    ("Ignore Fingers While Drawing off unless turned on", STROKES, "ignoreFingers = stored(Self.ignoreFingersKey) ?? true", "ignoreFingers = stored(Self.ignoreFingersKey) ?? false"),
+    ("Smooth Pencil Lines on unless turned off", STROKES, "smoothing = stored(Self.smoothingKey) ?? false", "smoothing = stored(Self.smoothingKey) ?? true"),
+    ("Brush Outline on unless turned off", STROKES, "brushOutline = stored(Self.brushOutlineKey) ?? false", "brushOutline = stored(Self.brushOutlineKey) ?? true"),
+    ("the rows under it with a Mac that takes no pen", STROKES, "func showsRowsUnder(hostPencil: Int?) -> Bool { pressure && Self.macTakes(hostPencil) }",
+     "func showsRowsUnder(hostPencil: Int?) -> Bool { pressure }"),
+    ("the palm rule for a Pencil that is the mouse", STROKES, "func palmRule(penMode: Bool) -> Bool { penMode && ignoreFingers }", "func palmRule(penMode: Bool) -> Bool { ignoreFingers }"),
+    ("a mouse's stroke smoothed", STROKES, "func smooths(penMode: Bool) -> Bool { penMode && smoothing }", "func smooths(penMode: Bool) -> Bool { smoothing }"),
+    ("the outline under a Pencil that is the mouse", STROKES, "func showsOutline(penMode: Bool) -> Bool { penMode && brushOutline }",
+     "func showsOutline(penMode: Bool) -> Bool { brushOutline }"),
+    ("a Mac that says 0 takes the pen", STROKES, "        guard let takes = hostPencil else { return false }\n        return takes >= generation\n    }\n\n    /// The rows",
+     "        guard let takes = hostPencil else { return false }\n        return takes >= 0\n    }\n\n    /// The rows"),
+    ("the footnote says update when off", STROKES, '        guard on else { return "Apple Pencil works as a mouse while this is off." }\n', ""),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

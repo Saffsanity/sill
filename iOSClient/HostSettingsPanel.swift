@@ -79,9 +79,14 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
-    /// This device's switch for the Apple Pencil as a pen (docs/pencil-pressure-plan.md §5.4): on
-    /// unless turned off, read as each stroke begins (`StreamClient.pencilAsPen`), never sent.
-    @AppStorage(StreamClient.pencilKey) private var pencilOn = true
+    /// This device's switches for the Apple Pencil (docs/pencil-pressure-plan.md §5.4, PencilSettings):
+    /// Pencil Pressure and Tilt, off unless turned on (Noah, 2026-11-18: new behaviour is off unless
+    /// turned on), and under it Ignore Fingers While Drawing (on), Smooth Pencil Lines and Brush Outline
+    /// While Hovering (both off). Read as each stroke or hover begins, never sent.
+    @AppStorage(PencilSettings.pressureKey) private var pencilOn = false
+    @AppStorage(PencilSettings.ignoreFingersKey) private var pencilIgnoresFingers = true
+    @AppStorage(PencilSettings.smoothingKey) private var pencilSmooths = false
+    @AppStorage(PencilSettings.brushOutlineKey) private var pencilOutline = false
     /// This device's hold before a thumbnail's lights (issue #113, ThumbnailHold): 0.5 s unless changed,
     /// read by every bar's thumbnails at once, never sent. Read for its changes; the length through
     /// `ThumbnailHold.seconds(stored:)`, which takes `-Sill.thumbnailHold 0.3`'s string too.
@@ -824,28 +829,38 @@ struct HostSettingsPanel: View {
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
 
-    /// This iPad's switch for the Apple Pencil as a pen, under the gestures' footnote and in the same
-    /// group (an iPhone has no Pencil, so none there). Off, a Pencil is the mouse, as on a Mac that
-    /// does not take a pen; the switch reaches nothing on the Mac, and a stroke under way keeps the
-    /// way it began (PenStrokes).
+    /// This iPad's switches for the Apple Pencil, under the gestures' footnote and in the same group (an
+    /// iPhone has no Pencil, so none there; they move into the whole-screen Settings pane with the rest
+    /// of This iPad). Pencil Pressure and Tilt off, a Pencil is the mouse, as on a Mac that does not take
+    /// a pen; on, with a Mac that takes one, the three under it show, each with its words
+    /// (PencilSettings). None reaches the Mac, and a stroke under way keeps the way it began (PenStrokes).
     @ViewBuilder private var pencil: some View {
         if device == "iPad" {
             Rows {
                 Toggle(isOn: $pencilOn) {
-                    Text("Pencil Pressure").foregroundStyle(Palette.text)
+                    Text(PencilSettings.pressureTitle).foregroundStyle(Palette.text)
                 }
                 .rowFrame()
             }
             .id(Self.pencilRowID)
-            Footnote(text: pencilFooter)
+            Footnote(text: PencilSettings.pressureFootnote(on: pencilOn, hostPencil: client.hostPencil, mac: mac))
+            if PencilSettings(pressure: pencilOn).showsRowsUnder(hostPencil: client.hostPencil) {
+                pencilRow(PencilSettings.ignoreFingersTitle, $pencilIgnoresFingers, PencilSettings.ignoreFingersFootnote)
+                pencilRow(PencilSettings.smoothingTitle, $pencilSmooths, PencilSettings.smoothingFootnote)
+                pencilRow(PencilSettings.brushOutlineTitle, $pencilOutline, PencilSettings.brushOutlineFootnote)
+            }
         }
     }
 
-    /// Under the Pencil's switch: what it does, or why a Pencil is the mouse.
-    private var pencilFooter: String {
-        guard pencilOn else { return "Apple Pencil works as a mouse while this is off." }
-        guard (client.hostPencil ?? 0) >= PenInput.generation else { return "Update Sill on \(mac) to use this." }
-        return "Apple Pencil pressure and tilt reach Mac apps that support drawing tablets."
+    /// One of the switches under Pencil Pressure and Tilt, with its words.
+    @ViewBuilder private func pencilRow(_ title: String, _ isOn: Binding<Bool>, _ words: String) -> some View {
+        Rows {
+            Toggle(isOn: isOn) {
+                Text(title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: words)
     }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one

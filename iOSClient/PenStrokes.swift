@@ -183,7 +183,7 @@ struct PenStrokes: Equatable {
     }
 }
 
-/// Smooth Pencil Lines (a switch of this device's, off unless turned on): the 1€ filter (Casiez,
+/// Smooth Pencil Lines (`PencilSettings.smoothing`, off unless turned on): the 1€ filter (Casiez,
 /// Roussel and Vogel, CHI 2012) over a stroke's moves before they reach the Mac, as cubelikeplayDaniel
 /// wrote it for Sill in pull request #381, with his numbers: slow, shaky motion is smoothed hard (its
 /// cutoff 1.1 Hz), and the cutoff opens as the tip speeds up (11 more hertz for each frame width a
@@ -259,3 +259,73 @@ struct PenSmoothing: Equatable {
     }
 }
 
+/// This device's Apple Pencil switches (the Settings panel's This iPad group, on an iPad; they move into
+/// the whole-screen Settings pane with it). Each is the device's own, never sent to the Mac, and read as
+/// each stroke or hover begins. The new behaviour is off unless turned on (Noah, 2026-11-18), but palm
+/// rejection, which keeps a resting hand from ending a stroke, comes on with the Pencil's pressure:
+/// - Pencil Pressure and Tilt (`pressureKey`): a Pencil on the stream draws as a tablet pen (kind 45)
+///   on a Mac that takes one, else it is the mouse, as before it. Off unless turned on.
+/// - Under it, while it is on and the Mac takes a pen: Ignore Fingers While Drawing (`ignoreFingersKey`,
+///   on unless turned off: PenStrokes.Palm), Smooth Pencil Lines (`smoothingKey`, off: PenSmoothing)
+///   and Brush Outline While Hovering (`brushOutlineKey`, off: a drawing app's own cursor under a
+///   hovering Pencil, kind 50). Each acts only on a stroke or a hover that goes as a pen's.
+/// Pure: the panel draws what it says, StreamClient and the overlay read it.
+struct PencilSettings: Equatable {
+    static let pressureKey = "Sill.pencilPressure"
+    static let ignoreFingersKey = "Sill.pencilIgnoreFingers"
+    static let smoothingKey = "Sill.pencilSmoothing"
+    static let brushOutlineKey = "Sill.pencilBrushOutline"
+
+    var pressure = false
+    var ignoreFingers = true
+    var smoothing = false
+    var brushOutline = false
+
+    /// From what the device keeps (`stored`, nil for a switch never set): each its own default then.
+    init(stored: (String) -> Bool?) {
+        pressure = stored(Self.pressureKey) ?? false
+        ignoreFingers = stored(Self.ignoreFingersKey) ?? true
+        smoothing = stored(Self.smoothingKey) ?? false
+        brushOutline = stored(Self.brushOutlineKey) ?? false
+    }
+
+    init(pressure: Bool = false, ignoreFingers: Bool = true, smoothing: Bool = false, brushOutline: Bool = false) {
+        self.pressure = pressure; self.ignoreFingers = ignoreFingers; self.smoothing = smoothing; self.brushOutline = brushOutline
+    }
+
+    /// Whether the Mac takes this build's pen: its window list's `pencil`, at least `generation`.
+    static func macTakes(_ hostPencil: Int?, generation: Int = PenInput.generation) -> Bool {
+        guard let takes = hostPencil else { return false }
+        return takes >= generation
+    }
+
+    /// The rows under Pencil Pressure and Tilt show while it is on and the Mac takes a pen; with a Mac
+    /// that does not, the switch shows alone, with why.
+    func showsRowsUnder(hostPencil: Int?) -> Bool { pressure && Self.macTakes(hostPencil) }
+
+    /// Fingers say nothing while the tip is on the glass (PenStrokes.Palm): only while the Pencil goes
+    /// as a pen (`penMode`, PenStrokes.penMode) and Ignore Fingers While Drawing is on.
+    func palmRule(penMode: Bool) -> Bool { penMode && ignoreFingers }
+    /// A stroke that goes as a pen's is smoothed while Smooth Pencil Lines is on.
+    func smooths(penMode: Bool) -> Bool { penMode && smoothing }
+    /// A pen's hover shows a drawing app's own cursor under it while Brush Outline While Hovering is on;
+    /// else nothing shows under it, as under a Pencil that is the mouse.
+    func showsOutline(penMode: Bool) -> Bool { penMode && brushOutline }
+
+    /// The words under Pencil Pressure and Tilt: what it does, or why a Pencil is the mouse.
+    static func pressureFootnote(on: Bool, hostPencil: Int?, mac: String) -> String {
+        guard on else { return "Apple Pencil works as a mouse while this is off." }
+        guard macTakes(hostPencil) else { return "Update Sill on \(mac) to use this." }
+        return "Apple Pencil draws with pressure and tilt in Mac apps that support drawing tablets."
+    }
+    static let ignoreFingersFootnote =
+        "While Apple Pencil touches the screen, and for half a second after it lifts, your hand and fingers send nothing to the Mac."
+    static let smoothingFootnote = "Steadies slow, shaky lines before they reach the Mac. The line follows the tip a little behind."
+    static let brushOutlineFootnote = "While Apple Pencil hovers, shows the drawing app’s own brush outline under it."
+
+    /// The rows' titles.
+    static let pressureTitle = "Pencil Pressure and Tilt"
+    static let ignoreFingersTitle = "Ignore Fingers While Drawing"
+    static let smoothingTitle = "Smooth Pencil Lines"
+    static let brushOutlineTitle = "Brush Outline While Hovering"
+}

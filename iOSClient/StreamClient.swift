@@ -4111,18 +4111,20 @@ final class StreamClient: ObservableObject {
 
     // MARK: - Apple Pencil (docs/pencil-pressure-plan.md §5)
 
-    /// This device's switch for the Pencil as a pen (the Settings panel's This iPad group): on unless
-    /// turned off. The device's own preference, never sent to the Mac; read as each stroke begins.
-    static let pencilKey = "Sill.pencilPressure"
-    static var pencilPressureOn: Bool {
-        let defaults = UserDefaults.standard   // `bool(forKey:)`, as `gesturesOn` reads its key
-        return defaults.object(forKey: pencilKey) == nil || defaults.bool(forKey: pencilKey)
+    /// This device's switch for the Pencil as a pen, Pencil Pressure and Tilt (the Settings panel's This
+    /// iPad group): off unless turned on (PencilSettings). The device's own preference, never sent to the
+    /// Mac; read as each stroke begins.
+    static let pencilKey = PencilSettings.pressureKey
+    /// Its four switches as the device keeps them, each its own default when never set.
+    static var pencilSettings: PencilSettings {
+        let defaults = UserDefaults.standard
+        return PencilSettings(stored: { defaults.object(forKey: $0) == nil ? nil : defaults.bool(forKey: $0) })
     }
 
     /// Whether a Pencil's next stroke goes to the Mac as a pen's (kind 45) rather than the mouse's
     /// (kind 8): the switch on, and a Mac whose window list says it takes one. Main thread.
     var pencilAsPen: Bool {
-        PenStrokes.penMode(switchOn: Self.pencilPressureOn, connected: connected, hostPencil: hostPencil,
+        PenStrokes.penMode(switchOn: Self.pencilSettings.pressure, connected: connected, hostPencil: hostPencil,
                            generation: PenInput.generation)
     }
 
@@ -4157,15 +4159,20 @@ final class StreamClient: ObservableObject {
     /// The Pencil's tip landed (`true`) or lifted, at `time` (a touch's clock).
     func pencilTouching(_ touching: Bool, at time: TimeInterval) { palm.pencil(touching: touching, at: time) }
 
-    /// Whether a finger stroke that began at `began` (a touch's clock) says nothing: a resting palm.
-    func fingersSilent(strokeBeganAt began: TimeInterval) -> Bool { palm.silent(strokeBeganAt: began) }
+    /// Whether a finger stroke that began at `began` (a touch's clock) says nothing: a resting palm, while
+    /// the Pencil goes as a pen and Ignore Fingers While Drawing is on (PencilSettings.palmRule). Else a
+    /// finger is a finger, as with a Pencil that is the mouse.
+    func fingersSilent(strokeBeganAt began: TimeInterval) -> Bool {
+        Self.pencilSettings.palmRule(penMode: pencilAsPen) && palm.silent(strokeBeganAt: began)
+    }
 
     /// What the stream's surfaces need of this client for a Pencil.
     var penLink: PenLink {
         PenLink(asPen: { [weak self] in self?.pencilAsPen ?? false },
                 send: { [weak self] in self?.sendPen($0) },
                 touching: { [weak self] in self?.pencilTouching($0, at: $1) },
-                fingersSilent: { [weak self] in self?.fingersSilent(strokeBeganAt: $0) ?? false })
+                fingersSilent: { [weak self] in self?.fingersSilent(strokeBeganAt: $0) ?? false },
+                settings: { Self.pencilSettings })
     }
 
     private func send(_ kind: StreamMessageKind, _ payload: Data) {
