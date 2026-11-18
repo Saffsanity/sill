@@ -988,7 +988,7 @@ func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 
 // Every row of every card, as the plan's table has it (docs/first-run-walkthrough-plan.md, "The tour
 // once more, for 0.6"), for Mac mini and an iPad unless said.
-let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
+let T1 = "Tap to click.", T2 = "Touch and hold to right-click, or hold, then drag, to move a window or select text.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
 let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Mac mini."
 let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
 let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
@@ -1123,7 +1123,7 @@ check(laptopFirst.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "A hard
 check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "keyboard.badge.ellipsis", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
 check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
 check(everyFeatures.allSatisfy { words(.laptop, P, first: true, features: $0) == laptopFirst }, "the halves' laptop card is the same for every Mac")
-check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
+check(touchPad.rows[1].spoken == T2, "a row is spoken as it reads")
 
 // The iPhone Duo open: its keys and trackpad come with the device on its side (the laptop pose, open
 // flat upright), so the words say so where an iPhone's and the Duo's cover's say upright.

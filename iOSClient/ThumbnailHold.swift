@@ -10,8 +10,8 @@ import Foundation
 /// WindowStrip reads it for every thumbnail of every bar (sideways, an iPad's portrait window bar, a
 /// phone's row 2) at launch and whenever it changes, so a hold already on screen waits the new length
 /// at its next press. The drag's own rules (12 pt before the hold is a scroll of the strip, 8 pt after
-/// it lifts the thumbnail) are not this type's, and the picture's long press (the right click, 0.45 s)
-/// does not follow it.
+/// it lifts the thumbnail) are not this type's, and the picture's long press (a right click or a drag,
+/// 0.45 s: TouchHold) does not follow it.
 ///
 /// Pure: Foundation only, checked in Tests/checks/thumbnail-hold.
 enum ThumbnailHold {

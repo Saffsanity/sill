@@ -11,6 +11,7 @@
 #   Tests/touchrig/run.sh --switch off NAME    sendGesture answers false, as with the device's switch off
 #   Tests/touchrig/compare.py BASE.log NEW.log [OFF.log]   H7's verdict
 #   RIG_ONLY=zoom Tests/touchrig/run.sh NAME   the overlay's zoom strokes alone (#65), where the sources have the zoom
+#   RIG_ONLY=hold Tests/touchrig/run.sh NAME   the overlay's touch and hold alone (#178: right click or drag)
 #   RIG_ONLY=edge Tests/touchrig/run.sh NAME   the strokes at the left edge alone (full screen, docs/full-screen-plan.md):
 #                                              the controls shown on both surfaces, then hidden with the swipe in listening
 #   RIG_ONLY=reveal Tests/touchrig/run.sh NAME the hidden strokes alone; with RIG_ORIENT=landscape the scene is turned
@@ -54,7 +55,7 @@ for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/Poi
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
          iOSClient/HardwareKeyboardPolicy.swift iOSClient/TextComposition.swift iOSClient/StreamZoom.swift \
          iOSClient/PhonePortraitLayout.swift iOSClient/FullScreenPolicy.swift iOSClient/RevealEdgePan.swift \
-         iOSClient/DuoPosture.swift; do
+         iOSClient/DuoPosture.swift iOSClient/TouchHold.swift; do
     fetch "$f"
 done
 # StreamProtocol whole, as REV or the working tree has it: the surfaces and their rules use more of it than
@@ -80,7 +81,7 @@ cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth
 target=arm64-apple-ios17.0-simulator
 xcrun -sdk iphonesimulator clang -target $target -fobjc-arc -Wall -c TouchSynth.m -o TouchSynth.o
 xcrun -sdk iphonesimulator swiftc -target $target -swift-version 5 -module-name TouchRig -Onone ${flags[@]+"${flags[@]}"} \
-    -package-name sill -import-objc-header Bridging.h Stubs.swift Keys.swift $spfiles $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift TextComposition.swift StreamZoom.swift PhonePortraitLayout.swift FullScreenPolicy.swift RevealEdgePan.swift DuoPosture.swift 2>/dev/null) \
+    -package-name sill -import-objc-header Bridging.h Stubs.swift Keys.swift $spfiles $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift TextComposition.swift StreamZoom.swift PhonePortraitLayout.swift FullScreenPolicy.swift RevealEdgePan.swift DuoPosture.swift TouchHold.swift 2>/dev/null) \
     TrackpadView.swift InputOverlay.swift main.swift TouchSynth.o -o "$work/TouchRig.app/TouchRig"
 cat > "$work/TouchRig.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
