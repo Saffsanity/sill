@@ -845,7 +845,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
-  in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
+  in StreamScreen.swift take it, issue #113), `PhoneKeyRow` (a phone's key row upright and its switch, Arrow
+  Keys, `Sill.arrowKeys`, off unless turned on, offered on an iPhone alone: Settings › This iPhone › Keys,
+  issue #287, PR #315; off the six caps that name a key, as before; on the four arrows after shift in a row
+  that scrolls, `Strip`: every cap 44 pt or wider, as many whole as fit so, six at most (five at 320 pt), 0.6
+  of the next showing, the fades at an edge with caps past it, the end; VoiceOver's action on every cap and
+  the cap it moves to, `voiceOverFocus`; the words, `Copy`; pure, `Tests/checks/phone-key-row` with
+  PhonePortraitLayout's row; pbxproj A315/F315; KeyRow and `PhoneKeyStrip` in PortraitStreamScreen.swift
+  draw it, the Settings panel's `keys` group has the switch), `VersionLabel` (this app's version and build as its bundle says
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),

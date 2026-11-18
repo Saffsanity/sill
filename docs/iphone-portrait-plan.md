@@ -223,7 +223,9 @@ halves; every landscape size stays landscape. The layout reads the device's idio
   and `press` are unchanged (PortraitStreamScreen.swift:383-457).
 - **What goes on the phone:** the four arrows, Spotlight and the keyboard cap. Spotlight is still
   there: latch cmd, then space on the keyboard (`insertText` sends ⌘Space,
-  InputOverlay.swift:299-305). Arrows come from a hardware keyboard only.
+  InputOverlay.swift:299-305). Arrows come from a hardware keyboard only. (Later: since PR #315,
+  issue #287, an iPhone's Arrow Keys switch, off by default, adds the four arrows after shift in a
+  row that scrolls; docs/steps/2026-11-18-ready-315.md.)
 
 ### The trackpad
 

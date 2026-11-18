@@ -525,6 +525,11 @@ ja-JP, ru-RU…), not from its `AppleKeyboards` preference. A test host's Deskto
 `-SillIdiom pad` draws a screen taller than wide and narrower than 600 pt as
 an iPad does (the compact halves) rather than as a phone, so an iPhone
 simulator photographs it (`phone` the other way round; the normal app too).
+`-Sill.arrowKeys 1` turns an iPhone's Arrow Keys on for one run (in the normal app
+too; #287, PhoneKeyRow): the phone's key row upright adds ← ↓ ↑ → after shift and
+scrolls sideways, `-SillKeyScroll end` starting it scrolled to the arrows, and
+`-SillSettingsScroll keys` opens the Settings panel at its Keys group (an
+iPhone's; `-SillIdiom pad` has none).
 `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: once, the
 portrait key row taps cmd, esc, shift and ctrl through its caps' action, then
 the trackpad checks that a touch at its centre lands on it, strokes, taps with
