@@ -867,8 +867,9 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
-        // The Apps list reads the Mac's other volumes too (#370), never on a test host; and under the
-        // AppKit loop it looks again as they come and go.
+        // The Apps list: this Mac's own disk at once; its other volumes too once a device connects
+        // (#370: macOS may ask whether Sill may read one, and nothing is asked at launch), never on a
+        // test host; under the AppKit loop again as they come and go while a device is connected.
         catalog.start(volumes: !synthetic)
         if appKitLoop && !synthetic { catalog.watchVolumes() }
         // The only startup line Direct Wireless adds, and only when it is on: the default path

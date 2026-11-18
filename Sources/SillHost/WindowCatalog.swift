@@ -12,8 +12,8 @@ import StreamProtocol
 /// Idle means idle: with no client connected nothing here runs on a timer. The window list is
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
-/// thumbnails. The installed-app scan runs at startup, off the main thread, and in Sill.app again
-/// when a volume of one's own comes or goes (`watchVolumes`, #370). So after a spell
+/// thumbnails. The installed-app scan runs at startup, off the main thread, and looks at the Mac's
+/// other volumes when a device connects, again when they changed (`lookAtVolumesIfDue`, #370). So after a spell
 /// with no client the last look can be hours old and its display gone: the coordinator looks again
 /// before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
@@ -204,7 +204,7 @@ final class WindowCatalog {
     nonisolated(unsafe) static var screenless = false
 
     /// Starts the installed-app scan, and polling if a client is already connected. `volumes`: the
-    /// scan also reads the volumes of one's own (InstalledApps), not on a test host.
+    /// scan also reads the volumes of one's own (InstalledApps) once a device connects, not on a test host.
     /// Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
     func start(volumes: Bool) {
         guard !started else { return }
@@ -390,8 +390,10 @@ final class WindowCatalog {
     var mainDisplay: SCDisplay? { lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first }
 
     /// A device is connected again after none was: a choice older than its span is forgotten, so the
-    /// session begins on the main display (DesktopDisplays.keepsChoice).
+    /// session begins on the main display (DesktopDisplays.keepsChoice); and the Apps list looks at the
+    /// volumes when that is due.
     private func devicesArrived() {
+        lookAtVolumesIfDue()                // the Apps list's second look, when it is due (#370)
         defer { devicesLeftAt = nil }
         guard desktopDisplayUUID != nil, let left = devicesLeftAt else { return }
         let gone = CatalogLook.seconds(ContinuousClock.now - left)
@@ -484,14 +486,26 @@ final class WindowCatalog {
 
     // MARK: Installed apps
 
-    /// Once at startup: this Mac's own disk, then the volumes of one's own too (InstalledApps, #370).
-    /// The second look reads nothing on a test host: macOS would ask the app that runs it (Terminal, an
-    /// agent's) whether it may read a removable volume.
+    /// At startup: this Mac's own disk, at once. The second look, with the volumes of one's own too
+    /// (InstalledApps, #370), waits for a device (`lookAtVolumesIfDue`), and a test host never takes it:
+    /// macOS would ask the app that runs it (Terminal, an agent's) whether it may read a removable volume.
     private func scanInstalledApps(volumes: Bool) {
+        readsVolumes = volumes
         lookAtApps(volumes: false, cause: nil)
-        guard volumes else { return }
-        volumesAsked = InstalledApps.volumes(InstalledApps.mounted())
-        lookAtApps(volumes: true, cause: nil)
+        lookAtVolumesIfDue()
+    }
+
+    /// The second look, when it is due (InstalledApps.secondLookDue): a device is connected, and the
+    /// volumes of one's own are not the ones the last second look was asked with. So macOS's question
+    /// whether Sill may read a removable volume comes when a device connects, never at a login. The
+    /// mount table and the I/O Registry: nothing on a volume is read here.
+    private func lookAtVolumesIfDue() {
+        guard readsVolumes else { return }
+        let own = InstalledApps.volumes(InstalledApps.mounted())
+        guard InstalledApps.secondLookDue(devices: clientCount, own: own, asked: volumesAsked) else { return }
+        let cause: String? = volumesAsked == nil ? nil : "the volumes changed"
+        volumesAsked = own
+        lookAtApps(volumes: true, cause: cause)
     }
 
     /// The looks run here, one after another, in the order asked. A queue of its own rather than the
@@ -507,6 +521,8 @@ final class WindowCatalog {
     /// Where each listed app is, from the look that landed: a launch's way to an app Launch Services
     /// does not know (one on another disk it never registered, #370).
     private var installedPaths: [String: String] = [:]
+    /// This host takes the second look (`start(volumes:)`): not a test host.
+    private var readsVolumes = false
     /// The volumes of one's own (InstalledApps.volumes) when the newest look at them was asked for, nil
     /// before one was: a change that leaves them as they were brings no look, also while a look waits
     /// on macOS's question (Time Machine mounts its snapshots every hour).
@@ -529,7 +545,7 @@ final class WindowCatalog {
     /// which on the main actor would hold up startup and the first window refresh, so all of it runs on
     /// `appsQueue` and only the results hop back. Without `volumes` it reads this Mac's own disk alone;
     /// with them, also the Applications folder at the top of each volume of one's own, and what a link
-    /// or an alias points at there. `cause`: why it looks again, nil at startup.
+    /// or an alias points at there. `cause`: why it looks again, nil for the first look of each kind.
     private func lookAtApps(volumes: Bool, cause: String?) {
         appsLooks += 1
         let look = appsLooks
@@ -595,8 +611,9 @@ final class WindowCatalog {
 
     /// Under the AppKit loop (Sill.app; the CLI's dispatchMain never delivers these): a volume mounted,
     /// unmounted or renamed brings a look at the volumes again, `volumesSettleTime` after the last of a
-    /// burst, when the volumes of one's own are not the ones the newest look was asked for with. A disk
-    /// image, a share or Recovery coming and going brings none.
+    /// burst, when it is due (`lookAtVolumesIfDue`): while a device is connected, and when the volumes of
+    /// one's own are not the ones the newest look was asked for with. A disk image, a share or Recovery
+    /// coming and going brings none; a change with no device connected waits for the next one.
     func watchVolumes() {
         guard volumeObservers.isEmpty else { return }
         let center = NSWorkspace.shared.notificationCenter
@@ -612,11 +629,7 @@ final class WindowCatalog {
         volumesSettle = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.volumesSettleTime)
             guard !Task.isCancelled, let self else { return }
-            // The mount table and the I/O Registry: nothing on a volume is read here.
-            let now = InstalledApps.volumes(InstalledApps.mounted())
-            guard now != self.volumesAsked else { return }
-            self.volumesAsked = now
-            self.lookAtApps(volumes: true, cause: "the volumes changed")
+            self.lookAtVolumesIfDue()
         }
     }
 

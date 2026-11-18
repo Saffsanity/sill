@@ -74,6 +74,15 @@ MUTANTS = [
      '!FileManager.default.fileExists(atPath: volume + "/System/Library/CoreServices/SystemVersion.plist")', "true"),
     ("the mount table's local flag misread",
      "local: entry.f_flags & UInt32(MNT_LOCAL) != 0", "local: entry.f_flags & UInt32(MNT_LOCAL) == 0"),
+    # Review of #405: the second look follows a device, never a login.
+    ("the second look at launch, with no device (macOS asks then)",
+     "        devices > 0 && own != asked\n", "        own != asked\n"),
+    ("the second look once only, never again when the volumes change",
+     "        devices > 0 && own != asked\n", "        devices > 0 && asked == nil\n"),
+    ("a second look at every device and every mount",
+     "        devices > 0 && own != asked\n", "        devices > 0\n"),
+    ("no second look while no volume of one's own was ever there",
+     "        devices > 0 && own != asked\n", "        devices > 0 && own != (asked ?? [])\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

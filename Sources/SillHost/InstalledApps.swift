@@ -16,7 +16,8 @@ import IOKit
 /// `volumes` says which volumes are read, and `applicationFolders(on:)` which of their folders. The
 /// catalog looks twice (WindowCatalog): first at this Mac's own disk alone (`Reach()`), then with
 /// the volumes too, so a volume that is slow, asleep, or waits on macOS asking whether Sill may read
-/// a removable volume never holds up the list of the Mac's own apps.
+/// a removable volume never holds up the list of the Mac's own apps. The second look waits for a
+/// device to connect (`secondLookDue`): the app asks for nothing at launch.
 ///
 /// Threading: FileManager, Bundle, the mount table and the I/O Registry only, so any thread.
 enum InstalledApps {
@@ -115,6 +116,18 @@ enum InstalledApps {
             guard InstalledApps.inside(path, volumesRoot) else { return true }
             return volumes?.contains { InstalledApps.inside(path, $0) } == true
         }
+    }
+
+    /// Whether the second look is due (WindowCatalog asks at its start, when a device connects, and 2 s
+    /// after a volume mounts, unmounts or is renamed): only while a device is connected, and only when
+    /// the volumes of one's own (`own`, `volumes(_:root:)`) are not the ones the last second look was
+    /// asked with (`asked`, nil before the first). Reading a removable volume can make macOS ask whether
+    /// Sill may, and the app asks for nothing at launch (docs/steps/2026-09-23-menu-bar-app.md, "TCC:"):
+    /// the question follows a device connecting, as Screen Recording's does. A disk image, a share or
+    /// Time Machine's hourly snapshots coming and going bring none, and with no device connected no disk
+    /// is read: a volume mounted meanwhile is read when the next device connects.
+    static func secondLookDue(devices: Int, own: [String], asked: [String]?) -> Bool {
+        devices > 0 && own != asked
     }
 
     /// `path` is `folder` or inside it, by name alone (nothing is looked up).

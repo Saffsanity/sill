@@ -207,6 +207,21 @@ check(firstIDs.isDisjoint(with: never) && Set(secondIDs).isDisjoint(with: never)
 check(!secondIDs.contains("a.plugin") && !secondIDs.contains("linked.app") && !secondIDs.contains("gone.alias"),
       "an alias to a bundle that is no app, to a folder, or whose app is gone lists nothing")
 check(InstalledApps.mounted().contains { $0.path == "/" && $0.local }, "the kernel's mount table is read: / is there, local")
+
+// When the second look is due: it can make macOS ask whether Sill may read a removable volume, and the
+// app asks for nothing at launch, so it follows a device connecting; then only when the volumes changed.
+let drive = [volume("Drive")], both = [volume("Another"), volume("Drive")]
+check(!InstalledApps.secondLookDue(devices: 0, own: drive, asked: nil),
+      "no second look before a device connects: nothing is asked at launch")
+check(InstalledApps.secondLookDue(devices: 1, own: drive, asked: nil), "the first device to connect brings it")
+check(InstalledApps.secondLookDue(devices: 1, own: [], asked: nil),
+      "also with no volume of one's own (a folder given may lead into the volumes)")
+check(!InstalledApps.secondLookDue(devices: 2, own: drive, asked: drive),
+      "a device, a disk image, a share or a Time Machine snapshot that leaves the volumes as they were brings none")
+check(InstalledApps.secondLookDue(devices: 1, own: [], asked: drive) && InstalledApps.secondLookDue(devices: 1, own: both, asked: drive),
+      "a volume gone or mounted while a device is connected brings one")
+check(!InstalledApps.secondLookDue(devices: 0, own: both, asked: drive),
+      "a volume mounted with no device connected waits for the next device (no disk read meanwhile)")
 // exit() skips the top-level defer, so the fake folder goes first.
 try? fm.removeItem(at: root)
 if failures > 0 { print("installed-apps: \(failures) failed"); exit(1) }
