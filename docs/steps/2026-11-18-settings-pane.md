@@ -1,4 +1,4 @@
-**Settings as a whole-screen pane on iPhone and iPad (2026-11-18, branch `settings-pane` from main at 8dbbb50).**
+**Settings as a whole-screen pane on iPhone and iPad (2026-11-18, branch `settings-pane` from main at 8dbbb50; PR #393, a draft).**
 
 - **Noah, 2026-11-18**: "Anything that it would make sense to add a toggle to you should add a toggle, also author a
   change to make the settings menu a full pane instead of a floating window". Asked which shape: "Whole screen
