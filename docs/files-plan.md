@@ -6,9 +6,9 @@ Mac)"). The same night: "Anything that it would make sense to add a toggle to yo
 Settings panel becomes a whole-screen pane ("Whole screen everywhere", branch `settings-pane`, in flight).
 Issue #188, pull request #189 (addhumal, device to Mac only; built on and mostly replaced: its defects D1 to D16
 are listed in `docs/steps/2026-11-18-files.md`). Branch `files` from #189's head 02cf1800 with origin/main merged
-in; the branch's notes are in that step file. Status: the first part (device to Mac) is being built; "Progress" at the end says
-what is done. Kind numbers follow the allocation of 2026-11-18: 34 for a file's bytes, 49 for the rest (48 is the
-microphone's).
+in; the branch's notes are in that step file. Status: the first part (device to Mac) is being built; "Progress"
+at the end says what is done. Kind numbers follow the allocation of 2026-11-18: 34 for a file's bytes, 49 for the
+rest (48 is the microphone's).
 
 ## 1. What it is, in a person's words
 
@@ -120,9 +120,10 @@ types (likely not; the Files app's does); the wording of Apple's disk-space reas
   `sessionPaired` true, while the list does not say `locked`; it sends `pick` only to a host that says 2.
 - A host sends kind 49 and 34 only to a connection whose hello said `files` 1 or more, and only answers on it.
 - Numbers: 34 is #66's number with #66's exact layout, as the clipboard took #66's 32, so #66 can still rebase;
-  35 to 42 stay #66's (#66's `FileDrop` cannot refuse, answer or pace, so it is not used here); 49 is files' in the allocation of
-  2026-11-18 (45 the pen, 46 the camera, 47 main's, 48 the microphone, 50 #175's cursor kind, 60 and 61 #195's),
-  which gave the six workstreams of this assignment their numbers once, before any branch wrote one.
+  35 to 42 stay #66's (#66's `FileDrop` cannot refuse, answer or pace, so it is not used here); 49 is files' in
+  the allocation of 2026-11-18 (45 the pen, 46 the camera, 47 main's, 48 the microphone, 50 #175's cursor kind,
+  60 and 61 #195's), which gave the six workstreams of this assignment their numbers once, before any branch
+  wrote one.
 
 ### 5.2 `FileTransfer` (kind 49, `Sources/StreamProtocol/Files.swift`)
 
@@ -764,7 +765,7 @@ Each recommendation is what the work proceeds with if Noah says nothing.
    version.
 10. **Sill in the share sheet?** (a) Document types (Sill among the share sheet's apps for a file); (b) a Share
     Extension (a second target, an app group, its own manifest and profile); (c) neither. *Recommendation: (a).*
-11. **The wire?** (a) Kind 34 as #66's `FileChunk` and a new kind (49 in the allocation); (b) two new kinds, leaving #66's
+11. **The wire?** (a) Kind 34 as #66's `FileChunk` and a new kind (49); (b) two new kinds, leaving #66's
     numbers entirely alone; (c) #66's 34–37 as they are (they cannot answer, pace or cancel). *Recommendation:
     (a).*
 12. **Ask the device's free space before receiving?** (a) No: the write's own failure says so, and the privacy
