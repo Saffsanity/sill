@@ -30,7 +30,8 @@
 #
 # Secrets: the environment nightly's (Settings › Environments; docs/release-checklist.md, "Secrets and
 # variables"), not the repository's. The Mac and iOS jobs run in it, only main may use it, and it has no
-# reviewer, so a night runs unattended: SILL_DEVELOPER_ID_P12, SILL_DEVELOPER_ID_P12_PASSWORD,
+# reviewer, so a night runs unattended: SILL_NIGHTLY_UPDATE_KEY (the nightly key, optional: without it the
+# night isn't signed for Update Now), SILL_DEVELOPER_ID_P12, SILL_DEVELOPER_ID_P12_PASSWORD,
 # SILL_NOTARY_KEY_ID, SILL_NOTARY_ISSUER_ID, SILL_NOTARY_KEY_P8, SILL_PROVISION_PROFILE (the profile in
 # base64), SILL_TESTFLIGHT_KEY_ID, SILL_TESTFLIGHT_ISSUER_ID, SILL_TESTFLIGHT_KEY_P8. Variables (the
 # repository's): SILL_NIGHTLY, SILL_SIGN_IN_CI, SILL_TESTFLIGHT_IN_CI, SILL_NIGHTLY_PUBLIC_BETA. A run
@@ -373,6 +374,36 @@ jobs:
             grep -E '^Sill .* is notarized and stapled|^[0-9a-f]{64}  ' .build/nightly-mac.log || true
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Use nightly builds (docs/one-click-update-plan.md §16): tonight's zip under a fixed name and its manifest,
+      # signed with the nightly key (a secret of this environment, used here alone; never the update key, which
+      # never leaves Noah's Mac). The zip goes up first, then the manifest: a Sill reading between the two finds a
+      # manifest naming another zip and installs nothing. Without the secret the step says so and the job stays
+      # green: nothing of Update Now is published for the night.
+      - name: Sign the nightly for Update Now (Scripts/sign-nightly.sh)
+        if: steps.mode.outputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SILL_RELEASE_REPO: ${{ github.repository }}
+          SILL_NIGHTLY_UPDATE_KEY: ${{ secrets.SILL_NIGHTLY_UPDATE_KEY }}
+        run: |
+          if [ -z "$SILL_NIGHTLY_UPDATE_KEY" ]; then
+            echo "::notice::The nightly isn't signed for Update Now: the environment nightly has no SILL_NIGHTLY_UPDATE_KEY (docs/release-checklist.md, Nightlies)."
+            exit 0
+          fi
+          # No nightly key compiled into this commit's Sill: no Sill would take a signed nightly, so nothing is signed
+          # (sign-nightly.sh refuses it too). A key compiled in that isn't the secret's half still stops the step.
+          if ! grep -m1 'static let nightlyKeys' Sources/SillMenuBar/UpdateManifest.swift | grep -q '"'; then
+            echo "::notice::The nightly isn't signed for Update Now: this commit's Sill has no nightly key (UpdateManifest.nightlyKeys is empty; docs/release-checklist.md, Nightlies)."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/sill-nightly-update.key"
+          ( umask 077; printf '%s' "$SILL_NIGHTLY_UPDATE_KEY" > "$key" )
+          stem="$(source Scripts/release.sh && nightly_stem)"
+          Scripts/sign-nightly.sh --key-file "$key" --zip ".build/$stem.zip" --out "$RUNNER_TEMP/nightly-update"
+          gh release upload nightly "$RUNNER_TEMP/nightly-update/Sill-nightly.zip" --repo "$SILL_RELEASE_REPO" --clobber
+          gh release upload nightly "$RUNNER_TEMP/nightly-update/Sill-nightly.zip.manifest" --repo "$SILL_RELEASE_REPO" --clobber
+          echo "Signed for Update Now: Sill-nightly.zip and its manifest on the pre-release nightly." >> "$GITHUB_STEP_SUMMARY"
+
       # Both submissions' answers and Apple's logs, and the run's own log. include-hidden-files:
       # upload-artifact skips whatever lies under a folder whose name starts with a dot (.build).
       - name: Keep the logs
@@ -392,7 +423,8 @@ jobs:
         if: always()
         run: |
           keychain="$RUNNER_TEMP/sill-nightly.keychain-db"
-          rm -f "$RUNNER_TEMP/sill-developer-id.p12" "$RUNNER_TEMP/sill-notary-key.p8" "$RUNNER_TEMP/profile.plist" Packaging/embedded.provisionprofile
+          rm -f "$RUNNER_TEMP/sill-developer-id.p12" "$RUNNER_TEMP/sill-notary-key.p8" "$RUNNER_TEMP/profile.plist" Packaging/embedded.provisionprofile \
+            "$RUNNER_TEMP/sill-nightly-update.key"
           if [ -f "$keychain" ]; then
             security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db" || true
             security delete-keychain "$keychain"

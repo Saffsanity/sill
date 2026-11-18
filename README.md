@@ -28,12 +28,18 @@ Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
 and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
 and you can also build it from source (below).
 
+From 0.6.2 on, Sill for Mac updates itself from Settings › General with Update Now, or by
+itself when you turn on Automatically update Sill (off unless you do; it installs
+only while no iPhone or iPad is connected). Either way it checks a new version two
+ways before installing it: Apple's signature and notarization for Sill's
+developer, and the release signed with Sill's own update key.
+
 To try the next version before it ships: Sill for iPhone and iPad has a
 [public beta on TestFlight](https://testflight.apple.com/join/6v7nqyn3), and Sill for Mac
 has [nightly builds](https://github.com/Saffsanity/sill/releases/tag/nightly) on
 GitHub, notarized like a release but not supported. Your devices stay paired
-(a nightly uses the release's identity), and Sill's update check never offers
-a nightly: the release above is the one to use.
+(a nightly uses the release's identity). Sill offers a nightly as an update only
+with Use nightly builds on: otherwise the release above is the one to use.
 
 ## Screenshots
 
@@ -106,12 +112,9 @@ Sill has layouts of its own.
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
   sits on the fold.
-  <!-- Desktop displays (phase 1 of docs/virtual-desktop-plan.md, PR #355): hidden until the release that
-  ships it, whose words commit takes the comment out and makes this its own bullet:
-  - **The Desktop** on a Mac with more than one screen: tap Desktop while it
-    shows to step to the next screen, starting from your main one. The button
-    shows which screen is up.
-  -->
+- **The Desktop** on a Mac with more than one screen: tap Desktop while it
+  shows to step to the next screen, starting from your main one. The button
+  shows which screen is up.
 - **The menus** of the app you use reach your device too: in the iPad's own
   menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
   Sill for Mac reads each menu from the app as you open it and chooses the
@@ -189,8 +192,12 @@ connect without pairing: update it.
 Nightly builds: every night main changes, a notarized Sill for Mac built from it
 goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/tag/nightly),
 and Sill for iPhone and iPad to TestFlight's testers. A nightly is tested less
-than a release and can break; Sill's update check never offers one, and going back
-from a nightly Sill for Mac to the release keeps its settings and paired devices.
+than a release and can break, and going back from a nightly Sill for Mac to the
+release keeps its settings and paired devices.
+Or turn on Use nightly builds in Sill for Mac's Settings › General (0.6.2 or later): Sill then
+offers each night's build too, built and signed by GitHub from Sill's newest code with nobody
+looking at it first. A nightly installs only when you click Update Now; Automatically update Sill
+installs releases only. A nightly is offered the release it led up to once that is out.
 
 ## Tips
 

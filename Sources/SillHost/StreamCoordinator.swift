@@ -49,6 +49,10 @@ package final class StreamCoordinator {
     private var prioritizeSpeed: Bool { config.prioritizeSpeed }
 
     let server: StreamServer
+
+    /// Holds (or releases) new sessions at every door, and says how many are connected now
+    /// (StreamServer.holdNewSessions): the automatic update's last look before it installs.
+    package func holdNewSessions(_ hold: Bool) -> Int { server.holdNewSessions(hold) }
     /// A sleeping display gives the stream black frames (issue #134): a device's session connecting,
     /// and what a person does to the Mac from it, are user activity on the Mac, declared as a key press
     /// would be (`deviceActive`). DisplayWake alone decides which messages count and when (`handle`
