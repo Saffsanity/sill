@@ -26,10 +26,19 @@ the Desktop, and prints one verdict per rule:
   display working is awake, so Sill's display is made as before.
 - tapwake: the only monitor gone while the screens sleep, unlocked; a tap on the device is a person's activity, which
   wakes them on a Mac: made two seconds after it, though the file still says asleep.
+Phase 2a (virtual-desktop-2a, 2026-11-18; Noah: "should default to resolution and refresh of client device"):
+- size: a screenless Mac, locked (#298); an iPad mini's viewport (1133×744 at 30 Hz, a rate the software encoder can
+  show held) asks for the Desktop: made at 1218×800 at 30 Hz for it; an iPhone at 60 joins: the Desktop stays at 30.
+- nosize: a client that sends no viewport: #200's 1920×1080 at 60, and the line says no device's screen is known.
+- guard: the guard for #380 (SILL_TEST_MAKE_GUARD, a folder of the test's own): the last run left a marker with one
+  stop kept: two in a row, it holds; the Desktop with no real screen makes nothing, one line; the marker taken.
+- guardok: one stop kept and no marker: made as before, the marker gone, the count back to 0.
+- offconsole: Sill's display made on a screenless Mac, then another user on the screen: removed at once (it would be
+  their displays); back on the console with no screen: made again after the return's two seconds.
 Each host lives under 40 s and is killed at the end.
 
     Scripts/headless-check/live.py OUT [switch|view|screenless|flicker|waiting|sleep|goneasleep|dropoff|after|nodevice|
-                                        lidclose|tapwake|all]
+                                        lidclose|tapwake|size|nosize|guard|guardok|offconsole|all]
 
 Needs .build/release/SillHost (swift build -c release), or another build's in HEADLESS_CHECK_HOST. Exits 1 when a verdict
 fails."""
@@ -339,6 +348,108 @@ def run_tapwake(out):
             f"the tap is the wake: made two seconds after it (about 11 s), the file still asleep: {created}")
 
 
+# Phase 2a (virtual-desktop-2a, 2026-11-18): the display sized to the device that asked, its rate held, the guard for #380.
+TEST_LINE = r"\(TEST ONLY: none made, SILL_TEST_HEADLESS\)"
+GUARD_HELD = r"^Headless display: no real screen, but Sill stopped while making its displays 2 runs in a row"
+
+
+def streaming_fps(h, after=0.0):
+    """Each 'Streaming a synthetic test pattern … at W×H, N fps' line's rate, from `after` on."""
+    rx = re.compile(r"^Streaming a synthetic test pattern.* at \d+×\d+, (\d+) fps")
+    return [int(m.group(1)) for t, l in list(h.lines) if t - h.start >= after and (m := rx.search(l))]
+
+
+def run_size(out):
+    print("== size: a screenless Mac, locked (#298); an iPad mini's viewport at 30 Hz, then an iPhone at 60 joins", flush=True)
+    d, l = files(out, "size", STANDIN, "1")
+    h = Host(out, "size", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    ipad = '{"width":1133,"height":744,"fps":30}'
+    iphone = '{"width":852,"height":393,"fps":60}'
+    c1 = client(h, out, "size-c1", 16, ["desktop", "--hello=0.6.3", "--device=iPad mini", f"--raw9={ipad}@0.2"], start=1.0)
+    c2 = client(h, out, "size-c2", 8, ["desktop", "--hello=0.6.3", "--device=iPhone", f"--raw9={iphone}@0.2"], start=8.0)
+    c1.join(); c2.join(); h.at(19.0); h.stop()
+    created = h.first(CREATED)
+    verdict(created[1] is not None and created[1].startswith("Headless display: created 1218×800 pt @2× at 30 Hz ")
+            and re.search(TEST_LINE + r" for iPad mini, its screen\.$", created[1]) is not None,
+            f"made at the asking iPad mini's size, grown to 800, at its 30 Hz: {created[1]!r}")
+    rates = streaming_fps(h, created[0] or 99)
+    verdict(rates and all(r == 30 for r in rates), f"the Desktop's rate held to Sill's display's 30 Hz, the iPhone's 60 joining too: {rates}")
+    verdict(len(h.all(CREATED)) == 1, f"one display for both: {h.all(CREATED)}")
+
+
+def run_nosize(out):
+    print("== nosize: a screenless Mac; a client that sends no viewport", flush=True)
+    d, l = files(out, "nosize", STANDIN, "0")
+    h = Host(out, "nosize", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "nosize-c1", 8, ["desktop"], start=1.0)
+    c.join(); h.at(11.0); h.stop()
+    created = h.first(CREATED)[1]
+    verdict(created == "Headless display: created 1920×1080 pt @2× at 60 Hz (TEST ONLY: none made, SILL_TEST_HEADLESS) at 1920×1080: no device's screen known yet.",
+            f"no viewport: #200's 1920×1080 at 60, said so: {created!r}")
+
+
+def run_guard(out):
+    print("== guard: the last two runs ended while making a display (#380): none made by itself", flush=True)
+    d, l = files(out, "guard", STANDIN, "1")
+    g = os.path.join(out, "guard.dir")
+    os.makedirs(g, exist_ok=True)
+    write(os.path.join(g, "making-display"), "desktop 2026-11-18T11:06:40Z\n")
+    write(os.path.join(g, "display-make-stops"), "1\n")
+    h = Host(out, "guard", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l, "SILL_TEST_MAKE_GUARD": g})
+    c = client(h, out, "guard-c1", 8, ["desktop", "--pick=none@4.0", "--pick=desktop@4.05"], start=1.0)
+    c.join(); h.at(11.0); h.stop()
+    verdict(h.first(r"^Test guard: .*2 stops in a row: it holds\.$")[0] is not None, "the test's folder taken: two stops, it holds")
+    launch = h.first(r"^Sill stopped while making a display last time")[1]
+    verdict(launch == "Sill stopped while making a display last time (2 runs in a row: its Desktop display, 2026-11-18T11:06:40Z); "
+                      "it makes none by itself until you choose Try Again in Settings › Virtual Display.", f"the launch's line: {launch!r}")
+    held = h.all(GUARD_HELD)
+    verdict(len(held) == 1, f"the Desktop with no real screen: one line, asked twice: {held}")
+    verdict(not h.all(CREATED) and not h.all(LOOKING), f"nothing made, nothing waited for: {h.all(CREATED)} {h.all(LOOKING)}")
+    verdict(not os.path.exists(os.path.join(g, "making-display")), "the marker taken at launch")
+    stops = open(os.path.join(g, "display-make-stops")).read().strip()
+    verdict(stops == "2", f"the count kept: {stops}")
+
+
+def run_guardok(out):
+    print("== guardok: one stop kept and no marker: made as before, inside the marker, and the count back to 0", flush=True)
+    d, l = files(out, "guardok", STANDIN, "0")
+    g = os.path.join(out, "guardok.dir")
+    os.makedirs(g, exist_ok=True)
+    for f in ("making-display",):
+        try: os.remove(os.path.join(g, f))
+        except FileNotFoundError: pass
+    write(os.path.join(g, "display-make-stops"), "1\n")
+    h = Host(out, "guardok", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l, "SILL_TEST_MAKE_GUARD": g})
+    c = client(h, out, "guardok-c1", 8, ["desktop"], start=1.0)
+    c.join(); h.at(11.0); h.stop()
+    verdict(h.first(r"^Test guard: .*1 stop in a row\.$")[0] is not None, "the test's folder taken: one stop, not holding")
+    verdict(h.first(r"^Sill stopped while making")[0] is None, "no marker left: no launch line")
+    verdict(len(h.all(CREATED)) == 1 and not h.all(GUARD_HELD), f"made as before: {h.all(CREATED)}")
+    verdict(not os.path.exists(os.path.join(g, "making-display")), "the marker gone once it was made")
+    stops = open(os.path.join(g, "display-make-stops")).read().strip()
+    verdict(stops == "0", f"a display that came up resets the count: {stops}")
+
+
+OFF_CONSOLE_REMOVED = r"^Headless display: this session is off the console; removed Sill's display"
+
+
+def run_offconsole(out):
+    print("== offconsole: Sill's display made on a screenless Mac, then another user on the screen, then back", flush=True)
+    d, l = files(out, "offconsole", STANDIN, "1")
+    h = Host(out, "offconsole", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "offconsole-c1", 22, ["desktop"], start=1.0)
+    made = h.wait_for(CREATED, 1.0, 8.0)
+    h.at(9.0); write(l, "2")                     # another user on the screen
+    h.at(15.0); write(l, "1")                    # back on the console, locked: the stand-in alone still
+    c.join(); h.at(25.0); h.stop()
+    verdict(made is not None, f"made on the screenless, locked Mac: {made}")
+    gone = h.all(OFF_CONSOLE_REMOVED)
+    verdict(len(gone) == 1 and 9.0 <= gone[0] <= 10.5, f"off console: removed at once, once: {gone}")
+    verdict(not h.all(CREATED, 9.0, 15.0), f"none made off console: {h.all(CREATED, 9.0, 15.0)}")
+    back = h.all(CREATED, 15.0)
+    verdict(len(back) == 1 and 15.9 <= back[0] <= 18.5, f"back on the console with no screen: made again after the return's settle: {back}")
+
+
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
@@ -346,7 +457,9 @@ def main():
     if not os.path.exists(HOST): sys.exit(f"live.py: no {HOST} (swift build -c release)")
     for name, run in (("switch", run_switch), ("view", run_view), ("screenless", run_screenless), ("flicker", run_flicker),
                       ("waiting", run_waiting), ("sleep", run_sleep), ("goneasleep", run_goneasleep), ("dropoff", run_dropoff),
-                      ("after", run_after), ("nodevice", run_nodevice), ("lidclose", run_lidclose), ("tapwake", run_tapwake)):
+                      ("after", run_after), ("nodevice", run_nodevice), ("lidclose", run_lidclose), ("tapwake", run_tapwake),
+                      ("size", run_size), ("nosize", run_nosize), ("guard", run_guard), ("guardok", run_guardok),
+                      ("offconsole", run_offconsole)):
         if which in (name, "all"): run(out)
     bad = [w for ok, w in verdicts if not ok]
     print(f"{len(verdicts) - len(bad)} of {len(verdicts)} verdicts passed")

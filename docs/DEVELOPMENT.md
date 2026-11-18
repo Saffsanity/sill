@@ -459,6 +459,56 @@ as a window pick is (`LockPolicy`); the chosen stop comes back after the
 unlock. The rule is `Sources/StreamProtocol/DesktopDisplays.swift`, checked in
 `Tests/checks/desktop-displays`.
 
+A Mac with no working screen (a MacBook with its lid closed and nothing
+attached, a Mac mini with no monitor; issues #61 and #298, addhumal's PR #200,
+finished as phase 2a of `docs/virtual-desktop-plan.md`) gets Sill's own display
+by itself while a device shows the Desktop, so the lock screen streams and takes
+the password; there is no switch (Noah on #61). It is made only in Sill.app and
+the CLI with `--virtual-display` (it needs the AppKit loop), with Screen
+Recording, on the console (at a locked screen too: the one display Sill makes
+while locked, `LockPolicy.makesDesktopDisplay`), once the display list has been
+steady 1 s and no real screen has worked for 2 s (3 s at most after the Desktop
+asked), never while the screens sleep (an asleep monitor counts as a screen, and
+a tap on the device wakes them), and goes 2 s after a real screen works, at
+once off console, and at Quit (`HeadlessDesktopPolicy.Watch`). Its size is the
+device's (Noah, 2026-11-18): the panel of the device that asked for the Desktop,
+in its points at Retina, grown evenly to 800 points on its shorter side and held
+to 4096 (an iPad mini's 1133×744 is 1218×800), at that device's rate held to
+Frame Rate's limit; 1920×1080 at 60 when no device has sent its size
+(`VirtualDesktopSize`); it is never resized. The Desktop's rate is held to its
+refresh rate as to a stop's. Sill's displays are told apart by role
+(`DesktopDisplays.role`): the stage's display is never the Desktop's. Sill.log:
+"Headless display: no real screen; looking again in 1.0 s before making one.",
+"Headless display: created 1218×800 pt @2× at 60 Hz (id 66) for iPad mini, its
+screen." (the mode it came up at, and what was asked when that differs), "…: a
+real screen works again; none made.", "…: the 2 screens are asleep, not gone;
+none made (a tap on a device wakes them).", "…: a display is online again;
+removed the virtual Desktop display.", "…: this session is off the console;
+removed Sill's display …", and after each `Locked:` and `Unlocked:` line a
+`Displays:` line with the counts. The menu's card names it ("Sill’s display ·
+1218×800") and Settings › Virtual Display says "Showing Sill’s display now: …".
+
+A guard for #380 (Sill for Mac stopping while it makes a display): Sill.app
+writes `~/Library/Application Support/Sill/making-display` just before it makes
+any display of its own and removes it once the display is up or failed, and at a
+clean quit. A marker found at launch is one stop (`displayMakeStops` in
+`me.saffer.sill.mac`); two runs in a row and Sill makes no display by itself (the
+stage streams windows where they are, a Mac with no screen what macOS shows)
+until Try Again in Settings › Virtual Display; a display that comes up resets the
+count (`DisplayMakeGuard`). To start over: `defaults delete me.saffer.sill.mac
+displayMakeStops`. The CLI keeps no marker.
+
+Headless, on test hosts only (`--synthetic`, never Sill.app's own executable):
+`SILL_TEST_HEADLESS=<file>` makes the host's displays the file's lines (`real`,
+`real asleep`, `standin`, `standin asleep`, `lid closed`, `screens asleep`), read
+at each change, with Sill's display only said to be made and removed; and
+`SILL_TEST_MAKE_GUARD=<folder>` gives it the guard in a folder of its own.
+`Scripts/headless-check/live.py OUT all` runs 17 scenarios on loopback test hosts
+(about 6 minutes; `swift build -c release` first), and
+`Tests/checks/virtual-display-api` and `virtual-desktop` check the rules. No agent
+or test makes a real display on a Mac someone uses: the steps that need one are
+Noah's, in the step file of 2026-11-18 (`docs/steps/2026-11-18-virtual-desktop-2a.md`).
+
 To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
 honoured only with `--synthetic`; nothing of this Mac's displays is read, and
 nothing is posted or warped):
@@ -1466,7 +1516,10 @@ empty and says `locked` (and `offConsole` while another user is on the
 console); no thumbnail is taken, no icon, installed app, sound, clipboard,
 pointer or cursor shape goes out; a window picked, an app launched, a window's
 traffic lights, the Mac's menus and trackpad gestures are refused; no virtual
-display is made, and the display is not woken from a switched-out session. At a
+display is made for a window (Sill's own display for a Mac with no working
+screen is the one exception, made at a locked screen so the password can be
+typed there, never from a switched-out session), and the display is not woken
+from a switched-out session. At a
 locked screen the device shows the lock screen with no cover (a paired iPad or
 iPhone can type the Mac's password there), and the Apps drawer and the Settings
 panel's header say "Mac mini is locked. Unlock it to see its windows." While

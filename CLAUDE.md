@@ -281,7 +281,12 @@ Rules found in the steps that hold for all work (each where it is written):
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
   on classes it makes at run time),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
-  geometry, prepare/release, emergency restore), `HostShutdown` (signal
+  geometry, prepare/release, emergency restore), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
+  PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
+  SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
+  size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
   default path: a device's keys let go and a sized window goes back, then the
@@ -1249,6 +1254,7 @@ python3 Scripts/migrate-notes.py        # once, in a branch opened before 2026-1
 Scripts/agent-simulators.sh create      # once: the agents' simulators "Sill agents Duo" (iOS 27.1) and "Sill agents iPad" (iOS 27.0), shut down
 Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main   # harness photos of HEAD (committed) on the agents' Duo, pixel for pixel against main's, in the heavy lock
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
+Scripts/headless-check/live.py OUT all  # Sill's own display for a Mac with no screen (PR #200) on loopback test hosts, SILL_TEST_HEADLESS, nothing made (~6 min)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
