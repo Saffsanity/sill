@@ -13,9 +13,9 @@ import StreamProtocol
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
 /// thumbnails. The installed-app scan runs at startup, off the main thread, and looks at the Mac's
-/// other volumes when a device connects, again when they changed (`lookAtVolumesIfDue`, #370). So after a spell
-/// with no client the last look can be hours old and its display gone: the coordinator looks again
-/// before it builds a capture from it (CatalogLook, `lookAge`).
+/// other volumes when a device connects, again when they changed (`lookAtVolumesIfDue`, #370). So
+/// after a spell with no client the last look can be hours old and its display gone: the coordinator
+/// looks again before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
 final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
@@ -204,8 +204,8 @@ final class WindowCatalog {
     nonisolated(unsafe) static var screenless = false
 
     /// Starts the installed-app scan, and polling if a client is already connected. `volumes`: the
-    /// scan also reads the volumes of one's own (InstalledApps) once a device connects, not on a test host.
-    /// Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
+    /// scan also reads the volumes of one's own (InstalledApps) once a device connects, not on a test
+    /// host. Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
     func start(volumes: Bool) {
         guard !started else { return }
         started = true
