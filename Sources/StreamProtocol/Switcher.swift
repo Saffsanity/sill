@@ -100,8 +100,14 @@ public struct WindowList: Codable {
     /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
     /// is (`LockedMac.viewLine`).
     public var offConsoleView: Bool?
-    /// What this host takes of the device's camera (kind 46, CameraMessage): 1 is JPEG / HEVC frames.
-    /// Nil from hosts before camera support or synthetic test hosts.
+    /// What this host takes of a device's camera (kind 46, Camera.swift; #193's field): 1 is generation 1
+    /// (`CameraCodec.generation`: HEVC Main, 8-bit 4:2:0, each side even and 16 to 1920, 1 to 30 fps, the
+    /// layouts of types 1 to 3), from paired sessions, answered by kind 16's `camera` and type 3; 0 is a Mac
+    /// that has Sill Camera with its Use iPhone and iPad cameras off or Sill Camera not ready, to which a
+    /// device sends no kind 46 but whose row says why. Left out by every host before, by the CLI (which
+    /// cannot host Sill Camera), and while the Mac is locked or another user is on its screen
+    /// (`LockPolicy.list`): a device sends no kind 46 to any of them. A later generation says 2 and goes
+    /// only to a device that says so. Set after the initializer, as `keyRepeat`.
     public var camera: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,

@@ -178,6 +178,44 @@ public struct LinkReport: Codable, Hashable, Sendable {
     public var isBehind: Bool { state == Self.behind }
 }
 
+/// Kind 16's camera, per connection (`HostSettingsState.camera`, docs/camera-plan.md §5; kind 46 is
+/// Camera.swift's): what this connection's device may do with its camera now, and why not. Sent at
+/// connect and on every change, by a host whose window list says `camera`; nil from every other. The
+/// device's Share Camera row and its capture read only this and the window list: a sensor captures only
+/// while `state` is `inUse`.
+public struct CameraState: Codable, Hashable, Sendable {
+    /// `state`'s values. A string, never an enum: a device reads one it does not know as `off`.
+    /// This Mac's Use iPhone and iPad cameras is off.
+    public static let off = "off"
+    /// The switch is on, but Sill Camera is not installed, allowed or running on this Mac.
+    public static let notReady = "notReady"
+    /// This connection's key is not on the Mac's trust list (Require pairing off): no camera.
+    public static let unpaired = "unpaired"
+    /// Nothing on the Mac uses Sill Camera now.
+    public static let idle = "idle"
+    /// Another device is the Mac's camera; `holder` names it.
+    public static let another = "another"
+    /// An app on the Mac uses Sill Camera and this device is it: frames now, as type 3 asks.
+    public static let inUse = "inUse"
+    public static let states = [off, notReady, unpaired, idle, another, inUse]
+
+    public var state: String
+    /// With `another`: that device's name, cleaned (SafeText.label, at most 40 characters).
+    public var holder: String?
+    /// With `inUse`: the app using Sill Camera ("FaceTime"), cleaned the same way; nil when Sill Camera
+    /// cannot tell.
+    public var app: String?
+
+    public init(state: String, holder: String? = nil, app: String? = nil) {
+        self.state = state; self.holder = holder; self.app = app
+    }
+
+    /// The state as this build reads it: one of `states`, an unknown one as `off`.
+    public var knownState: String { Self.states.contains(state) ? state : Self.off }
+    /// The device sends frames.
+    public var wanted: Bool { state == Self.inUse }
+}
+
 /// Host → device (`.hostSettings`): on connect (right after the window list), whenever it changes,
 /// and, with `answering` set, as the reply to one device's `HostSettingsChange`. Each connection gets
 /// its own (`away`, `link` and `sessionPaired` are the connection's, and so are `settings.bitrate`
@@ -222,6 +260,11 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     /// device that pairs during its session hears true. Nil from hosts before 2026-10-29, which took
     /// Direct Wireless from any session at home. The connection's own, like `away` and `link`.
     public var sessionPaired: Bool?
+    /// This connection's camera (`CameraState`, Camera.swift): whether the Mac wants its frames now, and
+    /// why not. From a host whose window list says `camera`, at connect and on every change; nil from every
+    /// other and while the list leaves `camera` out. The connection's own, like `sessionPaired`. Set after
+    /// the initializer, whose parameters stay as they were.
+    public var camera: CameraState?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,

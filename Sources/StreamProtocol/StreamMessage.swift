@@ -91,8 +91,14 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
-    case camera = 46         // device → host: CameraMessage (type 1 JSON CameraFormat, type 2 binary CameraFrame) —
-                             // the device's camera video, only to a host whose window list says `camera` 1 or more
+    // The device's camera as a camera on the Mac (Camera.swift, docs/camera-plan.md; #193's number). Older
+    // readers map it to `.unknown` and skip it.
+    case camera = 46         // both ways: CameraMessage. Device → host: type 1 (JSON CameraFormat: the offer, a
+                             // pause, an epoch's format) and type 2 (binary CameraFrame: one HEVC access unit,
+                             // the header's timestamp its capture time and isKeyframe its flag), only to a host
+                             // whose window list says `camera` 1 or more, frames only while kind 16's `camera`
+                             // says `inUse`. Host → device: type 3 (JSON CameraDemand: size, rate, a keyframe),
+                             // only to a device whose hello says `camera` 1 or more. Never a person (DisplayWake)
     // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which open pull requests
     // hold (the microphone and the pen; the camera). Older hosts map it to `.unknown` and skip it.
     case nextDisplay = 47    // device → host, empty payload: the Desktop button tapped while the Desktop
