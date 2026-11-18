@@ -10,4 +10,5 @@ done
 cp "$SELF/main.swift" "$T/main.swift"
 cp "$SELF/home.swift" "$T/home.swift"
 cp "$SELF/launch.swift" "$T/launch.swift"
+cp "$SELF/vpnmemory.swift" "$T/vpnmemory.swift"
 swiftc -O "$T/"*.swift -o "$OUT" 2>&1 | grep -E "error" ; rm -rf "$T"

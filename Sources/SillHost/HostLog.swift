@@ -90,6 +90,15 @@ package final class HostLog: @unchecked Sendable {
         append(text)
     }
 
+    /// Waits until every line appended so far is in the file (Tests/checks/host-log's writers, before they
+    /// answer). Never call it on the file's own queue.
+    package func flush() {
+        lock.lock()
+        let sink = self.sink
+        lock.unlock()
+        sink?.flush()
+    }
+
     /// The kept lines newer than `seq`, oldest first; every kept line for 0.
     package func lines(after seq: UInt64) -> [Line] {
         lock.lock(); defer { lock.unlock() }
@@ -110,6 +119,15 @@ package final class HostLog: @unchecked Sendable {
 /// previous one) when it is already past 10 MB at launch or passes 10 MB while running: the
 /// per-second stats line alone adds about 360 KB per streaming hour. Follow it with `tail -F`,
 /// which reopens Sill.log after the move; `tail -f` stays on the moved file and goes quiet.
+///
+/// Two Sills write it at once whenever one starts while another runs: Update Now's hand-over (the new copy
+/// starts, then the old one quits; docs/one-click-update-plan.md), a second launch that waits and leaves.
+/// So the file is opened for appending (O_APPEND): each line lands at the file's end whoever else writes,
+/// where a handle with a place of its own wrote over the other Sill's lines (found on Noah's Mac,
+/// 2026-11-14: a second Sill's first line lost, its last two inside older ones). And each write looks
+/// whether the file at the path is still the one it has open: another Sill moved it aside, or it was
+/// deleted, and this one writes the file at the path again rather than Sill.1.log or nothing with a name.
+/// `Tests/checks/host-log` runs two writers on one file.
 ///
 /// Threading: `write` is called from any thread; everything else runs on `queue`, which owns the
 /// handle, the size and the formatter.
@@ -133,15 +151,25 @@ private final class FileSink: @unchecked Sendable {
     func write(_ line: HostLog.Line) {
         queue.async { [self] in
             let data = Data((stamp.string(from: line.date) + line.text + "\n").utf8)
-            if size + UInt64(data.count) > Self.rotateAt { rotate() }
+            if let handle, !Self.same(handle.fileDescriptor, url.path) {
+                reopen()        // another Sill moved the file aside, or it is gone: the path's file from here on
+            } else if size + UInt64(data.count) > Self.rotateAt {
+                rotate()
+            }
             guard let handle else { return }
             do {
                 try handle.write(contentsOf: data)
-                size += UInt64(data.count)
+                // The file's real end, the other Sill's lines included: an appending write leaves the handle there.
+                size = (try? handle.offset()) ?? size + UInt64(data.count)
             } catch {
                 // A full disk or a deleted directory: the line still reached stdout and the ring.
             }
         }
+    }
+
+    /// Returns once every write handed over so far has run. Any thread but the queue's.
+    func flush() {
+        queue.sync {}
     }
 
     /// Queue only.
@@ -150,9 +178,22 @@ private final class FileSink: @unchecked Sendable {
         try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let existing = ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.uint64Value ?? 0
         if existing >= Self.rotateAt { moveAside() }
-        if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
-        handle = try? FileHandle(forWritingTo: url)
+        reopen()
+    }
+
+    /// The file at the path, made when missing, opened for appending; `size` is its length. Queue only.
+    private func reopen() {
+        try? handle?.close()
+        let fd = Darwin.open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
+        handle = fd >= 0 ? FileHandle(fileDescriptor: fd, closeOnDealloc: true) : nil
         size = (try? handle?.seekToEnd()) ?? 0
+    }
+
+    /// Whether the open file `fd` is the file now at `path` (false when either can't be read).
+    private static func same(_ fd: Int32, _ path: String) -> Bool {
+        var open = stat(), named = stat()
+        guard fstat(fd, &open) == 0, stat(path, &named) == 0 else { return false }
+        return open.st_dev == named.st_dev && open.st_ino == named.st_ino
     }
 
     /// Queue only.
@@ -160,9 +201,7 @@ private final class FileSink: @unchecked Sendable {
         try? handle?.close()
         handle = nil
         moveAside()
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try? FileHandle(forWritingTo: url)
-        size = 0
+        reopen()
     }
 
     /// Sill.log → Sill.1.log, replacing the previous one. Queue only.

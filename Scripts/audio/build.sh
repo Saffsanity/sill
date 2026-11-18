@@ -18,7 +18,7 @@ root="$(cd "$here/../.." && pwd)"
 out="$root/.build/audio"
 cd "$root"
 host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot KeyStrokes
-            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats
+            LinkJudge LockPolicy OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats
             AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)
 
 put() {   # put DEST: stdin to DEST, only if it differs

@@ -418,6 +418,8 @@ the cable or to Wi-Fi keeps the same `StreamScreen` and its `pictureAt`.
   and the App Store label stays Data Not Collected.
 - **No migration.** Only development and TestFlight builds exist before this one, so everyone gets
   the tour once (open question 11). A topic name a later build no longer has is ignored.
+  (Superseded for 0.6: tour version 2 clears an older memory once and stores `Sill.tourVersion`, so
+  the tour shows once more to everyone: "The tour once more, for 0.6", at the end.)
 
 ### 6. The overlay (`TourOverlay.swift`)
 
@@ -1103,7 +1105,8 @@ two keys, Skip for good, Take the Tour last in Settings, and the Debug rule.
     `-SillTourState done`.
 11. **Existing installs.** Default: **no migration;** everyone sees it once (only development and
     TestFlight builds exist). The alternative: skip it on a device that has connected before (a
-    saved window order or a saved Mac).
+    saved window order or a saved Mac). (For 0.6, Noah: the tour shows once more for everyone who
+    launches that version: "The tour once more, for 0.6".)
 12. **The words.** Default: **§7's table,** in the App Store description's words; the check pins
     them, so a change is one edit there and one in the check.
 13. **The Pencil row.** Default: **on iPad only.** The alternative: none; the Pencil acts as a
@@ -1367,4 +1370,331 @@ double-tap a thumbnail within the first second: no tour this session; P15 Settin
 Tour, Skip at its first card, then hold the device upright: the laptop card still comes; P16 at
 the largest text size, each bar, Settings and laptop card beside the controls it lights, their
 ring whole, the words scrolling.
+
+## The tour once more, for 0.6 (2026-10-31)
+
+Noah (2026-10-31): "Mark the new features with “New:” and make the tutorial run for anyone who
+launches this version for the first time. You don’t need to explain the Aa stuff, maybe add an
+explanation with Virtual Desktop’s explanation." With it: "Those new features will come to 0.6.1"
+(the handoff reads it as the open pull requests and ideas waiting for 0.6.1, this tour going into
+0.6; the rule below keys on a tour version, so it holds either way). Branch `tour-0-6` from main at
+e4d30349. Device only: no wire change, nothing in `Sources/`, no new file (no pbxproj entries), one
+new UserDefaults key. This section supersedes §5's "No migration" and open question 11.
+
+### What it rests on
+
+- **What is new since the App Store's 0.5.1** (`git ls-tree v0.5.1 iOSClient/`, and the pull
+  requests since): pinch to zoom (StreamZoom.swift, #196); the clipboard both ways (ClipboardChip,
+  #78; paste right away, #242); the Mac's sound (StreamClient+Audio, #94; Send Audio on by default,
+  #236); Reverse Scrolling (#159); Larger Picture (#79); Hold to Show Window Controls
+  (ThumbnailHold, #248); a hardware keyboard's keys without the Keyboard button
+  (HardwareKeyboardPolicy, #80); Virtual Display on by default in Sill for Mac (`HostConfig.app`,
+  #236). **Not new:** the Menus button (MacMenuButton) and the three-finger gestures
+  (TrackpadGestures), both in v0.5.1 and in 0.5 before it; they merged with the tour (#36, #38,
+  #35) and the tour never showed them, so their rows come now, without "New:".
+- **Passwords.** Since 2026-10-29 (Noah: "Remove the code that tries to make password copies never
+  arrive") a password manager's copies go like any other (ClipboardPolicy.swift); only Universal
+  Clipboard's items and the host's own write stay on the Mac. No row speaks of passwords, and the
+  check refuses the word.
+- **The targets** (`TourTarget`): stream, apps, strip, **menus** (new), textSize, keyboard,
+  settings, keys, trackpad. No Desktop target. The Menus button shows only while the Mac sent
+  menus and the bar holds it: the landscape bar and an iPad's portrait window bar after the strip
+  (`MacMenuButton.fits`), a phone's row 2 under Settings (placed with an offset), and with Larger
+  Picture row 1 after Apps. It reports itself (`.tourTarget(.menus)` in `MacMenuButton.body`), so
+  only where it is drawn. A synthetic host sends no menus: only the mock shows the button in photos.
+
+### The cards
+
+`TourTopic.allCases` is `touch, bar, sharing, settings, laptop`. `sharing` (saved as "sharing" in
+`Sill.tourSeen`) is **Clipboard and Sound**, right before Settings: both light the Settings button,
+and the sideways tour still ends on "Hold your iPad upright…".
+
+| layout | steps (sighted) | under VoiceOver |
+|---|---|---|
+| sideways | touch, bar, sharing, settings (4) | bar, sharing, settings (3) |
+| the halves upright | touch, bar, sharing, settings, laptop (5) | bar, sharing, settings, laptop (4) |
+| a phone upright | the same 5 | the same 4 |
+
+| card | targets |
+|---|---|
+| touch | stream |
+| bar, sideways and a phone | strip, menus, textSize, keyboard |
+| bar, the halves | strip, menus, textSize |
+| bar, a phone with Larger Picture in effect | apps, menus, textSize, keyboard |
+| sharing, settings | settings |
+| laptop | keys, trackpad |
+
+**"New:"** (`TourPolicy.newPrefix`): a row built with `new: true` starts with the spans "New:"
+(strong, `isNew`) and " ". `TourCard.attributed` draws the `isNew` span semibold in the accent
+(#9BB7FF on the bar's #16181C), one Text with the row, so it wraps with it at every size; VoiceOver
+reads the row's words, "New: Pinch to zoom…". Only rows about what is new since the tour was written carry it (0.6's, and the Menus button's, the
+three-finger swipes' and Virtual Display's in either form, which the old tour never told of; the
+review's change, below), on
+every install (it marks what this version adds; a later tour version clears its own marks).
+
+**What rows depend on** (`TourFeatures`, built by StreamScreen at each render): the Menus button on
+screen (its target), this device's Three-Finger Gestures with a Mac that takes them, the Mac's
+Virtual Display setting (the Settings panel's), a Mac that shares its clipboard (its window list),
+this device's Paste on ‹Mac› Right Away, a Mac with sound (its settings carry Send Audio), and the
+Settings panel offering Larger Picture here. A row about what this Mac or this device lacks is left
+out or reworded, never said wrong; a late kind 16 or a change mid-card redraws the rows.
+
+The words (‹Mac› the Mac's name, ‹device› iPad or iPhone; **bold** a strong span):
+
+| # | card | when | words |
+|---|---|---|---|
+| T1–T3 | touch, "Tap, Hold, Drag and Pinch" | always | **Tap** to click. / **Touch and hold** to right-click. / **Drag** to scroll. |
+| T4 | | iPad | **Apple Pencil** works as a mouse. |
+| T5 | | always | New: **Pinch** to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on ‹Mac›. |
+| T6 | | gestures | New: **Swipe with three fingers**: up for Mission Control, down for App Exposé, and sideways between Spaces. |
+| B1 | bar, "Windows and Menus" (or "Windows") | always | as before (VoiceOver's own; Apps' with Larger Picture) |
+| B2 | | menus | New: **Menus** has the menu bar of the app you’re using on ‹Mac›. |
+| B3 | | Virtual Display on | New: **Virtual Display** is on: a window you pick streams from a display of its own on ‹Mac›, so it keeps updating when something covers it; **Aa** then sizes its text. |
+| B3 | | otherwise | New: **Virtual Display**, in Settings, streams a window you pick from a display of its own on ‹Mac›, so it keeps updating when something covers it; **Aa** then sizes its text. |
+| B3 | | VoiceOver | either form, ending "; **Text size** then makes its text larger or smaller: swipe up or down on it." |
+| B4 | | sideways, a phone | **Keyboard** brings up the on-screen keyboard to type on ‹Mac›. |
+| B5 | | sideways, a phone | New: **A hardware keyboard** types on ‹Mac› by itself, Esc included, and **Keyboard** then brings up the keyboard bar. |
+| S1 | sharing, "Clipboard and Sound" ("Clipboard", "Sound") | clipboard | New: With **Share Clipboard**, text you copy on ‹Mac› is ready to paste on this ‹device›. |
+| S2 | | clipboard | New: Copy on this ‹device›, then come back to Sill: **Paste on ‹Mac›**, on the note Sill shows then or in Settings, puts it where ‹Mac›’s cursor is. (Right Away off: "…sends it to ‹Mac›’s clipboard.") |
+| S3 | | sound | New: **Send Audio**, a beta, plays ‹Mac›’s sound here, and **Mute** silences this ‹device› alone. |
+| S4 | | neither | New: **Update Sill on ‹Mac›** to copy and paste between it and this ‹device›, and to hear its sound here. |
+| G1, G2 | settings | always | as before (Disconnect, Take the Tour) |
+| G3 | | sighted | New: **Reverse Scrolling** turns a finger’s drag and the on-screen trackpad’s two-finger scroll around. |
+| G4 | | sighted | New: **Hold to Show Window Controls** sets how long you hold a window’s thumbnail before its controls show. |
+| G5 | | sideways, last | as before (**Hold your ‹device› upright** / **Turn your iPhone on its side**) |
+| K1 | laptop | always | as before |
+| K2 | | the halves | **The keyboard key** brings up the on-screen keyboard to type on ‹Mac›. |
+| K3 | | the halves | New: **A hardware keyboard** types on ‹Mac› by itself, Esc included, and **the keyboard key** then brings up the keyboard bar. |
+| K4, K5 | | sighted | as before (the trackpad's two-finger tap, hold then drag) |
+| K6 | | a phone, Larger Picture offered | New: **Larger Picture**, in Settings: a window’s picture takes the place of the thumbnails and reaches down to where the keyboard comes up. |
+
+The old Aa row and the old Keyboard rows ("…on screen or with a hardware keyboard", untrue since a
+hardware keyboard types by itself) are gone; Aa is named only in B3 (Noah's word). Sharing's hint:
+"In Settings, the last button in the row under the picture." on a phone, "In Settings, the last
+button in the bar." elsewhere. A phone's bar hints name Menus while it shows ("Under the picture: Aa
+and Keyboard in the first row, the windows and Menus in the second."; with Larger Picture "…Apps,
+Menus, Aa and Keyboard."). Symbols, iOS 16 or older: plus.magnifyingglass,
+hand.raised.fingers.spread, filemenu.and.selection, display, keyboard, keyboard.badge.ellipsis, doc.on.clipboard,
+doc.on.doc, speaker.wave.2, arrow.down.circle, arrow.up.arrow.down, timer, rectangle.expand.vertical.
+
+Rows with every feature there: sideways 6 (5 on an iPhone), 5, 3, 5; the halves 6, 3, 3, 4, 5; a
+phone 5, 5, 3, 4, 4 (3 on the Duo's cover, which has no Larger Picture). At most six anywhere.
+Under VoiceOver: bar 5/3/5, sharing 3, settings 3 (2 upright), laptop 3 (the halves) and 2 (a
+phone).
+
+Not covered, on purpose: Aa on its own; the connect screen's tiles (not on the stream screen);
+other languages and dictation, held keys, the display wake, the Mac's pointer.
+
+### The run-again rule
+
+`TourPolicy.version` is 2. `TourPolicy.upgraded(_:savedVersion:)`: a memory with no stored version
+(a fresh install, 0.5 and 0.5.1, which stored none) or an older one is cleared (nothing seen, not
+skipped) and `write` says to store that with version 2; version 2's memory, or a later build's (a
+downgrade back to this one), is kept as it is and the version never lowered. TourStore keeps it in
+`Sill.tourVersion` (an Int, read as nil when absent) beside `Sill.tourSeen` and `Sill.tourSkipped`,
+and writes it only in the upgrade; `save(_:)` never does. The upgrade runs in Release always, and
+in Debug only with `-SillTourState saved`: `fresh`, `landscape` (the sideways steps), `done` and
+`skipped` are this run's alone, and a Debug build with no state reads the memory as it is and
+writes no version, so it never uses up the once more that TestFlight or the App Store gives. It is
+idempotent, as it must be: SwiftUI makes a TourStore at every StreamScreen init and keeps the
+first. The DEBUG console says "tour: memory of tour version 1 (none stored; …) cleared: version 2
+shows once" when it writes, and each card's rows as "tour: card …".
+
+| stored | read as | then | written |
+|---|---|---|---|
+| nothing (a fresh install) | empty | the tour, as any first run | version 2, nothing seen, not skipped, at the first stream screen |
+| no version, seen (0.5.x Done) | cleared | the tour, once more | the same |
+| no version, skipped (0.5.x Skip) | cleared | the tour, once more | the same |
+| version 0 or 1, negative, not a number | cleared | the tour | the same |
+| version 2 | as saved | as saved | nothing |
+| version 3 or later | as saved | as saved | nothing |
+
+The automatic tour's rule is unchanged (a second after the first picture, untouched; the automatic
+reconnect's session keeps the last decision; Take the Tour as before).
+
+### Where the build departs from this plan, and why
+
+- **Two commits, not three, for the code.** The plan's first two (TourPolicy with its check; the
+  app's wiring) could not each build the app: `TourPolicy.copy` gains `features:` with no default,
+  which StreamScreen must pass. So the first commit is TourPolicy, its check, and the wiring that
+  compiles against it (StreamScreen's TourFeatures, MacMenuButton's target); the second is
+  TourStore's version and upgrade, the card's accent and the harness contract.
+- **The lit span with the Menus button.** Sideways and in the halves the button only takes room
+  from the strip, so the bar card's lit span is the same with it or without it, as the plan said.
+  On a phone it is 8 pt shorter on the right: the button sits under Settings, inside the rows'
+  14 pt side margin, where the strip's band ran to its own 6 pt one (the 18 Pro Max: 6 to 426
+  instead of 434). The check pins it.
+- **The support page's two lines** (Universal Control, Paste from Other Apps), which the build took
+  from the handoff of 2026-10-30, are gone since the review: Noah closed the Keyboard button under
+  Universal Control as iPadOS's own behavior with no support line asked, and the chip's missing Paste
+  (which Settings › Apps › Sill › Paste from Other Apps fixed on his iPad) is not the tour's; a line
+  for it, if wanted, is a change of its own.
+- **The App Store description's clipboard bullet** still said that a password manager's concealed
+  copies stay on the Mac, untrue since 2026-10-29: it loses that sentence, as README's bullet does.
+- **The site's marker** names the branch, not a pull request number, until the pull request is
+  open.
+
+### Open questions for Noah (the defaults taken)
+
+1. Mark the Menus and three-finger rows "New:"? **Yes, since the review** (the build's default was
+   no: they shipped in 0.5 and 0.5.1). The task asks for every feature added since the tour was
+   written to be marked, and the old tour told of neither; Virtual Display's row is marked in both
+   forms for the same reason. The flip back is `new: false` on T6's, B2's and B3's off form (and the
+   check's `expectedNew`).
+2. "New:" on a fresh install's tour too? **Default: yes**: it marks what this version adds.
+3. Clipboard and Sound as its own card, before Settings, lighting the Settings button? **Default:
+   yes.**
+4. Rows that follow this Mac (left out or reworded) rather than always shown? **Default: yes.**
+5. Larger Picture's row on the phone's laptop card? **Default: yes** (the Settings card would miss
+   it in a tour taken sideways).
+6. A fresh install stores version 2 at its first stream screen, and Debug writes it only with
+   `-SillTourState saved`? **Default: yes.**
+7. The site marker's name, "Tour 0.6", if the tour ships in 0.6.1? **Default: 0.6**, per the
+   handoff; renaming is one sed.
+
+### Results (2026-10-31)
+
+Built on main at e4d30349. Every build with `nice -n 10` while the load average was under 20; the
+test hosts only `SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1
+SILL_TEST_NO_SCREEN=1 .build/release/SillHost --synthetic`, one at a time, each killed by PID within
+55 s, no input sent (no `in.` counter in any host's lines); three private simulators, created for this
+and deleted after; photos with `simctl io … screenshot` or Tests/duorig's `shot`.
+
+- **H2, the check** (`Tests/checks/tour`): 732,447 checks, 0 failed (main: 111,189); its mutants 126 of
+  126 caught (main: 84). The 42 new: the version rule's 8 (not raised, `>` and `==` for `>=`, a cleared
+  memory that keeps Skip or what was seen, the upgrade not written, no version read as this one, a write
+  when current), the cards' and targets' 5 (sharing missing sideways, lighting the picture, after
+  Settings; Menus dropped from the bar's targets sideways and in the halves), the words that follow
+  TourFeatures 18, and "New:"'s 11 (dropped, not marked, not semibold, no space, another word, not
+  read by VoiceOver, the pinch unmarked or on iPad only, the swipe's and Menus' rows marked, the
+  hardware keyboard's unmarked); seven patterns of main's mutants follow the new lines, and "Aa not said
+  to be a window's" became "B3's Aa clause dropped". `Tests/checks/run-all.sh`: all 62 (565 s).
+- **H1**: the iOS app Debug for the generic simulator (CI's command, Xcode 27.1, 27A9275), Release for
+  the simulator and Debug for a generic device, unsigned: only the known StreamClient capture warning
+  (StreamClient.swift:4196). The first commit's state (TourPolicy, its check, StreamScreen's and
+  MacMenuButton's wiring, with main's TourOverlay and ContentView) built for the simulator on its own.
+- **H3**: no `.sheet(`, `.popover(` or TipKit in Tour*.swift (the one hit is the comment that forbids
+  them); TourPolicy imports Foundation and CoreGraphics alone; nothing in `Sources`, `Packaging`,
+  `Scripts`, `iOSClient/Info.plist`, the privacy manifest or the project file differs from main.
+- **H4, nothing else changed**: the mock with no tour argument, with `-SillSettings 1` and with
+  `-SillMenusOpen 1`, at 1000x710, 710x1000, 500x710 and 710x500 on the iPad simulator and at 951x669
+  (open flat) and 466x678 (the cover) on the Duo's, main's build against the branch's: 18 of 18
+  identical. (Main's first photo of Settings at 710x1000 differed from its own retake by 6 pixels at a
+  step of 1; the retake equals the branch's.)
+- **S1–S3, the photos** (each looked at; in `~/Downloads/sill-handoff/tour-0-6/`, INDEX.md):
+  - A private iPad Pro 13-inch (M5) simulator, iOS 27.0 (24A434), the mock: 1000x710 (4 cards),
+    710x1000 (5), 500x710 (5), 440x894 as a phone (5) and with Larger Picture (bar, laptop), 832x440 as
+    a phone (4); Virtual Display on (the bar sideways and upright, the laptop card), no menus
+    ("Windows", no Menus row), `nosound` ("Clipboard"), `legacy` (the update row, no swipe row, the
+    off form), Paste right away off, gestures off, Take the Tour from Settings; VoiceOver's runs at
+    1000x710, 710x1000 and 440x894. 47 photos at the default text size and 47 at
+    accessibility-extra-large. The rings sit on their controls; on a phone the ring takes in the row-2
+    Menus button, so `frame(in:)` includes its offset (the bar card's tail at 216, the union with the
+    button there; 174 without it).
+  - A private iPhone Duo simulator, iOS 27.1 (24A94232, the older of the two 27.1 runtimes installed),
+    folded by Tests/duorig: book 4, open flat sideways 4, laptop 5, open flat upright 5, the cover
+    upright 5, on its side 4, and VoiceOver's in the book and laptop poses; 34 at each text size. In the
+    book pose each card stays on its targets' page; in the laptop pose none crosses the fold; "iPhone",
+    no Pencil row, no Larger Picture row, "Turn your iPhone on its side".
+  - Found: on a phone (an iPhone upright and sideways, the Duo's cover either way) the bar card, five
+    rows with the Menus button, scrolls at the default text size: its last one or two rows are under
+    the card's fade, the footer in reach and the scroll indicator flashing as it shows (the risk this
+    plan took, 5). At 500x710, the iPad's compact halves, the laptop card (five rows now) fills its room
+    exactly and its last row scrolls. At accessibility sizes most cards scroll, as before.
+- **The accessibility tree** (`-SillAXDump 3` at 1000x710 and 710x1000, every card): each title
+  "…, step N of M" with its hint, each new row's label "New: …".
+- **S4, live**: a private iPhone 18 Pro Max simulator, iOS 27.0, the normal app against the test host,
+  `-SillTour` each card upright (5: "Windows", for a synthetic host sends no menus; Virtual Display's
+  off form; the clipboard's and the sound's rows; Larger Picture's on the laptop card) and with
+  `-SillOrientation landscape` (4), at both text sizes, each card clear of the Dynamic Island and the
+  home indicator. These photos carry this Mac's name and stay out of the handoff folder.
+- **S5, the upgrade, live** on that simulator (the app container's preferences read with plutil after
+  each session):
+  - (A) main's build (e4d30349) with `-SillTourState saved -SillTourPress next@1.5` passed its four
+    cards: stored `Sill.tourSeen` touch, bar, settings, laptop, no `Sill.tourVersion`. This build over
+    it, no `-SillTourState`: no tour, nothing written. With `saved`: "tour: memory of tour version 1
+    (none stored) (seen: touch, bar, settings, laptop) cleared: version 2 shows once", the first card
+    "1 of 5" 1.13 s after the picture; stored version 2, nothing seen. All five passed, then a
+    relaunch: "nothing owed here".
+  - (B) main's Skip on its first card (main itself then reads "seen: none; skipped"): this build
+    "(seen: none; skipped) cleared", 1 of 5 at 1.14 s.
+  - (C) a fresh install with `saved`: cleared (nothing stored), version 2 written at the first stream
+    screen, the five cards, Done, then nothing owed.
+  - (D) `-Sill.tourVersion 3` over the full memory: no tour, the stored version still 2. (E) version 3
+    over version 1's four seen: kept as it is, the new card alone (1 of 1), nothing written. (F)
+    `-Sill.tourVersion 1` over the full memory: cleared once, the whole tour.
+  - Two traps of the harness, not of the code: `xcrun simctl spawn … defaults write me.saffer.sill`
+    writes a domain the app also reads, outside its container, which an uninstall keeps (it planted a
+    memory in one run, deleted with `defaults delete` before the run above); and a launch terminated
+    about 2 s after main's stand-in Skip lost that Skip's write (main read it back once the session
+    lasted 10 s).
+- Not verified: a device; a Release build's own upgrade (`-SillConnect` is DEBUG only); TestFlight.
+
+### The review and its fixes (2026-10-31)
+
+One review of 228f3aec (two lenses: the words against the code, and the engineering); nothing had to
+be fixed before a merge. Its six findings, each checked here first; one commit per theme:
+
+1. **The Menus and three-finger rows carried no "New:"** (should-fix: the task's "each marked with a
+   visible 'New:' prefix" names both). Taken: both are marked, and so is Virtual Display's row in both
+   forms (finding 5), since the old tour told of none of them (280fa7dd, open question 1).
+2. **support.html's Universal Control line** (should-fix): Noah closed that case as iPadOS's own with
+   no support line asked. Taken out, with the checklist's grep and marker words and the
+   device step (19866a1e).
+3. **support.html's Paste from Other Apps line** (nit: not the tour's). Taken out too, for a change of
+   its own if wanted.
+4. **The Duo's cover at accessibility-extra-large**: the bar card's first view shows its title on two
+   lines and only the first row's symbol above the fade. Left as it is: the tour's rule (the words
+   scroll beside the controls, Skip and Next in reach), as the card scrolled there before; Noah's call
+   (a shorter title on narrow rooms, or no hardware-keyboard row on the cover).
+5. **Virtual Display's off form unmarked**: marked (with 1).
+6. **Small wording points** (c3319e18): (a) the Paste row now says where Paste is ("…: **Paste
+   on ‹Mac›**, on the note Sill shows then or in Settings, puts it…"); (b) Reverse Scrolling's row says "the on-screen
+   trackpad’s two-finger scroll" (ScrollDirection turns a connected trackpad's and a wheel's never);
+   (c) the hardware keyboard's rows use `keyboard.badge.ellipsis` (iOS 14), not `escape`, which draws
+   as a circular arrow; (d) CLAUDE.md's clipboard entry on this branch already says a password
+   manager's copy arrives like any other since 2026-10-29: no change.
+
+Verified after the fixes: `Tests/checks/tour` 732,447 checks, 0 failed, and 126 of 126 mutants (the
+three "marked New" mutants now "unmarked" ones); `run-all.sh`, all 62; the iOS app Debug for the
+generic simulator (CI's command, Xcode 27.1), Release for the simulator and Debug for a generic device,
+each with `nice -n 10` under a load average of 20, only the known StreamClient capture warning
+(StreamClient.swift:4196); the 94 iPad photos (a private iPad Pro 13-inch, iOS 27.0) and the 68 Duo
+photos (a private iPhone Duo, iOS 27.1 24A94232, Tests/duorig's poses) taken again with the same
+arguments and looked at as contact sheets, both simulators deleted after. The upgrade rule did not
+change, so S5 was not run again.
+
+### Untested, for Noah (the iPad mini and the iPhone 15 Pro)
+
+A Debug build from Xcode shows the tour by itself only with `-SillTourState saved` (the scheme's
+Arguments, or `xcrun devicectl device process launch --device <UDID> --terminate-existing
+me.saffer.sill -SillTourState saved`); one without it never stores the version, so TestFlight still
+shows the tour once. Delete the app to see it fresh.
+
+- **P1, the update**: over 0.5.1 from the App Store, or the current TestFlight build, with the old tour
+  done, install TestFlight 0.6: a second after the first picture, untouched, the tour comes back, four
+  cards sideways, five upright, "New:" in blue. After Done, nothing at the next session or after a
+  relaunch.
+- **P2**: the same after having skipped the old tour.
+- **P3, each New row true on the device**: the pinch (1× to 5×, two fingers move the picture, one finger
+  clicks what shows); with Sill for Mac 0.6, Virtual Display "is on", a window picked keeps updating
+  when covered, and Aa sizes it; Menus lit and opening the app's menus; copy on the Mac and paste on the
+  iPad, copy in Notes, back to Sill, Paste on ‹Mac› pastes at the cursor; Send Audio plays and Mute
+  silences it; Reverse Scrolling; Hold to Show Window Controls; with the Magic Keyboard, keys and Esc
+  reach the Mac without the Keyboard button, which brings up the keyboard bar.
+- **P4, the iPhone**: upright five cards with Larger Picture's row on the laptop card, sideways four,
+  every ring on its control, every card clear of the Dynamic Island and the home indicator; the bar
+  card's last rows scroll (found here): say whether to shorten it.
+- **P5**: against Sill for Mac 0.5.1, if at hand: "Update Sill on ‹Mac›…", and Virtual Display's row
+  in its "in Settings" form.
+- **P6**: Virtual Display off in Settings, then Take the Tour: the row's other form.
+- **P7, VoiceOver**: no touch card; rows read "New: …"; titles "step N of M"; the bar's Virtual Display
+  row says "Text size… swipe up or down"; no Reverse Scrolling or hold rows.
+- **P8**: the largest text size: each card beside what it lights, its words scrolling, Skip and Next in
+  reach.
+- **P9, a hardware keyboard**: the tour shows with it attached; Return goes on; Esc skips; afterwards
+  keys reach the Mac again.
+- **P10**: Skip on the new tour's first card: no tour at the next session, nor upright.
+- **P11**: Take the Tour shows the new cards, and its Skip only closes it.
+- **P12**: on an iPhone Duo, if at hand: the six poses.
 

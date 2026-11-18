@@ -4,7 +4,7 @@ import Foundation
 public enum StreamSource: Codable, Hashable {
     case none
     case window(UInt32)   // CGWindowID, stable for the life of the window
-    case desktop          // the Mac's main display
+    case desktop          // one of the Mac's displays: the main one unless a device stepped to another (kind 47)
 }
 
 /// One on-screen Mac window, as the client sees it. WindowList order is stable: first seen first.
@@ -68,6 +68,38 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// How many stops the Desktop has (DesktopDisplays: the Mac's displays, never Sill's own nor macOS's
+    /// stand-in, one per mirror set), 2 or more, and which of them it shows, or comes back to while a
+    /// window streams, counting from 1 in the cycle's order: 1 is the main display, then each display to
+    /// its right as they sit, wrapping round (issue #91, docs/virtual-desktop-plan.md §1). A device's
+    /// Desktop button then reads "Desktop 2", with a dot per stop while the Desktop streams, and a tap
+    /// then sends kind 47 for the next. Left out with one stop, while the Mac is locked or another user
+    /// is on its screen, and by every host before this, to which a device sends no kind 47. Set after the
+    /// initializer, as `keyRepeat`.
+    public var desktopDisplays: Int?
+    public var desktopDisplay: Int?
+    /// Each stop's name in that order (NSScreen's, "DELL U2723QE"; empty when it has none), for
+    /// VoiceOver's value ("Display 2 of 3, DELL U2723QE") and, later, a list to choose from (PR #296's).
+    /// With `desktopDisplays` only.
+    public var desktopDisplayNames: [String]?
+    /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
+    /// screen is locked, or another user, the login window or nobody is on its console. True, with no
+    /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and
+    /// sends no thumbnail, icon, app list, sound, clipboard, pointer or cursor shape. Left out otherwise,
+    /// and by every host before 2026-10-31, whose lists are what they were. A device covers its stream
+    /// and says why (`LockedMac`). Set after the initializer, as `keyRepeat`.
+    public var locked: Bool?
+    /// With `locked`: true while this Mac's console is not this session's (another user's session, the
+    /// login window, or none), left out while its own screen is locked. A device words its cover by it:
+    /// nothing typed reaches the Mac then (`LockedMac.Why`).
+    public var offConsole: Bool?
+    /// With `locked` and `offConsole`: true while the Mac shows this session anyway, its user's switch Show
+    /// this account while another user is on the screen on (docs/off-console-plan.md, issue #316): the list
+    /// has its windows, the Mac streams this session's own desktop or a window picked, to look at, and nothing
+    /// a device sends acts on it. Sent only to a device whose hello said it shows it (`Hello.offConsoleView`),
+    /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
+    /// is (`LockedMac.viewLine`).
+    public var offConsoleView: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
@@ -75,6 +107,112 @@ public struct WindowList: Codable {
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.clipboard = clipboard
     }
+}
+
+/// A locked Mac on the device (`WindowList.locked`, `offConsole`; docs/locked-mac-plan.md): why, the one
+/// line the Apps drawer and the Settings panel's header show where the Mac's windows would be, and the
+/// cover over the stream (`Shade`) with its words, which VoiceOver reads as they are. Pure; checked with
+/// the host's rule (Tests/checks/lock-policy).
+public enum LockedMac {
+    /// Why a Mac's list says `locked`: its own screen is locked, or it is switched to another user (or
+    /// to the login window).
+    public enum Why: Equatable, Sendable { case screenLocked, otherUser }
+
+    /// Why `list` says locked; nil for a list that does not (every host before 2026-10-31's).
+    public static func why(_ list: WindowList) -> Why? {
+        guard list.locked == true else { return nil }
+        return list.offConsole == true ? .otherUser : .screenLocked
+    }
+
+    /// What covers the stream: the Mac locked, then, after the unlock, until its picture comes back.
+    public enum Shade: Equatable, Sendable {
+        case locked(Why)
+        case unlocking
+    }
+
+    /// The cover after a window list that says `why` (nil: not locked): the Mac switched to another user
+    /// while it says so; this session's own screen locked shows no cover, since the Mac streams its lock
+    /// screen (`LockPolicy.lockScreenStreams`); after a cover, "Unlocking…" until the next keyframe
+    /// (`shade(_:frameIsKeyframe:)`, the lock screen's or the window's); else none.
+    public static func shade(_ was: Shade?, list why: Why?) -> Shade? {
+        if why == .otherUser { return .locked(.otherUser) }
+        return was == nil ? nil : .unlocking
+    }
+
+    /// The cover after a frame: a keyframe ends "Unlocking…" (the picture is back); nothing else does.
+    public static func shade(_ was: Shade?, frameIsKeyframe: Bool) -> Shade? {
+        was == .unlocking && frameIsKeyframe ? nil : was
+    }
+
+    /// How long "Unlocking…" waits for the picture at most before it goes anyway.
+    public static let unlockingTimeout: Double = 4
+
+    // MARK: The off-console view (docs/off-console-plan.md)
+
+    /// What this device says in its hello (`Hello.offConsoleView`): it shows a Mac's off-console view.
+    public static let viewGeneration = 1
+
+    /// Whether `list` is the off-console view's: this session's own desktop and windows, to look at.
+    public static func view(_ list: WindowList) -> Bool {
+        list.locked == true && list.offConsole == true && list.offConsoleView == true
+    }
+
+    /// Whether the stream is covered (and its picture cleared once, as it comes): only for a Mac off console
+    /// that shows nothing of itself; the off-console view's picture is live.
+    public static func covers(_ why: Why?, view: Bool) -> Bool { why == .otherUser && !view }
+
+    /// The cover after a window list, the off-console view's included: none for it (its picture is live),
+    /// else as `shade(_:list:)`.
+    public static func shade(_ was: Shade?, list why: Why?, view: Bool) -> Shade? {
+        if view, why == .otherUser { return nil }
+        return shade(was, list: why)
+    }
+
+    /// The line over the stream while the off-console view lasts (where the link's line goes), three lines at
+    /// most; VoiceOver hears it once as it comes.
+    public static let viewLine = "Your account’s own desktop, not this Mac’s screen. Taps and keys reach it once your account is back on the screen."
+
+    /// The Settings panel's header and the Apps drawer, above its open apps, in the off-console view.
+    public static let viewPanelLine = "Another user is on this Mac’s screen. You’re seeing your account’s own desktop and windows, not the screen. Taps, keys and opening apps wait until your account is back on it."
+
+    /// What VoiceOver hears after a dimmed Aa's name and value in the off-console view (no window is sized).
+    public static let viewTextScaleHint = "Available once your account is back on this Mac’s screen."
+
+    /// The Apps drawer's and the Settings panel's line, where the Mac's windows would be. Another user's
+    /// is the cover's title and line together, in Noah's words (2026-11-02), with no Mac's name in them.
+    public static func line(mac: String, why: Why) -> String {
+        switch why {
+        case .screenLocked: return "\(name(mac)) is locked. Unlock it to see its windows."
+        case .otherUser: return "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with Sill."
+        }
+    }
+
+    /// The cover's title. Another user's is Noah's words (2026-11-02: "Keep the current overlay, change the
+    /// text to …"), with no Mac's name in them.
+    public static func title(mac: String, shade: Shade) -> String {
+        switch shade {
+        case .locked(.screenLocked): return "\(name(mac)) is locked"
+        case .locked(.otherUser): return "Another user started controlling this Mac."
+        case .unlocking: return "Unlocking…"
+        }
+    }
+
+    /// The cover's line under its title. `paired`: this session's key is the Mac's (its settings state's
+    /// `sessionPaired`; nil before it has said): only then do keys typed here reach a locked screen.
+    /// Another user's, Noah's words too, is the same either way: nothing typed here reaches that session.
+    public static func detail(shade: Shade, paired: Bool?) -> String? {
+        switch shade {
+        case .locked(.screenLocked):
+            return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
+                                  : "Its windows come back once it is unlocked."
+        case .locked(.otherUser):
+            return "Log in to your account to reactivate screen sharing with Sill."
+        case .unlocking:
+            return nil
+        }
+    }
+
+    private static func name(_ mac: String) -> String { mac.isEmpty ? "The Mac" : mac }
 }
 
 public struct LaunchApp: Codable {

@@ -13,6 +13,19 @@ M = [
      "        if IPBytes.isLinkLocal(source) { return .lan }\n        switch kind {\n        case .peerToPeer: return .direct\n        case .tunnel: return .vpn\n        default: break\n        }"),
     ("private sources are internet", "if onLink || IPBytes.isPrivate(source) { return .lan }", "if onLink { return .lan }"),
     ("scope ignored", "if let scope, !scope.isEmpty { return scope }", ""),
+    # Issue #326: a connection from this Mac itself at the remote door is a relay on it.
+    ("loopback at the remote door stays loopback (the rule before #326)", "        case .loopback: return .relay\n", "        case .loopback: return .loopback\n"),
+    ("this Mac's own LAN address not a relay", "        case .lan: return isThisMac(remote, interfaces: interfaces) ? .relay : .lan\n", "        case .lan: return .lan\n"),
+    ("every LAN source a relay", "        case .lan: return isThisMac(remote, interfaces: interfaces) ? .relay : .lan\n", "        case .lan: return .relay\n"),
+    ("this Mac at its own tunnel address a relay", "        case .direct, .vpn, .internet, .relay: return o\n",
+     "        case .vpn: return isThisMac(remote, interfaces: interfaces) ? .relay : .vpn\n        case .direct, .internet, .relay: return o\n"),
+    ("own addresses compared with the kernel's scope bytes", "interfaces.owner[IPBytes.unscoped(source)] != nil", "interfaces.owner[source] != nil"),
+    ("loopback not this Mac", "        return IPBytes.isLoopback(source) || interfaces.owner[IPBytes.unscoped(source)] != nil\n",
+     "        return interfaces.owner[IPBytes.unscoped(source)] != nil\n"),
+    ("a relay refused with internet access off", "        case .loopback, .lan, .vpn, .relay: return true\n",
+     "        case .loopback, .lan, .vpn: return true\n        case .relay: return internetAccess\n"),
+    ("the home door admits a relay", "o == .loopback || o == .direct || o == .lan", "o == .loopback || o == .direct || o == .lan || o == .relay"),
+    ("a relay labelled by address", '        case .relay: return "through a relay on this Mac"\n', '        case .relay: return "by address"\n'),
 ]
 caught = 0
 for name, old, new in M:
