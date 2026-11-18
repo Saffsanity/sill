@@ -43,6 +43,8 @@ struct AppIconPicker: View {
                     tile(choice, selected: choice == current)
                 }
             }
+            // The first ring's edge 14 pt in, where the rows' words start, while the column leaves room for it.
+            .padding(.horizontal, max(0, 14 - (column - side - 10) / 2))
             if failed {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
@@ -51,9 +53,9 @@ struct AppIconPicker: View {
                 .font(.footnote)
                 .foregroundStyle(Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
             }
         }
-        .padding(.horizontal, 8)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
