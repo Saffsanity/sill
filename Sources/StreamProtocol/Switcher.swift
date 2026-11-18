@@ -60,9 +60,6 @@ public struct WindowList: Codable {
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
     public var clipboard: Int?
-    /// True: this host takes files dropped on its windows (kinds 34 and 35, FileChunk and FileDrop).
-    /// Nil from hosts before file drops, and from synthetic test hosts.
-    public var fileDrop: Bool?
     /// Whether this host repeats a device's key held down (KeyRepeat, #162): 1 is a key repeated between
     /// its down and its up, after the Mac's own Delay Until Repeat and at its Key Repeat Rate, each repeat
     /// the key's down again with the autorepeat flag. Nil from every host before 2026-10-29: a device then

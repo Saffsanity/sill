@@ -959,8 +959,6 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
-    /// Whether this session's Mac accepts dropped files (`WindowList.fileDrop`, kinds 34 and 35).
-    @Published var hostFileDrop = false
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
     /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
     /// windows then, it streams a black placeholder, and the Apps drawer and the Settings panel's header
@@ -3730,7 +3728,6 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
-        hostFileDrop = false
         hostKeyRepeat = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
@@ -4440,7 +4437,6 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
-                if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = (list.fileDrop == true) }
                 self.hostKeyRepeat = list.keyRepeat
                 self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the

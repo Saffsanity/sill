@@ -742,10 +742,6 @@ struct HostSettingsPanel: View {
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
                         .id(Self.clipboardRowsID)
                 }
-                if client.hostFileDrop {
-                    RowDivider()
-                    SendFileRow(client: client, mac: mac)
-                }
             }
             if clipboardOn, let note = client.clipboardNote {
                 Footnote(text: note.text, warning: note.warning, top: 6)
@@ -753,13 +749,6 @@ struct HostSettingsPanel: View {
                     .accessibilityHidden(true)      // announced as it came
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
-        } else if client.hostFileDrop {
-            Rows {
-                SendFileRow(client: client, mac: mac)
-            }
-            if let note = client.clipboardNote {
-                Footnote(text: note.text, warning: note.warning, top: 6)
-            }
         }
         Rows {
             Toggle(isOn: $reverseScroll) {

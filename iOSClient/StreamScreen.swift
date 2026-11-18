@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import UniformTypeIdentifiers
 import StreamProtocol
 
 // MARK: - Palette
@@ -470,9 +469,6 @@ struct StreamScreen: View {
             }
             .coordinateSpace(.named(TourSpace.name))
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
-            .onDrop(of: [.item], isTargeted: nil) { providers, location in
-                client.handleFileDrop(providers, at: location, in: tourTargets[.stream])
-            }
             .onPreferenceChange(KeyboardToggleFrameKey.self) { keyboardToggleFrame = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
             // A thumbnail's lights hang from the strip, which Larger Picture's arrangement has none

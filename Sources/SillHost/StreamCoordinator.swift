@@ -370,7 +370,6 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
-    private lazy var fileDrops = FileDrops()
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -615,7 +614,6 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
-                self.fileDrops.clientLeft(connection)
                 self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
@@ -1428,14 +1426,6 @@ package final class StreamCoordinator {
             if !clipboard.received(message.payload, from: connection, who: deviceName(connection)) {
                 refusedWhileLocked(.clipboard, message, from: connection)
             }
-        case .fileChunk:
-            guard !synthetic else { return }
-            fileDrops.chunk(message.payload, device: deviceName(connection), from: connection)
-        case .fileDrop:
-            guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
-            let x = min(max(d.x, 0), 1), y = min(max(d.y, 0), 1)
-            let point = currentSourceRect().map { CGPoint(x: $0.minX + x * $0.width, y: $0.minY + y * $0.height) }
-            fileDrops.drop(d, at: point, device: deviceName(connection), from: connection)
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
