@@ -1,4 +1,5 @@
 import Foundation
+import SillAudio
 import StreamProtocol
 
 /// A source of the Mac's sound: ScreenCaptureKit's audio-only stream (AudioCapture), or a synthetic

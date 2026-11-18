@@ -4,9 +4,16 @@ Where everything is, file by file: CLAUDE.md's "Layout" until 2026-11-18, moved 
 Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-AND-RUN.md.
 
 - `Package.swift` — SwiftPM. Products: `StreamProtocol` (shared wire format,
-  iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
+  iOS + macOS), `SillAudio` (the sound's shared code, iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
   (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
   is a library target with no product, so the iOS project never sees it.
+- `Sources/SillAudio/` — the sound's code both apps link (AudioToolbox and Foundation only, public, nothing of
+  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; `Tests/checks/audio-codec`),
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time; the `audio-codec` check and the sound
+  harness's device compile it too), `AudioPacketizer` (`PCMChunk` in, `AudioBlock`s out: blocks, stamps and
+  segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the device's timing of the Mac's sound; pure,
+  `Tests/checks/audio-playout`); SillHostCore depends on it and the iOS project links its product (pbxproj
+  AA05, DA01).
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
@@ -360,10 +367,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   lock; never run by a test),
   `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
   `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
-  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
-  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
-  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
-  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  click at each whole second of the stamps' clock; pure) and `AudioSourceRule`
+  (`AudioKey`, `AudioSourceRule`, `PCMLayout`, `AudioBufferTally`: the host's
+  rules around SillAudio's `AudioPacketizer` and `AudioEncoder`; pure,
+  `Tests/checks/audio-packetizer`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
   and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
@@ -602,7 +609,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
   127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
-  harness's device: every kind 43 decoded with iOSClient/AudioDecoder.swift and
+  harness's device: every kind 43 decoded with Sources/SillAudio/AudioDecoder.swift and
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
@@ -985,13 +992,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   black where the video is; Disconnect waits up to 300 ms for a fresh keyframe
   first (kind 44, every Mac; one that skips it, Sill for Mac 0.5.1, costs that
   pause, its picture the keyframe kept).
-  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
-  AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
-  `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
+  `AudioOutput` (its queue, SillAudio's `AudioDecoder` and `AudioPlayout`, and the
   engine; no video frame handed to its queue before the session's first format, the last 32 kept
   for the guard) and `StreamClient+Audio` (this device's mute, `soundMuted`, the Settings panel's
-  Mute; `macHasSound`, whether it shows): pbxproj AA01–AA04; the host's `audio-codec` check and
-  the sound harness's device compile AudioDecoder too. The Settings panel (`HostSettingsPanel`)
+  Mute; `macHasSound`, whether it shows): pbxproj AA03–AA04, and AA05/DA01 for SillAudio's product
+  (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's

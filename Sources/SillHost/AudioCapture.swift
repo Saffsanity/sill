@@ -1,6 +1,7 @@
 import Foundation
 import CoreMedia
 import ScreenCaptureKit
+import SillAudio
 
 /// The Mac's sound from ScreenCaptureKit (docs/audio-plan.md §4.2): a second, audio-only SCStream, so
 /// the picture's restarts (a resize, a rotation, an Aa step, a rate or quality change, the encoder

@@ -4,10 +4,10 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = {
-    "AudioEncoder.swift": "Sources/SillHost/AudioEncoder.swift",
-    "AudioPacketizer.swift": "Sources/SillHost/AudioPacketizer.swift",
+    "AudioEncoder.swift": "Sources/SillAudio/AudioEncoder.swift",
+    "AudioPacketizer.swift": "Sources/SillAudio/AudioPacketizer.swift",
     "TestTone.swift": "Sources/SillHost/TestTone.swift",
-    "AudioDecoder.swift": "iOSClient/AudioDecoder.swift",
+    "AudioDecoder.swift": "Sources/SillAudio/AudioDecoder.swift",
 }
 MUTANTS = [
     ("the bitrate 64 kbps", "AudioEncoder.swift", "var rate = UInt32(bitrate)", "var rate = UInt32(64_000)"),
