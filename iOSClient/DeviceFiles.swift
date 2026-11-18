@@ -95,6 +95,8 @@ final class DeviceFiles: @unchecked Sendable {
     /// The transfer as the chip shows it, at each change (throttled to `publishEvery` while parts go).
     /// On `queue`.
     var onSnapshot: ((Snapshot) -> Void)?
+    /// A send dropped because another transfer runs (`send`'s race with its start), on `queue`.
+    var onDropped: (() -> Void)?
     /// TEST ONLY (the device-files check): the window, instead of FileFlow's.
     var windowOverride: Int?
     /// How often the chip's percentage moves at most.
@@ -203,6 +205,7 @@ final class DeviceFiles: @unchecked Sendable {
         // and the running one's chip stays.
         guard preparing == nil, out == nil, !sources.isEmpty else {
             for s in sources where s.ownCopy { Self.deleteOwnCopy(s.url) }
+            if !sources.isEmpty { onDropped?() }
             return
         }
         preparing = Preparing(serial: serial, connection: connection, sources: sources, snapshot: snapshot)

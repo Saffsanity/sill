@@ -27,9 +27,14 @@ extension StreamClient {
     private var macWord: String { macName.isEmpty ? "the Mac" : macName }
 
     /// What the Files rows and the share sheet's question offer now.
-    var filesOffering: FilePolicy.Offering {
-        FilePolicy.deviceOffers(connected: connected, hostFiles: hostFiles, hostVersion: hostVersion, locked: macLocked,
-                                sessionPaired: settings.host?.sessionPaired, sending: OutgoingFiles.holdsMoves(fileOut))
+    var filesOffering: FilePolicy.Offering { filesOffering(ignoringLocal: false) }
+
+    /// `ignoringLocal`: the Photos picker's items still loading (`showFilesLocally`, before DeviceFiles has
+    /// them) do not count as a transfer of this device's: the send they lead to is theirs.
+    private func filesOffering(ignoringLocal: Bool) -> FilePolicy.Offering {
+        let sending = fileOut.map { !$0.isOver && !(ignoringLocal && $0.serial == OutgoingFiles.localSerial) } ?? false
+        return FilePolicy.deviceOffers(connected: connected, hostFiles: hostFiles, hostVersion: hostVersion, locked: macLocked,
+                                       sessionPaired: settings.host?.sessionPaired, sending: sending)
     }
 
     /// Each window list's `files`: a file shared into Sill that waited for such a session is asked about now.
@@ -52,8 +57,9 @@ extension StreamClient {
     /// (a pick that finished after the Mac locked or the session ended).
     func sendFiles(_ sources: [DeviceFiles.Source]) {
         guard !sources.isEmpty else { return }
-        guard filesOffering == .yes, let c = connection else {
+        guard filesOffering(ignoringLocal: true) == .yes, let c = connection else {
             for s in sources where s.ownCopy { DeviceFiles.deleteOwnCopy(s.url) }
+            filesDropped()
             #if DEBUG
             print("files: \(sources.count) picked, not sent: the session offers \(filesOffering)")
             #endif
@@ -76,8 +82,17 @@ extension StreamClient {
     /// Something to show before DeviceFiles has a transfer: the Photos picker's items loading (`preparing`), or
     /// what could not be had of them (a stop with its reason), as the chip shows a transfer.
     func showFilesLocally(_ phase: OutgoingFiles.Phase, names: [String]) {
-        let s = OutgoingFiles(serial: 0, phase: phase, names: names, total: 0, acked: 0, since: ProcessInfo.processInfo.systemUptime)
+        let s = OutgoingFiles(serial: OutgoingFiles.localSerial, phase: phase, names: names, total: 0, acked: 0,
+                              since: ProcessInfo.processInfo.systemUptime)
         fileSnapshot(s)
+    }
+
+    /// A pick that never became a transfer (the session no longer took files, or one of this device's had
+    /// just started): the Photos picker's own "getting ready" goes, so nothing waits for it.
+    func filesDropped() {
+        guard let out = fileOut, out.serial == OutgoingFiles.localSerial, !out.isOver else { return }
+        fileOut = nil
+        endFilesBackgroundTask()
     }
 
     /// A snapshot of the transfer (DeviceFiles, or `showFilesLocally`): the chip and the rows, what

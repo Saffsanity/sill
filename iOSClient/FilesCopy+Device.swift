@@ -164,8 +164,10 @@ struct OutgoingFiles: Equatable {
         case stopped(reason: String, message: String?, byPeer: Bool, name: String?)
     }
 
-    /// A number for this transfer, new at each `send`.
+    /// A number for this transfer, new at each `send` (from 1); `localSerial` for what the client shows before
+    /// DeviceFiles has the files (the Photos picker's items loading, or what could not be had of them).
     let serial: Int
+    static let localSerial = 0
     var phase: Phase
     /// The files' names as sent, in order.
     let names: [String]

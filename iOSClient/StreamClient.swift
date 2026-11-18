@@ -980,6 +980,7 @@ final class StreamClient: ObservableObject {
     private(set) lazy var deviceFiles: DeviceFiles = {
         let files = DeviceFiles(link: link)
         files.onSnapshot = { [weak self] s in DispatchQueue.main.async { self?.fileSnapshot(s) } }
+        files.onDropped = { [weak self] in DispatchQueue.main.async { self?.filesDropped() } }
         return files
     }()
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
