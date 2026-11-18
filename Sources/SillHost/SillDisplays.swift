@@ -13,7 +13,11 @@ import ScreenCaptureKit
 /// - its lost callback: macOS removed it on its own (a sleep, display arbitration), handed to the role's `onLost`;
 /// - removing it;
 /// - telling the catalog which displays are Sill's (the stage's IDs, `WindowCatalog.stageDisplayIDs`, kept for the run,
-///   so a stage display that went is never one of the Desktop's stops).
+///   so a stage display that went is never one of the Desktop's stops);
+/// - macOS's reconfiguration callback (#200's, one for the process, never removed: `watchReconfiguration`);
+/// - the teardown at Quit and at the signals (`removeAll`, after the stage's window went home);
+/// - TEST ONLY, a test host's display that is only said to be made (`say`: SILL_TEST_HEADLESS), so the rules around a
+///   display run on loopback with nothing made: the seam a dry run goes through.
 ///
 /// What a role does with its display stays its own: the stage places its window, measures the menu bar and remakes the
 /// display for it; the coordinator decides when the Desktop's is made and when it goes (HeadlessDesktopPolicy.Watch).
@@ -34,6 +38,10 @@ final class SillDisplays {
 
     private var made: [SillDisplayRole: VirtualDisplay] = [:]
     private var listedBy: [SillDisplayRole: SCDisplay] = [:]
+    /// TEST ONLY: the roles whose display a test host said it made (`say`).
+    private var said: Set<SillDisplayRole> = []
+    /// What macOS's display changes call (`watchReconfiguration`), once registered.
+    private var onReconfigured: (@MainActor () async -> Void)?
     /// Bumped per display made, so a late termination callback for an old display is ignored (the stage's rule).
     private var generation = 0
     private var generations: [SillDisplayRole: Int] = [:]
@@ -44,6 +52,12 @@ final class SillDisplays {
 
     /// The role's display, while it exists.
     func display(_ role: SillDisplayRole) -> VirtualDisplay? { made[role] }
+
+    /// Whether the role has a display: one made, or (a test host's) one said to be made.
+    func exists(_ role: SillDisplayRole) -> Bool { made[role] != nil || said.contains(role) }
+
+    /// TEST ONLY: whether a test host said it made the role's display (`say`), with none made.
+    func isSaid(_ role: SillDisplayRole) -> Bool { said.contains(role) }
 
     /// ScreenCaptureKit's listing of the role's display, once `waitUntilListed` found it.
     func listed(_ role: SillDisplayRole) -> SCDisplay? { listedBy[role] }
@@ -113,11 +127,42 @@ final class SillDisplays {
     /// windows Sill put there went home (VirtualStage.releaseWindow, StageRelease).
     @discardableResult
     func remove(_ role: SillDisplayRole) -> CGDirectDisplayID? {
+        said.remove(role)
         listedBy[role] = nil
         guard let d = made.removeValue(forKey: role) else { return nil }
         let id = d.displayID
         d.destroy()
         return id
+    }
+
+    /// Quit and the signals (StreamCoordinator.shutdownForExit, once the stage's window went home through its own
+    /// `release`): every display Sill made goes at once, and what a test host said it made.
+    func removeAll() {
+        for role in SillDisplayRole.allCases { remove(role) }
+    }
+
+    /// TEST ONLY (a test host with SILL_TEST_HEADLESS): the role's display is said to be made, never made: no private
+    /// call, no ID; it exists (`exists`) until `remove`, and counts as one that came up for the guard's marker (a test
+    /// host's own, under SILL_TEST_MAKE_GUARD). The rules around it run as on a Mac; nothing reaches the window server.
+    func say(_ role: SillDisplayRole) {
+        said.insert(role)
+        makeGuard?.made(cameUp: true)
+    }
+
+    /// macOS's display changes (the lid opened, a monitor plugged in, back from a user switch, a display Sill made or
+    /// removed): `handler` on the main actor for each change macOS reports, its beginning left out. One callback for the
+    /// process, registered on the first call and never removed, its context unretained: safe only while one manager
+    /// lives as long as the process, which the coordinator's is (AppModel and the CLI each make one coordinator; the
+    /// assessment of 2026-11-18, note 11); a second would need it undone first. It needs the AppKit loop, as every
+    /// reconfiguration callback (VirtualDisplay.swift, "Event loop").
+    func watchReconfiguration(_ handler: @escaping @MainActor () async -> Void) {
+        guard onReconfigured == nil else { return }
+        onReconfigured = handler
+        CGDisplayRegisterReconfigurationCallback({ _, flags, context in
+            guard !flags.contains(.beginConfigurationFlag), let context else { return }
+            let displays = Unmanaged<SillDisplays>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in await displays.onReconfigured?() }
+        }, Unmanaged.passUnretained(self).toOpaque())
     }
 
     /// macOS tore the display down on its own (its termination handler; `destroy` may fire it too, which is ignored, as

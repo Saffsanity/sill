@@ -54,6 +54,7 @@ let hostFiles = ((try? FileManager.default.contentsOfDirectory(atPath: hostFolde
 check(hostFiles.contains("SillDisplays.swift") && hostFiles.count > 50, "the host's sources read (\(hostFiles.count) in \(hostFolder.path))")
 let manager = source("Sources/SillHost/SillDisplays.swift")
 let stageSource = source("Sources/SillHost/VirtualStage.swift")
+let coordinator = source("Sources/SillHost/StreamCoordinator.swift")
 func occurrences(_ text: String, _ s: String) -> Int { s.components(separatedBy: text).count - 1 }
 
 // A display is made in one place: SillDisplays.make, and the self test's own (--virtual-display-selftest, a person's).
@@ -63,8 +64,8 @@ for f in hostFiles where f != "VirtualDisplay.swift" {
     let n = occurrences("VirtualDisplay(name:", source("Sources/SillHost/\(f)"))
     if n > 0 { makers.append("\(f) \(n)") }
 }
-check(makers == ["SillDisplays.swift 1", "StreamCoordinator.swift 1", "VirtualDisplaySelfTest.swift 1"],
-      "a display made only in SillDisplays.make, the self test and (until the headless display moves) the coordinator: \(makers)")
+check(makers == ["SillDisplays.swift 1", "VirtualDisplaySelfTest.swift 1"],
+      "a display made only in SillDisplays.make and the self test: \(makers)")
 check(manager.contains("d = try VirtualDisplay(name: role.name, widthPt: widthPt, heightPt: heightPt, scale: scale, refreshHz: refreshHz,\n"
                        + "                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial)"),
       "SillDisplays.make makes each display with its role's identity")
@@ -99,6 +100,37 @@ check(stageSource.contains("if let id = displays.remove(.stage) {\n            p
       "and removed there, with its line as before")
 check(stageSource.contains("displays.onLost[.stage] = { [weak self] in self?.displayLost() }"), "the stage hears its display lost")
 check(stageSource.contains("guarded = displays.guardHolds"), "the stage reads the guard there")
+
+// The Desktop's display (a Mac with no working screen's, PR #200; the coordinator decides when): through SillDisplays too.
+check(coordinator.contains("d = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale,"),
+      "the Desktop's display is made by SillDisplays")
+check(coordinator.contains("            displays.willMake(.desktop)\n            if testHeadlessFile != nil {"),
+      "its marker is written just before it is made, or said to be")
+check(coordinator.contains("_ = await displays.waitUntilOnline(d, timeout: 3)"), "it is waited for there, which takes the marker back")
+check(occurrences("displays.say(.desktop)", coordinator) == 1 && coordinator.contains("            if testHeadlessFile != nil {\n"),
+      "a test host's is only said to be made (SILL_TEST_HEADLESS)")
+check(coordinator.contains("let said = testHeadlessMade && headlessDisplay == nil\n        displays.remove(.desktop)"),
+      "it is removed there, a said one with it")
+check(coordinator.contains("private var headlessDisplay: VirtualDisplay? { displays.display(.desktop) }")
+      && coordinator.contains("private var hasHeadlessDisplay: Bool { displays.exists(.desktop) }"),
+      "the coordinator keeps no display of its own: it reads SillDisplays'")
+if let quit = coordinator.range(of: "package func shutdownForExit() {") {
+    let body = String(coordinator[quit.upperBound...].prefix(700))
+    let release = body.range(of: "stage.release()"), all = body.range(of: "displays.removeAll()")
+    check(release != nil && all != nil && release!.lowerBound < all!.lowerBound,
+          "Quit sends the stage's window home and removes its display, then every display Sill made")
+} else { check(false, "shutdownForExit not found") }
+check(manager.contains("func removeAll() {\n        for role in SillDisplayRole.allCases { remove(role) }"), "removeAll removes every role's display")
+check(manager.contains("        said.insert(role)\n        makeGuard?.made(cameUp: true)\n"),
+      "a said display counts as one that came up for a test host's guard")
+check(manager.contains("        said.remove(role)\n        listedBy[role] = nil\n"), "remove forgets a said display too")
+// macOS's reconfiguration callback: one, registered in SillDisplays alone, never twice, its beginning left out.
+check(hostFiles.filter { $0 != "SillDisplays.swift" && source("Sources/SillHost/\($0)").contains("CGDisplayRegisterReconfigurationCallback(") }.isEmpty
+      && occurrences("CGDisplayRegisterReconfigurationCallback(", manager) == 1,
+      "the reconfiguration callback is registered in SillDisplays alone")
+check(manager.contains("guard onReconfigured == nil else { return }"), "and only once")
+check(manager.contains("guard !flags.contains(.beginConfigurationFlag), let context else { return }"), "a change's beginning is no change")
+check(coordinator.contains("displays.watchReconfiguration { [weak self] in"), "the coordinator hears the changes through it")
 
 print("sill-displays: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

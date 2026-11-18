@@ -45,6 +45,28 @@ MUTANTS = [
     (STAGE, "W13 the stage ignores the guard", "guarded = displays.guardHolds", "guarded = false"),
     (STAGE, "W14 the stage's display waited for without the guard", "let online = await displays.waitUntilOnline(d, timeout: 3)",
      "let online = await d.waitUntilOnline(timeout: 3)"),
+    # The Desktop's display (the coordinator)
+    (COORD, "W15 the coordinator makes the Desktop's display itself again", "d = try displays.make(.desktop, widthPt:",
+     "d = try VirtualDisplay(name: \"Sill Desktop\", widthPt:"),
+    (COORD, "W16 the Desktop's marker not written", "            displays.willMake(.desktop)\n            if testHeadlessFile != nil {",
+     "            if testHeadlessFile != nil {"),
+    (COORD, "W17 the Desktop's display waited for without the guard", "_ = await displays.waitUntilOnline(d, timeout: 3)",
+     "_ = await d.waitUntilOnline(timeout: 3)"),
+    (COORD, "W18 a test host makes its display (no longer only said)", "                displays.say(.desktop)\n",
+     "                displays.willMake(.desktop)\n"),
+    (COORD, "W19 Quit leaves the Desktop's display", "        displays.removeAll()             // the Desktop's display", "        // the Desktop's display"),
+    (COORD, "W20 the coordinator registers its own callback again", "        displays.watchReconfiguration { [weak self] in\n",
+     "        CGDisplayRegisterReconfigurationCallback({ _, _, _ in }, nil)\n        displays.watchReconfiguration { [weak self] in\n"),
+    (COORD, "W21 the coordinator keeps a display of its own", "private var headlessDisplay: VirtualDisplay? { displays.display(.desktop) }",
+     "private var headlessDisplay: VirtualDisplay?"),
+    (MANAGER, "W22 a said display not taken as up for the guard", "        said.insert(role)\n        makeGuard?.made(cameUp: true)\n",
+     "        said.insert(role)\n"),
+    (MANAGER, "W23 remove keeps a said display", "        said.remove(role)\n        listedBy[role] = nil\n", "        listedBy[role] = nil\n"),
+    (MANAGER, "W24 removeAll misses the Desktop's display", "for role in SillDisplayRole.allCases { remove(role) }",
+     "for role in [SillDisplayRole.stage] { remove(role) }"),
+    (MANAGER, "W25 a change's beginning taken for a change", "guard !flags.contains(.beginConfigurationFlag), let context else { return }",
+     "guard let context else { return }"),
+    (MANAGER, "W26 registered at every call", "        guard onReconfigured == nil else { return }\n", ""),
 ]
 caught = 0
 originals = {}

@@ -210,8 +210,9 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
-    /// Fallback virtual display created for Desktop mode on a headless Mac or closed-lid MacBook (#61).
-    private var headlessDisplay: VirtualDisplay?
+    /// Fallback virtual display created for Desktop mode on a headless Mac or closed-lid MacBook (#61): the Desktop
+    /// role's display, made and removed by SillDisplays, as every display of Sill's.
+    private var headlessDisplay: VirtualDisplay? { displays.display(.desktop) }
     private var releasingHeadless = false
     /// The displays as this session has looked at them, and the rules for making Sill's display and for its going
     /// (HeadlessDesktopPolicy.Watch: Noah's test of 2026-11-12). Fed by macOS's reconfiguration callback, the
@@ -235,10 +236,11 @@ package final class StreamCoordinator {
     /// (HeadlessDesktopPolicy.testHeadlessList), so the rules and their looks run for real against a scripted list, and
     /// Sill's display is only said to be made (`testHeadlessMade`) and removed, never made. Nil otherwise.
     private let testHeadlessFile: String?
-    /// TEST ONLY: the display a test host with SILL_TEST_HEADLESS said it made (listed as Sill's, active).
-    private var testHeadlessMade = false
+    /// TEST ONLY: the display a test host with SILL_TEST_HEADLESS said it made (listed as Sill's, active): SillDisplays'
+    /// said Desktop display (`say`), never made.
+    private var testHeadlessMade: Bool { displays.isSaid(.desktop) }
     /// Sill's display exists (or, on a test host, was said to be made).
-    private var hasHeadlessDisplay: Bool { headlessDisplay != nil || testHeadlessMade }
+    private var hasHeadlessDisplay: Bool { displays.exists(.desktop) }
     /// Each connection's last viewport and whose came last, and the device that asked for the Desktop last (its pick of
     /// it, or a step: kind 47): Sill's display is that device's size and rate (VirtualDesktopSize.matched, Noah's decision
     /// of 2026-11-18), never only the last viewport any device sent.
@@ -1253,7 +1255,7 @@ package final class StreamCoordinator {
         // kept as a display that is no longer there, with the Desktop on macOS's stand-in until Sill quits.
         if let d = headlessDisplay, CGDisplayIsOnline(d.displayID) == 0 {
             print("Headless display: the virtual Desktop display (id \(d.displayID)) is gone; making it again.")
-            headlessDisplay = nil
+            displays.remove(.desktop)
             headlessHz = nil
             status.update { $0.sillDisplay = nil }
         }
@@ -1268,15 +1270,15 @@ package final class StreamCoordinator {
                 ?? VirtualDesktopSize.fallback
             let hz = VirtualDesktopSize.rate(viewportFPS: vp?.fps, limit: maxFPS)
             let device = vp == nil ? nil : matched.map { deviceName(id: $0) }
-            // The guard's marker from just before the private calls until the display is up or failed (#380).
-            displayGuard?.willMake("desktop")
+            // The guard's marker from just before the private calls until the display is up or failed (#380; SillDisplays:
+            // `make`'s throw, `waitUntilOnline`, a test host's `say`).
+            displays.willMake(.desktop)
             if testHeadlessFile != nil {
-                // TEST ONLY: said, never made; listed as Sill's from now on (`displaysNow`), at the size and rate a Mac's
-                // would be asked for.
-                testHeadlessMade = true
+                // TEST ONLY: said, never made (SillDisplays.say); listed as Sill's from now on (`displaysNow`), at the size and
+                // rate a Mac's would be asked for.
+                displays.say(.desktop)
                 headlessHz = Double(hz)
                 catalog.keepsSills = true
-                displayGuard?.made(cameUp: true)
                 print(VirtualDesktopSize.createdLine(came: asked, asked: asked, hz: hz, id: nil, device: device))
                 status.update { $0.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, hz: hz, device: device) }
                 lookAtDisplays(changed: true)
@@ -1284,23 +1286,23 @@ package final class StreamCoordinator {
             }
             let d: VirtualDisplay
             do {
-                d = try VirtualDisplay(name: "Sill Desktop", widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale,
-                                       refreshHz: Double(hz), vendorID: DesktopDisplays.sillVendor,
-                                       productID: DesktopDisplays.desktopProduct, serialNum: VirtualStage.serialNum + 1)
+                // Made where every display of Sill's is (SillDisplays): the Desktop's identity ("Sill Desktop", 0x5111,
+                // 0x0002, serial 2: DesktopDisplays.role's `.sillDesktop`).
+                d = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale,
+                                      refreshHz: Double(hz))
             } catch {
-                displayGuard?.made(cameUp: false)
                 print("Headless display: could not create virtual display (\(error)).")
                 return
             }
-            headlessDisplay = d
             catalog.keepsSills = true
-            _ = await d.waitUntilOnline(timeout: 3)
+            _ = await displays.waitUntilOnline(d, timeout: 3)
+            // Removed meanwhile (its switch turned off, this session off the console, Quit): SillDisplays destroyed it at
+            // once, and the line that removed it said so.
+            guard headlessDisplay === d else { return }
             let b = d.bounds
-            displayGuard?.made(cameUp: b.width > 0)
             guard b.width > 0 else {
                 // It never came up: nothing to show on it. Removed; the Desktop stays on what macOS shows.
-                headlessDisplay = nil
-                d.destroy()
+                displays.remove(.desktop)
                 catalog.keepsSills = false
                 print("Headless display: it never came up (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)× at \(hz) Hz); removed it.")
                 return
@@ -3338,8 +3340,7 @@ package final class StreamCoordinator {
 
     private func removeHeadlessDisplay(line: String = "Headless display: a display is online again; removed the virtual Desktop display.") {
         let said = testHeadlessMade && headlessDisplay == nil
-        headlessDisplay = nil
-        testHeadlessMade = false
+        displays.remove(.desktop)
         headlessHz = nil
         status.update { $0.sillDisplay = nil }
         lookAtDisplays(changed: true)
@@ -3367,19 +3368,17 @@ package final class StreamCoordinator {
     }
 
     /// macOS's display changes (the lid opened, a monitor plugged in, back from a user switch), for the watch, for
-    /// `releaseHeadlessDisplayIfDone` and for the Desktop's display (`followDesktopDisplay`). Never removed, and its
-    /// context unretained: safe only while one coordinator lives as long as the process, which AppModel and the CLI
-    /// each make once (the assessment of 2026-11-18, note 11); a second coordinator would need this undone first.
+    /// `releaseHeadlessDisplayIfDone` and for the Desktop's display (`followDesktopDisplay`): SillDisplays' one
+    /// reconfiguration callback, never removed, its context unretained: safe only while one coordinator (and its
+    /// SillDisplays) lives as long as the process, which AppModel and the CLI each make once (the assessment of
+    /// 2026-11-18, note 11); a second coordinator would need it undone first.
     private func watchDisplayChanges() {
-        CGDisplayRegisterReconfigurationCallback({ _, flags, context in
-            guard !flags.contains(.beginConfigurationFlag), let context else { return }
-            let coordinator = Unmanaged<StreamCoordinator>.fromOpaque(context).takeUnretainedValue()
-            Task { @MainActor in
-                coordinator.lookAtDisplays(changed: true)
-                coordinator.releaseHeadlessDisplayIfDone()
-                await coordinator.followDesktopDisplay(look: true)
-            }
-        }, Unmanaged.passUnretained(self).toOpaque())
+        displays.watchReconfiguration { [weak self] in
+            guard let self else { return }
+            self.lookAtDisplays(changed: true)
+            self.releaseHeadlessDisplayIfDone()
+            await self.followDesktopDisplay(look: true)
+        }
     }
 
     /// A wake (the Mac, or its displays): what this session sees may still be changing, so Sill's display waits
@@ -3702,8 +3701,7 @@ package final class StreamCoordinator {
         restoreFits(keeping: nil)
         stage.release()
         releaseCheck?.cancel()
-        headlessDisplay = nil
-        testHeadlessMade = false
+        displays.removeAll()             // the Desktop's display (the stage's went with its window, above)
         displayGuard?.quitting()         // a clean quit while a display was being made is no stop (#380's guard)
     }
 
