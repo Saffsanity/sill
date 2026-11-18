@@ -14,7 +14,8 @@
 //   C3 a window in the background, or one in front that does not qualify, added anywhere, never changes a
 //      choice made in front; nor does the order of windows used at different moments;
 // then every truth table: watched, heard, running, frozen, only in Picture in Picture (the device's own input,
-// its viewports and the Mac's copies wait), `stops` for each ending; `pauseEnds` at its edges; the words; then the Lifecycle by cases (start, pause, play, a pause
+// its viewports and the Mac's copies wait), `stops` for each ending, `endsSession` (#379: all 32 of its
+// inputs, and its cases by name); `pauseEnds` at its edges; the words; then the Lifecycle by cases (start, pause, play, a pause
 // looked at before and at its ten minutes, every ending, a second start, a play or pause while off) and
 // 20,000 random lives of one window against:
 //   L1 paused only while active, and a pause time exactly while paused;
@@ -25,7 +26,10 @@
 //      pause's own effects say when to look (its start plus the limit);
 //   L5 the effects never ask a stop while off, and AVKit's didStop leaves it off and not paused;
 //   L6 a willStart while it shows changes and asks nothing, one while off starts it playing and tells AVKit;
-//   L7 an ending or a look at the clock only asks (AVKit's didStop is what ends it).
+//   L7 an ending or a look at the clock only asks (AVKit's didStop is what ends it);
+//   L8 the session ends (`endsSession`, #379) exactly at AVKit's didStop or a failed start while it was on
+//      with Sill in the background, Sill in the foreground or the background at random at each event:
+//      never at a start, a play or pause, an ending's ask or a look.
 import Foundation
 
 var fails = 0, passes = 0
@@ -56,6 +60,7 @@ struct Rng {
 
 eq(P.defaultOn, false, "off by default (the plan's open question 1)")
 eq(P.pausedLimit, 600, "a pause stops it after 10 minutes, DeviceIdlePolicy.idleLimit's")
+eq(P.endSettle, 0.5, "ended in the background: looked at again half a second later (#379)")
 eq(S.off, S(active: false, paused: false), "off: not active, not paused")
 
 // MARK: Offered
@@ -197,6 +202,23 @@ eq(P.onlyInPictureInPicture(sceneForegroundActive: true, pip: playing), false, "
 eq(P.onlyInPictureInPicture(sceneForegroundActive: false, pip: paused), true, "away, paused: still only there (nothing of the device's own goes)")
 eq(P.onlyInPictureInPicture(sceneForegroundActive: false, pip: .off), false, "away without it: as before (Sill is suspended there)")
 
+// endsSession (#379): all 32 inputs against the rule written out, then its cases by name.
+for old in states {
+    for new in states {
+        for fg in [false, true] {
+            check("ends the session: \(old) to \(new), the app \(fg ? "in the foreground" : "in the background")",
+                  P.endsSession(from: old, to: new, appForeground: fg) == (old.active && !new.active && !fg))
+        }
+    }
+}
+eq(P.endsSession(from: playing, to: .off, appForeground: false), true, "the device locks while it plays, Sill away: the session ends")
+eq(P.endsSession(from: paused, to: .off, appForeground: false), true, "ten minutes paused, Sill away: the session ends")
+eq(P.endsSession(from: playing, to: .off, appForeground: true), false, "the return button, Sill in front: the session goes on")
+eq(P.endsSession(from: playing, to: paused, appForeground: false), false, "paused, Sill away: the connection is kept")
+eq(P.endsSession(from: paused, to: playing, appForeground: false), false, "played again, Sill away: goes on")
+eq(P.endsSession(from: .off, to: playing, appForeground: false), false, "iOS starts it as Sill leaves: goes on")
+eq(P.endsSession(from: .off, to: .off, appForeground: false), false, "Sill away without it: as before (iOS suspends Sill)")
+
 // pauseEnds at its edges.
 eq(P.pauseEnds(pip: paused, pausedAt: 100, now: 100), false, "paused just now: not yet")
 eq(P.pauseEnds(pip: paused, pausedAt: 100, now: 699.9), false, "9 min 59.9 s paused: not yet")
@@ -273,7 +295,9 @@ do {
 var rngLife = Rng(s: 0x291_0002)
 var lifeViolations: [String: Int] = [:], lifeFirst: [String: String] = [:]
 func lifeViolated(_ what: String, _ detail: String) { lifeViolations[what, default: 0] += 1; if lifeFirst[what] == nil { lifeFirst[what] = detail } }
-var starts = 0, pauses = 0, pauseStops = 0, endingStops = 0
+var starts = 0, pauses = 0, pauseStops = 0, endingStops = 0, sessionEnds = 0
+// L8's Sill in the foreground or not, from a generator of its own, so the lives' events are as before.
+var rngApp = Rng(s: 0x379_0001)
 for life in 0..<20_000 {
     var l = L()
     var t = 0.0
@@ -336,11 +360,19 @@ for life in 0..<20_000 {
         }
         // L7: only AVKit's events and a play or pause change it; an ending or a look only asks.
         if event >= 4, l != before { lifeViolated("L7 an ending or a look changed it", detail) }
+        // L8 (#379): the session ends exactly at AVKit's end of it while it was on, with Sill in the background.
+        let appForeground = rngApp.coin()
+        let ends = P.endsSession(from: before.state, to: l.state, appForeground: appForeground)
+        if ends != (event == 1 && before.state.active && !appForeground) {
+            lifeViolated("L8 the session's end not exactly at didStop while on with Sill away", detail + ", the app \(appForeground ? "in front" : "away")")
+        }
+        if ends { sessionEnds += 1 }
     }
 }
 for (what, n) in lifeViolations.sorted(by: { $0.key < $1.key }) { check("\(what): \(n) times; first: \(lifeFirst[what] ?? "")", false) }
-check("20,000 random lives (\(starts) starts, \(pauses) pauses, \(pauseStops) stopped at the pause's limit, \(endingStops) by an ending): L1–L7",
-      lifeViolations.isEmpty && starts > 10_000 && pauses > 5_000 && pauseStops > 500 && endingStops > 5_000)
+check("20,000 random lives (\(starts) starts, \(pauses) pauses, \(pauseStops) stopped at the pause's limit, \(endingStops) by an ending, "
+      + "\(sessionEnds) sessions ended with Sill away): L1–L8",
+      lifeViolations.isEmpty && starts > 10_000 && pauses > 5_000 && pauseStops > 500 && endingStops > 5_000 && sessionEnds > 2_000)
 
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

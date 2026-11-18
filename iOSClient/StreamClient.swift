@@ -898,6 +898,10 @@ final class StreamClient: ObservableObject {
         var openKey: Data?
     }
     var reconnect: Reconnect?
+    /// The reconnect of a session that ended because Picture in Picture ended with Sill in the background
+    /// (`endSessionInBackground`, #379), held until Sill is back (`cameForward`): it becomes `reconnect`
+    /// then, its loss counted from then. Main thread.
+    var reconnectAtReturn: Reconnect?
     /// The key the last session at home under each Bonjour name saw on an open door (`p=0`), in
     /// memory: DiscoveryPolicy.reconnectKey's `earlier`. A tap clears the reconnect and dials any
     /// key, so a tap whose dial ended before its handshake (one the reconnect's own words invite
@@ -1238,6 +1242,22 @@ final class StreamClient: ObservableObject {
             keyframeAskWork?.cancel(); keyframeAskWork = nil
         }
         pictureBackInSill()
+        endSessionIfAway(from: old, to: new)
+    }
+
+    /// Picture in Picture ended with Sill in the background (PictureInPicturePolicy.endsSession, #379): the
+    /// session ends `endSettle` later (`endSessionInBackground`) if the rule still says so then and its
+    /// connection is still this one, so a return that lands just after the stop (the window's return
+    /// button) keeps it. Main thread.
+    private func endSessionIfAway(from old: PictureInPicturePolicy.State, to new: PictureInPicturePolicy.State) {
+        guard PictureInPicturePolicy.endsSession(from: old, to: new, appForeground: !appInBackground),
+              connected, let c = connection else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + PictureInPicturePolicy.endSettle) { [weak self] in
+            guard let self, self.connected, self.connection === c,
+                  PictureInPicturePolicy.endsSession(from: old, to: self.pictureInPictureState, appForeground: !self.appInBackground)
+            else { return }
+            self.endSessionInBackground()
+        }
     }
 
     /// What waited while the picture showed only in Picture in Picture goes, once it no longer does and
@@ -1418,6 +1438,20 @@ final class StreamClient: ObservableObject {
         let wasInBackground = !appInForeground
         appInBackground = false
         runningChanged()
+        // A session that ended with Picture in Picture in the background (#379): its reconnect starts now, as
+        // for a loss seen now, as a session the Mac dropped while iOS had Sill suspended is seen on the return.
+        if var r = reconnectAtReturn {
+            reconnectAtReturn = nil
+            if !connected, reconnect == nil {
+                r.lostAt = ProcessInfo.processInfo.systemUptime
+                r.pathAtLoss = pathSignature
+                reconnect = r
+                scheduleReconnectRetry()
+                #if DEBUG
+                print("pip: back in Sill: the reconnect of the session Picture in Picture's end closed starts")
+                #endif
+            }
+        }
         guard browsing, wasInBackground else { return }
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
