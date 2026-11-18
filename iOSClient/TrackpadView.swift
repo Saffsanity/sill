@@ -570,8 +570,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     }
 
     private func consumeLatch() {
-        guard !latchedModifiers.subtracting(lockedModifiers).isEmpty else { return }
-        latchedModifiers = lockedModifiers
+        guard let left = ModifierLock.used(latched: latchedModifiers, locked: lockedModifiers) else { return }
+        latchedModifiers = left
         onModifiersConsumed?()
     }
 

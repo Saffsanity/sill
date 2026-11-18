@@ -232,6 +232,9 @@ struct PortraitStreamScreen: View {
         // above the keyboard's glass, or for a keyboard that leaves it no room (or whose glass Sill cannot
         // know) the Keyboard toggle on the picture's corner (#215).
         let standIn = keyboardStandIn(size, origin: origin, split: split)
+        // What the picture's input view carries of the key row's modifiers: nothing while no key row is on
+        // screen to show them (full screen; the toggle, or nothing yet, in the row's place), #268.
+        let keys = ModifierLock.keyRowOnScreen(upright: true, controlsHidden: hidden, rowDisplaced: standIn.map { $0.row == nil } ?? false)
         return ZStack(alignment: .topLeading) {
             // The swipe in's preview draws the controls with the black they sit on and nothing of the picture's
             // place (RevealCut.halves): the black only behind the controls' block, its top margin included.
@@ -243,7 +246,7 @@ struct PortraitStreamScreen: View {
 
             VStack(spacing: split.controls - half) {
                 // Full screen: the room, with no margin (the pane's padding is the room's place in this screen).
-                picturePane(measured: true)
+                picturePane(measured: true, keys: keys)
                     .padding(hidden ? EdgeInsets(top: room.minY, leading: room.minX, bottom: max(0, size.height - room.maxY),
                                                  trailing: max(0, size.width - room.maxX))
                                     : EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
@@ -366,9 +369,11 @@ struct PortraitStreamScreen: View {
     }
 
     /// The key row's caps as they are, the Keyboard cap among them (lit while the keyboard is up, a tap
-    /// takes it down), at the row's height and gaps. No tour target: the tour takes the keyboard down.
+    /// takes it down), at the row's height and gaps, with what is latched and locked. No tour target: the
+    /// tour takes the keyboard down.
     private func rowAlone(_ rect: CGRect) -> some View {
-        KeyRow(metrics: metrics.keyboardRow(caps: rect.height), keys: .full, latched: $latched, keyboardShown: keyboardShown,
+        KeyRow(metrics: metrics.keyboardRow(caps: rect.height), keys: .full, latched: $latched, locked: $locked,
+               keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
                showSpotlight: client.active == .desktop)
@@ -529,7 +534,8 @@ struct PortraitStreamScreen: View {
             // past row 1's leading edge; the strip goes while either is open, so nothing cut shows
             // beside them.
             PhoneRows(size: layout.size, rects: rects) {
-                picturePane(measured: false).accessibilityHidden(drawerOpen)
+                picturePane(measured: false, keys: ModifierLock.keyRowOnScreen(upright: true, controlsHidden: hidden, rowDisplaced: false))
+                    .accessibilityHidden(drawerOpen)
                 if !hidden {
                     phoneRow1(layout, menus: larger && client.menus.hasMenus)
                         .transition(chromeTransition)
@@ -653,16 +659,18 @@ struct PortraitStreamScreen: View {
     /// the room this pane sits at the top of.
     /// In the swipe in's preview, nothing at all: the picture's place (RevealCut), so no pane, panel, rim, cover
     /// or line can come in with the controls, by construction (there is one picture view, the hidden one).
+    /// `keys`: a key row is on screen (ModifierLock.keyRowOnScreen), so what it latched and locked rides the
+    /// keyboard's characters; none is, and nothing does (ModifierLock.carried, #268).
     @ViewBuilder
-    private func picturePane(measured: Bool) -> some View {
+    private func picturePane(measured: Bool, keys: Bool) -> some View {
         if preview {
             Color.clear
         } else {
-            livePicturePane(measured: measured)
+            livePicturePane(measured: measured, keys: keys)
         }
     }
 
-    private func livePicturePane(measured: Bool) -> some View {
+    private func livePicturePane(measured: Bool, keys: Bool) -> some View {
         ZStack {
             // Scaled and moved by the picture's zoom, inside the clip below.
             ZoomedStreamView(client: client, zoom: zoom)
@@ -671,8 +679,8 @@ struct PortraitStreamScreen: View {
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
-                         latchedModifiers: latched,
-                         lockedModifiers: locked,
+                         latchedModifiers: ModifierLock.carried(latched, keyRowOnScreen: keys),
+                         lockedModifiers: ModifierLock.carried(locked, keyRowOnScreen: keys),
                          onModifiersConsumed: { latched = ModifierLock.spent(locked: locked) },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
@@ -1015,13 +1023,15 @@ private struct KeyRow: View {
     var hidden: Bool = false
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
-    /// A finger on a modifier's cap: the task that locks the modifier once the finger has stayed
-    /// `ModifierLock.holdSeconds` (cancelled by its lifting first), then the one that forgets the lock
-    /// was the hold's once the cap's own action could no longer be its release.
-    @State private var lockTask: Task<Void, Never>?
-    /// The hold locked the cap under the finger, so the action that comes as the finger lifts is the
-    /// hold's end, not a tap (a tap on a locked modifier lets it go).
-    @State private var lockedByHold = false
+    /// Hold to Lock Modifiers (Settings › This iPad › Keys; ModifierLock.switchKey): off unless turned on.
+    /// Off, the modifiers' caps act on their tap alone, as before the lock, and VoiceOver offers no lock.
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = false
+    /// The fingers on the modifiers' caps (ModifierHold): whether a hold locked, so the action as its finger
+    /// lifts is the hold's end and not a tap, each cap on its own.
+    @State private var modifierHold = ModifierHold()
+    /// Each modifier's hold timer (by its raw value), started as a finger lands on its cap and cancelled as
+    /// it leaves: at `ModifierLock.holdSeconds` it locks the modifier, if that finger is still on the cap.
+    @State private var lockTimers: [UInt64: Task<Void, Never>] = [:]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Whether escape, tab and the arrows are held from the touch to the release: everywhere but where a
     /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
@@ -1074,9 +1084,10 @@ private struct KeyRow: View {
         }
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
-        // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
-        .onDisappear { heldCap.releaseAll().forEach(send); lockTask?.cancel() }
-        .onChange(of: hidden) { _, now in if now { heldCap.releaseAll().forEach(send); lockTask?.cancel() } }
+        // comes up here, and a modifier's hold under way locks nothing; and hidden under the key row
+        // alone, whose caps are now the ones to touch.
+        .onDisappear { heldCap.releaseAll().forEach(send); stopHolds() }
+        .onChange(of: hidden) { _, now in if now { heldCap.releaseAll().forEach(send); stopHolds() } }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
@@ -1138,8 +1149,8 @@ private struct KeyRow: View {
         case .press(_, let usage, _), .arrow(_, let usage, _):
             press(usage)
         case .modifier(_, let flag, _):
-            // The release after a hold that locked the cap is the hold's own, not a tap.
-            if lockedByHold { lockedByHold = false; return }
+            // The release after a hold that locked the cap is the hold's own, not a tap (ModifierHold).
+            guard modifierHold.activated(flag, at: ProcessInfo.processInfo.systemUptime) else { return }
             (latched, locked) = ModifierLock.tapped(flag, latched: latched, locked: locked)
         case .keyboard:
             toggleKeyboard()
@@ -1188,16 +1199,18 @@ private struct KeyRow: View {
             .foregroundStyle(Palette.text)
     }
 
-    /// A latching modifier: it stays lit until something uses it, or until it is tapped again. Held for
-    /// `ModifierLock.holdSeconds` it locks (a small lock on the cap) and stays lit through every use
-    /// until it is tapped (#268). Where a long press shows the cap large (`capsHold`) the hold is that
-    /// look's; the lock is then VoiceOver's action, as it is for anyone who cannot hold a cap.
+    /// A latching modifier: it stays lit until something uses it, or until it is tapped again. With Hold
+    /// to Lock Modifiers on (`holdToLock`), held for `ModifierLock.holdSeconds` it locks (a small lock on
+    /// the cap) and stays lit through every use until it is tapped (#268). Where a long press shows the
+    /// cap large (`capsHold`) the hold is that look's; the lock is then the accessibility action, as it is
+    /// for anyone who cannot hold a cap. With the switch off the cap is a tap alone, as before the lock.
     private func latchKey(_ key: Key, _ title: String, _ flag: KeyModifiers, label: String) -> some View {
         let isLocked = locked.contains(flag)
         let on = latched.contains(flag)
         return cap(open: on,
-                   label: isLocked ? "\(label), locked. Tap to release." : on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
-                   largeContent: title, held: capsHold ? { modifierTouch(flag, down: $0) } : nil, action: { tap(key) }) {
+                   label: ModifierLock.Copy.capLabel(label, latched: on, locked: isLocked),
+                   largeContent: title, held: holdToLock && capsHold ? { modifierTouch(flag, down: $0) } : nil,
+                   action: { tap(key) }) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(on ? Palette.accent : Palette.text)
@@ -1212,32 +1225,38 @@ private struct KeyRow: View {
                 }
         }
         .accessibilityActions {
-            if !isLocked { Button("Lock until released") { lock(flag, byHold: false) } }
+            if holdToLock, !isLocked { Button(ModifierLock.Copy.lockAction) { lock(flag) } }
         }
     }
 
-    /// A finger landed on a modifier's cap, or left it: after `ModifierLock.holdSeconds` on it, it locks.
+    /// A finger landed on a modifier's cap, or left it (ModifierHold): landed, its hold's timer starts, and
+    /// locks the modifier at `ModifierLock.holdSeconds` if that finger is still on the cap; left, the timer
+    /// stops. Each cap's timer on its own, so a finger on another cap neither stops nor ends this one's.
     private func modifierTouch(_ flag: KeyModifiers, down: Bool) {
-        lockTask?.cancel()
-        if down {
-            lockedByHold = false
-            lockTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(ModifierLock.holdSeconds))
-                guard !Task.isCancelled else { return }
-                lock(flag, byHold: true)
-            }
-        } else if lockedByHold {
-            lockTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(HeldCap.actionWindow))
-                guard !Task.isCancelled else { return }
-                lockedByHold = false
-            }
+        lockTimers[flag.rawValue]?.cancel()
+        lockTimers[flag.rawValue] = nil
+        guard down else {
+            modifierHold.touchUp(flag, at: ProcessInfo.processInfo.systemUptime)
+            return
         }
+        let touch = modifierHold.touchDown(flag)
+        lockTimers[flag.rawValue] = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(ModifierLock.holdSeconds))
+            guard !Task.isCancelled, modifierHold.holdElapsed(flag, touch: touch) else { return }
+            lock(flag)
+        }
+    }
+
+    /// Every hold under way stopped (the row gone from the screen, or hidden under the row alone): none
+    /// locks, and a finger still on a cap there is no longer one this row hears lift.
+    private func stopHolds() {
+        lockTimers.values.forEach { $0.cancel() }
+        lockTimers = [:]
+        modifierHold = ModifierHold()
     }
 
     /// `flag` locked, with a tap of the Taptic Engine where there is one (an iPhone's) the first time.
-    private func lock(_ flag: KeyModifiers, byHold: Bool) {
-        lockedByHold = byHold
+    private func lock(_ flag: KeyModifiers) {
         if !locked.contains(flag) { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
         (latched, locked) = ModifierLock.held(flag, latched: latched, locked: locked)
     }

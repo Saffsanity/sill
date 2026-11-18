@@ -35,8 +35,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// The assistant item's groups, put back when the person's own keyboard holds it.
     private var assistantGroups: (leading: [UIBarButtonItemGroup], trailing: [UIBarButtonItemGroup])?
 
-    /// Modifiers the portrait key row is holding down for the next keystroke. Empty in landscape
-    /// unless the user latched one before rotating.
+    /// Modifiers the portrait key row is holding down for the next keystroke, while a key row is on
+    /// screen to show them: empty on the device's side, in full screen and under the laptop pose's
+    /// Keyboard toggle, whatever the row latched or locked before (ModifierLock.carried, #268).
     var latchedModifiers: KeyModifiers = []
     /// The part of `latchedModifiers` a use leaves latched: locked on the key row (ModifierLock).
     var lockedModifiers: KeyModifiers = []
@@ -810,7 +811,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     //     typed character therefore goes out as a raw `.key` down/up carrying the latched bits
     //     (⌘S), not as `.text`, which is the same split the hardware-key path makes below.
     //
-    // Either way the latch is spent afterwards: it is a one-shot, like a sticky key.
+    // Either way the latch is spent afterwards: it is a one-shot, like a sticky key, but for what is
+    // locked on the key row (Hold to Lock Modifiers, ModifierLock), which stays for every key after.
 
     func insertText(_ text: String) {
         Self.textinput("insertText \(text.debugDescription)" + (composition.isComposing ? " over the composition" : "")
@@ -926,8 +928,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     private func consumeLatch() {
-        guard !latchedModifiers.subtracting(lockedModifiers).isEmpty else { return }
-        latchedModifiers = lockedModifiers
+        guard let left = ModifierLock.used(latched: latchedModifiers, locked: lockedModifiers) else { return }
+        latchedModifiers = left
         onModifiersConsumed?()
     }
 
