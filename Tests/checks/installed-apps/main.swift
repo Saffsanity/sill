@@ -153,6 +153,11 @@ link("Applications/Hop link", to: volume("Drive/Hop/HopApp.app"))
 link("Elsewhere2/ToDrive", to: volume("Drive/Elsewhere"))
 app("Volumes/Drive/Elsewhere/Via.app", id: "via.app")
 link("Applications/Via link", to: root.appendingPathComponent("Elsewhere2/ToDrive/Via.app").path)
+// A relative link whose text names the drive (read against its own folder) and leads back to this Mac's
+// disk through the drive's Hop; an alias onto a volume whose name begins with an own volume's name.
+app("Elsewhere2/RelHop.app", id: "relhop.app")
+link("Applications/Rel hop", to: "../Volumes/Drive/Hop/RelHop.app")
+alias("Applications/Data alias", to: "Volumes/Old Mac - Data/Applications/DataOnly.app")
 // ~/Applications on the drive: a folder given that is a link into the volumes.
 link("HomeApps", to: volume("Drive/MyApps"))
 // The home folder: the first look reads its Applications folder alone. A link or an alias into the rest of
@@ -214,6 +219,8 @@ check(!firstIDs.contains("moved.alias") && secondIDs.contains("moved.alias"),
 check(!firstIDs.contains("hop.app") && secondIDs.contains("hop.app"),
       "where a link points is read from its text before it is resolved: not on the first look")
 check(!firstIDs.contains("via.app") && secondIDs.contains("via.app"), "where a link resolves to counts too")
+check(!firstIDs.contains("relhop.app") && secondIDs.contains("relhop.app"),
+      "a relative link's text is read against its own folder: not on the first look")
 let never = ["net.app", "ro.app", "installer.app", "image.linked", "old.mac", "old.data", "backup.app", "recovery.app",
              "dot.volume", "nested.volume", "mnt.volume"]
 check(firstIDs.isDisjoint(with: never) && Set(secondIDs).isDisjoint(with: never),
@@ -226,7 +233,11 @@ check(!firstIDs.contains("home.downloads") && secondIDs.contains("home.downloads
 check(!firstIDs.contains("home.built") && secondIDs.contains("home.built"), "so does a link there named like an app")
 check(!firstIDs.contains("home.cloud") && secondIDs.contains("home.cloud"),
       "a folder given that leads into the home folder past its Applications folder is read by the second look")
-check(InstalledApps.mounted().contains { $0.path == "/" && $0.local }, "the kernel's mount table is read: / is there, local")
+let table = InstalledApps.mounted()
+check(table.contains { $0.path == "/" && $0.local && $0.readOnly },
+      "the kernel's mount table is read: / is there, local and read-only (the sealed system)")
+check(table.contains { $0.path == "/System/Volumes/Data" && $0.roles == ["Data"] && !$0.browsable && !$0.readOnly },
+      "with the I/O Registry's roles: /System/Volumes/Data has the Data role, is writable and not shown in Finder")
 
 // When the second look is due: it can make macOS ask whether Sill may read a removable volume, and the
 // app asks for nothing at launch, so it follows a device connecting; then only when the volumes changed.

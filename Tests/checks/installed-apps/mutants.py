@@ -2,8 +2,9 @@
 and must make it fail. A file that is no folder is refused by contentsOfDirectory(at:) itself
 (ENOTDIR), and a link never reaches that test (the alias branch takes it first), so dropping the
 isDirectory test changes nothing and is no mutant here; nor are an alias's resolution options (no UI,
-no mounting: nothing in a temporary folder needs either) or the I/O Registry's roles (the check's mount
-table is made up, all but the one line that reads the real one). The unsorted mutant counts on APFS
+no mounting: nothing in a temporary folder needs either) or a link's text standardized (URL's path
+already drops its "..": no change). The I/O Registry's roles and the mount table's flags are checked
+on the real table (/ read-only, /System/Volumes/Data the Data volume, not shown in Finder). The unsorted mutant counts on APFS
 listing a folder in its own order (by a hash of each name), which puts the fixture's "right" before
 "left"; a file system that lists names sorted would miss it. usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
@@ -93,6 +94,19 @@ MUTANTS = [
     ("the first look reads a folder given that leads into the home folder (the volumes alone left to the second)",
      "if reach.volumes == nil && !reach.allows(folder.path) { continue }",
      "if reach.volumes == nil && inside(folder.path, reach.volumesRoot) { continue }"),
+    # Review of #405: rules the check did not reach.
+    ("a relative link's text read against the current folder, not its own",
+     "relativeTo: link.deletingLastPathComponent())", "relativeTo: nil)"),
+    ("a volume counted inside another whose name begins its own (/Volumes/Old Mac - Data in /Volumes/Old Mac)",
+     'p.hasPrefix(f.hasSuffix("/") ? f : f + "/")', "p.hasPrefix(f)"),
+    ("the mount table's read-only flag misread",
+     "readOnly: entry.f_flags & UInt32(MNT_RDONLY) != 0", "readOnly: entry.f_flags & UInt32(MNT_RDONLY) == 0"),
+    ("the mount table's don't-browse flag misread",
+     "browsable: entry.f_flags & UInt32(MNT_DONTBROWSE) == 0", "browsable: entry.f_flags & UInt32(MNT_DONTBROWSE) != 0"),
+    ("the I/O Registry asked for a property that is not there (no volume has a role)",
+     '"Role" as CFString', '"Roles" as CFString'),
+    ("the I/O Registry asked by the device's path, not its BSD name",
+     'roles(of: String(from.dropFirst("/dev/".count)))', "roles(of: from)"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
