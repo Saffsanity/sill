@@ -49,13 +49,17 @@ package struct HostStatusSnapshot: Equatable {
         /// Its link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6); nil while it
         /// does. The card names it.
         package var link: LinkStatus?
+        /// It records the stream, as its last report said (`ClientStats.recording`, #284). The menu's
+        /// headline and its row say so (StatusText); shown, never acted on (RecordingNotice).
+        package var recording: Bool
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
                      frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil,
-                     link: LinkStatus? = nil) {
+                     link: LinkStatus? = nil, recording: Bool = false) {
             self.id = id; self.endpoint = endpoint; self.name = name
             self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs
             self.route = route; self.remoteRoute = remoteRoute; self.link = link
+            self.recording = recording
         }
     }
 

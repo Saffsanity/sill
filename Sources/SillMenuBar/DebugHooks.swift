@@ -806,6 +806,14 @@ enum DebugHooks {
         // The off-console view (docs/off-console-plan.md): another user on the screen, this account shown.
         var offConsoleView = streaming
         offConsoleView.offConsoleView = true
+        // A device recording the stream (#284): the headline's subtitle says so and its row starts
+        // "Recording"; of two devices, only the one that records.
+        var recordingIPad = ipad
+        recordingIPad.recording = true
+        var recording = streaming
+        recording.devices = [recordingIPad]
+        var recordingTwo = two
+        recordingTwo.devices = [recordingIPad, iphone]
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -825,6 +833,8 @@ enum DebugHooks {
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
             Sample(name: "off-console-view", snapshot: offConsoleView),
+            Sample(name: "recording", snapshot: recording),
+            Sample(name: "recording-two", snapshot: recordingTwo),
         ]
     }
 }
