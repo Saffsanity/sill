@@ -167,7 +167,10 @@ final class HostSettings {
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
-                            lockAfterSession: defaults.bool(forKey: Key.lockAfterSession)).validated()
+                            lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
+                            // Darken this Mac's screen (docs/privacy-mode-plan.md, part 2) has no switch here until the
+                            // probe G0 has chosen how its black windows are made: off, its keys locking once it is on.
+                            darkenScreen: .off, darkenKeysLock: true).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
