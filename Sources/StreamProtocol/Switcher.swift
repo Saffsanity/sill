@@ -68,6 +68,12 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// What this host does when a device records the stream (#284, docs/recording-plan.md): 1 is its menu
+    /// and its log saying that the device is recording, from the device's `ClientStats.recording`
+    /// (`RecordingNotice.generation`). In every list, a locked Mac's too. Nil from every host before it,
+    /// whose menu says nothing: a device records anyway, and its Settings say that Mac won't show it. Set
+    /// after the initializer, as `keyRepeat`.
+    public var recordings: Int?
     /// How many stops the Desktop has (DesktopDisplays: the Mac's displays, never Sill's own nor macOS's
     /// stand-in, one per mirror set), 2 or more, and which of them it shows, or comes back to while a
     /// window streams, counting from 1 in the cycle's order: 1 is the main display, then each display to

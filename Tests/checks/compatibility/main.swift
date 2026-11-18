@@ -350,6 +350,41 @@ let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: fa
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")
 
+// Recording the stream (#284, docs/recording-plan.md): a device's stats say `recording` true while it records,
+// and a host that shows it says `recordings` 1 in its window list. Display only, and additive both ways: a
+// device that is not recording leaves the key out (never false), a host before it skips the key, a device
+// before it sends none, and a reader from before the list's field skips it. No new kind.
+let recordingStats = ClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11,
+                                 audioBehindMs: 42, audioLate: 3, recording: true)
+check(json(recordingStats).contains(#""recording":true"#) && Wire.decode(ClientStats.self, from: Wire.encode(recordingStats)) == recordingStats,
+      "ClientStats carries recording true and round-trips: \(json(recordingStats))")
+check(heard.recording == nil && quiet.recording == nil && !json(heard).contains("recording") && !json(quiet).contains("recording"),
+      "stats without it (the initializer's) leave the key out")
+check(Wire.decode(OldClientStats.self, from: Wire.encode(recordingStats))
+      == OldClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11),
+      "a host from before the sound reads the stats and skips recording")
+struct StatsBefore: Decodable, Equatable { var fps: Int; var device: String; var audioBehindMs: Int?; var audioLate: Int? }
+check(Wire.decode(StatsBefore.self, from: Wire.encode(recordingStats)) == StatsBefore(fps: 60, device: "iPad", audioBehindMs: 42, audioLate: 3),
+      "a host from before recording (with the sound's fields) reads them and skips recording")
+check(Wire.decode(ClientStats.self, from: Data(#"{"fps":60,"frameAgeMs":9,"rttMs":7,"device":"iPad","audioLate":0}"#.utf8)).map { $0.recording == nil } == true,
+      "an older device's stats decode, recording nil")
+check(ClientStats(fps: 1, frameAgeMs: 1, rttMs: 1, device: "d", recording: true).recording == true
+      && ClientStats(fps: 1, frameAgeMs: 1, rttMs: 1, device: "d", recording: nil).recording == nil,
+      "the initializer keeps what it is given")
+var records = named
+records.recordings = 1
+check(json(records).contains(#""recordings":1"#), "a list from a host that shows a device's recording says recordings 1: \(json(records))")
+check(!json(named).contains("recordings") && named.recordings == nil && !json(list).contains("recordings") && list.recordings == nil,
+      "a list without it (the initializer's) leaves the key out")
+check(decodedOld != nil && decodedOld?.recordings == nil, "an older host's list decodes, recordings nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(records)).map {
+          $0.recordings == 1 && $0.keyRepeat == 1 && $0.desktopDisplays == 2 && $0.clipboard == 1
+      } == true, "recordings round-trips beside keyRepeat, the Desktop's stops and the clipboard")
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(records)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before it skips recordings")
+check(Wire.decode(ReaderOf173.self, from: Wire.encode(records)).map { $0.desktopDisplays == 2 && $0.desktopDisplay == 1 } == true,
+      "a reader of 0.6.2's list skips recordings")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
@@ -365,6 +400,8 @@ if let out {
         "clipboardMessage": clipboardMessage.base64EncodedString(),
         "windowListDesktopStops": String(decoding: Wire.encode(named), as: UTF8.self),
         "nextDisplayMessage": nextMessage.base64EncodedString(),
+        "windowListRecordings": String(decoding: Wire.encode(records), as: UTF8.self),
+        "clientStatsRecording": String(decoding: Wire.encode(recordingStats), as: UTF8.self),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }

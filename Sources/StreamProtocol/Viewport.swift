@@ -113,6 +113,11 @@ public struct ClientStats: Codable, Hashable {
     public var frameAgeMaxMs: Int?
     /// The slowest round trip among that second's pongs, -1 when none came back. nil from an older client.
     public var rttMaxMs: Int?
+    /// This device records the stream (#284, docs/recording-plan.md): true in every report from the
+    /// recording's light ("Starting…" included) until its movie is closed, and left out otherwise, never
+    /// false. Display only: a host shows it in its menu and its log (RecordingNotice) and acts on nothing.
+    /// Nil from every device before it, and a host before it skips the key.
+    public var recording: Bool?
     /// The Mac's sound (kind 43): that second's median of how far the sound trailed the picture as the
     /// device sees it, in ms, -1 for a second in which no sound played. Nil from a device that has
     /// played none this session, and from an older client.
@@ -121,10 +126,12 @@ public struct ClientStats: Codable, Hashable {
     public var audioLate: Int?
 
     public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String,
-                frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil, audioBehindMs: Int? = nil, audioLate: Int? = nil) {
+                frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil, audioBehindMs: Int? = nil, audioLate: Int? = nil,
+                recording: Bool? = nil) {
         self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs; self.device = device
         self.frameAgeMaxMs = frameAgeMaxMs; self.rttMaxMs = rttMaxMs
         self.audioBehindMs = audioBehindMs; self.audioLate = audioLate
+        self.recording = recording
     }
 
     /// A host's count of the sound's late packets since its last stats line (StreamServer), with one
