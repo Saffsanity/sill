@@ -1252,10 +1252,24 @@ final class StreamClient: ObservableObject {
     private func endSessionIfAway(from old: PictureInPicturePolicy.State, to new: PictureInPicturePolicy.State) {
         guard PictureInPicturePolicy.endsSession(from: old, to: new, appForeground: !appInBackground),
               connected, let c = connection else { return }
+        #if DEBUG
+        // Both looks on the console, so a device shows which order iOS used (the return button's stop before
+        // or after Sill comes forward) and whether the second look kept a session.
+        print("pip: Picture in Picture ended with Sill in the background: looked at again in \(PictureInPicturePolicy.endSettle) s")
+        #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + PictureInPicturePolicy.endSettle) { [weak self] in
-            guard let self, self.connected, self.connection === c,
+            guard let self else { return }
+            guard self.connected, self.connection === c,
                   PictureInPicturePolicy.endsSession(from: old, to: self.pictureInPictureState, appForeground: !self.appInBackground)
-            else { return }
+            else {
+                #if DEBUG
+                let why = !self.connected || self.connection !== c ? "the session ended another way, or moved to another connection"
+                    : !self.appInBackground ? "Sill is in front again: the session goes on"
+                    : "Picture in Picture is on again: the session goes on"
+                print("pip: Picture in Picture's end, looked at again: \(why)")
+                #endif
+                return
+            }
             self.endSessionInBackground()
         }
     }
