@@ -132,6 +132,17 @@ MUTANTS = [
      "                      height: min(max((panel.height / s).rounded(), 1), maxSide))\n"),
     ("S11 the window's ceiling under the largest viewport a host takes", "    static let maxWindowSide: CGFloat = 65536\n",
      "    static let maxWindowSide: CGFloat = 65535\n"),
+    # A hardware encoder's limit (#278).
+    ("E1 the limit at 4095", "    static let side = 4096\n", "    static let side = 4095\n"),
+    ("E2 a size at the limit held too", "        guard longer > side else { return nil }\n", "        guard longer >= side else { return nil }\n"),
+    ("E3 held by the width alone (an upright 5K display past the limit)", "        let longer = max(width, height)\n",
+     "        let longer = width\n"),
+    ("E4 odd sides", "        return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))\n",
+     "        return (max(width * side / longer, 2), max(height * side / longer, 2))\n"),
+    ("E5 a sliver held to nothing", "        return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))\n",
+     "        return (width * side / longer & ~1, height * side / longer & ~1)\n"),
+    ("E6 the sides swapped", "        return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))\n",
+     "        return (max(height * side / longer & ~1, 2), max(width * side / longer & ~1, 2))\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
