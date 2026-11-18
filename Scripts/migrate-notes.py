@@ -3,20 +3,25 @@
 `tooling-speedup`): CLAUDE.md's "Current step" became one file per piece of work in docs/steps/, the
 table of Tests/checks/README.md one README.md per check folder, and CI's list of checks with mutants
 is read from the folders. A branch opened before that keeps its notes in the old places; this moves
-them, so its owner does it in one command.
+them, so its owner does it in one command. On 2026-11-18 (branch `lean-claude-md`) CLAUDE.md's
+Layout, Build and run and Compatibility floor moved too, word for word, to docs/LAYOUT.md,
+docs/BUILD-AND-RUN.md and docs/COMPATIBILITY.md, CLAUDE.md keeping a short section of each name; a
+branch that changed them before that, whenever it was opened, runs this the same way.
 
 In such a branch, right after `git merge origin/main` stops on conflicts:
 
-    python3 Scripts/migrate-notes.py      resolves and stages CLAUDE.md, Tests/checks/README.md,
-                                          docs/DEVELOPMENT.md and .github/workflows/ci.yml
+    python3 Scripts/migrate-notes.py      resolves and stages CLAUDE.md, the files its sections
+                                          moved to, Tests/checks/README.md, docs/DEVELOPMENT.md
+                                          and .github/workflows/ci.yml
     git status                            any other conflict is the branch's own, as before
     git commit
 
 It reads the three versions git keeps during the merge (the merge base, this branch's, main's), so it
 works whatever the conflicted files look like now, and writes only in the working tree:
 - CLAUDE.md: each "Current step" entry this branch added becomes docs/steps/<date>-<branch>.md; an
-  entry it changed is merged three ways into the file main gave that entry. Its other changes to
-  CLAUDE.md (Layout, Build and run, ...) are merged into main's CLAUDE.md.
+  entry it changed is merged three ways into the file main gave that entry. Its changes to the
+  Layout, Build and run and Compatibility floor are merged into docs/LAYOUT.md, docs/BUILD-AND-RUN.md
+  and docs/COMPATIBILITY.md, and its other changes to CLAUDE.md into main's CLAUDE.md.
 - Tests/checks/README.md: each table row this branch added or changed becomes, or is merged into,
   Tests/checks/<name>/README.md (counts left out: a check prints its own). The file itself is main's;
   any other change the branch made to it is printed, to carry by hand if still wanted.
@@ -61,6 +66,12 @@ CHECKS_BULLET_START = "- `Tests/checks/` — the pure checks, a folder each"
 DEV_HEADING = "### The pure checks"
 MATRIX_OLD = re.compile(r"^\s*check: \[.*\]\s*$")
 MATRIX_NEW = re.compile(r"^\s*check: \$\{\{ fromJSON\(")
+# CLAUDE.md's three long sections, moved on 2026-11-18 (branch `lean-claude-md`) to files of their
+# own, each a title, a note and the section's text below its heading, word for word; CLAUDE.md keeps
+# a short section of the same name that points there.
+LAYOUT = "docs/LAYOUT.md"
+MOVED = (("## Layout", LAYOUT), ("## Build and run", "docs/BUILD-AND-RUN.md"),
+         ("## Compatibility floor", "docs/COMPATIBILITY.md"))
 
 # What --convert writes in place of the old Current step and the milestones (the pointer), and in
 # place of the Layout's list of checks. The migration reads both back from main's CLAUDE.md instead,
@@ -311,6 +322,64 @@ def bullet_text(text):
     return "\n".join(lines[r[0]:r[1]]) + "\n" if r else None
 
 
+# ------------------------------------------------------------------- CLAUDE.md's moved sections
+
+def section_body(text, heading):
+    """A '## ' section's text below its heading and the empty line after it, as the file it moved to
+    has it (the empty lines before the next heading left out), or None."""
+    lines = text.split("\n")
+    for s, e, h in sections(lines):
+        if h == heading:
+            body = lines[s + 1:e]
+            if body and body[0] == "":
+                body = body[1:]
+            while body and body[-1] == "":
+                body.pop()
+            return "\n".join(body) + "\n"
+    return None
+
+
+def with_section(text, heading, section):
+    """text with its '## ' section `heading` replaced by `section` (as section_text gives one)."""
+    lines = text.split("\n")
+    for s, e, h in sections(lines):
+        if h == heading:
+            return "\n".join(lines[:s] + section.rstrip("\n").split("\n") + [""] + lines[e:])
+    return text
+
+
+def file_header(text):
+    """A moved section's file, up to its section's text: the title, its empty line, the note, and the
+    empty line after the note."""
+    lines = text.split("\n")
+    i = 2
+    while i < len(lines) and lines[i] != "":
+        i += 1
+    return "\n".join(lines[:i + 1]) + "\n"
+
+
+def carry_moved(root, base, theirs, o_text, b_text, t_claude, resolved, conflicted, notes):
+    """The Layout, Build and run and Compatibility floor of this branch's CLAUDE.md and of the merge
+    base's, where main has moved them and the merge base had not: this branch's changes to each are
+    merged into the file it moved to, and in both texts main's short section takes its place, so
+    that the merge of CLAUDE.md meets no change there. Returns the two texts."""
+    for heading, path in MOVED:
+        t_file, stub = show(theirs, path), section_text(t_claude, heading)
+        if t_file is None or stub is None or show(base, path) is not None:
+            continue            # not moved on main, or moved before the merge base: git merges it
+        o_body, b_body = section_body(o_text, heading), section_body(b_text, heading)
+        if o_body is None:
+            notes.append(f"CLAUDE.md: this branch has no \"{heading[3:]}\" section; {path} is main's")
+        elif o_body != b_body:
+            header = file_header(t_file)
+            merged, n = merge3(header + o_body, header + (b_body or ""), t_file)
+            write(os.path.join(root, path), merged)
+            (conflicted if n else resolved).append(path)
+            notes.append(f"{path}: this branch's changes to CLAUDE.md's \"{heading[3:]}\", merged into it")
+        o_text, b_text = with_section(o_text, heading, stub), with_section(b_text, heading, stub)
+    return o_text, b_text
+
+
 # ------------------------------------------------------------------------------ the checks' table
 
 ROW = re.compile(r"^\| `([^`]+)` \|")
@@ -549,15 +618,18 @@ def migrate(root, ours, theirs):
     resolved, conflicted, notes = [], [], []
 
     # CLAUDE.md -------------------------------------------------------------------------------
-    pointer, bullet = section_text(t_claude, NEW_SECTION) or POINTER, bullet_text(t_claude) or CHECKS_BULLET
+    pointer = section_text(t_claude, NEW_SECTION) or POINTER
+    bullet = bullet_text(show(theirs, LAYOUT) or "") or bullet_text(t_claude) or CHECKS_BULLET
     o_lean, o_entries, _ = split_claude(o_claude, pointer, bullet)
     b_lean, b_entries, _ = split_claude(b_claude, pointer, bullet)
-    if not o_entries:
-        notes.append("CLAUDE.md: this branch's CLAUDE.md has no Current step; nothing to move")
-    else:
-        lean, n = merge3(o_lean, b_lean, t_claude)
+    o_cut, b_cut = carry_moved(root, base, theirs, o_lean, b_lean, t_claude, resolved, conflicted, notes)
+    if o_entries or (o_cut, b_cut) != (o_lean, b_lean):
+        lean, n = merge3(o_cut, b_cut, t_claude)
         write(os.path.join(root, CLAUDE), lean)
         (conflicted if n else resolved).append(CLAUDE)
+    if not o_entries:
+        notes.append("CLAUDE.md: this branch's CLAUDE.md has no Current step; no entry to move")
+    else:
         # main's step files by their first line, the key an entry keeps when its words change
         t_files = [f for f in git("ls-tree", "--name-only", f"{theirs}:{STEPS}").split() if f.endswith(".md")]
         by_first = {}
@@ -813,7 +885,7 @@ def main(argv):
         ours = ours or "HEAD"
     else:
         dirty = git("status", "--porcelain", "--", CLAUDE, CHECKS_README, DEVELOPMENT, CI, STEPS,
-                    "Tests/checks", cwd=root)
+                    "Tests/checks", *(path for _, path in MOVED), cwd=root)
         if dirty.strip():
             raise SystemExit("Uncommitted changes to the files this writes; commit or stash them first:\n" + dirty)
     ours = ours or "HEAD"
