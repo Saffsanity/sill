@@ -23,9 +23,10 @@ use an emoji and 4) upload their own .svg or icon composer document."
   an alternative. The design leaves room for more bundled icons: a later one is a case in `AppIconChoice`, its
   document, its preview and its name in the build's alternates, and `Tests/checks/app-icon` names whichever is
   missing.
-- **Sill for Mac keeps one icon**, the original in Liquid Glass. macOS gives a signed app no way to change its own
-  icon (a custom icon set in Finder's Get Info is written into the bundle, which a signed, notarized app should not
-  have changed under it, and Update Now replaces the bundle anyway).
+- **Sill for Mac keeps one icon**, the original in Liquid Glass. macOS has no alternate icons for apps: changing a
+  signed app's own icon means writing a custom icon into its bundle (as Finder's Get Info does), which leaves the
+  bundle no longer as it was signed, and Update Now replaces the bundle anyway; the one icon an app may change while
+  it runs is its Dock tile's, and Sill, a menu bar app, has none.
 
 ## A. The original in Liquid Glass
 

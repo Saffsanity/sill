@@ -14,7 +14,7 @@ import Foundation
 ///
 /// A later icon is one more case, its document, its preview (Scripts/app-icon-previews.sh) and its name in the
 /// project's alternates; Tests/checks/app-icon says which of them is missing. Sill for Mac keeps the original
-/// alone: macOS gives an app no way to change its own icon.
+/// alone: macOS has no alternate icons, and a signed app's own icon changes only by writing into its bundle.
 ///
 /// iOS keeps the alternate's name across launches and updates (`UIApplication.alternateIconName`). A name this
 /// build does not ship reads as the original, which iOS shows then, and choosing the original clears it. Each
