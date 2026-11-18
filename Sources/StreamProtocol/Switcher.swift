@@ -4,7 +4,7 @@ import Foundation
 public enum StreamSource: Codable, Hashable {
     case none
     case window(UInt32)   // CGWindowID, stable for the life of the window
-    case desktop          // the Mac's main display
+    case desktop          // one of the Mac's displays: the main one unless a device stepped to another (kind 47)
 }
 
 /// One on-screen Mac window, as the client sees it. WindowList order is stable: first seen first.
@@ -68,6 +68,20 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// How many stops the Desktop has (DesktopDisplays: the Mac's displays, never Sill's own nor macOS's
+    /// stand-in, one per mirror set), 2 or more, and which of them it shows, or comes back to while a
+    /// window streams, counting from 1 in the cycle's order: 1 is the main display, then each display to
+    /// its right as they sit, wrapping round (issue #91, docs/virtual-desktop-plan.md §1). A device's
+    /// Desktop button then reads "Desktop 2", with a dot per stop while the Desktop streams, and a tap
+    /// then sends kind 47 for the next. Left out with one stop, while the Mac is locked or another user
+    /// is on its screen, and by every host before this, to which a device sends no kind 47. Set after the
+    /// initializer, as `keyRepeat`.
+    public var desktopDisplays: Int?
+    public var desktopDisplay: Int?
+    /// Each stop's name in that order (NSScreen's, "DELL U2723QE"; empty when it has none), for
+    /// VoiceOver's value ("Display 2 of 3, DELL U2723QE") and, later, a list to choose from (PR #296's).
+    /// With `desktopDisplays` only.
+    public var desktopDisplayNames: [String]?
     /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
     /// screen is locked, or another user, the login window or nobody is on its console. True, with no
     /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and

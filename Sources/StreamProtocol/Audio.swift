@@ -137,8 +137,8 @@ public enum AudioMessage: Hashable, Sendable {
     public static let typePackets: UInt8 = 2
     /// The largest payload of each type a reader takes (a format is under 1 KB; a packets message at
     /// 128 kbps is under 1 KB too), far under the 4 MB every host message may have. Part of the
-    /// compatibility floor once a public build reads kind 43 (CLAUDE.md): a device drops a message past
-    /// them whole, so a later host keeps within them, one that batches packets included.
+    /// compatibility floor once a public build reads kind 43 (docs/COMPATIBILITY.md): a device drops
+    /// a message past them whole, so a later host keeps within them, one that batches packets included.
     public static let maxFormatPayload = 4096
     public static let maxPacketsPayload = 16384
 

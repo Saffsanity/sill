@@ -5,9 +5,10 @@ Sill, see the [Support](https://getsill.app/support) page on
 [getsill.app](https://getsill.app).
 
 Until 2026-09-25 this was the README, so where a plan in `docs/` mentions "the
-README", it means a section here. `CLAUDE.md` has the rest: the layout, the
-decisions already made and every test hook; `docs/steps/` has what each piece of
-work did, a file each.
+README", it means a section here. `CLAUDE.md` has the rules for all work and the
+decisions already made, `docs/LAYOUT.md` the layout, `docs/BUILD-AND-RUN.md`
+every test hook, `docs/COMPATIBILITY.md` the compatibility floor, and
+`docs/steps/` what each piece of work did, a file each.
 
 ## Overview
 
@@ -29,7 +30,7 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
   disk image's background and the App Store screenshots (see its README).
   `docs/`: the brief and the plans.
 
-`CLAUDE.md`, Layout, goes through the code file by file.
+`docs/LAYOUT.md` goes through the code file by file.
 
 ## Build and run
 
@@ -113,7 +114,16 @@ open it again) and shows as Custom; a device can pick only the presets.
 Virtual Display is on by default (2026-10-27): on a Mac whose `virtualDisplay`
 key was never set, a window a device picks moves onto Sill's virtual display
 while it streams (The command-line host, below, says how) and comes back where
-it was when it stops. The default is registered, never written
+it was when it stops. Sill's display goes only once the window server shows the
+window home, at most 1 s later: an app commits an Accessibility move a few to
+tens of milliseconds after the writes return, and a display removed before that
+took the window to the main display (Chrome filling a monitor came back filling
+the main one, 2026-11-12). The log says how long it took ("Removed virtual
+display 81 (Google Chrome home after 38 ms)"), and for 1.5 s after the removal
+a window macOS moved all the same is put back once ("Put Google Chrome — … back
+at (…): macOS had moved it to (…) as Sill's display went."). Quit and the
+signals still put the window back and remove the display at once: they cannot
+wait. The default is registered, never written
 (`HostConfig.app` in `HostSettings`), so a key set from the menu, Settings ›
 Virtual Display or a device always wins: a Mac that turned it off keeps it
 off. To go back to the default, quit Sill, run `defaults delete
@@ -142,8 +152,69 @@ release, as before v0.3.0), it logs "Update check failed: GitHub has no
 release of Sill (HTTP 404)." once a day. It keeps `updateLastCheck`,
 `updateETag`, `updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`;
 to make the next launch check again after 30 s: `for k in updateLastCheck
-updateETag updateLatestTag updateLatestURL; do defaults delete
+updateETag updateLatestTag updateLatestURL updateLatestSigned; do defaults delete
 me.saffer.sill.mac $k; done` (`defaults delete` takes one key at a time).
+
+Update Now (docs/one-click-update-plan.md): beside Open Release Page…, in a
+build with an update key (`UpdateManifest.releaseKeys`, empty until Noah makes
+the key, so no build shows it yet) and for a release signed for it (the check
+stores `updateLatestSigned` when the release lists `Sill.zip.manifest`). One
+click reads the release again, verifies the manifest's Ed25519 signature with
+the compiled-in key, downloads `Sill.zip` (GitHub's hosts only, the manifest's
+size and SHA-256), unpacks it with Sill's own zip reader into a temporary folder
+on Sill.app's volume, checks the app (Developer ID 9B2KKVM937 as
+me.saffer.sill.mac, notarized, strictly valid, this app's own designated
+requirement, the keychain entitlements, newer, every slice the code the
+manifest names), checks it once more right before it swaps it into place in one
+`renamex_np(RENAME_SWAP)`, checks it again there, launches it as a new instance,
+starts the watcher and quits; the new Sill waits for the old to quit, and once
+its host has been up for 30 s tells the watcher (a note with a token in Sill's
+Caches folder) and removes the old copy. If it doesn't within 150 s, the watcher
+(`/bin/sh` with `UpdateInstaller.watcherScript`) stops it, puts the old copy
+back and starts it. Any failure puts the old copy back and says why in Settings ›
+General, naming the check that failed: Apple's (the Developer ID signature and
+notarization) or Sill's update key's. A stop signed with an update key beside
+the release (`Sill.zip.stop`) ends it before anything is downloaded.
+
+Automatically update Sill (docs/one-click-update-plan.md §15), in a build with
+Update Now: a switch under "Check for updates automatically", off by default,
+kept with what it remembers in Sill's keychain group (`AutoUpdateStore`, never
+the defaults; only Settings turns it on). After a check, it runs Update Now's
+steps by itself for a release it first found at least 48 hours ago (its own
+first read of the verified manifest, kept across launches, never before the
+manifest's `signed` date; 48 hours by this Mac's clock and by GitHub's, the `Date`
+of its HTTPS answers, from the release's `published_at` when that is later, and
+afresh for the same tag and zip on another release object, by its `id`), then
+waits for 5 minutes without a device connected, asks
+GitHub again, holds new sessions (a device that tries is told Sill is
+restarting and reconnects by itself) and installs. Two attempts a version at
+most, a day apart. The log's lines start "Automatic update:". It never runs for the bare
+binary, a development or unnotarized build, a test feed (`-SillUpdateFeed`) or
+version (`-SillUpdateVersion`), a translocated copy, a disk image, a folder this
+account can't change, a Sill.app another account owns, or while another account's
+Sill runs from the same copy.
+`Tests/checks/update-install` checks its rules; `Tests/update-harness/run.sh`
+drives the real mechanism against scratch bundles and a stand-in for GitHub on
+127.0.0.1 (The update harness, below); `Scripts/sign-update.sh v<version>` signs
+a published release on Noah's Mac (Releasing).
+
+Use nightly builds (docs/one-click-update-plan.md §16), in a build with Update
+Now and a nightly key (`UpdateManifest.nightlyKeys`, empty until Noah makes the
+key): a switch under Automatically update Sill, off by default, kept beside it.
+With it on, the daily check (and each launch while that check is on) also reads the nightly pre-release's
+`Sill-nightly.zip.manifest`, verified with the nightly key alone ("Sill nightly
+1", never a release's format or keys), and offers the version and build it names
+(GitHub's title is never read); Update Now installs it through the same steps and
+checks, newer by version, then build. The automatic update never does: it installs
+releases only (Noah's decision of 2026-11-12, option 4; `UpdateAutoPolicy.start` and
+`dates` refuse a nightly first, and AppUpdater gives it the release offer alone). A
+release is newer by its version; a nightly is also offered the release of its own version
+when that release's signed build is at least its own (the same commit or a later one: it
+reads that release's manifest first, `AppUpdater.lookAtRelease`), and one built after the
+release waits for the next version. nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
+and the secret `SILL_NIGHTLY_UPDATE_KEY`, when the environment `nightly` has it;
+`make-app.sh` marks a nightly with `SillChannel = nightly` and every build with
+its commit (`SillCommit`).
 
 ### The command-line host
 
@@ -350,6 +421,58 @@ not start is looked at again and tried once more, with one line ("Could not
 start streaming the whole desktop: ‹error›. Looked at the displays again: trying
 once more on display 53."); a second failure is the old line, and nothing
 streams.
+
+On a Mac with two displays or more, the Desktop button steps through them
+(issue #91; addhumal's PR #173, grown by phase 1 of
+`docs/virtual-desktop-plan.md`). "Desktop 1" is always the main display (the
+one with the menu bar), then each display to its right as they sit in System
+Settings › Displays › Arrange, wrapping to the leftmost and back to the main
+display. The display Sill makes for a picked window (Virtual Display's) is never
+a stop and never counted, nor is macOS's stand-in for a Mac with no screen or a
+display that has gone since the last look (each step takes a fresh look first);
+a mirror set is one stop. Sill's own Desktop display (#200's, the Virtual
+Desktop's) is no stop in this phase: phase 2 adds it as the last one. While the Desktop streams the
+button reads "Desktop 2" with a dot per stop under it, the shown one filled
+("3/7" from seven stops), and a tap moves the Desktop to the next stop; while a
+window streams it names the stop a tap brings the Desktop back to. VoiceOver
+reads "Desktop", the value "Display 2 of 3, DELL U2723QE" and the hint "Shows
+the next display.", and after this device's own tap says where it landed. The
+device sends kind 47 only to a Mac whose window list says `desktopDisplays` 2 or
+more (with `desktopDisplay` and `desktopDisplayNames`), so with one display or
+an older Mac the button is as before. The choice is the Mac's, by the display's
+UUID (a new ID after a sleep is still the same display), kept while a device is
+connected and for 30 s after the last one left: a reconnect or a move to the
+cable comes back to it, and a session that starts later begins on the main
+display, Virtual Display on or off (issue #345). A stop that is unplugged sends
+the Desktop to the main display and back when it returns; one that will not
+stream sends it back to the stop it was on. The host moves the Mac's pointer to
+the new stop's centre and logs "Desktop: display 2 of 3 (DELL U2723QE), asked
+by ‹device›."; input lands on the stop the capture runs on, never the one just
+chosen. The stream's rate is held to the shown stop's refresh rate when it
+reports one: a 60 Hz monitor streams at 60, at the 60 fps bitrate, to a 120 Hz
+iPad. The Desktop's sound is built on the main display whatever stop shows, so a
+step never restarts it, and kind 47 is a person at the device (it wakes a
+sleeping display; the "Woke the display" line reads the shown stop's). Every
+device watching the Desktop moves with it: the Mac streams one source. Locked,
+or with another user on the screen (the off-console view too), the Desktop is
+the main display, its lock screen, the list says no stops and kind 47 is refused
+as a window pick is (`LockPolicy`); the chosen stop comes back after the
+unlock. The rule is `Sources/StreamProtocol/DesktopDisplays.swift`, checked in
+`Tests/checks/desktop-displays`.
+
+To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
+honoured only with `--synthetic`; nothing of this Mac's displays is read, and
+nothing is posted or warped):
+`SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0'`
+(a name, points@scale, Hz, the origin; the first the main display). The test
+pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
+(DELL U2723QE)" drawn on it; `python3 Scripts/sillclient.py PORT 10 desktop
+--next-display@3 --expect=desktopDisplay=2` steps it (kind 47 goes only to a
+`--synthetic` host on this Mac), and with `SILL_TEST_INPUT_LOG=1` the dry run's
+log shows input landing in each stop's own space. On the device,
+`-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
+harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
+them.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
@@ -1703,9 +1826,9 @@ Mac's row has Forget in its menu (touch and hold).
 
 ## Test tools
 
-None of these needs a device. `CLAUDE.md`, Build and run, has the complete
-list, with the test-only environment variables and the recipes for headless
-tests of Direct Wireless Connection and remote access.
+None of these needs a device. `docs/BUILD-AND-RUN.md` has the complete list,
+with the test-only environment variables and the recipes for headless tests of
+Direct Wireless Connection and remote access.
 
 ### The pure checks
 
@@ -1873,6 +1996,42 @@ unlocked screen: nothing presses a menu under the login window), and its
 Close, also off every display, whose close holds the fixture 4 s: the press
 must come back within its own 1 s, as no answer. The file's header says how to
 build and run it.
+
+### The update harness
+
+`Tests/update-harness/run.sh [--keep]` (docs/one-click-update-plan.md §11, G2) compiles
+UpdateInstaller and the pure update files with its own `main.swift`, makes test apps
+(a tiny executable signed ad hoc as `me.saffer.sill.updater-test`, versions 0.9 to
+1.2, some changed after signing), zips them with ditto and with `make-zip.py`'s
+hostile kinds, starts `server.py`, a stand-in for GitHub's release API and download
+hosts on 127.0.0.1, and runs every case: the installs, each refusal with the
+installed copy's tree unchanged, the requests (Sill's User-Agent, no credential or
+cookie), the launch check against a running process, where an app runs (a folder
+made read-only, a link, a disk image writable and read-only, made with hdiutil
+under `.build` and never browsable), the staging folders, a stop beside the
+release, and the watcher (a new copy that proves itself, quits at once, never
+proves itself, writes another token; the old copy changed while it waited; a
+process that isn't the new copy, never stopped). The trust, the
+endpoints and the update key are the harness's own; nothing in Sill.app can take
+them. With the genuine v0.6.1 zip in `.build/updater-scratch/release-v0.6.1` (a
+read-only `gh release download v0.6.1 --repo Saffsanity/sill --pattern Sill.zip`),
+it also runs `Trust.release`'s every rule, with the harness's key, against Sill's
+real signature: installed over a 0.6.0, refused for the same version, a tag that
+isn't its version, another team, a tampered, an ad hoc and an unstapled copy, and
+each slice's cdhash as codesign prints it. It never touches /Applications, a
+keychain or Sill's defaults, and launches no app (the launch check's and the
+watcher's test executables run directly, never through Launch Services: the
+watcher's launcher there is `launch.sh`, Sill.app's is `/usr/bin/open`);
+everything is under `.build/update-harness`, removed at the end.
+`Tests/update-harness/mutants.py [NAME…]` changes UpdateInstaller in one place
+at a time, and runs the harness on each copy (each must fail it; several
+minutes each; names pick some).
+`Tests/update-harness/sign-test.sh` runs `Scripts/sign-update.sh` against a
+stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1 (and a
+release run's record and artifact for `--run`), with a throwaway key file and the
+tests' key (`UpdateManifest.testKeySeed`, which no Sill trusts, the only key the
+test-only `SILL_SIGN_TEST_BUILT_FROM` goes with) and the signer installed in a
+scratch folder: nothing is uploaded anywhere, and the login keychain is never used.
 
 ### The restore probe
 
@@ -2119,6 +2278,27 @@ simulator:
   active|inactive` holds the audio session active while a picture is offered
   or shows (a device's default), or never (the simulator's). The console's
   `pip:` lines say what happened.
+- Full screen (docs/full-screen-plan.md): `-SillFullScreen 1` starts with
+  Sill's controls hidden (in the mock, live and in the normal app), and with
+  it `-SillFullScreenReveal 0.4` catches the swipe in 40% of the way, its
+  preview photographed; `-SillFullScreenHint 1` (or `hold`, kept up) the hint;
+  `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes;
+  `-SillFullScreenToggle 3,6`, `-SillFullScreenSwipe 9` and `-SillShakeAt 12`
+  hide or show (as Settings › Full Screen and the swipe in do), play a swipe
+  in and shake at those seconds; `-SillFullScreenTakeBack 2` plays one taken
+  back (it springs back), and `-SillRevealSlow 20` makes the swipe in's own
+  animations twenty times slower, so a photo catches them mid-way;
+  `-Sill.shakeToShowControls 0` turns Shake to Show Controls off for one run. The console's `full screen:` lines say what
+  happened, and in a Debug build `reveal:` lines give every touch the swipe in
+  judged at the left edge (where it landed, why it was let go, when it began)
+  and each lift's travel, speed and verdict; `full screen: Sill's window
+  fills the screen: …` gives the window's and the screen's frames.
+  `-SillSettings 1 -SillSettingsScroll fullscreen` opens the panel at the
+  rows (after Frame Rate). The swipe in itself is proved in the touch rig:
+  `RIG_ONLY=edge Tests/touchrig/run.sh NAME` (the controls shown, then hidden),
+  `RIG_ONLY=reveal RIG_ORIENT=landscape` on an iPhone-idiom simulator for the
+  hidden strokes on its side, then `Tests/touchrig/compare.py --edge` against
+  main's surfaces, and `compare.py --all` for every other stroke.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to
   VoiceOver. SwiftUI builds that tree only for an assistive technology, so on
@@ -2132,7 +2312,7 @@ simulator:
   registered under that type are rows), `-SillHomeDoor paired|open|plain`
   (what a `-SillConnect` address counts as), `-SillCableTest 1` (this
   device's path counts as the cable) and the connect screen's `home…` cases;
-  `CLAUDE.md`, Build and run, has them all.
+  `docs/BUILD-AND-RUN.md` has them all.
 - `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
@@ -2196,8 +2376,8 @@ simulator:
   Mac on the network a second into a remote session, at a home door that
   speaks TLS, so the move home runs against a synthetic host with `--remote
   --pairing` (dialed pinned to the saved Mac's key, never plain), and
-  `-SillDialSaved remotely` dials it as Connect Remotely does. `CLAUDE.md`,
-  Build and run, has the host side (`SILL_TEST_REMOTE_ORIGIN`,
+  `-SillDialSaved remotely` dials it as Connect Remotely does.
+  `docs/BUILD-AND-RUN.md` has the host side (`SILL_TEST_REMOTE_ORIGIN`,
   `SILL_TEST_PATTERN=noise`).
 
 ### The touch rig
@@ -2529,6 +2709,35 @@ that the layout tool writes.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
+Update Now (docs/one-click-update-plan.md) installs a release only once it
+carries `Sill.zip.manifest`, signed with Noah's update key: `Scripts/sign-update.sh
+v<version>`, on his Mac, right after the release is published (never in CI), of a
+zip built on his Mac or, with `--run ID`, the zip a release.yml run kept once
+GitHub's record of that run names his tag's commit. It
+checks the published zip as the checklist checks a download, compares what the
+tag's source trusts (its update keys, the pinned requirement, the trust and the
+endpoints) with what the signer recorded when it was installed and stops on any
+difference, requires the app to name the tag's commit (`SillCommit` in its
+Info.plist, which `make-app.sh` writes, "+changes" for a build with changes) and
+GitHub's tag to name it too, refuses a nightly (`SillChannel`), shows the updater's
+own changes since the last release it signed and asks (whatever `--yes` says), signs
+the manifest (the tag, version, build, size, SHA-256, each
+slice's cdhash and the time) with the key in his login keychain (`--key-file
+PATH` for a key in a file) after asking in person with the whole SHA-256 shown,
+reads it back with the key the tagged source carries, uploads it and reads it
+back. The signer is built with the hardened runtime and refused without it. A
+release no Sill may install gets a stop (`update-manifest stop`, then `gh
+release upload`: docs/one-click-update-plan.md §15.4). Every manifest it signs
+goes in the signing record beside the signer (`signed.txt`), and
+`Scripts/sign-update.sh --audit` compares every release on GitHub with it, drafts
+and pre-releases too: each manifest (one that verifies with the key but isn't in the
+record is a release Noah didn't sign), each `Sill.zip` since the first release
+signed, every release signed still listed (`--pulled vX` marks one he pulled), and none
+marked pulled back again;
+`--notify` posts a notification then and whenever the audit couldn't run; its
+LaunchAgent, every four hours, is his choice: docs/release-checklist.md part 1 §7.
+`Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
+part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the
 Developer ID provisioning profile, git-ignored) and signs with
 `Packaging/SillRelease.entitlements`, so Sill keeps its key and paired devices
@@ -2616,10 +2825,10 @@ only if it has none; `asc.swift whats-new` always replaces.
 127.0.0.1 (throwaway keys, every run sandboxed to loopback).
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
-version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
-from 2026-10-31 until then, 0.5.5 the pre-release number before), with the commit
-count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly, and offers
-one nothing until a release newer than its version exists. A nightly reads the
+version of main's next release (0.6.3 since App Review approved 0.6.2, on the App Store since 2026-11-17; 0.6.2
+from 0.6.1's approval on 2026-11-12 until then; 0.6.1 from 0.6.0's approval until then; 0.6.0 from 2026-10-31, 0.5.5 the pre-release number before), with the commit
+count as its build, as in "Sill nightly 0.6.3 (1614)"; the update check never offers a nightly (Update Now
+does, with Use nightly builds on: above), and offers one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …
 --issuer …` lists the app's TestFlight groups (reads only).

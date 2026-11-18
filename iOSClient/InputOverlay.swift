@@ -82,6 +82,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
+    /// The scroll in progress has had a change since it began. A finger's pan that UIKit lets begin only as the
+    /// finger lifts (full screen's swipe in held it while it judged a touch at the left edge with the controls
+    /// hidden, and the lift said it was not one: EdgeRecognizers.releasedAtLift) begins and ends with no change
+    /// between, and its end then sends the travel first, so none is lost. Every other pan is as before.
+    private var scrollChanged = false
     /// -1 while Reverse Scrolling turns the scroll in progress around (a finger's drag; a connected
     /// trackpad's or wheel's never), else 1 (`ScrollDirection`): read as each scroll begins, so its
     /// deltas and the coast after its lift keep the direction it began with.
@@ -309,10 +314,41 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         if gesture.state == .began {
             zoomStroke.panBegan()
             fingerScroll = zoomStroke.scrollsMac
+        } else if gesture.state == .ended, !fingerScroll, !scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
+            // UIKit let the pan go only at the lift (full screen's swipe in held it there,
+            // EdgeRecognizers.releasedAtLift) and ended it without a begin: it begins here, so its end carries the
+            // travel (`scrollChanged`).
+            zoomStroke.panBegan()
+            fingerScroll = zoomStroke.scrollsMac
+            if fingerScroll {
+                scroll(.began, at: gesture.location(in: self), translation: .zero, velocity: .zero, from: .finger)
+                carryHeldTravel(gesture)
+            }
         }
         guard fingerScroll else { return }
         if gesture.state == .ended || gesture.state == .cancelled { fingerScroll = false }
         scroll(gesture, .finger)
+        if gesture.state == .began { carryHeldTravel(gesture) }
+    }
+
+    /// A finger's pan full screen's swipe in held while it judged a stroke at the left edge, the controls hidden
+    /// (EdgeRecognizers.heldLanding): UIKit begins it only as the swipe in lets the stroke go and counts its
+    /// translation from there, where on its own it counts from 10 pt past the landing
+    /// (EdgeRecognizers.panHysteresis). The next delta carries the difference, so the Mac scrolls what the same
+    /// stroke scrolls anywhere else. A pan that began on its own, as the swipe in let go, needs nothing: its
+    /// translation's origin is already there.
+    private func carryHeldTravel(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.numberOfTouches <= 1, let window, let held = EdgeRecognizers.heldLanding(in: window) else { return }
+        let landing = convert(held, from: window)
+        let location = gesture.location(in: self)
+        let t = gesture.translation(in: self)
+        let d = CGPoint(x: location.x - landing.x, y: location.y - landing.y)
+        let length = hypot(d.x, d.y)
+        let h = EdgeRecognizers.panHysteresis
+        guard length > h else { return }
+        let own = CGPoint(x: landing.x + d.x / length * h, y: landing.y + d.y / length * h)
+        let now = CGPoint(x: location.x - t.x, y: location.y - t.y)
+        lastPanTranslation = CGPoint(x: own.x - now.x, y: own.y - now.y)
     }
 
     /// Every direct touch on the picture, from the stroke observer: who the stroke belongs to, and while
@@ -404,6 +440,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         case .began:
             setOwnPointer(nil, .none)
             lastPanTranslation = .zero
+            scrollChanged = false
             // A new pan while the last flick is still coasting ends the coast first, so the Mac
             // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
             momentum.stop()
@@ -419,10 +456,15 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             // once it has moved, and its first change carries that, as always.
             if source != .finger { scrolled(to: translation, at: location) }
         case .changed:
+            scrollChanged = true
             scrolled(to: translation, at: location)
         case .ended, .cancelled:
-            // What a trackpad's or a wheel's last event moved, if its change never came.
+            // What a trackpad's or a wheel's last event moved, if its change never came; and a finger's whole
+            // travel when its pan began only at the lift (`scrollChanged`).
             if source != .finger, state == .ended { scrolled(to: translation, at: location) }
+            if source == .finger, state == .ended, !scrollChanged, scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
+                scrolled(to: translation, at: location)
+            }
             lastPanTranslation = .zero
             // A wheel never opened a gesture: nothing to close, and no coast.
             guard scrollGestureOpen else { return }
@@ -2069,7 +2111,7 @@ struct InputOverlay: UIViewRepresentable {
 /// Only direct touches are fingers: a Pencil is the mouse, and a Magic Keyboard trackpad's click is
 /// one indirect touch. Those only end a finished stroke's silence (`otherTouch`), since the
 /// portrait trackpad's recognizers take them too.
-final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
+final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate, WatchesTouchesOnly {
     private var strokes = TrackpadGestures()
     /// From three fingers down until the next stroke's first touch: the surface sends nothing.
     var silent: Bool { strokes.silent }
