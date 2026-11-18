@@ -342,7 +342,7 @@ for rd in readings { for paired in [false, true] {
 // MARK: - The server's gate
 
 let gateKinds: [StreamMessageKind] = [.parameterSets, .frame, .windowList, .thumbnail, .appIcon, .appList, .pong, .tick, .cursorShape,
-                                      .hostSettings, .macInfo, .goodbye, .macMenu, .macPointer, .clipboard, .audio]
+                                      .hostSettings, .macInfo, .goodbye, .macMenu, .macPointer, .clipboard, .audio, .camera]
 let pictures: [P.Picture?] = [nil, .placeholder, .display, .window]
 for rd in readings { for kind in gateKinds { for picture in pictures {
     let got = P.withheld(kind, picture: picture, reading: rd)
@@ -352,6 +352,7 @@ for rd in readings { for kind in gateKinds { for picture in pictures {
         // A window's frames always; the display's where the rule does not let it stream (a locked screen does, off console never).
         case .frame, .parameterSets: want = (picture ?? .window) == .window || (picture == .display && !P.allowed(rd).display)
         case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer: want = true
+        case .camera: want = true   // a device's camera is refused at any lock: no demand goes either
         default: want = false
         }
     }
@@ -375,7 +376,7 @@ let everyRequest: [(R, String)] = [
     (.menuRequest, "a menu fetched or chosen"), (.gesture, "a gesture"), (.clipboardText, "a device's clipboard text"),
     (.clipboardSubscription, "the clipboard's subscription or stop"), (.input(letsGo: false), "input"),
     (.input(letsGo: true), "the up of what the device holds down"), (.other, "settings, the viewport, a keyframe, Pair This iPad…"),
-    (.nextDisplay, "the Desktop's next display (kind 47)"),
+    (.nextDisplay, "the Desktop's next display (kind 47)"), (.camera, "the device's camera (kind 46)"),
 ]
 func expectedDecision(_ r: R, _ rd: Reading, paired: Bool) -> P.Decision {
     guard rd.locked else { return .take }
@@ -389,6 +390,7 @@ func expectedDecision(_ r: R, _ rd: Reading, paired: Bool) -> P.Decision {
     case .menuRequest: return .refuse(.menus)
     case .gesture: return .refuse(.gesture)
     case .clipboardText: return .refuse(.clipboard)
+    case .camera: return .refuse(.camera)   // a paired device's too, at a locked screen as off console
     case .input(let letsGo):
         let types = rd == .screenLocked && paired
         return types ? .take : (letsGo ? .letGo : .refuse(.input))
@@ -402,8 +404,10 @@ check(P.decide(.input(letsGo: false), reading: .offConsole, paired: true) == .re
       "off console a paired session's input is dropped too (nothing typed here reaches another session's login window)")
 check(P.decide(.input(letsGo: true), reading: .offConsole, paired: true) == .letGo, "off console the up of a key or button held down still goes")
 check(P.decide(.input(letsGo: false), reading: .screenLocked, paired: true) == .take, "at a locked screen a paired session types (the owner's password)")
-check(P.Refusal.allCases.map(\.rawValue) == ["pick", "launch", "windowCommand", "menus", "gesture", "clipboard", "input"],
-      "seven refusal kinds, each its own summary line")
+check(P.Refusal.allCases.map(\.rawValue) == ["pick", "launch", "windowCommand", "menus", "gesture", "clipboard", "input", "camera"],
+      "eight refusal kinds, each its own summary line")
+check(P.decide(.camera, reading: .screenLocked, paired: true) == .refuse(.camera) && P.decide(.camera, reading: .unlocked, paired: false) == .take,
+      "the camera: refused at a locked screen even from a paired device; unlocked, the lock takes it (CameraHostPolicy judges pairing)")
 // Judged at the more restrictive of the reading at arrival and now: what came while locked never acts after.
 for arrived in readings { for now in readings {
     let rd = P.restrictive(arrived, now)
@@ -421,6 +425,7 @@ full.keyRepeat = 1
 full.desktopDisplays = 2
 full.desktopDisplay = 1
 full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
+full.camera = 1
 let unlockedList = P.list(full, reading: .unlocked)
 check(sortedJSON(unlockedList) == sortedJSON(full) && Wire.encode(unlockedList).count == Wire.encode(full).count,
       "unlocked: the list as it is, byte for byte: \(sortedJSON(unlockedList))")
@@ -428,6 +433,7 @@ check(!json(unlockedList).contains("locked") && !json(unlockedList).contains("of
 for rd in [Reading.screenLocked, .offConsole] {
     let l = P.list(full, reading: rd)
     check(l.windows.isEmpty && l.clipboard == nil && !json(l).contains("clipboard"), "\(rd): no windows, no clipboard")
+    check(l.camera == nil && !json(l).contains("camera"), "\(rd): no camera (a device sends no kind 46, and its camera stops)")
     check(l.desktopDisplays == nil && l.desktopDisplay == nil && l.desktopDisplayNames == nil && !json(l).contains("desktopDisplay")
           && !json(l).contains("DELL"), "\(rd): no displays or their names either (one stop: a device sends no kind 47, and learns nothing of the Mac's screens)")
     check(l.locked == true && json(l).contains(#""locked":true"#), "\(rd): `locked` true")
@@ -563,6 +569,8 @@ let words: [(P.Refusal, String, String)] = [
      "Locked: dropped 3 clipboard texts from devices; the clipboard waits for this Mac to be unlocked."),
     (.input, "Locked: dropped an input event; only a paired device types at a locked Mac, and no device at one switched to another user.",
      "Locked: dropped 3 input events; only a paired device types at a locked Mac, and no device at one switched to another user."),
+    (.camera, "Locked: dropped a device's camera message; Sill Camera waits for this Mac to be unlocked.",
+     "Locked: dropped 3 camera messages from devices; Sill Camera waits for this Mac to be unlocked."),
 ]
 for (kind, one, three) in words {
     check(P.refusedLine(kind, count: 1) == one, "\(kind)'s line for one: \(P.refusedLine(kind, count: 1))")
@@ -674,6 +682,7 @@ for kind in gateKinds { for picture in pictures {
     case .audio: want = !a.sound
     case .clipboard: want = !a.clipboard
     case .cursorShape, .macPointer: want = !a.pointer
+    case .camera: want = true   // off console the camera is refused, the view or not
     default: want = false
     }
     check(got == want, "the view: kind \(kind.rawValue) (\(picture.map { "\($0)" } ?? "no picture")) \(want ? "withheld" : "sent")")
@@ -711,6 +720,7 @@ check(P.stricter(.take, .letGo) == .letGo && P.stricter(.letGo, .refuse(.input))
 let viewList = P.list(full, reading: .offConsole, offConsoleView: true)
 check(viewList.windows == full.windows && viewList.locked == true && viewList.offConsole == true && viewList.offConsoleView == true
       && viewList.clipboard == nil && json(viewList).contains(#""offConsoleView":true"#), "the view's list: the windows, `locked`, `offConsole` and `offConsoleView`, no clipboard")
+check(viewList.camera == nil && !json(viewList).contains("camera"), "the view's list: no camera")
 check(viewList.desktopDisplays == nil && viewList.desktopDisplay == nil && viewList.desktopDisplayNames == nil && !json(viewList).contains("desktopDisplay"),
       "the view's list: no displays (one stop, this session's main display: no kind 47)")
 check(sortedJSON(P.list(full, reading: .offConsole)) == sortedJSON(P.list(full, reading: .offConsole, offConsoleView: false))
