@@ -25,7 +25,13 @@ enum FilePickers {
         guard !results.isEmpty else { return }
         let names = results.map { $0.itemProvider.suggestedName ?? "Photo" }
         client.showFilesLocally(.preparing, names: names)
+        let token = client.filesLocalToken
         load(results) { sources, failed in
+            // Cancelled while they loaded: nothing goes, and Sill's copies go.
+            guard client.filesLocalToken == token else {
+                for s in sources { DeviceFiles.deleteOwnCopy(s.url) }
+                return
+            }
             if let first = failed.first {
                 for s in sources { DeviceFiles.deleteOwnCopy(s.url) }
                 client.showFilesLocally(.stopped(reason: FileReason.cantRead.rawValue, message: nil, byPeer: false,

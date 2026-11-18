@@ -73,8 +73,13 @@ extension StreamClient {
         #endif
     }
 
-    /// The chip's Cancel.
+    /// The chip's Cancel (and Stop Sending): DeviceFiles' transfer, or the Photos picker's items still loading,
+    /// whose send is then dropped (`filesLocalToken`).
     func cancelFiles() {
+        if let out = fileOut, out.serial == OutgoingFiles.localSerial, !out.isOver {
+            filesLocalToken += 1
+            showFilesLocally(.stopped(reason: FileReason.cancelled.rawValue, message: nil, byPeer: false, name: nil), names: out.names)
+        }
         deviceFiles.cancel()
         noteAction()
     }

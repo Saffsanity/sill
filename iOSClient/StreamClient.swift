@@ -973,6 +973,9 @@ final class StreamClient: ObservableObject {
     var filesSharedExpiry: DispatchWorkItem?
     /// While a transfer runs: the background task that lets it go on for a while after Sill leaves the screen.
     var filesBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// Bumped by the chip's Cancel while the Photos picker's items still load (`showFilesLocally`): the send
+    /// they would lead to is dropped.
+    var filesLocalToken = 0
     /// When this session's transfer last moved (systemUptime): the device's auto-lock stays off meanwhile
     /// (DeviceIdlePolicy.Uses.transfer).
     var lastFileProgressAt: Double?

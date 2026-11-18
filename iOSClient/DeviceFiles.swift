@@ -276,7 +276,11 @@ final class DeviceFiles: @unchecked Sendable {
         // What the Mac would refuse anyway (FilePolicy.answer), said before anything goes.
         let tooMany = sizes.count > FilePolicy.maxFiles, tooBig = total > FilePolicy.maxBytes
         let ids = Self.ids(sizes.count)
-        let files = zip(p.sources, zip(ids, sizes)).map { s, f in FileTransfer.File(id: f.0, name: s.name, size: f.1, type: s.type) }
+        // Each name cleaned as the Mac will clean it (FileNames, idempotent): an offer of 500 long names stays
+        // well under kind 49's cap.
+        let files = zip(p.sources, zip(ids, sizes)).map { s, f in
+            FileTransfer.File(id: f.0, name: FileNames.clean(s.name), size: f.1, type: s.type)
+        }
         let transfer = UInt32.random(in: 1 ... .max)
         let offer = FileTransfer.offer(transfer: transfer, files: files)
         guard !tooMany, !tooBig, let payload = offer.payload else {
