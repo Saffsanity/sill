@@ -85,9 +85,15 @@ struct TrackpadView: UIViewRepresentable {
     let onModifiersConsumed: () -> Void
     var verticalSpan: CGFloat? = nil
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Trackpad mode (TouchMode, #178): this pad lies over the picture, whose input view is under it. Read once, as
+    /// the surface is made (`TrackpadSurface.overPicture`).
+    var overPicture = false
+    /// Over the picture: where the Apple Pencil's touches and a connected trackpad's or mouse's clicks go, the
+    /// picture's input view (`InputOverlayView.takePointerTouch`), which takes them where they point.
+    var pointerTouch: (UITouch.Phase, UITouch, UIEvent?) -> Void = { _, _, _ in }
 
     func makeUIView(context: Context) -> TrackpadSurface {
-        let view = TrackpadSurface(frame: .zero)
+        let view = TrackpadSurface(frame: .zero, overPicture: overPicture)
         // The pointer closures go in before the first update as well: the surface reads the feed as
         // it joins the window, and that need not wait for `updateUIView`.
         view.setPointer = setPointer
@@ -104,6 +110,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
         uiView.sendGesture = sendGesture
+        uiView.pointerTouch = pointerTouch
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -137,6 +144,16 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
     /// a window streams). True when it went, which the light tick follows.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Trackpad mode (TouchMode, #178): this pad lies over the picture, as the whole picture's trackpad, instead of
+    /// below it. Only a finger is then the pad's (`TouchMode.taker`): its recognizers take fingers alone, as the
+    /// picture's own do ("Every finger recognizer is direct-touch only", InputOverlayView), so the Apple Pencil's
+    /// touches and a connected trackpad's or mouse's clicks reach `touchesBegan` intact and go on to the picture
+    /// (`pointerTouch`), and the events that carry no touch (the pointer's hover and scrolls, a trackpad's pinch)
+    /// pass through to it (`point(inside:with:)`). The on-screen trackpad is main's, every touch its own.
+    private(set) var overPicture = false
+    /// Over the picture: the picture's input view, which takes the Pencil's touches and the pointer's clicks where
+    /// they point (`InputOverlayView.takePointerTouch`). Each touch with the phase it is in.
+    var pointerTouch: (UITouch.Phase, UITouch, UIEvent?) -> Void = { _, _, _ in }
     /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
     /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
     /// line).
@@ -204,8 +221,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// which is UIKit's doing, so there is deliberately no device check here.
     private let clickHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
-    override init(frame: CGRect) {
+    override convenience init(frame: CGRect) {
+        self.init(frame: frame, overPicture: false)
+    }
+
+    /// `overPicture`: Trackpad mode's pad over the picture (fixed for the surface's life).
+    init(frame: CGRect, overPicture: Bool) {
         super.init(frame: frame)
+        self.overPicture = overPicture
         backgroundColor = .clear
         isOpaque = false
         isMultipleTouchEnabled = true
@@ -260,6 +283,37 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in self?.gestureDecided(gesture, fingers: fingers) }
         addGestureRecognizer(strokes)
+
+        // Over the picture, fingers alone (`overPicture`): a recognizer that does not take a touch neither cancels
+        // nor delays it, so the Pencil's and the pointer's reach the touch callbacks below whole. The stroke
+        // observer takes direct touches only already, and hears the rest only to end a silence.
+        if overPicture {
+            for recognizer in [tracker, pan, tap, twoFingerTap, longPress, fingerCounter] as [UIGestureRecognizer] {
+                recognizer.allowedTouchTypes = Self.fingerTouchTypes
+            }
+            tracker.fingersOnly = true
+        }
+    }
+
+    /// The touch kinds that are a finger's (`TouchMode.taker`), for the recognizers of the pad over the picture: a
+    /// direct touch, and an indirect one, which no iPhone or iPad makes.
+    private static let fingerTouchTypes: [NSNumber] = [UITouch.TouchType.direct, .indirect, .pencil, .indirectPointer]
+        .filter { TouchMode.taker(TouchMode.Arrival(touch: $0)) == .trackpad }
+        .map { NSNumber(value: $0.rawValue) }
+
+    /// Whether `touch` is this pad's: every touch on the on-screen trackpad; over the picture, a finger's.
+    private func isPads(_ touch: UITouch) -> Bool {
+        !overPicture || TouchMode.taker(TouchMode.Arrival(touch: touch.type)) == .trackpad
+    }
+
+    /// Over the picture, the touches that are not a finger's go on to the picture's input view (`pointerTouch`), in
+    /// their phase; the rest, the pad's, are returned. On the on-screen trackpad every touch is returned.
+    private func handOn(_ phase: UITouch.Phase, _ touches: Set<UITouch>, _ event: UIEvent?) -> Set<UITouch> {
+        guard overPicture else { return touches }
+        let others = touches.filter { !isPads($0) }
+        guard !others.isEmpty else { return touches }
+        for touch in others { pointerTouch(phase, touch, event) }
+        return touches.subtracting(others)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -314,6 +368,12 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             trackSuspended = false
             trackLive = false
             trackLast = tracker.location(in: self)
+            // The pad over the picture with full screen's controls hidden: the swipe in held this stroke while it
+            // judged it (EdgeRecognizers.heldLanding), so the tracker begins only as it lets the stroke go, up to
+            // 8 pt on. The pointer carries the travel from where the finger landed, as an unheld stroke's does.
+            if overPicture, let window, let held = EdgeRecognizers.heldLanding(in: window) {
+                trackLast = convert(held, from: window)
+            }
         case .changed:
             guard trackerDriving else { return }
             let location = tracker.location(in: self)
@@ -445,25 +505,49 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             onEnd: { send(.scrollGesture(.momentumEnded, x: at.x, y: at.y)) })
     }
 
-    /// The iPad's own pointer hovers and scrolls with events this surface has no recognizer for: they fall
-    /// through to what lies under it, the picture's input view in Trackpad mode (#178).
+    /// Over the picture (Trackpad mode, #178), the events that carry no touch and are not a finger's (TouchMode.taker:
+    /// iPadOS's pointer hovering, the Pencil hovering, a trackpad's or a wheel's scroll, a trackpad's pinch or
+    /// rotation) fall through to what lies under the pad, the picture's input view, whose recognizers take them as
+    /// in Direct Touch. A touch is the pad's to hit: which of them are a finger's only its kind says, as it lands
+    /// (`handOn`). The on-screen trackpad is hit by everything, as on main.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if event?.type == .hover || event?.type == .scroll { return false }
+        if overPicture, let type = event?.type, let arrival = TouchMode.Arrival(event: type),
+           TouchMode.taker(arrival) == .picture { return false }
         return super.point(inside: point, with: event)
     }
 
     /// Two fingers resting on the pad stop a coasting scroll, as on a Mac trackpad, before the pan
     /// has even recognized. One finger does not: that is the pointer, and it may move freely
-    /// while the content coasts.
+    /// while the content coasts. Over the picture, a touch that is not a finger's goes on to the
+    /// picture first (`handOn`), and only fingers count.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let touches = handOn(.began, touches, event)
+        guard !touches.isEmpty else { return }
         super.touchesBegan(touches, with: event)
         let down = event?.touches(for: self)?
-            .filter { $0.phase != .ended && $0.phase != .cancelled }.count ?? 0
+            .filter { $0.phase != .ended && $0.phase != .cancelled && isPads($0) }.count ?? 0
         // The first finger of a new stroke: carry on from wherever the pointer is now.
         if down == touches.count { adoptAnchor() }
         // Spin the Taptic Engine up now, so a tap's click lands without its start-up delay.
         clickHaptic.prepare()
         if down >= 2 { momentum.stop() }
+    }
+
+    // The rest of a touch's life, for the pad over the picture: the Pencil's and the pointer's go on to the picture,
+    // as their landing did (`handOn`); a finger's, and every touch on the on-screen trackpad, to UIView's own.
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let touches = handOn(.moved, touches, event)
+        if !touches.isEmpty { super.touchesMoved(touches, with: event) }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let touches = handOn(.ended, touches, event)
+        if !touches.isEmpty { super.touchesEnded(touches, with: event) }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let touches = handOn(.cancelled, touches, event)
+        if !touches.isEmpty { super.touchesCancelled(touches, with: event) }
     }
 
     override func didMoveToWindow() {
@@ -482,8 +566,11 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         } else {
             adoptAnchor()
             #if DEBUG
-            InputScript.pad = self
-            runInputTest()
+            // `-SillInputScript`'s pad steps and `-SillInputTest`'s trackpad run go to the on-screen trackpad. In
+            // Trackpad mode upright there are two pads, the picture's over the one below it: the picture's is the
+            // script's only while no on-screen pad is (sideways), whichever joins first, and never runs the test.
+            if !overPicture || InputScript.pad == nil { InputScript.pad = self }
+            if !overPicture { runInputTest() }
             #endif
         }
     }
@@ -621,6 +708,33 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     #endif
 }
 
+// MARK: - What lands on the pad over the picture
+
+/// UIKit's names for what reaches the pad over the picture (TouchMode.Arrival, pure, in PointerPresence.swift).
+fileprivate extension TouchMode.Arrival {
+    /// A touch, by its kind: the Apple Pencil, iPadOS's pointer (a click of a connected trackpad or mouse), or
+    /// otherwise a finger (a direct touch, or an indirect one, which no iPhone or iPad makes).
+    init(touch type: UITouch.TouchType) {
+        switch type {
+        case .pencil: self = .pencil
+        case .indirectPointer: self = .pointerClick
+        default: self = .finger
+        }
+    }
+
+    /// An event that carries no touch: the pointer or the Pencil hovering, a trackpad's or a wheel's scroll, a
+    /// trackpad's pinch or rotation. Nil for touches, which their kind decides as each lands, and for what is never
+    /// hit-tested (presses, motion, a remote's controls).
+    init?(event type: UIEvent.EventType) {
+        switch type {
+        case .hover: self = .hover
+        case .scroll: self = .scroll
+        case .transform: self = .transform
+        default: return nil
+        }
+    }
+}
+
 // MARK: - Finger counter
 
 /// Counts the fingers on the pad for Q1's flip (`StreamClient.trackpadFingers`). The view's own
@@ -628,7 +742,11 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 /// never hears a finger lift. This recognizer sees every touch and never recognizes (it stays
 /// possible, so UIKit ends it with the last finger), takes none from the view (`cancelsTouchesInView`
 /// off) and delays none (`delaysTouchesEnded` off); the pad's delegate lets it run beside the rest.
-private final class FingerCounter: UIGestureRecognizer {
+/// It only watches (`WatchesTouchesOnly`), so it never waits for full screen's swipe in: the pad over
+/// the picture in Trackpad mode is in the window while the swipe in listens, and a watcher made to
+/// wait was never reset after the first stroke the swipe in held, nor the pad with it
+/// (docs/full-screen-plan.md, the touch rig's finding of 2026-11-12, on the stroke observer).
+private final class FingerCounter: UIGestureRecognizer, WatchesTouchesOnly {
     var onCount: ((Int) -> Void)?
     private var down = Set<UITouch>()
 
@@ -674,10 +792,14 @@ private final class FingerCounter: UIGestureRecognizer {
 /// so the count is taken here, from the view's own touches, before the superclass sees the new one.
 private final class FingerTracker: UILongPressGestureRecognizer {
     private(set) var sawSecondFinger = false
+    /// The pad over the picture (`TrackpadSurface.overPicture`): only the kinds of touch it takes count, so the
+    /// Apple Pencil resting on the picture, which goes on to it, is no second finger.
+    var fingersOnly = false
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let view,
-           let down = event.touches(for: view)?.filter({ $0.phase != .ended && $0.phase != .cancelled }),
+           let down = event.touches(for: view)?.filter({ $0.phase != .ended && $0.phase != .cancelled
+                                                          && (!fingersOnly || allowedTouchTypes.contains(NSNumber(value: $0.type.rawValue))) }),
            down.count >= 2 {
             sawSecondFinger = true
         }

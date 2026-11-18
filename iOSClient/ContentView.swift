@@ -220,7 +220,7 @@ struct ContentView: View {
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
-///   switch and its footnote (#291).
+///   switch and its footnote (#291). `-SillSettingsScroll touch` at Touch Mode's row and its footnote (#178).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -245,6 +245,11 @@ struct ContentView: View {
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
 ///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-Sill.touchMode trackpad` — not a harness argument either: this device's Touch Mode (the Settings
+///   panel's This iPad group, issue #178, TouchMode) at Trackpad for one run, in the normal app too: the
+///   whole picture is the Mac's trackpad in every layout (the on-screen trackpad's surface laid over it,
+///   which hands the Pencil and iPadOS's pointer on to the picture), this device's own arrow shows, and
+///   the tour's picture card is "The Picture Is a Trackpad". Anything else is Direct Touch, as before.
 /// * `-Sill.thumbnailHold 0.3` — not a harness argument either: how long a window's thumbnail is held
 ///   before its lights show and it can be dragged (ThumbnailHold, issue #113; the Settings panel's This
 ///   iPad group, 0.2 to 3 s, 0.5 s unless changed) held at 0.3 s for one run, in the normal app too (the

@@ -1825,6 +1825,8 @@ struct StreamScreen: View {
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },
                              writeZoom: { [zoom] in zoom.set($0) })
+                // Trackpad mode (TouchMode, #178): the whole picture is the Mac's trackpad, over the input view,
+                // which still takes the Pencil, iPadOS's pointer and the keyboard (`pointerTouch`).
                 if TouchMode.stored(touchModeRaw) == .trackpad {
                     TrackpadView(send: { client.sendInput($0) },
                                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
@@ -1833,7 +1835,9 @@ struct StreamScreen: View {
                                  latched: latched,
                                  onModifiersConsumed: { latched = [] },
                                  verticalSpan: nil,
-                                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                                 overPicture: true,
+                                 pointerTouch: { [overlay] in overlay.view?.takePointerTouch($0, $1, with: $2) })
                 }
             }
             // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.

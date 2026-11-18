@@ -677,6 +677,8 @@ struct PortraitStreamScreen: View {
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) })
+            // Trackpad mode (TouchMode, #178): the whole picture is the Mac's trackpad, as StreamScreen's is, over
+            // the one below it in the halves and on a phone upright.
             if TouchMode.stored(touchModeRaw) == .trackpad {
                 TrackpadView(send: { client.sendInput($0) },
                              setPointer: { client.setOwnPointer($0, from: .trackpad) },
@@ -685,7 +687,9 @@ struct PortraitStreamScreen: View {
                              latched: latched,
                              onModifiersConsumed: { latched = [] },
                              verticalSpan: nil,
-                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             overPicture: true,
+                             pointerTouch: { [overlay] in overlay.view?.takePointerTouch($0, $1, with: $2) })
             }
         }
         // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.

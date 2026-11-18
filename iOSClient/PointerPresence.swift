@@ -10,7 +10,7 @@ import Foundation
 // sent to every device but the one moving it.
 //
 // Pure: Foundation and CoreGraphics only, so it is checked on its own with swiftc
-// (Tests/checks/pointer-presence). Three parts:
+// (Tests/checks/pointer-presence). Four parts:
 // • PointerPresence (main): what the sprite shows, the trackpad's linger (Q1's flip), and the rules a
 //   report from the Mac is judged by.
 // • PointerFeedState (the network queue): who moved the pointer last as this device knows it, where
@@ -18,6 +18,8 @@ import Foundation
 //   carry-over; PointerFeed keeps it under a lock for main to read.
 // • PadCursor (the portrait pad): where a stroke, and a move after the Mac moved the pointer,
 //   carry on from.
+// • TouchMode (#178): Direct Touch or Trackpad on the picture, who takes what lands on the picture in
+//   Trackpad mode, and the Settings panel's words.
 
 /// What the device's one pointer sprite shows (§7.2):
 ///
@@ -25,6 +27,8 @@ import Foundation
 ///     the Mac, or another device             any         the Mac's pointer while it is over the stream
 ///     this device, the on-screen trackpad    portrait    this device's own, until another input takes over (Q1)
 ///     this device, the on-screen trackpad    landscape   hidden
+///     this device, the picture as a          any         this device's own, as the on-screen trackpad's in
+///       trackpad (TouchMode.trackpad)                    portrait (`portrait` is true then: TouchMode.showsPointer)
 ///     this device, a finger on the stream,   any         hidden
 ///       typing, a hardware key, the iPad's
 ///       own trackpad or mouse
@@ -354,14 +358,19 @@ struct PadCursor: Equatable {
     }
 }
 
-/// Option to switch between Direct Touch and Trackpad (relative mouse) mode on the stream
-/// (issue #178). Pure (`Foundation` + `CoreGraphics`).
+/// How a finger on the picture reaches the Mac (issue #178; the Settings panel's This ‹device›, Touch Mode): Direct
+/// Touch, where the pointer goes where the finger touches (the picture's own input view, the default, as before the
+/// option), or Trackpad, the whole picture as the Mac's trackpad: the portrait trackpad's own surface
+/// (TrackpadView) laid over it, its pointer carried on from wherever it is (PadCursor) and this device's own arrow
+/// shown in every layout. This device's own, stored under `Sill.touchMode` (`-Sill.touchMode trackpad` for one run),
+/// never sent: nothing goes to the Mac that the on-screen trackpad does not already send.
 enum TouchMode: String, CaseIterable, Equatable, Sendable {
     case direct
     case trackpad
 
     static let defaultsKey = "Sill.touchMode"
 
+    /// The segmented control's words.
     var title: String {
         switch self {
         case .direct: "Direct Touch"
@@ -369,13 +378,45 @@ enum TouchMode: String, CaseIterable, Equatable, Sendable {
         }
     }
 
+    /// What `Sill.touchMode` holds: "trackpad" is Trackpad, and anything else, nothing included, Direct Touch.
     static func stored(_ raw: String?) -> TouchMode {
         raw.flatMap(TouchMode.init(rawValue:)) ?? .direct
     }
 
+    /// Whether the sprite may show this device's own trackpad pointer (`PointerPresence.portrait`, through
+    /// StreamClient.setPointerLayout): in the laptop layouts, whose on-screen trackpad it is (`isPortrait`, false
+    /// while full screen hides that trackpad), and in every layout while the picture itself is a trackpad, full
+    /// screen included.
     static func showsPointer(isPortrait: Bool, mode: TouchMode) -> Bool {
         isPortrait || mode == .trackpad
     }
 
-    static let footnote = "Direct Touch clicks where you tap on the picture. Trackpad turns the picture itself into a trackpad: drag to move the pointer, tap to click, press and hold to drag, and use two fingers to scroll."
+    // MARK: Who takes what lands on the picture in Trackpad mode
+
+    /// What reaches the trackpad over the picture, as UIKit tells it apart: a touch by its kind (`UITouch.TouchType`:
+    /// a finger; the Apple Pencil; a click of a trackpad or mouse connected to an iPad, iPadOS's pointer), or an event
+    /// that carries no touch (`UIEvent.EventType`: the pointer or the Pencil hovering, a trackpad's or a wheel's
+    /// scroll, a trackpad's pinch or rotation).
+    enum Arrival: CaseIterable, Equatable, Sendable { case finger, pencil, pointerClick, hover, scroll, transform }
+    /// Who takes it: the trackpad, or the picture's own input view under it, which takes it as in Direct Touch.
+    enum Taker: Equatable, Sendable { case trackpad, picture }
+
+    /// Only a finger is the trackpad's (the review's decision 4, 2026-11-18: the Apple Pencil and a connected
+    /// trackpad or mouse stay absolute). The Pencil clicks and drags where it touches, and iPadOS's pointer clicks,
+    /// drags, hovers and scrolls where it is, on the picture as in Direct Touch; the surface over it hands their
+    /// touches on and lets their events through. A trackpad's pinch and rotation go through as well: the picture
+    /// does nothing with them yet, and a pinch for the Mac (#261) will find them there.
+    static func taker(_ arrival: Arrival) -> Taker {
+        arrival == .finger ? .trackpad : .picture
+    }
+
+    /// Under the Settings panel's Touch Mode, for ‹Mac› (its name, or "the Mac") and this ‹device› ("iPad" or
+    /// "iPhone"): what each mode does (the review's words, 2026-11-18); that a pinch zooms nothing in Trackpad mode,
+    /// while the trackpad lies over the picture; and on an iPad, that the Pencil and a connected trackpad keep
+    /// clicking where they point (`taker`).
+    static func footnote(mac: String, device: String) -> String {
+        "Direct Touch: tap what you want to click. Trackpad: the whole picture works as \(mac)’s trackpad. Drag to move the pointer, tap to click, tap with two fingers to right-click, touch and hold then drag to drag, and drag two fingers to scroll."
+            + " In Trackpad mode, a pinch doesn’t zoom the picture."
+            + (device == "iPad" ? " The Apple Pencil and a connected trackpad still click where they point." : "")
+    }
 }
