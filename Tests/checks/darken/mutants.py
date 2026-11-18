@@ -5,7 +5,8 @@ Left out as equivalent (each a second guard behind one that already holds): the 
 `switched`, `reading`, `local`, `called` and `tick` (a quit has cleared the wait, the hold and the lock asked and taken
 the windows down, so nothing after it can raise, lift or lock); `screens`' guard that only a change across zero acts
 (any other change settles to the same); `tick`'s `lockFollows = false` at a wait's end (read only at a wait's end, and
-set again at the next one's start)."""
+set again at the next one's start); `lockHolds` dropped from the hold's start (`if lockFollows, lockHolds`: a hold
+started while the lock holds nothing ends in the same tick, at the hold's own end test)."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
@@ -58,7 +59,6 @@ M = [
     ("the wait ends after its time", F, "if let since = waitingSince, now - since >= grace {", "if let since = waitingSince, now - since > grace {"),
     ("the wait ends a second early", F, "if let since = waitingSince, now - since >= grace {", "if let since = waitingSince, now - since >= grace - 1 {"),
     ("the hold for any lock", F, "                if lockFollows, lockHolds { holdingSince = since }", "                if lockHolds { holdingSince = since }"),
-    ("the hold whatever the lock says", F, "                if lockFollows, lockHolds { holdingSince = since }", "                if lockFollows { holdingSince = since }"),
     ("the hold outlasts the lock", F, "if let since = holdingSince, !lockHolds || now - since >=", "if let since = holdingSince, now - since >="),
     ("the hold has no bound", F, "!lockHolds || now - since >= grace + lockConfirm + DarkenPolicy.holdSlack {", "!lockHolds {"),
     ("the hold's bound 10 s later", F, "now - since >= grace + lockConfirm + DarkenPolicy.holdSlack {", "now - since >= grace + lockConfirm + 10 {"),

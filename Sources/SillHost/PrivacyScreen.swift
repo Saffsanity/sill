@@ -82,7 +82,7 @@ final class PrivacyScreen {
         startLines = lines
         self.status = status
         self.gate = gate
-        run(state.screens(screenIDs().count, at: 0))
+        if scope != .off { run(state.screens(screenIDs().count, at: 0)) }
         run(state.reading(PrivacyLock.mac(gate), at: 0))
     }
 
@@ -100,14 +100,23 @@ final class PrivacyScreen {
     /// calls this before it declares the connect's user activity, so a sleeping panel lights up black (rule 5).
     func sessions(away: Int, home: Int) {
         let now = now()
-        run(state.screens(screenIDs().count, at: now))
+        if state.scope != .off { run(state.screens(screenIDs().count, at: now)) }
         run(state.sessions(away: away, home: home, at: now))
     }
 
     /// The switches, at once (`setTarget`). Outside a test host darkening stays off until G0 fills the seams.
     func switched(_ config: HostConfig) {
         let scope = curtain == nil ? .off : config.darkenScreen
-        run(state.switched(scope: scope, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession, at: now()))
+        let now = now()
+        if scope != .off { run(state.screens(screenIDs().count, at: now)) }
+        run(state.switched(scope: scope, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession, at: now))
+    }
+
+    /// The displays changed (rule 13): the count the rule goes by. The filled curtain calls it from the display
+    /// reconfiguration callback, beside its own re-sync; with darkening off nothing is read.
+    func displaysChanged() {
+        guard state.scope != .off else { return }
+        run(state.screens(screenIDs().count, at: now()))
     }
 
     /// SessionLock's reading changed.
