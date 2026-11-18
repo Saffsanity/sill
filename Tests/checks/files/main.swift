@@ -505,6 +505,11 @@ for direction in ["device → Mac", "Mac → device"] {
         var opened = Set<UInt32>()
         var corrupt = Set<UInt32>()               // files one of whose parts the model damaged on the way
         var hashes: [UInt32: SHA256] = [:]        // the sender's running hash, by file
+        var contents: [UInt32: Data] = [:]        // each file's bytes, made once
+        func bytesOf(_ id: UInt32, _ size: UInt64) -> Data {
+            if let d = contents[id] { return d }
+            let d = content(id, size); contents[id] = d; return d
+        }
         let locked = rng.chance(0.1), paired = !rng.chance(0.1), shareOn = !rng.chance(0.05)
         let askBefore = rng.chance(0.5)
         var connectionUp = true
@@ -545,7 +550,7 @@ for direction in ["device → Mac", "Mac → device"] {
                 case .sendPart(let id, let offset, let count):
                     if sender.inFlight > UInt64(max(window, F.chunkBytes)) { broke("\(sender.inFlight) in flight, the window \(window)") }
                     let size = offered.first { $0.id == id }!.size
-                    var bytes = content(id, size).subdata(in: Int(offset)..<(Int(offset) + count))
+                    var bytes = bytesOf(id, size).subdata(in: Int(offset)..<(Int(offset) + count))
                     hashes[id, default: SHA256()].update(data: bytes)
                     if rng.chance(0.005) { bytes[0] ^= 0xFF; corrupt.insert(id); disturbed = true }
                     if connectionUp {
@@ -657,7 +662,7 @@ for direction in ["device → Mac", "Mac → device"] {
         if sender.phase == .done {
             completed += 1
             if receiver.phase != .done { broke("the sender done, the receiver \(receiver.phase)") }
-            for f in offered where kept[f.id] != content(f.id, f.size) { broke("file \(f.id) kept wrong") }
+            for f in offered where kept[f.id] != bytesOf(f.id, f.size) { broke("file \(f.id) kept wrong") }
         } else { cancelledRuns += 1 }
         if case .cancelled = receiver.phase, !staged.isEmpty { broke("partials left at the end") }
         if receiver.phase == .done, kept.count != offered.count { broke("done with \(kept.count) of \(offered.count)") }
