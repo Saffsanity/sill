@@ -68,8 +68,8 @@ MUTANTS = [
      "package func isDown(_ usage: UInt16) -> Bool { false }"),
     ("an unknown key is typed as A", STROKES, "guard let virtualKey = Self.virtualKeys[usage] else { return nil }",
      "guard let virtualKey = Self.virtualKeys[usage] ?? Self.virtualKeys[0x04] else { return nil }"),
-    ("every device bit reaches the Mac", STROKES, "        if modifiers & (1 << 20) != 0 { flags |= command }\n        return flags\n",
-     "        if modifiers & (1 << 20) != 0 { flags |= command }\n        return modifiers\n"),
+    ("every device bit reaches the Mac", STROKES, "        if modifiers & (1 << 23) != 0 { flags |= fn }\n        return flags\n",
+     "        if modifiers & (1 << 23) != 0 { flags |= fn }\n        return modifiers\n"),
     ("caps lock dropped", STROKES, "        if modifiers & (1 << 16) != 0 { flags |= capsLock }\n", ""),
     ("command read from option's bit", STROKES, "if modifiers & (1 << 20) != 0 { flags |= command }", "if modifiers & (1 << 19) != 0 { flags |= command }"),
     ("the right command key holds control", STROKES, "0xE4: control, 0xE5: shift, 0xE6: option, 0xE7: command,",
@@ -265,6 +265,17 @@ MUTANTS = [
      "static let paste: [InputEvent] = press(ClipboardPolicy.pasteKey, with: [])"),
     ("Paste right away's ⌘ never let go", CHORDS, "static let paste: [InputEvent] = press(ClipboardPolicy.pasteKey, with: .command)",
      "static let paste: [InputEvent] = Array(press(ClipboardPolicy.pasteKey, with: .command).dropLast())"),
+    # The Keys menu (2026-11-02)
+    ("the fn bit dropped again", STROKES, "        if modifiers & (1 << 23) != 0 { flags |= fn }\n", ""),
+    ("fnKey from macOS 14 (fn⌃← is ⌃← there)", STROKES, "macOSMajor >= 15 ? 1 : nil", "macOSMajor >= 14 ? 1 : nil"),
+    ("fnKey never said", STROKES, "macOSMajor >= 15 ? 1 : nil", "nil"),
+    ("Lock Screen as ⌘Q (Quit)", CHORDS, "case .lockScreen: return (0x14, [.control, .command])", "case .lockScreen: return (0x14, .command)"),
+    ("Force Quit without option", CHORDS, "case .forceQuit: return (0x29, [.option, .command])", "case .forceQuit: return (0x29, .command)"),
+    ("the screenshot as ⇧⌘4", CHORDS, "case .screenshot: return (0x22, [.shift, .command])", "case .screenshot: return (0x21, [.shift, .command])"),
+    ("the tiling without fn (⌃←: a Space away)", CHORDS, "        let tile: KeyModifiers = [.fn, .control]\n", "        let tile: KeyModifiers = [.control]\n"),
+    ("left and right swapped", CHORDS, "case .tileLeft: return (0x50, tile)", "case .tileLeft: return (0x4F, tile)"),
+    ("the tiling shown to a Mac without fn", CHORDS, "allCases.filter { macTakesFn || !$0.needsFn }", "allCases"),
+    ("the fn bit not the Globe's", CHORDS, "    static let fn = KeyModifiers(rawValue: 1 << 23)\n", "    static let fn = KeyModifiers(rawValue: 1 << 22)\n"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

@@ -82,6 +82,10 @@ public struct WindowList: Codable {
     /// VoiceOver's value ("Display 2 of 3, DELL U2723QE") and, later, a list to choose from (PR #296's).
     /// With `desktopDisplays` only.
     public var desktopDisplayNames: [String]?
+    /// 1 from a host that passes a device's fn bit (the Globe key, bit 23) to the Mac (2026-11-02, #272): a
+    /// device's Keys menu offers the window tiling (macOS's Globe-Control shortcuts) only then, since an older
+    /// host drops the bit and the Mac would take fn⌃← as ⌃←. Nil from every host before. Set after the initializer.
+    public var fnKey: Int?
     /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
     /// screen is locked, or another user, the login window or nobody is on its console. True, with no
     /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and

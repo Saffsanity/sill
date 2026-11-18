@@ -955,6 +955,10 @@ final class StreamClient: ObservableObject {
     /// then says ("Display 2 of 3, DELL U2723QE"): the stop shown when the tap went out, and when. Another
     /// device's step moves this button unannounced.
     private var desktopStepSentFrom: (stop: Int?, at: Date)?
+    /// 1 from a Mac that takes a device's fn bit (`WindowList.fnKey`): the Keys menu's window tiling. Cleared with the session.
+    @Published var hostFnKey: Int?
+    /// The Mac takes the fn bit, so the Keys menu offers its window tiling.
+    var macTakesFn: Bool { (hostFnKey ?? 0) >= 1 }
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3733,6 +3737,7 @@ final class StreamClient: ObservableObject {
         hostDesktopDisplay = nil
         hostDesktopDisplayNames = nil
         desktopStepSentFrom = nil
+        hostFnKey = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -4439,6 +4444,7 @@ final class StreamClient: ObservableObject {
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
                 self.desktopStopsChanged(list)
+                if self.hostFnKey != list.fnKey { self.hostFnKey = list.fnKey }
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
