@@ -1749,11 +1749,14 @@ device keeps working with Macs from the first public build on, or each says why
   the plain-TCP `_sill._tcp` door, which only development builds and the CLI without `--pairing`
   keep; the ALPNs `sill/1` and `sill-pair/1`, which every host offers for good at both doors
   (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
-  header; kinds 0–28, 32 and 44 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
-  Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and Clipboard;
-  44, a device's keyframe request after its picture was interrupted, empty, which a host from
-  before skips; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
-  below), inside `sill/1` at both doors (19 and 20 on their own `sill-pair/1` connection, the
+  header; kinds 0–28, 32, 44 and 47 and their payloads (HEVC with ParameterSets; the JSON of
+  Switcher, Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and
+  Clipboard; 44, a device's keyframe request after its picture was interrupted, empty, which a host
+  from before skips; 47, the Desktop's next stop, empty, below; 29 to 31, 33 and 35 to 42 stay
+  free, pull request #66's; 34, 45, 46, 48 to 50, 60 and 61 are held for work being built, as the
+  list of held numbers in StreamMessage.swift says, where every new kind's number is claimed
+  first; and 43 is the Mac's sound's, below), inside `sill/1` at both doors (19 and 20 on their own
+  `sill-pair/1` connection, the
   next bullet); the ping echo; a viewport (kind 9) within `ViewportBounds`, each side 1 to
   16384 points and a text scale 0.25 to 4 or none: every device build's is, a host from
   2026-10-29 on refuses any other whole (security scan, finding 4), so a later device keeps
@@ -1794,7 +1797,16 @@ device keeps working with Macs from the first public build on, or each says why
   replaces the last picture of a device from before them, but off console with its user's switch on (Show this
   account while another user is on the screen, docs/off-console-plan.md), when it streams this session's own desktop
   and windows to every device and sends a device whose hello says `offConsoleView` 1 the list with its windows and
-  `offConsoleView` true (every other device the locked list: a later host keeps both keys' meanings); the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  `offConsoleView` true (every other device the locked list: a later host keeps both keys' meanings); the
+  Desktop's stops (DesktopDisplays.swift, issue #91; public since both apps' 0.6.2): the window list's
+  `desktopDisplays` (how many stops the Desktop has, 2 or more), `desktopDisplay` (the one it shows, or
+  comes back to while a window streams, counting from 1 in the order a step goes through them) and
+  `desktopDisplayNames` (each stop's name in that order, empty when it has none), all three left out
+  with one stop, while the Mac is locked or another user is on its console, and by every host before
+  them; kind 47, empty, goes from a device only to a host whose list says `desktopDisplays` 2 or more
+  and asks for the next stop, and since a host from 0.6.2 reads no payload, a later device sends one
+  (pull request #296's `{"number": n}`, a stop chosen by name) only to a host that says it takes it;
+  the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
   its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
   type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps

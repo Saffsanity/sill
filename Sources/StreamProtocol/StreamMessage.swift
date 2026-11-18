@@ -91,14 +91,35 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
-    // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which open pull requests
-    // hold (the microphone and the pen; the camera). Older hosts map it to `.unknown` and skip it.
+    // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which are held for the pen
+    // and the camera (the list below). Older hosts map it to `.unknown` and skip it. In the compatibility
+    // floor since both apps' 0.6.2, with the window list's `desktopDisplays`, `desktopDisplay` and
+    // `desktopDisplayNames`.
     case nextDisplay = 47    // device → host, empty payload: the Desktop button tapped while the Desktop
                              // streams, so the Desktop moves to the Mac's next stop (DesktopDisplays: the
                              // main display first, then each display to its right, wrapping). Only to a host
                              // whose window list says `desktopDisplays` 2 or more; ignored unless the Desktop
                              // streams, refused while the Mac is locked. A person at the device (DisplayWake).
                              // `{"number": n}` is kept for PR #296's list
+    // The numbers held for work being built (2026-11-18), so that no two branches take one. None is a case
+    // here yet: this build maps each to `.unknown` and skips it, and each joins the compatibility floor once
+    // a public build carries it. A number becomes a case only in the work named for it, which takes its line
+    // out of this list as it adds the case; a new claim adds its line here first.
+    //   29–31, 33, 35–42  pull request #66 (Sill Viewer, with #72 and #73). #158 writes 33 too
+    //                     (`editableFocus`): for #158 and #66 to settle
+    //   34        files' bytes, both ways (#189): `FileChunk` in #66's layout, which #66 then shares, as it
+    //             shares the clipboard's 32
+    //   45        the pen: an Apple Pencil's strokes with pressure and tilt, device → host (#175, #381, #382)
+    //   46        the camera (#193): types 1 and 2 device → host (`CameraFormat`, `CameraFrame`), type 3
+    //             host → device (`CameraDemand`)
+    //   48        the microphone (#191, redone): device → host, type 1 its format and type 2 its packets (kind
+    //             43's `AudioFormat` and `AudioPackets`), type 3 its end
+    //   49        files (#189): JSON `FileTransfer`, both ways, everything but the bytes (its `op` says which)
+    //   50        #175's `cursorKind`, host → device, in place of its 46
+    //   51–59     free
+    //   60, 61    pull request #195's relay (`relayInvite`, `relayJoin`)
+    //   62–249    free
+    //   250–254   never a kind: kept for the checks' mutants to renumber kinds onto (docs/audio-plan.md §3.1)
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
