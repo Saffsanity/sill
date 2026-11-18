@@ -121,6 +121,20 @@ login window or nobody is on its console; and these send what a locked Mac refus
                      this Mac's windows and would press the button of the one with that id
   --expect=clipboard=TEXT  (with --expect's other keys, or alone) at exit, the last kind 32's text;
                      clipboard=none: none came
+Files (kinds 34 and 49, docs/files-plan.md; the window list's line ends in files=N when the host says it). Each
+kind 49 from the host is printed on a line but its acknowledgements, which are counted:
+  --send-file=PATH[,X,Y]@T  offer PATH T seconds in (a folder: each regular file in it, sorted, as one transfer),
+                     then once accepted send its parts, 64 KiB each, within a window of acknowledged bytes
+                     (--files-window, 512 KiB by default), each file's end with its SHA-256, as a device does;
+                     X,Y: a drop point (fractions of the picture), else a save
+  --files-window=N   the window in bytes (1 sends one part at a time)
+  --files-pace=B     at most B bytes a second of parts (a slow link's stand-in, so a test can act mid-transfer)
+  --cancel-files@T   a cancel of this client's transfer T seconds in (reason cancelled, as the chip's Cancel)
+  --raw49=JSON@T     this literal kind 49 payload T seconds in (split on the last @)
+  --raw34=ID,TOTAL,OFFSET,HEX@T  a kind 34 part as written: file ID, its total, this part's offset, its bytes in hex
+                     (or rN for N random bytes)
+  --expect-files=OP[:REASON]  at exit, the last kind 49 from the host that is not an ack must have this op (and
+                     reason): done, answer:locked, cancel:stalled…; prints EXPECT-FILES ok or EXPECT-FILES FAIL (exit 1)
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -184,12 +198,13 @@ AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale
 LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display",
+         "send-file", "cancel-files", "raw49", "raw34")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "files-window", "expect-files", "files-pace")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -506,12 +521,12 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|cancel-files)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "cancel-files") and text: raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -524,6 +539,18 @@ try:
                 pid_, comma, ptitle = text.partition(",")
                 if not pid_: raise ValueError(f"--press: ID[,TITLE], got {text!r}")
                 parsed = (pid_, ptitle if comma else None)
+            elif name == "send-file":
+                fpath, _, point = text.partition(",")
+                if not os.path.exists(fpath): raise ValueError(f"--send-file: no {fpath!r}")
+                paths = ([os.path.join(fpath, n) for n in sorted(os.listdir(fpath)) if os.path.isfile(os.path.join(fpath, n))]
+                         if os.path.isdir(fpath) else [fpath])
+                if not paths: raise ValueError(f"--send-file: no file in {fpath!r}")
+                parsed = (paths, fractions(point, "--send-file") if point else None)
+            elif name == "raw34":
+                bits = text.split(",")
+                if len(bits) != 4: raise ValueError(f"--raw34: ID,TOTAL,OFFSET,HEX, got {text!r}")
+                body = os.urandom(number(bits[3][1:], "--raw34's rN")) if bits[3].startswith("r") else bytes.fromhex(bits[3])
+                parsed = (number(bits[0], "--raw34's ID"), number(bits[1], "--raw34's TOTAL"), number(bits[2], "--raw34's OFFSET"), body)
             else:
                 parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
                           else number(text, "--fps-after") if name == "fps-after"
@@ -786,6 +813,45 @@ def menu_line(it):
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
 clipboards = []        # every kind 32's text, in order (--expect=clipboard checks the last)
 last_list = None       # the last window list (--expect=desktopDisplay checks it)
+# Files (kinds 34 and 49): this client's one outgoing transfer, the host's kind 49s, and the acknowledgements.
+files_window = number(valued("files-window"), "--files-window") if valued("files-window") else 512 * 1024
+files_pace = number(valued("files-pace"), "--files-pace") if valued("files-pace") else None
+expect_files = valued("expect-files")
+files_out = None       # {transfer, files: [(id, path, size)], starts, phase, current, offset, sent, acked, hash, fh, began}
+files_in = []          # every kind 49 from the host but acks, in order
+files_acks = 0
+def send_all(data):
+    """A large send whatever the loop's short timeout: blocking for up to 10 s."""
+    old = s.gettimeout(); s.settimeout(10)
+    try: s.sendall(data)
+    finally: s.settimeout(old)
+def files_msg(d): return msg(49, json.dumps(d, ensure_ascii=False).encode())
+def chunk_msg(fid, total, offset, data):
+    return msg(34, struct.pack(">IH", fid, 0) + struct.pack(">QQ", total, offset) + data)
+def files_pump():
+    """The sender's part of a device: parts within the window, each file's end, file after file."""
+    global files_out
+    o = files_out
+    if o is None or o["phase"] != "sending": return
+    while o["current"] < len(o["files"]):
+        fid, path, size = o["files"][o["current"]]
+        if o["offset"] < size:
+            n = min(64 * 1024, size - o["offset"])
+            inflight = o["sent"] - o["acked"]
+            if inflight and inflight + n > files_window: return
+            if files_pace and o["sent"] + n > files_pace * (time.time() - o["began"]): return
+            if o["fh"] is None: o["fh"] = open(path, "rb")
+            data = o["fh"].read(n)
+            if len(data) != n: print(f"  files: {path} changed while it was read"); o["phase"] = "cancelled"; return
+            o["hash"].update(data)
+            send_all(chunk_msg(fid, size, o["offset"], data))
+            o["offset"] += n; o["sent"] += n
+            continue
+        digest = base64.urlsafe_b64encode(o["hash"].digest()).decode().rstrip("=")
+        send_all(files_msg({"op": "end", "transfer": o["transfer"], "file": fid, "sha256": digest}))
+        if o["fh"] is not None: o["fh"].close(); o["fh"] = None
+        o["current"] += 1; o["offset"] = 0; o["hash"] = hashlib.sha256()
+    o["phase"] = "finishing"
 # The Mac's sound (kind 43): packets this second, and in all; each epoch's next seq; gaps; the arrival
 # times of the first and the last packet; each packet's age (arrival minus its stamp: the same clock
 # when the host runs on this Mac).
@@ -860,6 +926,30 @@ def fire(e, now):
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
     elif name in ("raw7", "raw15"):
         s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
+    elif name == "send-file":
+        global files_out
+        paths, point = parsed
+        transfer = struct.unpack(">I", os.urandom(4))[0]
+        entries = []; starts = []; total = 0
+        for i_, path in enumerate(paths):
+            size = os.path.getsize(path); starts.append(total); total += size
+            entries.append(((transfer + 1 + i_) & 0xFFFFFFFF or 1, path, size))
+        offer = {"op": "offer", "transfer": transfer,
+                 "files": [{"id": fid, "name": os.path.basename(path), "size": size} for fid, path, size in entries]}
+        if point is not None: offer["drop"] = {"x": point[0], "y": point[1]}
+        files_out = {"transfer": transfer, "files": entries, "starts": starts, "phase": "offering", "current": 0, "offset": 0,
+                     "sent": 0, "acked": 0, "hash": hashlib.sha256(), "fh": None, "began": now, "total": total}
+        send_all(files_msg(offer)); print(f"  sent files offer: transfer {transfer}, {len(entries)} files, {total} bytes at {at}")
+    elif name == "cancel-files":
+        if files_out is not None:
+            s.sendall(files_msg({"op": "cancel", "transfer": files_out["transfer"], "reason": "cancelled"}))
+            files_out["phase"] = "cancelled"; print(f"  sent files cancel at {at}")
+        else: print(f"  --cancel-files at {at}: no transfer of this client's")
+    elif name == "raw49":
+        send_all(msg(49, text.encode())); print(f"  sent raw kind 49 {text[:200]} at {at}")
+    elif name == "raw34":
+        fid, total, offset, body = parsed
+        send_all(chunk_msg(fid, total, offset, body)); print(f"  sent raw kind 34: file {fid}, total {total}, offset {offset}, {len(body)} bytes at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     try:
@@ -934,7 +1024,8 @@ while time.time() - t0 < dur:
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
                   + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
-                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else "")
+                  + (f" files={d['files']}" if "files" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
@@ -944,6 +1035,29 @@ while time.time() - t0 < dur:
             clipboards.append(t)
             shown = "no text" if t is None else f"{len(t.encode())} bytes {t[:60]!r}" + ("…" if len(t) > 60 else "")
             print(f"  clipboard at {time.time()-t0:.3f}s: {shown}" + (f" keys={sorted(d)}" if set(d) - {"text"} else ""))
+        elif kind == 49:
+            try:
+                d = json.loads(payload)
+            except ValueError:
+                print(f"  files at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
+            o = files_out
+            mine = o is not None and d.get("transfer") == o["transfer"]
+            if d.get("op") == "ack":
+                files_acks += 1
+                if mine:
+                    k = next((i_ for i_, e_ in enumerate(o["files"]) if e_[0] == d.get("file")), None)
+                    if k is not None: o["acked"] = max(o["acked"], o["starts"][k] + int(d.get("offset") or 0))
+                continue
+            files_in.append(d)
+            print(f"  files at {time.time()-t0:.3f}s: {json.dumps(d, ensure_ascii=False)[:300]}")
+            if mine and d.get("op") == "answer":
+                o["phase"] = "sending" if d.get("accept") else "refused"
+            elif mine and d.get("op") in ("done", "cancel"):
+                if d.get("op") == "done":
+                    took = time.time() - o["began"]
+                    print(f"  files done: {o['total']} bytes in {took:.2f} s ({o['total'] / max(took, 1e-6) / 1e6:.1f} MB/s)")
+                o["phase"] = d["op"]
+                if o["fh"] is not None: o["fh"].close(); o["fh"] = None
         elif kind == 18:
             ok, i = verify_macinfo(payload, mac_pin)
             addrs = ",".join(f"{a['host']}{':' + str(a['port']) if a.get('port') else ''}/{a['kind']}/{a['via']}" for a in i.get("addresses", []))
@@ -1015,6 +1129,10 @@ while time.time() - t0 < dur:
                 print(f"  settings at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
             last_state = d
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
+    try:
+        files_pump()
+    except OSError as e:
+        print(f"files send failed at {time.time() - t0:.2f}s: {e}"); break
     if now - last >= 1:
         f = per.get("frame", 0)
         # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
@@ -1074,3 +1192,12 @@ if expect is not None:
     print("EXPECT ok" if not problems else "EXPECT FAIL " + "; ".join(problems))
     if problems: sys.exit(1)
 if menus_failed: sys.exit(1)
+if files_out is not None or files_in or files_acks:
+    o = files_out
+    print(f"FILES {len(files_in)} messages, {files_acks} acks" + (f"; this client's transfer {o['phase']}, {o['sent']} of {o['total']} bytes sent, {o['acked']} acknowledged" if o else ""))
+if expect_files is not None:
+    want_op, _, want_reason = expect_files.partition(":")
+    got = files_in[-1] if files_in else None
+    ok = got is not None and got.get("op") == want_op and (not want_reason or got.get("reason") == want_reason)
+    print("EXPECT-FILES ok" if ok else f"EXPECT-FILES FAIL: want {expect_files}, got {json.dumps(got)}")
+    if not ok: sys.exit(1)
