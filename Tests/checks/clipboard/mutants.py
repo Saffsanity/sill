@@ -166,6 +166,8 @@ MUTANTS = [
     ("D4 idle at 256 KiB", P, "public static let imageIdleBytes = 64 * 1024", "public static let imageIdleBytes = 256 * 1024"),
     ("D4 silence drops a device right after it connects", P, "        connectedFor >= imageSilence && silentFor > imageSilence\n", "        silentFor > imageSilence\n"),
     ("D4 silence drops at 8 s exactly", P, "        connectedFor >= imageSilence && silentFor > imageSilence\n", "        connectedFor >= imageSilence && silentFor >= imageSilence\n"),
+    ("D4 a stalled image never dropped", P, "        busyFor > imageSilence + Double(bytes) / receiptFloorBytesPerSecond\n", "        false\n"),
+    ("D4 a stalled image's bytes not counted", P, "        busyFor > imageSilence + Double(bytes) / receiptFloorBytesPerSecond\n", "        busyFor > imageSilence\n"),
     ("images offered with Include Images off (#300's)", P, "        imagesOn && hostTakesImages(hostClipboard)\n", "        hostTakesImages(hostClipboard)\n"),
     ("a pasted image over the away cap sent away", P, "guard image.count <= imageCap(away: away), let data = payload(image: image)", "guard let data = payload(image: image)"),
     ("D7 a Mac's image over 8 MiB written", P, "              image.count <= Clipboard.maxImageBytes, Clipboard.imageType(image) != nil else { return nil }",

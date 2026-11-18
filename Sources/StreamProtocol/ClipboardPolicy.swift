@@ -291,6 +291,14 @@ public enum ClipboardPolicy {
         connectedFor >= imageSilence && silentFor > imageSilence
     }
 
+    /// A device that still pings but takes nothing (its frames withheld meanwhile, so no drain eviction
+    /// meets it either): one whose image has waited or crossed longer than `imageSilence` and its `bytes`
+    /// at the receipt's floor (`receiptFloorBytesPerSecond`, 2 Mbit/s: 11 MB, 53 s) is dropped as not
+    /// draining.
+    public static func imageStalls(busyFor: Double, bytes: Int) -> Bool {
+        busyFor > imageSilence + Double(bytes) / receiptFloorBytesPerSecond
+    }
+
     // MARK: The host: macOS's paste privacy
 
     /// What macOS lets Sill do with the Mac's clipboard: NSPasteboard's `accessBehavior` (macOS 15.4

@@ -366,9 +366,10 @@ final class HostClipboard {
         let takers = order.compactMap { subscribers[$0] }.filter(\.images)
         let home = takers.filter { !$0.away }.map(\.connection), away = takers.filter(\.away).map(\.connection)
         if testLog {
-            func size(_ p: Data?) -> String { p.map { "\($0.count) bytes of JSON" } ?? "none fits" }
-            print("Test clipboard: change \(count), an image of \(bytes) bytes, sent to \(home.count) device\(home.count == 1 ? "" : "s") at home (\(size(payloads.home)))"
-                  + " and \(away.count) away (\(size(payloads.away))).")
+            func to(_ n: Int, _ where_: String, _ p: Data?) -> String {
+                "\(n) device\(n == 1 ? "" : "s") \(where_)" + (n == 0 ? "" : p.map { " (\($0.count) bytes of JSON)" } ?? " (none fits)")
+            }
+            print("Test clipboard: change \(count), an image of \(bytes) bytes, sent to \(to(home.count, "at home", payloads.home)) and \(to(away.count, "away", payloads.away)).")
         }
         if !home.isEmpty { sendImage(payload: payloads.home, to: home) }
         if !away.isEmpty { sendImage(payload: payloads.away, to: away) }

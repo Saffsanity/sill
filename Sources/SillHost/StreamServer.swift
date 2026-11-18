@@ -161,6 +161,8 @@ final class StreamServer {
         var pendingImage: Data?
         var imageBytesInFlight = 0
         var imageBusy: Bool { pendingImage != nil || imageBytesInFlight > 0 }
+        /// Since when an image has waited for it or crossed it without a break (ClipboardPolicy.imageStalls).
+        var imageSince: TimeInterval?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -1377,6 +1379,14 @@ final class StreamServer {
             if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
             let silent = now - client.lastHeardAt
             if client.pendingImage != nil { pumpImage(client) }      // a backstop: each message taken also looks
+            // An image that neither starts nor crosses (a device that pings and takes nothing): dropped as not
+            // draining, at either door (ClipboardPolicy.imageStalls).
+            if client.imageBusy, let since = client.imageSince,
+               ClipboardPolicy.imageStalls(busyFor: now - since, bytes: client.imageBytesInFlight + (client.pendingImage?.count ?? 0)) {
+                print("Client not taking a clipboard image for \(Int(now - since)) s, dropping: \(client.connection.endpoint)")
+                client.connection.cancel()
+                continue
+            }
             guard client.route.isRemote else {
                 // A clipboard image waits for it or crosses it: its frames are withheld, so the drain eviction
                 // never meets it; silence does (ClipboardPolicy.dropsSilentWhileImage).
@@ -1768,6 +1778,7 @@ final class StreamServer {
             for id in ids {
                 guard let client = clients[id], client.connection.state == .ready else { continue }
                 if lockGate.withholds(.clipboard) { withheld(.clipboard, for: id); continue }
+                if !client.imageBusy { client.imageSince = Date().timeIntervalSince1970 }
                 client.pendingImage = data
                 client.needsKeyframe = true      // its frames wait from now on (`imageBusy`)
                 pumpImage(client)
@@ -1808,6 +1819,7 @@ final class StreamServer {
     private func imageCrossed(_ client: Client) {
         if client.pendingImage != nil { pumpImage(client); return }
         guard !client.imageBusy, clients[ObjectIdentifier(client.connection)] === client else { return }
+        client.imageSince = nil
         client.needsKeyframe = true
         if client.route.isRemote {
             client.keyframeWanted = true     // asked for when its queue is idle and one is due (`paceRemote`, `sweep`)

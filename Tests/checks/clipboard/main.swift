@@ -317,6 +317,11 @@ check(P.imageSilence == 8 && !P.dropsSilentWhileImage(silentFor: 8, connectedFor
       "a device silent more than 8 s while an image waits for it or crosses: dropped (it pings four times a second)")
 check(!P.dropsSilentWhileImage(silentFor: 9, connectedFor: 7.9) && P.dropsSilentWhileImage(silentFor: 9, connectedFor: 8),
       "…once it has been connected 8 s, as the remote door's rule")
+// One that pings but takes nothing: its image waits or crosses longer than 8 s and its bytes at 2 Mbit/s.
+let fullJSON = P.payload(image: atImageCap)!.count
+check(!P.imageStalls(busyFor: 8, bytes: 0) && P.imageStalls(busyFor: 8.01, bytes: 0), "an image of nothing: 8 s")
+check(!P.imageStalls(busyFor: 52, bytes: fullJSON) && P.imageStalls(busyFor: 53, bytes: fullJSON),
+      "8 MiB's 11 MB of JSON: about 53 s (8 s and its bytes at the receipt's 2 Mbit/s)")
 
 // MARK: - The host: a change of its pasteboard
 
