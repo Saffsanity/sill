@@ -100,7 +100,9 @@ Sill has layouts of its own.
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill pastes what you copied on your device where your Mac's cursor is (with
   Paste on … Right Away off, it only goes to your Mac's clipboard, where you
-  press ⌘V). Sill never reads your device's clipboard by itself.
+  press ⌘V). Images go too once you turn on Include Images under it on your
+  device (Include images in Sill for Mac is on unless you turn it off). Sill
+  never reads your device's clipboard by itself.
 - **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
   Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
   your iPhone or iPad, turns it off and on. Sill for Mac captures the sound of
@@ -175,8 +177,9 @@ Sill has layouts of its own.
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
 plays your Mac's sound on your device as a beta, on by default. While the
 virtual display is on, the window your device shows isn't on your Mac's screen
-until you stop. The clipboard carries text up to 256 KB and images up to 8 MB (a bigger one
-is re-encoded to fit), and only between apps that both have it. Your Mac needs to be awake, with Sill
+until you stop. The clipboard carries text up to 256 KB and, with Include Images on, images up to
+8 MB, 2 MB away from home (a bigger one is made smaller to fit), and only between apps that both
+have it. Your Mac needs to be awake, with Sill
 open. Sill may not be able to wake it. After a restart Sill opens only once
 someone logs in, with Launch at Login on.
 Only the iPhones and iPads you paired can connect, unless you turn off Require

@@ -212,7 +212,10 @@ dependency, the device through the local package).
 10. **Who can subscribe.** Any device the doors admit: the devices that can already see the Mac's
     screen and type on it. With Require pairing off that is anyone on the network with Sill; the
     privacy page already says so for the screen.
-11. **Rich text, images, files.** Text only (generation 1). Rich text copies send their plain text.
+11. **Rich text, images, files.** Text only in generation 1; images since generation 2 ("Generation 2:
+    images", below: #300, finished 2026-11-18, behind Include Images on the device and Include images on
+    the Mac). Rich text copies send their plain text; files on the clipboard are the files plan's later
+    step (docs/files-plan.md, on #300's look at the pasteboard).
 12. **macOS's paste privacy** (after the review). The default: read only while macOS allows every read,
     never in the background while it asks (its alert at every copy) or denies; Settings › General says
     why and opens Paste from Other Apps, asking once first while macOS has not asked about Sill. The
@@ -806,3 +809,65 @@ transient type, 1Password's own): `markerTypes` and `HostSkip.marked` are gone f
 types are still read before any data, and Universal Clipboard's items and the host's own writes are still
 never sent. The footnote, README, the support and privacy pages and DEVELOPMENT.md no longer except them;
 the check sends each former marker like any copy and its model has no marked case.
+
+## Generation 2: images (#300, finished 2026-11-18)
+
+addhumal's pull request #300 carries a copied image both ways on kind 32, as this plan reserved it
+(`clipboard` 2, `"accepts":2`, #66's `image`); branch `ready-300` keeps his commit and adds what the
+evaluation of 2026-11-18 found missing (`~/Downloads/sill-handoff/next/feature-requests/pr-evaluations/
+clipboard.md`; the step file docs/steps/2026-11-18-ready-300.md has every defect and its fix).
+
+**The wire (additive; the compatibility floor's kind 32 gains it once a public build ships it).**
+- A host says `clipboard` 2 while its Share clipboard with devices and its Include images are on, 1
+  with Include images off (text alone, as generation 1), nothing with Share clipboard off
+  (`ClipboardPolicy.hostGeneration`).
+- A device's subscription says `{"accepts":2}` while its Include Images is on and `{}` while it is
+  off; a move of the switch subscribes again at once. What a subscription says stands until the next
+  one: a Paste (`text` or `image`, no `accepts`) leaves it as it was (`subscriberTakesImages`; #300 set
+  it from every kind 32, so one Paste ended the Mac's images to that device).
+- `image` is a PNG or JPEG (told by its first bytes, never parsed on the Mac) of at most 8 MiB
+  (`Clipboard.maxImageBytes`), in a kind 32 of at most 12 MiB (`StreamMessage.maxClipboardPayload`),
+  only between peers that both said 2; a sender away from home keeps to 2 MiB
+  (`ClipboardPolicy.awayImageBytes`), the receiver takes 8 MiB either way. The host takes a kind 32 of
+  12 MiB only from a connection whose subscription takes images while its Include images is on, 1 MiB
+  from any other (`maxClientPayload(for:clipboardImages:)`).
+- An older device subscribes with `{}` and is never sent an image; an older host reads `{"accepts":2}`
+  as `{}` and says 1, so a device sends it none. The floor's sentence "any kind 32 subscribes" is no
+  longer exact: an image-only kind 32 that is neither PNG nor JPEG, over 8 MiB, or sent while the Mac's
+  Include images is off is refused and does not subscribe (no shipped peer sends one).
+
+**The rules (ClipboardPolicy, checked by `Tests/checks/clipboard`).**
+- What goes from the Mac: with no text on the pasteboard, its image (PNG, JPEG, HEIC, TIFF, read in
+  that order), read only while some subscriber takes images, never a Finder copy's icon; fitted
+  (`ClipboardImage.fitted`) to 8 MiB for subscribers at home and 2 MiB for those away: a PNG or JPEG
+  within the cap as it is, else upright (the orientation applied), photographs as JPEG at 0.85,
+  anything else as PNG while that fits, then JPEG, on white where it had transparency, scaled down until
+  it fits. A device's image goes on to the other subscribers that take images, away only within 2 MiB
+  (the Mac never re-encodes a device's image).
+- The image path (StreamServer): an image is one message, and nothing reaches the device while it
+  crosses; it starts only while the device's connection holds at most 64 KiB and no keyframe crosses
+  (`hostMaySendImage`), the device's frames wait from then until it has crossed (not counted against the
+  link), and a keyframe brings the picture back. Off `inflight` and the drain eviction, counted in the
+  bytes the link judge and remote pacing read. A device silent 8 s meanwhile, or one that takes nothing
+  for 8 s and the image's bytes at 2 Mbit/s, is dropped (`dropsSilentWhileImage`, `imageStalls`).
+- The host reads a device's big message in pieces of 256 KiB, each a sign of life, so an upload on a
+  slow link is never taken for silence (#300's D3).
+- The lock: a kind 32 with text or an image is a set (`LockPolicy.clipboardRequest`), refused if the
+  Mac read locked when it came or now (#300's D2: an image was taken as a subscription and written after
+  the unlock).
+- The device: Paste takes an image only with Include Images on and a Mac that says 2; text wins. The
+  receipt waits for the message's bytes at 2 Mbit/s on top of its 4 s (`receiptWait(worstRttMs:bytes:)`),
+  and a Paste over 256 KiB says "Sending to ‹Mac›…" until it comes (`showsSending`).
+
+**The switches.**
+- Include Images (the device, `Sill.clipboardImages`), off unless turned on, under Paste on ‹Mac›
+  Right Away while Share Clipboard is on and the Mac says 2; its words close the group's footnote.
+- Include images (the Mac, `HostConfig.shareClipboardImages`, `shareClipboardImages`), on unless
+  turned off, the Mac owner's veto, in Settings › General under Share clipboard with devices; the CLI's
+  `--no-clipboard-images`.
+
+**For Noah** (the evaluation's questions, with the defaults taken): the 8 MiB cap (#300 cites a decision of
+2026-11-02, no record found); the two defaults; 2 MiB away from home (option (a)); images follow the
+clipboard's rule for unpaired sessions; no re-encoding of a device's image on the Mac; files on the
+clipboard belong to the files plan. His tries on devices are in the pull request.
+
