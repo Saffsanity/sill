@@ -1,0 +1,8 @@
+# The App Icon group in Settings (docs/app-icons-plan.md) on the agents' iPad (iPad Pro 13-inch (M5), iOS 27.0,
+# upright: a sideways screen is drawn a quarter turn round): either way round, the community's marked, and a Slide
+# Over's width.
+#   Scripts/harness-photos.sh Scripts/harness-photos/app-icons-ipad.cases --device ipad --baseline origin/settings-pane
+ipad-upright-appicon             -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll appicon
+ipad-side-appicon-community      -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll appicon -SillAppIcon community
+ipad-slide-over-appicon          -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll appicon
+ipad-side-stream                 -SillLayout 1376x1032 -SillSafeArea 24,0,20,0

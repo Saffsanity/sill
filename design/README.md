@@ -1,25 +1,36 @@
 # Design sources
 
 - `AppIcon.svg` — the app icon on the 1024 grid, full square (iOS applies the
-  squircle). Four groups map to Icon Composer layers: background, iMac, iPad,
-  window. Render the asset with:
-
-  ```
-  qlmanage -t -s 1024 -o . design/AppIcon.svg   # then flatten alpha before adding to the catalog
-  ```
+  squircle), flat: an iMac with an iPad tilted in front, the streamed window
+  on the iPad, on a dark gradient. The website's `site/icon.svg` is a copy of
+  it, and it stays the flat original.
 
   The three-direction exploration and the final board live on the design
   canvas linked from `docs/BRIEF.md`.
 
-- The Mac app's icon comes from the same file. `Scripts/make-app.sh` renders
-  it with Quick Look (`qlmanage -t -s 1024`), makes the render the one layer
-  of a generated Icon Composer document, and compiles that with Xcode's
-  `actool` into `Assets.car` (macOS 26 and later mask and light it natively)
-  plus a pre-masked `AppIcon.icns` for macOS 14–15. A plain `.icns` made with
-  `sips`/`iconutil` shows up on macOS 27 as a shrunken icon inside a grey
-  tile. The result is cached in `.build/icon`. A layered
-  `Packaging/AppIcon.icon` made in Icon Composer from the SVG's four groups
-  replaces the generated one as soon as it exists.
+- `Packaging/AppIcon.icon` — the same icon as an Icon Composer document, so
+  the system draws it in Liquid Glass (2026-11-18, docs/app-icons-plan.md):
+  the SVG's background as the document's fill, and its groups as two layer
+  groups, front to back: the iPad (the window, the screen and camera, the
+  slate body as glass) and the iMac (the screen, the space grey body with its
+  neck and foot as glass). Each layer is a 1024 × 1024 SVG cut from
+  `AppIcon.svg` at the same coordinates; the original's gloss is in the
+  layers' own fills, and its white rims and drop shadows are left to the
+  system (the glass's specular edges and the groups' shadows). The iMac body
+  has a lighter fill for the Clear and Tinted looks only, so the iMac reads
+  there. It is Sill for Mac's icon (`Scripts/make-app.sh` compiles it with
+  `actool` into `Assets.car` and a masked `AppIcon.icns` for macOS 14–15; a
+  plain `.icns` shows up on macOS 27 shrunk inside a grey tile) and the iOS
+  app's primary icon. `Packaging/AppIconCommunity.icon`, grub-basket's design
+  from pull request #386, is the iOS app's alternate icon (Settings, App
+  Icon). Render any look of either with Icon Composer's command-line tool:
+
+  ```
+  "/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" \
+      Packaging/AppIcon.icon --export-image --output-file out.png --platform iOS \
+      --rendition Default --width 1024 --height 1024 --scale 1   # Dark, ClearLight, ClearDark, TintedLight, TintedDark; macOS
+  Scripts/app-icon-previews.sh   # the Settings picker's previews of every icon, from the documents
+  ```
 - `DMGBackground.svg` — the window of Sill.dmg, the Mac download: 660 x 400
   points of white, an arrow from where Sill.app sits (170, 180) to
   Applications (490, 180) in the app icon's greys, and "To install Sill, drag

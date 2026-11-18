@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- design/AppIcon.svg's iPad screen and camera, tilted with it, under the iPad's gloss. -->
+<defs>
+<linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="0" y1="240" x2="0" y2="540"><stop offset="0" stop-color="#ffffff" stop-opacity="0.48"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+</defs>
+<g transform="translate(0 56) rotate(-5 520 392)">
+<rect x="342" y="266" width="356" height="248" rx="28" fill="#f7f8fa"/>
+<circle cx="520" cy="253" r="5" fill="#6b7079"/>
+<rect x="342" y="266" width="356" height="248" rx="28" fill="url(#gloss)"/>
+<circle cx="520" cy="253" r="5" fill="url(#gloss)"/>
+</g>
+</svg>

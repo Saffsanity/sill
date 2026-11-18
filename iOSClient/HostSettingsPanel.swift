@@ -36,8 +36,8 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
-/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, App Icon (the
+/// Home Screen icon, AppIconPicker), and last this app's version, "Sill 0.6.2 (1400)" (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -134,6 +134,8 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `appicon`, to the App Icon group's title, so a photo shows its pictures, its footnote and the version under
+    /// it (docs/app-icons-plan.md).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -145,6 +147,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "appicon"?: return appIconID
         default: return nil
         }
         #else
@@ -158,6 +161,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let appIconID = "appIcon"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -581,7 +585,26 @@ struct HostSettingsPanel: View {
             // Both are this device's own: its gestures, then the tour.
             thisDevice
             tour
+            appIcon
             versionLine
+        }
+    }
+
+    /// Sill's Home Screen icon, chosen here beside the version (Noah, 2026-11-18; docs/app-icons-plan.md): the
+    /// group's title, the pictures (AppIconPicker), and under them what the choice changes and the way back
+    /// (AppIconChoice). Only where iOS can change the icon.
+    @ViewBuilder private var appIcon: some View {
+        if AppIconPicker.offered {
+            Text(AppIconChoice.Copy.title)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+                .id(Self.appIconID)
+            Rows { AppIconPicker() }
+            Footnote(text: AppIconChoice.Copy.footnote(device: device))
         }
     }
 

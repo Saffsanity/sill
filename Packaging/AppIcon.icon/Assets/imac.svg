@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- design/AppIcon.svg's iMac, its glass: the body, the neck and the foot in the original's space grey, the body under its gloss. -->
+<defs>
+<linearGradient id="grey" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c7e86" stop-opacity="0.98"/><stop offset="1" stop-color="#4c4e56" stop-opacity="0.96"/></linearGradient>
+<linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="0" y1="176" x2="0" y2="632"><stop offset="0" stop-color="#ffffff" stop-opacity="0.3"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+</defs>
+<g transform="translate(0 56)">
+<rect x="372" y="672" width="280" height="40" rx="20" fill="url(#grey)"/>
+<rect x="480" y="630" width="64" height="50" fill="url(#grey)"/>
+<rect x="176" y="176" width="672" height="456" rx="60" fill="url(#grey)"/>
+<rect x="176" y="176" width="672" height="456" rx="60" fill="url(#gloss)"/>
+</g>
+</svg>

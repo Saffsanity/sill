@@ -1,0 +1,26 @@
+# The App Icon group in Settings (docs/app-icons-plan.md) on the agents' Duo (iOS 27.1): the original marked (a
+# fresh install), the community's marked, a name this build does not ship (the original marked), iOS's refusal,
+# large type, right to left; on the inner display upright and in the book pose, an iPhone upright and on its side,
+# and the cover; last, iOS's own change and its alert. Grouped by pose, so the Duo folds as few times as can be.
+#   Scripts/harness-photos.sh Scripts/harness-photos/app-icons-duo.cases --baseline origin/settings-pane
+# Open flat, upright (the default pose): the inner display, and an iPhone's 393x852 upright.
+flat-portrait-appicon            -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon
+flat-portrait-appicon-community  -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIcon community
+flat-portrait-appicon-unknown    -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIcon AppIconPride
+flat-portrait-appicon-failed     -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIconFailed 1
+flat-portrait-appicon-ax3        -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+flat-portrait-stream             -SillLayout 669x951 -SillHinge flat
+phone-upright-appicon            -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1 -SillSettingsScroll appicon -SillAppIcon community
+phone-upright-end                -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1 -SillSettingsEnd 1
+# The book pose: this device's part on the trailing page.
+book-appicon                     -SillLayout 951x669 -SillHinge half -SillSettings 1 -SillSettingsScroll appicon --pose=book
+book-appicon-rtl                 -SillLayout 951x669 -SillHinge half -SillSettings 1 -SillSettingsScroll appicon -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES --pose=book
+# Open flat, sideways: an iPhone's 852x393 on its side, two columns.
+phone-side-appicon               -SillLayout 852x393 -SillSafeArea 0,59,21,59 -SillSettings 1 -SillSettingsScroll appicon --pose=flat-landscape
+# Closed: the cover, upright.
+cover-appicon                    -SillLayout 466x678 -SillHinge closed -SillSettings 1 -SillSettingsScroll appicon --pose=closed-upright
+# Last, the real call a tap makes (-SillAppIconSet), in this run's fresh install: iOS's alert over Settings, the
+# community's icon still set at the next launch, then the original again, so the install ends on the primary icon.
+flat-portrait-appicon-set-community -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIconSet community --wait=6
+flat-portrait-appicon-kept          -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon
+flat-portrait-appicon-set-original  -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll appicon -SillAppIconSet original --wait=6
