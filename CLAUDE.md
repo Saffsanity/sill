@@ -59,7 +59,8 @@ needs its four pbxproj entries by hand). Where the rest is written:
 ## Build and run
 
 Every command, test hook and harness argument: docs/BUILD-AND-RUN.md (this section until
-2026-11-18). What every piece of work runs:
+2026-11-18). Read it before running a host, Sill.app or a harness: its "never"s bind every test.
+What every piece of work runs:
 
 ```
 swift build -c release                  # the Mac side
