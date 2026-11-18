@@ -315,7 +315,11 @@ enum LockPolicy {
         /// The Mac's pointer (kind 26) and its cursor shape (kind 14), and reading either.
         var pointer: Bool
         var gestures: Bool
-        /// Sill's virtual display may be made.
+        /// Sill's virtual display for a picked window (the stage) may be made. One exception, written down here and in
+        /// docs/locked-mac-plan.md's table: Sill's own display for the Desktop of a Mac with no working screen (PR #200,
+        /// #298) is made at a locked screen too, since the lock screen streams there and takes the password; it carries
+        /// the lock screen through a display filter, never a window, and is never made off console
+        /// (`makesDesktopDisplay`).
         var virtualDisplay: Bool
         var input: Input
         /// A device's session connecting declares user activity (it wakes the display).
@@ -328,6 +332,13 @@ enum LockPolicy {
         /// buttons pressed (kind 15), its app's menus read and chosen. Never in the off-console view.
         var actsOnWindows: Bool { windows && !viewOnly }
     }
+
+    /// Whether Sill's own display for the Desktop of a Mac with no working screen (PR #200, #61, #298) may be made at
+    /// this reading: unlocked, and at a locked screen too, the one display Sill makes while locked (the lock screen
+    /// streams, and the password is typed there: "Expected: the Mac unlocks and stays unlocked", #298), carrying the lock
+    /// screen through a display filter, never a window. Never off console, the off-console view included: it would join
+    /// the displays of the user on the screen (db9cea5). `Allowed.virtualDisplay`, the stage's, stays false while locked.
+    static func makesDesktopDisplay(_ r: Reading) -> Bool { r != .offConsole }
 
     /// `offConsoleView`: the off-console view applies (the gate's `offConsoleView`); it changes only what off
     /// console allows.

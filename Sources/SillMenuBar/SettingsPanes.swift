@@ -16,6 +16,8 @@ struct SettingsPane: View {
     var previewClipboardAccess: ClipboardPolicy.MacAccess?
     /// …and what the macOS firewall does as given (FirewallRule), never asked.
     var previewFirewall: FirewallRule.Verdict?
+    /// …and Virtual Display's with this host status (Sill's display for a Mac with no screen, the guard for #380).
+    var previewStatus: HostStatusSnapshot?
 
     var body: some View {
         Group {
@@ -24,7 +26,7 @@ struct SettingsPane: View {
                                        previewClipboardAccess: previewClipboardAccess, previewFirewall: previewFirewall)
             case .devices: LiveDevicesPane(model: model, settings: model.settings)
             case .streaming: StreamingPane(model: model, settings: model.settings)
-            case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
+            case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings, previewStatus: previewStatus)
             case .permissions: PermissionsPane(model: model)
             case .remoteAccess: LiveRemoteAccessPane(model: model, settings: model.settings)
             }
@@ -513,10 +515,12 @@ private struct StreamingPane: View {
 private struct VirtualDisplayPane: View {
     let model: AppModel
     @Bindable var settings: HostSettings
+    /// The previews' status in place of the host's (DebugHooks).
+    var previewStatus: HostStatusSnapshot?
     @State private var retrying = false
 
     var body: some View {
-        let snapshot = model.coordinator?.status.snapshot ?? HostStatusSnapshot()
+        let snapshot = previewStatus ?? model.coordinator?.status.snapshot ?? HostStatusSnapshot()
         Form {
             Section {
                 Toggle("Stream from a virtual display", isOn: $settings.config.virtualDisplay)
@@ -532,7 +536,12 @@ private struct VirtualDisplayPane: View {
                             Button("Try Again") {
                                 retrying = true
                                 Task { @MainActor in
-                                    await model.coordinator?.retryVirtualDisplay()
+                                    // The guard for #380 first: it holds every display Sill makes.
+                                    if snapshot.displayMakeHeld {
+                                        model.coordinator?.tryDisplaysAgain()
+                                    } else {
+                                        await model.coordinator?.retryVirtualDisplay()
+                                    }
                                     retrying = false
                                 }
                             }
@@ -545,8 +554,15 @@ private struct VirtualDisplayPane: View {
                         Text("Streamed where it is: \(failure)").multilineTextAlignment(.trailing)
                     }
                 }
+                // A Mac with no working screen (PR #200, #61, #298): Sill's own display, made by itself, no switch
+                // (Noah on #61); a line while it exists.
+                if let line = StatusText.sillDisplayLine(snapshot.sillDisplay) {
+                    LabeledContent("No screen") {
+                        Text(line).multilineTextAlignment(.trailing)
+                    }
+                }
             } footer: {
-                Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is.")
+                Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is. \(StatusText.noScreenFootnote)")
             }
         }
     }
@@ -556,6 +572,7 @@ private struct VirtualDisplayPane: View {
         if s.virtualDisplayAPIMissing, let problem = s.virtualDisplayProblem {
             return "Not available on this version of macOS: \(problem)"
         }
+        if s.displayMakeHeld { return StatusText.displayGuardHeld }
         if !sr && !ax { return "Needs Screen Recording and Accessibility" }
         if !ax { return "Needs Accessibility" }
         if !sr { return "Needs Screen Recording" }
@@ -564,9 +581,11 @@ private struct VirtualDisplayPane: View {
     }
 
     /// A run-level disable (the system removed the display too often) can be retried; a missing
-    /// API or permission cannot.
+    /// API or permission cannot. The guard for #380 (DisplayMakeGuard) is lifted by Try Again alone.
     private func canRetry(_ s: HostStatusSnapshot) -> Bool {
-        s.virtualDisplayProblem != nil && !s.virtualDisplayAPIMissing && model.permissions.allGranted
+        if s.virtualDisplayAPIMissing { return false }
+        if s.displayMakeHeld { return true }
+        return s.virtualDisplayProblem != nil && model.permissions.allGranted
     }
 }
 

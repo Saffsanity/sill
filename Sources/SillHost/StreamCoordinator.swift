@@ -32,12 +32,23 @@ package final class StreamCoordinator {
     private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
     /// The rate the next pipeline for `source` runs at: the devices' (`wanted`, `effectiveFPS` unless
     /// said), and the Desktop's held to its stop's refresh rate (DesktopDisplays.rate): a 60 Hz monitor's
-    /// Desktop streams at 60, at the 60 fps bitrate, to a 120 Hz iPad, since its capture gives no more. A
-    /// test host's test pattern only under SILL_TEST_DISPLAYS, whose stops say their rate.
+    /// Desktop streams at 60, at the 60 fps bitrate, to a 120 Hz iPad, since its capture gives no more; on Sill's
+    /// own display (a Mac with no working screen: no stop), to that display's (VirtualDesktopSize.refreshHeld). A
+    /// test host's test pattern only under SILL_TEST_DISPLAYS, whose stops say their rate, or once SILL_TEST_HEADLESS's
+    /// display was said to be made, at the rate said.
     private func streamRate(for source: StreamSource, wanted: Int? = nil) -> Int {
         let wanted = wanted ?? effectiveFPS
-        guard source == .desktop, !synthetic || catalog.testDisplays != nil else { return wanted }
-        return DesktopDisplays.rate(wanted, refreshHz: catalog.desktopStop?.refreshHz)
+        guard source == .desktop, !synthetic || catalog.testDisplays != nil || testHeadlessMade else { return wanted }
+        return DesktopDisplays.rate(wanted, refreshHz: VirtualDesktopSize.refreshHeld(stop: catalog.desktopStop?.refreshHz, sills: headlessHz,
+                                                                                         onSills: desktopOnSills(catalog.display?.displayID)))
+    }
+
+    /// Whether the Desktop's display `id` is Sill's own (a test host: once its display was said to be made, the test
+    /// pattern stands for it).
+    private func desktopOnSills(_ id: UInt32?) -> Bool {
+        if testHeadlessMade { return true }
+        guard let made = headlessDisplay?.displayID, made != 0 else { return false }
+        return id == made
     }
     /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
     /// keeps its share of bits.
@@ -226,6 +237,20 @@ package final class StreamCoordinator {
     private var testHeadlessMade = false
     /// Sill's display exists (or, on a test host, was said to be made).
     private var hasHeadlessDisplay: Bool { headlessDisplay != nil || testHeadlessMade }
+    /// Each connection's last viewport and whose came last, and the device that asked for the Desktop last (its pick of
+    /// it, or a step: kind 47): Sill's display is that device's size and rate (VirtualDesktopSize.matched, Noah's decision
+    /// of 2026-11-18), never only the last viewport any device sent.
+    private var viewports: [ObjectIdentifier: Viewport] = [:]
+    private var newestViewport: ObjectIdentifier?
+    private var desktopAsker: ObjectIdentifier?
+    /// Sill's display's refresh rate as it came up (its mode's; a test host's said one): the Desktop's rate is held to it
+    /// while the Desktop shows it (`streamRate`, VirtualDesktopSize.refreshHeld).
+    private var headlessHz: Double?
+    /// The guard for #380 (DisplayMakeGuard): Sill.app's marker in Application Support and its count, or a test host's
+    /// under SILL_TEST_MAKE_GUARD; nil in the CLI, which keeps none.
+    private let displayGuard: DisplayMakeGuard.Store?
+    /// Its line for a Desktop with no real screen, once a run.
+    private var saidGuardHolds = false
     /// The Desktop's display size in points as its capture was built (`desktopCapture`).
     private var desktopStreamPoints: CGSize?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
@@ -429,9 +454,10 @@ package final class StreamCoordinator {
     /// CLI's default). `testHooks`: false for Sill.app's own executable, which honours no TEST ONLY
     /// hook that bears on who gets in or what pairing needs (§4.3): with it false, or on a host
     /// that advertises, those hooks are ignored with one line each. `hostVersion`: Sill.app's
-    /// version for the window lists, when it has one that parses.
+    /// version for the window lists, when it has one that parses. `displayGuard`: keep the guard for #380 in
+    /// Application Support (DisplayMakeGuard: Sill.app's; the CLI keeps none).
     package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil,
-                 homePairing: Bool = false, testHooks: Bool = true, hostVersion: String? = nil) throws {
+                 homePairing: Bool = false, testHooks: Bool = true, hostVersion: String? = nil, displayGuard: Bool = false) throws {
         var config = config.validated()
         if !appKitLoop { config.virtualDisplay = false }
         self.config = config
@@ -458,6 +484,9 @@ package final class StreamCoordinator {
         let testHeadless = HeadlessDesktopPolicy.testHeadless(environment: env,
                                                               testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks))
         testHeadlessFile = testHeadless.path
+        // The guard for #380: Sill.app's, else a test host's own folder (TEST ONLY, never Sill.app's).
+        let guardHook = Self.makeGuardHook(environment: env, testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks))
+        self.displayGuard = displayGuard ? DisplayMakeGuard.Store.app() : guardHook.store
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                        environment: env)
@@ -465,7 +494,8 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, testHeadless.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, testHeadless.line,
+                         guardHook.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -537,13 +567,16 @@ package final class StreamCoordinator {
         injector.lockReading = { gate.reading }
         stage.mayWarp = { gate.reading != .offConsole }       // the cursor is the console's then, never moved from here
         stage.mayMakeDisplay = { !gate.locked }
+        stage.makeGuard = self.displayGuard
+        catalog.remembersBuiltIn = displayGuard        // Sill.app's preference alone (#200's defect 10)
         SessionLock.shared.onChange = { [weak self] in Task { @MainActor in await self?.lockChanged() } }
         SessionLock.shared.start(testHost: server.isTestHost)
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
         // registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
-        status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
+        let guardHeld = self.displayGuard?.holds ?? false
+        status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay; $0.displayMakeHeld = guardHeld }
         // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
@@ -639,6 +672,9 @@ package final class StreamCoordinator {
                 self.gestureArrivals[id] = nil
                 self.keyframeRequestAt[id] = nil
                 self.viewportRefusedLineAt[id] = nil
+                self.viewports[id] = nil
+                if self.newestViewport == id { self.newestViewport = nil }
+                if self.desktopAsker == id { self.desktopAsker = nil }
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
@@ -679,6 +715,7 @@ package final class StreamCoordinator {
                 // worked two seconds (HeadlessDesktopPolicy.Watch), devices or not; when the last leaves, after
                 // `select(.none)` has stopped the capture.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
+                if count == 0 { self.viewports = [:]; self.newestViewport = nil; self.desktopAsker = nil }
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
@@ -714,7 +751,7 @@ package final class StreamCoordinator {
         catalog.onDesktopDisplaysChanged = { [weak self] in
             guard let self else { return }
             self.broadcastList()
-            Task { @MainActor in await self.followDesktopStop() }
+            Task { @MainActor in await self.followDesktopDisplay() }
         }
         catalog.onThumbnail = { [weak self] id, jpeg in
             self?.server.broadcast(StreamMessage(kind: .thumbnail, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
@@ -889,6 +926,8 @@ package final class StreamCoordinator {
         for line in SessionLock.testHookLines(testHost: server.isTestHost, environment: ProcessInfo.processInfo.environment) { print(line) }
         // Show this account while another user is on the screen (docs/off-console-plan.md): one line, only when on.
         if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
+        // The guard for #380: one line, only when the last run ended while making a display.
+        if let line = displayGuard?.launchLine { print(line) }
         checkFirewall()                                         // at launch, beside the listener's own check
         watchDisplayChanges()                                   // the fallback display goes when a real one is back
         watchWakes()                                            // a wake: the displays may still be changing
@@ -1167,47 +1206,77 @@ package final class StreamCoordinator {
             print(HeadlessDesktopPolicy.asleepNotGoneLine(asleep: asleep))
             saidAsleepNotGone = true
         }
-        guard displayWatch.real == 0, headlessGateAllows() else { return }
+        guard displayWatch.real == 0, headlessGateAllows() else {
+            // No real screen, and only the guard for #380 keeps Sill's display from being made: one line a run.
+            if displayWatch.real == 0, displayGuard?.holds == true, !saidGuardHolds, headlessGateAllows(guardHolds: false) {
+                print(DisplayMakeGuard.headlessHeldLine)
+                saidGuardHolds = true
+            }
+            return
+        }
         // The system removed it on its own (sleep and wake can, as VirtualStage's `onLost` knows): made again, not
         // kept as a display that is no longer there, with the Desktop on macOS's stand-in until Sill quits.
         if let d = headlessDisplay, CGDisplayIsOnline(d.displayID) == 0 {
             print("Headless display: the virtual Desktop display (id \(d.displayID)) is gone; making it again.")
             headlessDisplay = nil
+            headlessHz = nil
+            status.update { $0.sillDisplay = nil }
         }
         if !hasHeadlessDisplay {
             guard await headlessDisplaySettled() else { return }
-            let dims = HeadlessDesktopPolicy.desktopDimensions(
-                builtIn: WindowCatalog.lastBuiltIn,
-                viewportWidth: viewport?.width,
-                viewportHeight: viewport?.height
-            )
+            // The device's size and refresh rate (Noah, 2026-11-18): the device that asked for the Desktop, else the one
+            // whose viewport came last, else #200's 1920×1080 at 60 (VirtualDesktopSize). Decided here, once: never
+            // resized while it is the Mac's only display (phase 2b follows a device's turn, in place and unlocked).
+            let matched = VirtualDesktopSize.matched(asker: desktopAsker, newest: newestViewport, sent: Set(viewports.keys))
+            let vp = matched.flatMap { viewports[$0] }
+            let asked = VirtualDesktopSize.device(room: nil, panel: vp.map { CGSize(width: $0.width, height: $0.height) })
+                ?? VirtualDesktopSize.fallback
+            let hz = VirtualDesktopSize.rate(viewportFPS: vp?.fps, limit: maxFPS)
+            let device = vp == nil ? nil : matched.map { deviceName(id: $0) }
+            // The guard's marker from just before the private calls until the display is up or failed (#380).
+            displayGuard?.willMake("desktop")
             if testHeadlessFile != nil {
-                // TEST ONLY: said, never made; listed as Sill's from now on (`displaysNow`).
+                // TEST ONLY: said, never made; listed as Sill's from now on (`displaysNow`), at the size and rate a Mac's
+                // would be asked for.
                 testHeadlessMade = true
+                headlessHz = Double(hz)
                 catalog.keepsSills = true
-                print("Headless display: created \(dims.widthPt)×\(dims.heightPt) pt @\(dims.scale)× virtual display (TEST ONLY: none made, \(HeadlessDesktopPolicy.testHeadlessVariable)) for Desktop mode.")
+                displayGuard?.made(cameUp: true)
+                print(VirtualDesktopSize.createdLine(came: asked, asked: asked, hz: hz, id: nil, device: device))
+                status.update { $0.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, hz: hz, device: device) }
                 lookAtDisplays(changed: true)
                 return
             }
+            let d: VirtualDisplay
             do {
-                let d = try VirtualDisplay(
-                    name: "Sill Desktop",
-                    widthPt: dims.widthPt,
-                    heightPt: dims.heightPt,
-                    scale: dims.scale,
-                    refreshHz: Double(effectiveFPS),
-                    vendorID: VirtualStage.vendorID,
-                    productID: VirtualStage.productID + 1,
-                    serialNum: VirtualStage.serialNum + 1
-                )
-                headlessDisplay = d
-                catalog.keepsSills = true
-                _ = await d.waitUntilOnline(timeout: 3)
-                print("Headless display: created \(dims.widthPt)×\(dims.heightPt) pt @\(dims.scale)× virtual display (id \(d.displayID)) for Desktop mode.")
+                d = try VirtualDisplay(name: "Sill Desktop", widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale,
+                                       refreshHz: Double(hz), vendorID: DesktopDisplays.sillVendor,
+                                       productID: DesktopDisplays.desktopProduct, serialNum: VirtualStage.serialNum + 1)
             } catch {
+                displayGuard?.made(cameUp: false)
                 print("Headless display: could not create virtual display (\(error)).")
                 return
             }
+            headlessDisplay = d
+            catalog.keepsSills = true
+            _ = await d.waitUntilOnline(timeout: 3)
+            let b = d.bounds
+            displayGuard?.made(cameUp: b.width > 0)
+            guard b.width > 0 else {
+                // It never came up: nothing to show on it. Removed; the Desktop stays on what macOS shows.
+                headlessDisplay = nil
+                d.destroy()
+                catalog.keepsSills = false
+                print("Headless display: it never came up (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)× at \(hz) Hz); removed it.")
+                return
+            }
+            // The mode it came up at, not the one asked for (the stage's rule since 2026-10-27; #200's line said "@2×"
+            // whatever macOS made it), and the rate it reads, which the Desktop's rate is held to.
+            let came = VirtualDesktopSize.Size(widthPt: Int(b.width), heightPt: Int(b.height), scale: d.currentScale)
+            let cameHz = CGDisplayCopyDisplayMode(d.displayID).map { Int($0.refreshRate.rounded()) }.flatMap { $0 > 0 ? $0 : nil } ?? hz
+            headlessHz = Double(cameHz)
+            print(VirtualDesktopSize.createdLine(came: came, asked: asked, hz: cameHz, id: d.displayID, device: device))
+            status.update { $0.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: came.widthPt, heightPt: came.heightPt, scale: came.scale, hz: cameHz, device: device) }
         }
         guard headlessDisplay != nil else { return }      // a test host's said display has no look to wait for
         // Until the catalog's look has it (macOS's stand-in may still be listed beside it).
@@ -1256,7 +1325,7 @@ package final class StreamCoordinator {
     /// What `needsVirtualDesktop` asks of this host now, from the watch's last look (`screens`: whether a real screen
     /// counts as there; `false` asks what it would say with none). A test host with SILL_TEST_HEADLESS stands in for a
     /// Mac with an AppKit loop, the private API and Screen Recording: it makes no display, only says so.
-    private func headlessGateAllows(screens: Bool? = nil) -> Bool {
+    private func headlessGateAllows(screens: Bool? = nil, guardHolds: Bool? = nil) -> Bool {
         let scripted = testHeadlessFile != nil
         return HeadlessDesktopPolicy.needsVirtualDesktop(
             hasDisplay: screens ?? (displayWatch.real > 0),
@@ -1265,8 +1334,43 @@ package final class StreamCoordinator {
             synthetic: synthetic && !scripted,
             apiAvailable: scripted || VirtualDisplay.checkPrivateAPI().isEmpty,
             screenRecording: scripted || CGPreflightScreenCaptureAccess(),  // never a display without it (VirtualStage.prepare's rule)
-            onConsole: lockReading != .offConsole                           // never one that would join another user's displays
+            onConsole: LockPolicy.makesDesktopDisplay(lockReading),         // locked too (#298); never off console
+            guardHolds: guardHolds ?? (displayGuard?.holds ?? false)        // two runs in a row ended making one (#380)
         )
+    }
+
+    /// A device's name as the card has it (its ClientStats), for Sill's display's line; "a device" before it said.
+    private func deviceName(id: ObjectIdentifier) -> String {
+        status.snapshot.devices.first { $0.id == id }?.name ?? "a device"
+    }
+
+    /// The Desktop's rate on the display it streams, judged once that display is known (a look during the awaits can
+    /// have moved it to a stop of another rate, or onto Sill's own display just made): the stop's refresh rate, else
+    /// Sill's display's while the Desktop is on it (VirtualDesktopSize.refreshHeld); judged at the rate it runs.
+    private func holdDesktopRate(onDisplay id: UInt32?) {
+        let stop = catalog.desktopCandidates.first { $0.id == id }?.refreshHz
+        let rate = DesktopDisplays.rate(effectiveFPS, refreshHz: VirtualDesktopSize.refreshHeld(stop: stop, sills: headlessHz,
+                                                                                                    onSills: desktopOnSills(id)))
+        if rate != fps {
+            fps = rate
+            judgeLinks(LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
+        }
+    }
+
+    /// Try Again, from Settings › Virtual Display while the guard for #380 holds: Sill makes its displays again, and a
+    /// Desktop streaming with no real screen asks for Sill's display at once.
+    package func tryDisplaysAgain() {
+        guard let displayGuard, displayGuard.holds else { return }
+        displayGuard.tryAgain()
+        saidGuardHolds = false
+        print(DisplayMakeGuard.tryAgainLine)
+        status.update { $0.displayMakeHeld = false }
+        guard active == .desktop, !switching, !shuttingDown else { return }
+        Task { @MainActor in
+            self.lookAtDisplays()
+            guard self.displayWatch.real == 0, self.active == .desktop, !self.switching else { return }
+            await self.select(.desktop)
+        }
     }
 
     /// A look at the displays, for the watch (HeadlessDesktopPolicy.Watch): `changed` when macOS said the
@@ -1436,6 +1540,8 @@ package final class StreamCoordinator {
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
+            // The Desktop asked by this device: Sill's own display, if one is made for it, is this device's size.
+            if source == .desktop { desktopAsker = ObjectIdentifier(connection) }
             // A pick from the device's switcher, or the device's own request (StreamClient's window
             // list: the Desktop at a connection's start or once the Mac stopped it, and after a move
             // what it watched, the Desktop or a window).
@@ -1444,6 +1550,7 @@ package final class StreamCoordinator {
             // The Desktop button tapped while the Desktop streams (DesktopDisplays). A synthetic host's
             // Desktop is the test pattern, which has stops only under SILL_TEST_DISPLAYS.
             guard !synthetic || catalog.testDisplays != nil else { return }
+            desktopAsker = ObjectIdentifier(connection)
             await nextDesktopDisplay(askedBy: deviceName(connection))
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
@@ -1556,6 +1663,7 @@ package final class StreamCoordinator {
                 restored = restoreFits(keeping: nil)
             }
             viewport = v
+            viewports[id] = v; newestViewport = id      // Sill's own display is sized to a device's (VirtualDesktopSize)
             clientFPS[id] = v.fps ?? 60
             // The flip its connection made waited for this, its rate (`flipAwaits`): the restart the
             // rate needs takes the flip too, and the flip alone restarts once when the rate needs none.
@@ -1754,7 +1862,7 @@ package final class StreamCoordinator {
         catalog.locked = !allowed.windows
         // Locked, or another user on the screen: the Desktop's one stop is the main display, whose lock
         // screen takes the password (DesktopDisplays); the stop a device chose comes back after the unlock.
-        // A Desktop on another display moves now (`followDesktopStop`, from the catalog's change).
+        // A Desktop on another display moves now (`followDesktopDisplay`, from the catalog's change).
         catalog.mainOnly = now.locked
         status.update { $0.offConsoleView = view }      // the card's subtitle
         clipboard.setLocked(!allowed.clipboard)
@@ -1764,6 +1872,9 @@ package final class StreamCoordinator {
             pendingLaunch = nil              // a launch asked for before the lock picks nothing now
             injector.stopRepeating()         // a held key repeats no more
         }
+        // Off console (another user, or the login window, on the screen): Sill's own Desktop display goes at once
+        // (LockPolicy.makesDesktopDisplay: never off console).
+        if now == .offConsole, hasHeadlessDisplay { await removeHeadlessOffConsole() }
         menuTargetChanged()                  // no app's menus while locked, the source's again after
         audioFollow()                        // and no sound
         broadcastList()                      // the windows go now; they come back once looked at
@@ -2417,7 +2528,10 @@ package final class StreamCoordinator {
             } else if synthetic {
                 // TEST ONLY: with SILL_TEST_HEADLESS, Sill's display is judged on the file's list as on a Mac's, and
                 // only said to be made; the test pattern streams either way.
-                if testHeadlessFile != nil { await ensureHeadlessDisplayIfNeeded() }
+                if testHeadlessFile != nil {
+                    await ensureHeadlessDisplayIfNeeded()
+                    holdDesktopRate(onDisplay: nil)
+                }
                 // A 1512×949-point test pattern: the same size as a typical streamed window, so the
                 // encoder and the fallback see realistic load without Screen Recording.
                 width = evenPixels(1512 * captureScale); height = evenPixels(949 * captureScale)
@@ -2439,12 +2553,8 @@ package final class StreamCoordinator {
                 title = "Whole Desktop"; kind = .desktop
                 picture = .display
                 // The stop's own refresh rate, now that its display is known (a look during the awaits can
-                // have moved the Desktop to a stop of another rate): judged at the rate it runs.
-                let rate = DesktopDisplays.rate(effectiveFPS, refreshHz: catalog.desktopCandidates.first { $0.id == plan.displayID }?.refreshHz)
-                if rate != fps {
-                    fps = rate
-                    judgeLinks(LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
-                }
+                // have moved the Desktop to a stop of another rate), or Sill's own display's: judged at the rate it runs.
+                holdDesktopRate(onDisplay: plan.displayID)
             }
         }
 
@@ -2553,13 +2663,27 @@ package final class StreamCoordinator {
         return (stop, testDisplayScales[stop.id] ?? 1, "display \(n) of \(catalog.desktopCandidates.count) (\(Self.displayName(stop)))")
     }
 
-    /// The Desktop streams a display other than the stop the catalog shows now (a step, the stop
-    /// unplugged or back, the main display changed, this Mac locked or unlocked: `mainOnly`): restart it
-    /// there. Not the placeholder, which captures no display; not mid-switch, whose own end decides.
-    private func followDesktopStop() async {
-        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams,
-              synthetic ? catalog.testDisplays != nil : true,
-              let streams = desktopStreamDisplay, streams != catalog.desktopDisplayID else { return }
+    /// The Desktop follows its display, one follower for every trigger, so one display change restarts it once (the
+    /// assessment of 2026-11-18, defect 7: opening the lid restarted it twice, #355's stop follower and #200's size
+    /// follower each on its own, the second comparing a size it had read before the first restart). It restarts when it
+    /// streams a display other than the stop the catalog shows now (a step, the stop unplugged or back, the main display
+    /// changed, this Mac locked or unlocked: `mainOnly`), else when the display it streams changed size under it (the lid
+    /// opened: the built-in screen at its default for a moment, then at the person's own; a resolution changed in System
+    /// Settings), rather than streaming it scaled into the old size. `look`: macOS's reconfiguration callback, which looks
+    /// at the displays first. Both are judged after that look, against what streams then, so a restart made meanwhile is
+    /// never made again. Not the placeholder, which captures no display; not mid-switch, whose own end decides; not while
+    /// Sill's display is being released, whose own restart moves the Desktop; a test host's test pattern only under
+    /// SILL_TEST_DISPLAYS, and never for a size.
+    private func followDesktopDisplay(look: Bool = false) async {
+        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams, !releasingHeadless,
+              synthetic ? catalog.testDisplays != nil : true else { return }
+        if look { await catalog.refreshWindows() }
+        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams, !releasingHeadless,
+              let streams = desktopStreamDisplay else { return }
+        if streams != catalog.desktopDisplayID { await select(.desktop); return }
+        guard !synthetic, let was = desktopStreamPoints, let d = catalog.display, d.displayID == streams,
+              CGSize(width: d.width, height: d.height) != was else { return }
+        print("Desktop: the display is \(d.width)×\(d.height) pt now (was \(Int(was.width))×\(Int(was.height))); restarting at its size.")
         await select(.desktop)
     }
 
@@ -2699,10 +2823,12 @@ package final class StreamCoordinator {
         streamDisplayScale = displayScale
         injector.displayScale = displayScale
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
+        // The card names Sill's own display when the Desktop shows it (a Mac with no working screen).
+        let onSills = kind == .desktop && picture == .display && headlessDisplay != nil && desktopOnSills(desktopStreamDisplay)
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
                                                   mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
-                                                  softwareEncoder: useSoftwareEncoder)
+                                                  softwareEncoder: useSoftwareEncoder, onSillDisplay: onSills)
         }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
         // may already have fired, and that report was ignored (no current encoder yet).
@@ -3169,17 +3295,37 @@ package final class StreamCoordinator {
         }
     }
 
-    private func removeHeadlessDisplay() {
+    private func removeHeadlessDisplay(line: String = "Headless display: a display is online again; removed the virtual Desktop display.") {
         let said = testHeadlessMade && headlessDisplay == nil
         headlessDisplay = nil
         testHeadlessMade = false
+        headlessHz = nil
+        status.update { $0.sillDisplay = nil }
         lookAtDisplays(changed: true)
-        print("Headless display: a display is online again; removed the virtual Desktop display.\(said ? " (TEST ONLY: none was made.)" : "")")
+        print(line + (said ? " (TEST ONLY: none was made.)" : ""))
+    }
+
+    /// Off console, Sill's display goes at once (docs/virtual-desktop-plan.md §2 and §10, LockPolicy.makesDesktopDisplay):
+    /// it would be the displays of the user now on the screen, and a Sill in their session would make one of its own
+    /// beside it, of the same identity. A switch under way first, at most 5 s; never while its release is under way,
+    /// which ends it anyway. Off console the Desktop streams the placeholder, which captures no display; with the
+    /// off-console view it streams the main display, so it starts again, once, on what is left. Back on the console with
+    /// no screen, the Desktop asks for it again and it is made two seconds after the return (`Watch.cameBack`).
+    private func removeHeadlessOffConsole() async {
+        for _ in 0..<100 where switching { try? await Task.sleep(for: .milliseconds(50)) }
+        guard hasHeadlessDisplay, !releasingHeadless, !shuttingDown, lockReading == .offConsole else { return }
+        releaseCheck?.cancel(); releaseCheck = nil
+        catalog.keepsSills = false
+        removeHeadlessDisplay(line: "Headless display: this session is off the console; removed Sill's display (it would be the displays of the user on the screen).")
+        guard active == .desktop, !placeholderStreams, !switching else { return }
+        await catalog.refreshWindows()
+        await select(.desktop)
     }
 
     /// macOS's display changes (the lid opened, a monitor plugged in, back from a user switch), for the watch, for
-    /// `releaseHeadlessDisplayIfDone` and for the Desktop's size. Never removed: one coordinator lives as long as the
-    /// process.
+    /// `releaseHeadlessDisplayIfDone` and for the Desktop's display (`followDesktopDisplay`). Never removed, and its
+    /// context unretained: safe only while one coordinator lives as long as the process, which AppModel and the CLI
+    /// each make once (the assessment of 2026-11-18, note 11); a second coordinator would need this undone first.
     private func watchDisplayChanges() {
         CGDisplayRegisterReconfigurationCallback({ _, flags, context in
             guard !flags.contains(.beginConfigurationFlag), let context else { return }
@@ -3187,7 +3333,7 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 coordinator.lookAtDisplays(changed: true)
                 coordinator.releaseHeadlessDisplayIfDone()
-                coordinator.desktopFollowsDisplaySize()
+                await coordinator.followDesktopDisplay(look: true)
             }
         }, Unmanaged.passUnretained(self).toOpaque())
     }
@@ -3253,20 +3399,6 @@ package final class StreamCoordinator {
                 last = text
                 try? await Task.sleep(for: .milliseconds(100))
             }
-        }
-    }
-
-    /// The Desktop's display changed size under it (the lid opened: macOS shows the built-in screen at its
-    /// default for a moment, then at the person's own; a resolution changed in System Settings): the
-    /// Desktop restarts at the new size, rather than streaming the display scaled into the old one.
-    private func desktopFollowsDisplaySize() {
-        guard active == .desktop, !switching, !releasingHeadless, let was = desktopStreamPoints else { return }
-        Task { @MainActor in
-            await self.catalog.refreshWindows()
-            guard self.active == .desktop, !self.switching, !self.releasingHeadless, let d = self.catalog.display,
-                  CGSize(width: d.width, height: d.height) != was else { return }
-            print("Desktop: the display is \(d.width)×\(d.height) pt now (was \(Int(was.width))×\(Int(was.height))); restarting at its size.")
-            await self.select(.desktop)
         }
     }
 
@@ -3371,6 +3503,18 @@ package final class StreamCoordinator {
         guard let n = Int(raw), n > 0 else { return (0, "SILL_TEST_DESKTOP_FAIL=\(shown) ignored: a number of starts, 1 or more.") }
         let which = n == 1 ? "the first start of the Desktop's capture fails" : "the first \(n) starts of the Desktop's capture fail"
         return (n, "Test Desktop: \(which), as ScreenCaptureKit's \"The stream is nil\" did on 2026-10-28 (SILL_TEST_DESKTOP_FAIL).")
+    }
+
+    /// TEST ONLY: `SILL_TEST_MAKE_GUARD=<folder>` gives a test host the guard for #380 (DisplayMakeGuard) in a folder of
+    /// its own, the count in a file beside the marker, so a gate trips it with a marker it writes there and never
+    /// touches Sill.app's; with SILL_TEST_HEADLESS its said display is made inside the marker as Sill.app's would be.
+    /// Honoured only by a test host (DoorPolicy.isTestHost); anywhere else one line says it is ignored.
+    static func makeGuardHook(environment env: [String: String], testHost: Bool) -> (store: DisplayMakeGuard.Store?, line: String?) {
+        guard let raw = env["SILL_TEST_MAKE_GUARD"], !raw.isEmpty else { return (nil, nil) }
+        guard testHost else { return (nil, "SILL_TEST_MAKE_GUARD ignored: only a --synthetic test host takes it, never Sill.app.") }
+        let store = DisplayMakeGuard.Store.test(folder: URL(fileURLWithPath: raw, isDirectory: true))
+        return (store, "Test guard: the guard for #380 keeps its marker and count in \(raw) (SILL_TEST_MAKE_GUARD); "
+                    + "\(store.stops) stop\(store.stops == 1 ? "" : "s") in a row\(store.holds ? ": it holds" : "").")
     }
 
     /// TEST ONLY: `SILL_TEST_MENU_PID`, honoured only by a --synthetic host (which does not
@@ -3516,6 +3660,7 @@ package final class StreamCoordinator {
         releaseCheck?.cancel()
         headlessDisplay = nil
         testHeadlessMade = false
+        displayGuard?.quitting()         // a clean quit while a display was being made is no stop (#380's guard)
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

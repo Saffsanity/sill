@@ -53,6 +53,8 @@ MUTANTS = [
      "&& apiAvailable && screenRecording", "&& apiAvailable"),
     ("headless display created off console (another user's displays)",
      "&& screenRecording && onConsole", "&& screenRecording"),
+    ("headless display created while the guard for #380 holds",
+     "&& onConsole && !guardHolds", "&& onConsole"),
     ("headless display kept after a real display is back",
      "static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }",
      "static func stillNeeded(physicalDisplays: Int) -> Bool { true }"),
@@ -138,9 +140,6 @@ MUTANTS = [
     ("Sill's display preferred over a real one",
      "for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {",
      "for wanted in [Kind.sills, .real] {"),
-    ("the built-in screen's size ignored",
-     "        guard let builtIn else { return desktopDimensions(viewportWidth: viewportWidth, viewportHeight: viewportHeight) }",
-     "        guard let builtIn, builtIn.widthPt < 0 else { return desktopDimensions(viewportWidth: viewportWidth, viewportHeight: viewportHeight) }"),
     ("an asleep display counted as none whatever the lid (the review of 2026-11-09)",
      "static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { online }",
      "static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { active }"),
@@ -196,9 +195,6 @@ MUTANTS = [
      "case [\"standin\", \"asleep\"]: displays.append(TestDisplay(kind: .standIn, active: true))"),
     ("TEST ONLY: the screens' line left out",
      "case [\"screens\", \"asleep\"]: screensAsleep = true", "case [\"screens\", \"asleep\"]: break"),
-    ("headless dimensions not rounded to even",
-     "let evenW = clampedW & ~1",
-     "let evenW = clampedW"),
 ]
 # A mutant names its file as a fourth element: "kind" is HeadlessDisplayKind.swift, else VirtualDisplay.swift.
 FILES = {"vd": F, "kind": os.path.join(WT, "Sources/SillHost/HeadlessDisplayKind.swift")}

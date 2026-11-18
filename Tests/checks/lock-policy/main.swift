@@ -338,6 +338,15 @@ for rd in readings { for paired in [false, true] {
     let want = rd == .unlocked || (rd == .screenLocked && paired)
     check(P.takesInput(rd, paired: paired) == want, "takesInput(\(rd), paired: \(paired)) is \(want)")
 } }
+// The one display Sill makes while locked (PR #200, #298, written down 2026-11-18): Sill's own Desktop display for a Mac
+// with no working screen, at a locked screen too; never off console, the off-console view included. The stage's (a
+// picked window's, `virtualDisplay`) stays off while locked.
+check(P.makesDesktopDisplay(.unlocked) && P.makesDesktopDisplay(.screenLocked) && !P.makesDesktopDisplay(.offConsole),
+      "Sill's Desktop display: unlocked and at a locked screen, never off console")
+check(!screen.virtualDisplay && P.makesDesktopDisplay(.screenLocked),
+      "at a locked screen: no stage display, Sill's Desktop display the written exception")
+check(!P.allowed(.offConsole, offConsoleView: true).virtualDisplay && !P.makesDesktopDisplay(.offConsole),
+      "the off-console view: neither display")
 
 // MARK: - The server's gate
 

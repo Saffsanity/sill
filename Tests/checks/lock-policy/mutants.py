@@ -7,6 +7,11 @@ F = "Sources/SillHost/LockPolicy.swift"
 S = "Sources/StreamProtocol/Switcher.swift"
 C = "Sources/StreamProtocol/Compatibility.swift"
 M = [
+    # The one display Sill makes while locked (PR #200, #298).
+    ("Sill's Desktop display made off console", F, "static func makesDesktopDisplay(_ r: Reading) -> Bool { r != .offConsole }",
+     "static func makesDesktopDisplay(_ r: Reading) -> Bool { true }"),
+    ("Sill's Desktop display not made at a locked screen", F, "static func makesDesktopDisplay(_ r: Reading) -> Bool { r != .offConsole }",
+     "static func makesDesktopDisplay(_ r: Reading) -> Bool { r == .unlocked }"),
     # The readings.
     ("restrictive: the less restrictive", F, "static func restrictive(_ a: Reading, _ b: Reading) -> Reading { max(a, b) }",
      "static func restrictive(_ a: Reading, _ b: Reading) -> Reading { min(a, b) }"),

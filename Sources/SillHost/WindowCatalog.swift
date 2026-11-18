@@ -171,9 +171,11 @@ final class WindowCatalog {
                               width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
-    /// The MacBook's own screen in points, as the last look that saw it had it: the size of Sill's Retina
-    /// display with the lid closed (HeadlessDesktopPolicy). Kept in the preferences, so a relaunch with the
-    /// lid already closed still knows it.
+    /// The MacBook's own screen in points, as the last look that saw it had it, kept in the preferences so a relaunch
+    /// with the lid already closed still knows it (#200's). Sill's display for a Mac with no working screen is the
+    /// device's size since 2026-11-18 (VirtualDesktopSize); this is kept for phase 3's choice "Same as this Mac's
+    /// screen", and written only by Sill.app (`remembersBuiltIn`), never into the CLI's defaults (the assessment's
+    /// defect 10).
     static var lastBuiltIn: (widthPt: Int, heightPt: Int)? {
         guard let a = UserDefaults.standard.array(forKey: builtInKey) as? [Int], a.count == 2 else { return nil }
         return (a[0], a[1])
@@ -183,6 +185,8 @@ final class WindowCatalog {
         guard widthPt > 0, heightPt > 0, lastBuiltIn.map({ $0 == (widthPt, heightPt) }) != true else { return }
         UserDefaults.standard.set([widthPt, heightPt], forKey: builtInKey)
     }
+    /// Whether a look writes `lastBuiltIn` (Sill.app's coordinator sets it; the CLI never does).
+    var remembersBuiltIn = false
     /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
     private var leftOutNamed: Set<String> = []
 
@@ -401,7 +405,9 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
+        if remembersBuiltIn, let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) {
+            Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height)
+        }
         lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { self.headlessKind(of: $0.displayID) }, sillsFirst: keepsSills)
         resolveDesktopDisplay()
         // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of

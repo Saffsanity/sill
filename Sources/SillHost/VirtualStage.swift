@@ -55,10 +55,14 @@ final class VirtualStage {
         /// This Mac read locked as the display was about to be made (LockPolicy: no virtual display while
         /// locked). Never counted as a creation failure; the coordinator streams nothing of the window.
         case locked
+        /// The guard for #380 holds (DisplayMakeGuard): Sill stopped while making a display two runs in a row, and
+        /// makes none by itself until Try Again. Never counted as a creation failure; the window streams where it is.
+        case guarded
 
         var description: String {
             switch self {
             case .locked: return "locked (this Mac is locked: no virtual display is made)"
+            case .guarded: return "guarded (\(DisplayMakeGuard.stageSummary), so it makes none by itself until Try Again)"
             case .disabled(let why): return "virtual display disabled: \(why)"
             case .accessibilityOff: return "accessibilityOff (Accessibility permission is needed to move the window)"
             case .screenRecordingOff: return "screenRecordingOff (Screen Recording is needed to capture the display; without it ScreenCaptureKit also hangs while a virtual display exists)"
@@ -86,6 +90,7 @@ final class VirtualStage {
             case .notOnDisplay: return "the window didn’t move"
             case .windowMissing: return "the window went away"
             case .locked: return "this Mac is locked"
+            case .guarded: return DisplayMakeGuard.stageSummary
             }
         }
     }
@@ -154,6 +159,9 @@ final class VirtualStage {
     /// cursor is the console's, another user's). Unset: as ever.
     var mayMakeDisplay: (() -> Bool)?
     var mayWarp: (() -> Bool)?
+    /// The guard for #380 (DisplayMakeGuard, Sill.app's and a test host's under SILL_TEST_MAKE_GUARD; nil in the CLI):
+    /// its marker around every display made here, and none made while it holds (`Failure.guarded`).
+    var makeGuard: DisplayMakeGuard.Store?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
@@ -527,16 +535,22 @@ final class VirtualStage {
         // dump it anywhere on a real display until the new one is up: send it home first. prepare
         // re-records the placement and re-places the window once the new display is listed.
         if placement != nil { releaseWindow() }
+        // A locked Mac makes no display: off console one joined the console's display set (2026-10-31). Two runs in a
+        // row ended while making a display (#380): none until Try Again. Otherwise the guard's marker from just before
+        // the old display goes (#380's stops came right after "Removed virtual display N", a remake) until the new one
+        // is up or failed (`made`).
+        let mayMake = mayMakeDisplay?() ?? true, guarded = makeGuard?.holds == true
+        if mayMake, !guarded { makeGuard?.willMake("stage") }
         destroyDisplay()
-
-        // A locked Mac makes no display: off console one joined the console's display set (2026-10-31).
-        if let may = mayMakeDisplay, !may() { throw Failure.locked }
+        if !mayMake { throw Failure.locked }
+        if guarded { throw Failure.guarded }
         let t0 = Date()
         let d: VirtualDisplay
         do {
             d = try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
                                    refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: Self.serialNum)
         } catch {
+            makeGuard?.made(cameUp: false)
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
             throw Failure.displayCreate(error)
@@ -551,6 +565,7 @@ final class VirtualStage {
         d.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }
 
         let online = await d.waitUntilOnline(timeout: 3)
+        makeGuard?.made(cameUp: d.bounds.width > 0)
         let onlineMs = Self.ms(since: t0)
         if !online {
             if d.bounds.width == 0 {

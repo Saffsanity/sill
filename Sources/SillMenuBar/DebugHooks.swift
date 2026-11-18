@@ -411,6 +411,15 @@ enum DebugHooks {
                 render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
             }
         }
+        // Virtual Display while Sill's own display shows on a Mac with no working screen (PR #200), and while the
+        // guard for #380 holds (pane-virtualDisplay-<state>).
+        for (state, status) in noScreenPaneSamples() {
+            for (name, appearance) in appearances {
+                render(SettingsPane(tab: .virtualDisplay, model: model, previewStatus: status)
+                        .background(Color(nsColor: .windowBackgroundColor)),
+                       appearance: appearance, to: out.appendingPathComponent("pane-virtualDisplay-\(state)-\(name).png"))
+            }
+        }
         // General while the macOS firewall blocks Sill's executable (the report's Mac), and the line alone
         // in each verdict that shows one (FirewallRule).
         for (name, appearance) in appearances {
@@ -701,6 +710,19 @@ enum DebugHooks {
                 ("both", judged("both", installed)), ("all", judged("all", installed)), ("quoted", judged("executable", spaced))]
     }()
 
+    /// Virtual Display's states for a Mac with no working screen (PR #200): Sill's display showing for an iPad mini,
+    /// and the guard for #380 holding.
+    static func noScreenPaneSamples() -> [(String, HostStatusSnapshot)] {
+        var showing = HostStatusSnapshot()
+        showing.virtualDisplayOn = true
+        showing.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: 1218, heightPt: 800, scale: 2, hz: 60, device: "iPad mini")
+        var held = HostStatusSnapshot()
+        held.virtualDisplayOn = true
+        held.displayMakeHeld = true
+        held.lastStageFailure = "Sill stopped twice while making its display"
+        return [("noscreen", showing), ("guard", held)]
+    }
+
     /// The remote device of `remote-device`, every connected device away: the away quality runs.
     private static func remoteAway() -> HostStatusSnapshot {
         var s = samples_remoteBase()
@@ -806,6 +828,13 @@ enum DebugHooks {
         // The off-console view (docs/off-console-plan.md): another user on the screen, this account shown.
         var offConsoleView = streaming
         offConsoleView.offConsoleView = true
+        // A Mac with no working screen (PR #200): the Desktop on Sill's own display, sized to the iPad mini.
+        var sillsDisplay = connected
+        sillsDisplay.devices = [ipad]
+        sillsDisplay.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 2436, height: 1600, fps: 60,
+                                                        mbps: 15, onVirtualDisplay: false, softwareEncoder: false, onSillDisplay: true)
+        sillsDisplay.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: 1218, heightPt: 800, scale: 2, hz: 60, device: "iPad mini")
+        sillsDisplay.encodedFPS = 60
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -825,6 +854,7 @@ enum DebugHooks {
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
             Sample(name: "off-console-view", snapshot: offConsoleView),
+            Sample(name: "sills-display", snapshot: sillsDisplay),
         ]
     }
 }

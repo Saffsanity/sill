@@ -465,25 +465,6 @@ private enum Runtime {
 /// Headless Mac / closed-lid MacBook fallback display for Desktop mode (issue #61).
 /// Pure: compiled and checked by `Tests/checks/virtual-display-api`.
 enum HeadlessDesktopPolicy {
-    static let defaultWidthPt = 1920
-    static let defaultHeightPt = 1080
-    static let minWidthPt = 1024
-    static let maxWidthPt = 3840
-    static let minHeightPt = 640
-    static let maxHeightPt = 2400
-
-    struct Dimensions: Equatable, Sendable {
-        var widthPt: Int
-        var heightPt: Int
-        var scale: Int
-
-        init(widthPt: Int, heightPt: Int, scale: Int) {
-            self.widthPt = widthPt
-            self.heightPt = heightPt
-            self.scale = scale
-        }
-    }
-
     /// Whether the Desktop gets Sill's display now. `screenRecording`: this process may capture the screen
     /// (CGPreflightScreenCaptureAccess). Without it no display is made, as VirtualStage.prepare refuses to make
     /// one: measured 2026-09-22, SCShareableContent never returns in a process without Screen Recording once a
@@ -491,7 +472,8 @@ enum HeadlessDesktopPolicy {
     /// the display is made would hold the Desktop's select, and every select after it, for good. `onConsole`: this
     /// session is the one on the screen (the lock's reading is not off console). A display made from a session
     /// another user has the screen from would join that user's displays; the off-console view of #340 lets the
-    /// Desktop stream off console, and makes no virtual display there for that reason.
+    /// Desktop stream off console, and makes no virtual display there for that reason. `guardHolds`: Sill stopped while
+    /// making a display two runs in a row (DisplayMakeGuard, #380), and makes none by itself until Try Again.
     static func needsVirtualDesktop(
         hasDisplay: Bool,
         clientCount: Int,
@@ -499,9 +481,10 @@ enum HeadlessDesktopPolicy {
         synthetic: Bool,
         apiAvailable: Bool,
         screenRecording: Bool,
-        onConsole: Bool
+        onConsole: Bool,
+        guardHolds: Bool
     ) -> Bool {
-        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole && !guardHolds
     }
 
     /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
@@ -708,23 +691,5 @@ enum HeadlessDesktopPolicy {
             if !some.isEmpty { return some }
         }
         return desktops
-    }
-
-    /// The fallback display's size: the MacBook's own screen as Sill last saw it, so windows keep their places;
-    /// never seen (a Mac mini), the device's viewport, as before.
-    static func desktopDimensions(builtIn: (widthPt: Int, heightPt: Int)?, viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
-        guard let builtIn else { return desktopDimensions(viewportWidth: viewportWidth, viewportHeight: viewportHeight) }
-        return desktopDimensions(viewportWidth: Double(builtIn.widthPt), viewportHeight: Double(builtIn.heightPt))
-    }
-
-    static func desktopDimensions(viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
-        guard let w = viewportWidth, let h = viewportHeight, w > 0, h > 0 else {
-            return Dimensions(widthPt: defaultWidthPt, heightPt: defaultHeightPt, scale: 2)
-        }
-        let clampedW = min(maxWidthPt, max(minWidthPt, Int(w.rounded())))
-        let clampedH = min(maxHeightPt, max(minHeightPt, Int(h.rounded())))
-        let evenW = clampedW & ~1
-        let evenH = clampedH & ~1
-        return Dimensions(widthPt: evenW, heightPt: evenH, scale: 2)
     }
 }
