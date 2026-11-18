@@ -70,6 +70,7 @@ final class AppModel {
     @ObservationIgnored private var loggedStatus: String?
     @ObservationIgnored private var napActivity: NSObjectProtocol?
     @ObservationIgnored private var napHold = NapHold.none
+    @ObservationIgnored private let privacyShield = PrivacyShieldController()
     /// Recomputes the presentation when a menu item that lasts a while runs out with nothing else
     /// changing then (the older-device item's 10 minutes).
     @ObservationIgnored private var presentationExpiry: Task<Void, Never>?
@@ -121,6 +122,7 @@ final class AppModel {
             return false
         }
         updater.hold = { [weak self] on in self?.coordinator?.holdNewSessions(on) ?? 0 }
+        settings.onPrivacyChange = { [weak self] in self?.updatePrivacyShield() }
     }
 
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
@@ -426,7 +428,28 @@ final class AppModel {
         holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0)
         // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).
         updater.devicesChanged(snapshot?.devices.count ?? 0)
+        updatePrivacyShield()
         scheduleExpiry()
+    }
+
+    private func updatePrivacyShield() {
+        let count = coordinator?.status.snapshot.devices.count ?? 0
+        privacyShield.update(
+            privacyMode: settings.privacyMode,
+            lockOnDisconnect: settings.lockOnDisconnect,
+            connectedDevices: count,
+            synthetic: synthetic
+        )
+    }
+
+    func tearDownPrivacyForQuit() {
+        let count = coordinator?.status.snapshot.devices.count ?? 0
+        privacyShield.tearDownForQuit(
+            privacyMode: settings.privacyMode,
+            lockOnDisconnect: settings.lockOnDisconnect,
+            connectedDevices: count,
+            synthetic: synthetic
+        )
     }
 
     private enum NapHold { case none, connected, remote }

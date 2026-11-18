@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        model.tearDownPrivacyForQuit()
         // An update's install step under way (under a second): the quit waits for it, so it never leaves a
         // half-done step behind (review 3, F5), at most 10 s, on a run-loop Timer.
         if model.updater.installing {
