@@ -545,10 +545,13 @@ final class WindowCatalog {
             if let own {
                 // Only with a volume of one's own, or after a change: a Mac with none prints what it always did.
                 if !own.isEmpty || cause != nil {
-                    let listed = read.map { folder in "\(folder): \(found.filter { InstalledApps.inside($0.path, folder) }.count)" }
-                    print("installed apps with " + (own.isEmpty ? "no other volume" : own.joined(separator: ", "))
-                          + (cause.map { " (\($0))" } ?? "") + ": \(found.count) in \(took))"
-                          + (listed.isEmpty ? "" : "; listed from " + listed.joined(separator: ", ")))
+                    let listed: [String] = read.map { folder -> String in
+                        "\(folder): \(found.filter { InstalledApps.inside($0.path, folder) }.count)"
+                    }
+                    let with: String = own.isEmpty ? "no other volume" : own.joined(separator: ", ")
+                    let why: String = cause.map { " (\($0))" } ?? ""
+                    let from: String = listed.isEmpty ? "" : "; listed from " + listed.joined(separator: ", ")
+                    print("installed apps with \(with)\(why): \(found.count) in \(took))\(from)")
                 }
             } else {
                 print("installed apps: \(found.count) in \(took), off the main thread)")
