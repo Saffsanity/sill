@@ -470,7 +470,7 @@ check_required_reasons() {
         say "Required-reason APIs in the binary: $(printf '%s' "$used" | awk -F '\t' 'NF == 2 { if (!($1 in n)) order[++k] = $1; n[$1] = n[$1] (n[$1] == "" ? "" : ", ") $2 } END { for (i = 1; i <= k; i++) printf "%s%s (%s)", (i > 1 ? "; " : ""), order[i], n[order[i]] }'); declared: $(printf '%s\n' "$declared" | paste -s -d ',' - | sed -e 's/,/, /g' -e 's/^$/none/')"
     fi
     if [ -n "$missing" ]; then
-        warn "the binary uses required-reason APIs that no privacy manifest declares:$missing. App Store Connect refuses such an upload (ITMS-91053): add each category and its reason to iOSClient/PrivacyInfo.xcprivacy (docs/app-store-metadata.md §4 and the Layout note in CLAUDE.md)."
+        warn "the binary uses required-reason APIs that no privacy manifest declares:$missing. App Store Connect refuses such an upload (ITMS-91053): add each category and its reason to iOSClient/PrivacyInfo.xcprivacy (docs/app-store-metadata.md §4 and the privacy manifest's note in docs/LAYOUT.md)."
     fi
 }
 

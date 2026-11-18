@@ -86,7 +86,7 @@ check("the old inits compile and leave the new fields nil", PairRequest(method: 
       && PairResult(ok: false, reason: PairResult.code, triesLeft: 4).method == nil
       && PairResult(ok: false, reason: PairResult.code, triesLeft: 4).message == nil)
 
-// MARK: What the first public build freezes of pairing (the compatibility floor, CLAUDE.md)
+// MARK: What the first public build freezes of pairing (the compatibility floor, docs/COMPATIBILITY.md)
 
 // A later host adds a reason only with its own words (`message`); every kind 20 of this build
 // carries none, so each is byte for byte what it was.
