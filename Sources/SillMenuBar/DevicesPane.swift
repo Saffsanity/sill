@@ -108,8 +108,7 @@ struct DevicesPane: View {
                 Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
             }
             // Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283, #275): at once, no
-            // restart; the Mac's alone. Its warning only while the switch is on (the host's status, which lags the
-            // switch by one main-actor turn, so the switch's own value decides).
+            // restart; the Mac's alone. Its warning, from the host's status, only while the switch is on.
             Section {
                 Toggle(PrivacyPolicy.Words.toggle, isOn: $lockAfterSession)
                 if lockAfterSession, let warning = privacyLock.warning {

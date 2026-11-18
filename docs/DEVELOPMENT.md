@@ -5,9 +5,10 @@ Sill, see the [Support](https://getsill.app/support) page on
 [getsill.app](https://getsill.app).
 
 Until 2026-09-25 this was the README, so where a plan in `docs/` mentions "the
-README", it means a section here. `CLAUDE.md` has the rest: the layout, the
-decisions already made and every test hook; `docs/steps/` has what each piece of
-work did, a file each.
+README", it means a section here. `CLAUDE.md` has the rules for all work and the
+decisions already made, `docs/LAYOUT.md` the layout, `docs/BUILD-AND-RUN.md`
+every test hook, `docs/COMPATIBILITY.md` the compatibility floor, and
+`docs/steps/` what each piece of work did, a file each.
 
 ## Overview
 
@@ -29,7 +30,7 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
   disk image's background and the App Store screenshots (see its README).
   `docs/`: the brief and the plans.
 
-`CLAUDE.md`, Layout, goes through the code file by file.
+`docs/LAYOUT.md` goes through the code file by file.
 
 ## Build and run
 
@@ -1552,6 +1553,37 @@ switch its user to test it, and never post a notification by those names: other
 apps listen to them. The iOS harness's `-SillMacLocked 1|2|unlocking` draws the
 mock Mac locked, switched, or just unlocked.
 
+## Lock this Mac when the last device leaves
+
+Settings › Devices' Lock this Mac when the last device leaves (off by default; `lockAfterSession` in
+`me.saffer.sill.mac`; docs/privacy-mode-plan.md, part 1, issues #283 and #275) is for a Mac you unlock from afar:
+30 seconds after the last session of any kind ends, unless one comes back, Sill locks the Mac (login.framework's
+`SACLockScreenImmediate`, the call macOS's own Lock Screen makes) and puts its display to sleep (`pmset
+displaysleepnow`). A paired device unlocks it again by typing the password at the lock screen (A locked Mac, above).
+What counts: every registered session, of either door, paired or not, and one cut off as it leaves; never a
+connection that only pairs, one the device gate refuses or one an update's hold sends away. A device's move to
+another route never reaches zero sessions, and a reconnect within the 30 s ends the wait ("Privacy: a device
+connected again within 30 s; this Mac won’t be locked."). At the wait's end nothing is locked when the Mac is locked
+already, another user (or the login window) is on its screen, or it has no display a lock screen could take a
+password at (#298: Sill's own displays and macOS's stand-in for a Mac with no screen don't count; the switch's
+warning says so). The lock is confirmed by the lock's own reading within 3 seconds; when macOS has no such call, or
+the Mac still reads unlocked, the log says so, Settings shows "Sill couldn’t lock this Mac the last time: …", and the
+display sleeps instead (which locks a Mac that asks for its password at once after display sleep). A quit, a logout
+or an update's restart never locks; a crash or a force quit leaves nothing behind that locks later. The switch
+applies at once (turning it off ends a wait under way), no device can change it, and while a wait runs Sill.app
+holds App Nap off so the wait keeps its time. Sill.log says each step with "Privacy:".
+
+Headless, on test hosts only (`--synthetic`): `SillHost --synthetic --lock-after-session` is a dry run, which locks
+nothing and puts no display to sleep ("Privacy (test host): would lock this Mac now; nothing is locked."); without
+`--synthetic` the CLI ignores the flag with one line. TEST ONLY: `SILL_TEST_PRIVACY_GRACE=<s>` (the wait, 0.5 to
+600 s), `SILL_TEST_PRIVACY_DISPLAYS=<n>` (the displays a password could be typed at) and
+`SILL_TEST_PRIVACY_NO_SYMBOL=1` (the call answers as on a macOS without it); the lock's confirmation is
+`SILL_TEST_LOCKED_FILE`'s (`echo 1 > $F` once the host says it would lock). `Scripts/privacy-check/live.py OUT` runs
+every case (`all`, or `wait back move locked offconsole nodisplay nosymbol quit crash pairing gate off`), each host
+under a minute. The bare app takes `-SillSetAfter '<s> lockAfterSession=1'` and draws the switch's states in
+`-SillRenderPreviews` (`pane-devices-lock*`). Only Sill.app locks a Mac: try the real lock as the step file's list
+for Noah says, never on a Mac someone else is using.
+
 ## Direct Wireless Connection
 
 Direct Wireless Connection (Settings › General, and the status menu) lets an
@@ -1825,9 +1857,9 @@ Mac's row has Forget in its menu (touch and hold).
 
 ## Test tools
 
-None of these needs a device. `CLAUDE.md`, Build and run, has the complete
-list, with the test-only environment variables and the recipes for headless
-tests of Direct Wireless Connection and remote access.
+None of these needs a device. `docs/BUILD-AND-RUN.md` has the complete list,
+with the test-only environment variables and the recipes for headless tests of
+Direct Wireless Connection and remote access.
 
 ### The pure checks
 
@@ -2311,7 +2343,7 @@ simulator:
   registered under that type are rows), `-SillHomeDoor paired|open|plain`
   (what a `-SillConnect` address counts as), `-SillCableTest 1` (this
   device's path counts as the cable) and the connect screen's `home…` cases;
-  `CLAUDE.md`, Build and run, has them all.
+  `docs/BUILD-AND-RUN.md` has them all.
 - `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
@@ -2375,8 +2407,8 @@ simulator:
   Mac on the network a second into a remote session, at a home door that
   speaks TLS, so the move home runs against a synthetic host with `--remote
   --pairing` (dialed pinned to the saved Mac's key, never plain), and
-  `-SillDialSaved remotely` dials it as Connect Remotely does. `CLAUDE.md`,
-  Build and run, has the host side (`SILL_TEST_REMOTE_ORIGIN`,
+  `-SillDialSaved remotely` dials it as Connect Remotely does.
+  `docs/BUILD-AND-RUN.md` has the host side (`SILL_TEST_REMOTE_ORIGIN`,
   `SILL_TEST_PATTERN=noise`).
 
 ### The touch rig
