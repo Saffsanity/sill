@@ -51,7 +51,8 @@ python3 Scripts/migrate-notes.py        # once, in a branch opened before 2026-1
 Scripts/agent-simulators.sh create      # once: the agents' simulators "Sill agents Duo" (iOS 27.1) and "Sill agents iPad" (iOS 27.0), shut down
 Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main   # harness photos of HEAD (committed) on the agents' Duo, pixel for pixel against main's, in the heavy lock
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
-Scripts/headless-check/live.py OUT all  # Sill's own display for a Mac with no screen (PR #200) on loopback test hosts, SILL_TEST_HEADLESS, nothing made (~6 min)
+Scripts/headless-check/live.py OUT all  # Sill's own display for a Mac with no screen (PR #200) on loopback test hosts, SILL_TEST_HEADLESS, nothing made (~7 min)
+SILL_TEST_HEADLESS=$T/displays SILL_TEST_MAKE_GUARD=$T/guard SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 .build/release/SillHost --synthetic   # TEST ONLY: the host's displays are the file's lines (real, real asleep, standin, standin asleep, lid closed, screens asleep), read at each change, Sill's display only said to be made and removed; the guard for #380 (DisplayMakeGuard) in a folder of its own, never Sill.app's
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it

@@ -460,6 +460,20 @@ as a window pick is (`LockPolicy`); the chosen stop comes back after the
 unlock. The rule is `Sources/StreamProtocol/DesktopDisplays.swift`, checked in
 `Tests/checks/desktop-displays`.
 
+To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
+honoured only with `--synthetic`; nothing of this Mac's displays is read, and
+nothing is posted or warped):
+`SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0'`
+(a name, points@scale, Hz, the origin; the first the main display). The test
+pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
+(DELL U2723QE)" drawn on it; `python3 Scripts/sillclient.py PORT 10 desktop
+--next-display@3 --expect=desktopDisplay=2` steps it (kind 47 goes only to a
+`--synthetic` host on this Mac), and with `SILL_TEST_INPUT_LOG=1` the dry run's
+log shows input landing in each stop's own space. On the device,
+`-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
+harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
+them.
+
 A Mac with no working screen (a MacBook with its lid closed and nothing
 attached, a Mac mini with no monitor; issues #61 and #298, addhumal's PR #200,
 finished as phase 2a of `docs/virtual-desktop-plan.md`) gets Sill's own display
@@ -505,24 +519,10 @@ Headless, on test hosts only (`--synthetic`, never Sill.app's own executable):
 at each change, with Sill's display only said to be made and removed; and
 `SILL_TEST_MAKE_GUARD=<folder>` gives it the guard in a folder of its own.
 `Scripts/headless-check/live.py OUT all` runs 17 scenarios on loopback test hosts
-(about 6 minutes; `swift build -c release` first), and
+(about 7 minutes; `swift build -c release` first), and
 `Tests/checks/virtual-display-api` and `virtual-desktop` check the rules. No agent
 or test makes a real display on a Mac someone uses: the steps that need one are
 Noah's, in the step file of 2026-11-18 (`docs/steps/2026-11-18-virtual-desktop-2a.md`).
-
-To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
-honoured only with `--synthetic`; nothing of this Mac's displays is read, and
-nothing is posted or warped):
-`SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0'`
-(a name, points@scale, Hz, the origin; the first the main display). The test
-pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
-(DELL U2723QE)" drawn on it; `python3 Scripts/sillclient.py PORT 10 desktop
---next-display@3 --expect=desktopDisplay=2` steps it (kind 47 goes only to a
-`--synthetic` host on this Mac), and with `SILL_TEST_INPUT_LOG=1` the dry run's
-log shows input landing in each stop's own space. On the device,
-`-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
-harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
-them.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
