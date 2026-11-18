@@ -1217,11 +1217,20 @@ package final class StreamCoordinator {
             displayWake.pass(event, from: sender, at: CFAbsoluteTimeGetCurrent(),
                              asleep: { pressLandsAsleep(event) })
         }
-        if passed?.waking == true { Stats.shared.bump(DisplayWake.heldKey) }
+        // An Apple Pencil's tip (kind 45) likewise: its down there wakes the display and goes no further,
+        // nor does its lift, and its stroke between them only moves the pointer: nothing is drawn out of
+        // sight (DisplayWake.pass(pen:)). The pointer event it amounts to says where it lands.
+        let penEvent = pen.flatMap { PenTablet.pointerEvent(for: $0) }
+        let penPassed = pen.map { p in
+            displayWake.pass(pen: p, from: sender, at: CFAbsoluteTimeGetCurrent(),
+                             asleep: { penEvent.map { pressLandsAsleep($0) } ?? false })
+        }
+        let waking = passed?.waking == true || penPassed?.waking == true
+        if waking { Stats.shared.bump(DisplayWake.heldKey) }
         // Every message goes to DisplayWake, which alone says which of them is a person at the device
-        // (a pick never is: the device asks for the Desktop by itself), issue #134; a press held back
-        // declares at once; at the lock's reading.
-        deviceActive(passed?.waking == true ? .wakingPress : .message(message.kind, input), connection, reading: reading)
+        // (a pick never is: the device asks for the Desktop by itself; a Pencil's leave never is either),
+        // issue #134; a press held back declares at once; at the lock's reading.
+        deviceActive(waking ? .wakingPress : .message(message.kind, input ?? penEvent), connection, reading: reading)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -1290,7 +1299,7 @@ package final class StreamCoordinator {
             // 8 with a tablet pen's pressure and tilt, so it goes through kind 8's rules as the
             // pointer event it amounts to (PenTablet.pointerEvent): a down closes a gesture's view
             // and brings the window forward, as a click does.
-            guard let pen else { return }
+            guard let pen = penPassed?.input else { return }     // it does not decode, or a lift held back
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nowhere to land: the up of a button the Mac has down still goes, where the pointer
