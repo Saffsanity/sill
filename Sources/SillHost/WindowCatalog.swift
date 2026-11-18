@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import IOKit
 import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
@@ -20,6 +21,10 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// Sill's fallback display exists and is not being released: the Desktop's display is it, before a real one, so
+    /// the Desktop stays on it through a real screen's two seconds (HeadlessDesktopPolicy.Watch) and moves once, when
+    /// it goes (the coordinator's).
+    var keepsSills = false
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -130,7 +135,8 @@ final class WindowCatalog {
     /// host's stop's (`testDisplays`). Nil with no display at all.
     private(set) var desktopDisplayID: UInt32?
     /// The displays the last look listed, which the stops are chosen among (where PR #200 puts its pool:
-    /// a real display, else Sill's, else macOS's stand-in).
+    /// a real display, else Sill's, else macOS's stand-in; never the stage's display, nor one gone, by role:
+    /// HeadlessDesktopPolicy.pool and `headlessKind`).
     private var lookedDisplays: [SCDisplay] = []
     /// The Desktop on the main display alone (DesktopDisplays.resolve's `mainOnly`): this Mac locked, or
     /// another user on its screen (the coordinator's lock reading). The choice is kept, and the Desktop
@@ -165,6 +171,22 @@ final class WindowCatalog {
                               width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
+    /// The MacBook's own screen in points, as the last look that saw it had it, kept in the preferences so a relaunch
+    /// with the lid already closed still knows it (#200's). Sill's display for a Mac with no working screen is the
+    /// device's size since 2026-11-18 (VirtualDesktopSize); this is kept for phase 3's choice "Same as this Mac's
+    /// screen", and written only by Sill.app (`remembersBuiltIn`), never into the CLI's defaults (the assessment's
+    /// defect 10).
+    static var lastBuiltIn: (widthPt: Int, heightPt: Int)? {
+        guard let a = UserDefaults.standard.array(forKey: builtInKey) as? [Int], a.count == 2 else { return nil }
+        return (a[0], a[1])
+    }
+    private static let builtInKey = "lastBuiltInDisplayPoints"
+    private static func rememberBuiltIn(widthPt: Int, heightPt: Int) {
+        guard widthPt > 0, heightPt > 0, lastBuiltIn.map({ $0 == (widthPt, heightPt) }) != true else { return }
+        UserDefaults.standard.set([widthPt, heightPt], forKey: builtInKey)
+    }
+    /// Whether a look writes `lastBuiltIn` (Sill.app's coordinator sets it; the CLI never does).
+    var remembersBuiltIn = false
     /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
     private var leftOutNamed: Set<String> = []
 
@@ -247,6 +269,54 @@ final class WindowCatalog {
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
         return Array(ids.prefix(Int(count)))
+    }
+
+    /// The displays macOS has online now: the active ones and those asleep (a display asleep is online, not
+    /// active), by ID. No ScreenCaptureKit call. Empty when the call fails.
+    nonisolated static func onlineDisplayIDs() -> [UInt32] {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
+    }
+
+    /// Whether a MacBook's lid is closed, by the lid's own sensor (IOPMrootDomain's AppleClamshellState): false with
+    /// it open, and on a Mac with no lid, which has no such property. About 10 µs a read.
+    nonisolated static func lidClosed() -> Bool {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return false }
+        defer { IOObjectRelease(root) }
+        return (IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? Bool) ?? false
+    }
+
+    /// The displays as `LockPolicy.displaysLine` counts them, read now ("Sill's": the stage's and the Desktop's, by their
+    /// identities; off the main actor, so not by the IDs the stage made, which only a gone display needs).
+    nonisolated static func displaysLine() -> String {
+        let online = onlineDisplayIDs()
+        let kinds = online.map { HeadlessDesktopPolicy.kind(role(of: $0, madeByStage: false), online: true) }
+        return LockPolicy.displaysLine(online: online.count, active: activeDisplayIDs().count,
+                                       asleep: online.filter { CGDisplayIsAsleep($0) != 0 }.count,
+                                       sills: kinds.filter { $0 == .sills || $0 == .stage }.count,
+                                       standIn: kinds.filter { $0 == .standIn }.count)
+    }
+
+    /// A display's role (DesktopDisplays.role) by what CoreGraphics reads of its ID now: its vendor and product, and
+    /// `madeByStage`, whether the stage made this ID this run (a display it removed reads no monitor, 0xFFFFFFFF).
+    nonisolated static func role(of id: CGDirectDisplayID, madeByStage: Bool) -> DesktopDisplays.Role {
+        DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id), madeByStage: madeByStage)
+    }
+
+    /// A display's role, with the IDs the stage made this run (`stageDisplayIDs`).
+    func role(of id: CGDirectDisplayID) -> DesktopDisplays.Role {
+        Self.role(of: id, madeByStage: stageDisplayIDs.contains(id))
+    }
+
+    /// What Sill's Desktop display rules make of a display (HeadlessDesktopPolicy.kind): by its role, and nothing of
+    /// one that has gone (a gone display's ID reads online -1).
+    func headlessKind(of id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
+        HeadlessDesktopPolicy.kind(role(of: id), online: CGDisplayIsOnline(id) > 0)
     }
 
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
@@ -335,7 +405,10 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        lookedDisplays = content.displays
+        if remembersBuiltIn, let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) {
+            Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height)
+        }
+        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { self.headlessKind(of: $0.displayID) }, sillsFirst: keepsSills)
         resolveDesktopDisplay()
         // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
         // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
@@ -419,10 +492,8 @@ final class WindowCatalog {
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
         let mirrors = CGDisplayMirrorsDisplay(id)
         let refresh = CGDisplayCopyDisplayMode(id).map { $0.refreshRate }
-        let role = DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id),
-                                        madeByStage: stageDisplayIDs.contains(id))
         return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
-                                       role: role, online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
+                                       role: role(of: id), online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
                                        mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
                                        refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
                                        name: VirtualStage.screen(for: id)?.localizedName)

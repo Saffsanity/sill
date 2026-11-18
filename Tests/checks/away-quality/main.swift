@@ -94,7 +94,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, headlessDisplay: true)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -114,12 +114,34 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, headlessDisplay: true)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(on.applying(all).offConsoleView && on.applyingAway(all).offConsoleView
           && !standard.applying(all).offConsoleView && !standard.applyingAway(all).offConsoleView,
+          "a device's change never moves it, at home or away")
+}
+
+// A Mac with no screen's display (PR #200, issues #61 and #298), the Mac's alone: on in `standard` and `app` (Noah on #61: a
+// Mac with its lid closed or no monitor gets a display of its own; the gate also needs the AppKit loop), its switch in
+// Settings › Virtual Display and the CLI's --no-headless-display (Noah, 2026-11-18: a toggle wherever it makes sense), named
+// in the log's line, kept by `validated`, and never moved by a device's change.
+do {
+    check(standard.headlessDisplay && HostConfig.app.headlessDisplay, "standard and app: Sill's display for a Mac with no screen on")
+    var off = standard
+    off.headlessDisplay = false
+    eq(standard.changes(to: off), "headless display on → off", "changes: the switch")
+    eq(off.changes(to: standard), "headless display off → on", "changes: and back")
+    check(!off.validated().headlessDisplay && standard.validated().headlessDisplay, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: false)
+    check(!made.headlessDisplay, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(!off.applying(all).headlessDisplay && !off.applyingAway(all).headlessDisplay
+          && standard.applying(all).headlessDisplay && standard.applyingAway(all).headlessDisplay,
           "a device's change never moves it, at home or away")
 }
 

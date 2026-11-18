@@ -56,6 +56,12 @@ config.sendAudio = audioFlag
 // acts on it. Off by default, as in Sill.app (Settings › Devices): such a Mac shows nothing of this session.
 config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
 
+// `SillHost --no-headless-display`: with --virtual-display, make no display of Sill's own when this Mac has no working
+// screen (PR #200, issues #61 and #298; HostConfig.headlessDisplay). On by default, as in Sill.app (Settings › Virtual
+// Display): a device's Desktop on a closed-lid Mac with nothing attached, or a Mac mini with no monitor, gets a display
+// the size of that device. Without --virtual-display none is made either way (it needs the AppKit loop).
+config.headlessDisplay = !CommandLine.arguments.contains("--no-headless-display")
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
