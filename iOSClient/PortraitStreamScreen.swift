@@ -986,11 +986,13 @@ private enum Key {
 /// tab, the four modifiers, the four arrows, the keyboard itself and Spotlight, twelve equal caps
 /// across the screen at 48 pt tall, ≈49 pt wide at 710 pt — or, in the compact halves where twelve
 /// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
-/// (`.phone`): escape, tab, the four modifiers and the four arrows in one row that scrolls sideways
-/// (#287), as the thumbnails above it do: six caps and over half of the left arrow across the row, the
-/// cut cap fading out at the edge to say there is more, and a swipe brings the arrows in beside cmd
-/// and shift (`PhoneKeyStrip`); the Keyboard button is in row 1, and Spotlight is cmd then space on
-/// the keyboard (a latched ⌘ turns a typed space into ⌘Space). Escape, tab and the arrows are down on the
+/// (`.phone`): escape, tab and the four modifiers, six caps across the row; with Arrow Keys on
+/// (Settings › This iPhone › Keys, off unless turned on; PhoneKeyRow, #287) the four arrows after shift
+/// too, in one row that scrolls sideways as the thumbnails above it do: as many caps as fit whole at
+/// 44 pt or wider (six, five at 320 pt) and over half of the next across the row, the cut cap fading out
+/// at the edge to say there is more, and a swipe brings the arrows in beside shift (`PhoneKeyStrip`).
+/// The Keyboard button is in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns
+/// a typed space into ⌘Space). Escape, tab and the arrows are down on the
 /// Mac while a finger holds them, so the Mac repeats them (HeldCap, #162), but for the phone's at the
 /// accessibility text sizes, whose long press shows the cap large (`capsHold`).
 private struct KeyRow: View {
@@ -1016,6 +1018,9 @@ private struct KeyRow: View {
     /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
     /// stays a look, a tap at its release as before, and never a key held down and repeating on the Mac.
     private var capsHold: Bool { !(keys == .phone && dynamicTypeSize.isAccessibilitySize) }
+    /// Arrow Keys (Settings › This iPhone › Keys; PhoneKeyRow.arrowKeysKey): off unless turned on. On, a
+    /// phone's row adds the four arrows and scrolls; an iPad's rows (`.full`) have them either way.
+    @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
 
     private static let all: [Key] = [
         .press("esc", HIDKey.escape, "Escape"),
@@ -1032,13 +1037,11 @@ private struct KeyRow: View {
         .spotlight,
     ]
 
-    /// The six that name a key, then the four arrows: everything but Keyboard and Spotlight, which a
-    /// phone has elsewhere. The row scrolls (`PhoneKeyStrip`).
-    private static let phone = Array(all.prefix(10))
-
     private var shown: [Key] {
         switch keys {
-        case .phone: return Self.phone
+        // The six that name a key, and with Arrow Keys on the four arrows after them: never Keyboard or
+        // Spotlight, which a phone has elsewhere.
+        case .phone: return Array(Self.all.prefix(PhoneKeyRow.capCount(arrowKeys: arrowKeys)))
         case .full: return showSpotlight ? Self.all : Self.all.filter { if case .spotlight = $0 { return false } else { return true } }
         }
     }
@@ -1053,7 +1056,7 @@ private struct KeyRow: View {
 
     var body: some View {
         Group {
-            if keys == .phone {
+            if keys == .phone && PhoneKeyRow.scrolls(arrowKeys: arrowKeys) {
                 PhoneKeyStrip(count: shown.count, gap: metrics.keyGap, height: metrics.capHeight) { index in
                     key(shown[index])
                 }
@@ -1070,6 +1073,9 @@ private struct KeyRow: View {
                 }
             }
         }
+        // Arrow Keys turned on or off with a cap held (another finger in Settings): the row it was in has
+        // gone, and no release comes from it, so it comes up here.
+        .onChange(of: arrowKeys) { _, _ in heldCap.releaseAll().forEach(send) }
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
         // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
@@ -1236,53 +1242,57 @@ private struct KeyboardToggleFrame: View {
     }
 }
 
-/// The phone's key row (#287): every cap in one row that scrolls sideways, as the thumbnails above it
-/// do. Six caps fit whole and over half of the seventh (the left arrow, its chevron) shows past them, fading out at
-/// the edge, so the row says there is more; a swipe brings the arrows in beside cmd and shift, and the
-/// first caps fade at the left edge once scrolled. It stops with a cap at the leading edge, never
-/// halfway. Its room is the row's 44 pt as before, so nothing else on the screen moves
-/// (PhonePortraitLayout's `keys`). A cap goes down only once the scroll view has let the touch be a
-/// press, so a swipe that starts on esc or an arrow scrolls and sends nothing; a quick tap is still
-/// one press (HeldCap's `activated`). DEBUG: `-SillKeyScroll end` starts scrolled to the arrows.
+/// The phone's key row with Arrow Keys on (#287, PR #315 by oyyblin): every cap in one row that scrolls
+/// sideways, as the thumbnails above it do, laid out by `PhoneKeyRow.Strip`. As many caps as fit whole at
+/// 44 pt or wider (six at most, five at 320 pt) and over half of the next (the left arrow's chevron, or
+/// shift at 320 pt) show past them, fading out at the edge, so the row says there is more; a swipe brings
+/// the arrows in beside shift, and the first caps fade at the left edge once scrolled. It stops with a cap
+/// at the leading edge, never halfway. Its room is the row's 44 pt as before, so nothing else on the screen
+/// moves (PhonePortraitLayout's `keys`). A cap goes down only once the scroll view has let the touch be a
+/// press, so a swipe that starts on esc or an arrow should scroll and send nothing; a quick tap is still
+/// one press (HeldCap's `activated`). VoiceOver: every cap's action "Show the arrow keys" scrolls to them
+/// and moves VoiceOver to the left arrow, and at the end "Show the modifier keys" goes back to esc (#293's
+/// action, PhoneKeyRow.Copy). DEBUG: `-SillKeyScroll end` starts scrolled to the arrows.
 private struct PhoneKeyStrip<Cap: View>: View {
     let count: Int
     let gap: CGFloat
     let height: CGFloat
     @ViewBuilder let cap: (Int) -> Cap
 
-    /// Whole caps across the row before it scrolls, and how much of the next one shows.
-    static var whole: CGFloat { 6 }
-    static var peek: CGFloat { 0.6 }
+    /// How far the row has scrolled from its start: 0 at rest.
+    @State private var scrolled: CGFloat = 0
+    /// The cap VoiceOver's action puts VoiceOver on (PhoneKeyRow.voiceOverFocus).
+    @AccessibilityFocusState private var focus: Int?
 
-    /// A cap's width: six whole caps, their six gaps and `peek` of the seventh fill the row.
-    static func capWidth(rowWidth: CGFloat, gap: CGFloat) -> CGFloat {
-        max(0, (rowWidth - whole * gap) / (whole + peek))
-    }
-
-    /// The caps' leading edge in the row, 0 at rest and negative once scrolled.
-    @State private var offset: CGFloat = 0
+    /// The scroll view's own space, which the caps' place is read in (computed: a generic type stores none).
+    private static var space: String { "keyStrip" }
 
     var body: some View {
         GeometryReader { geo in
-            let width = geo.size.width
-            let capWidth = Self.capWidth(rowWidth: width, gap: gap)
-            let content = CGFloat(count) * capWidth + CGFloat(max(0, count - 1)) * gap
+            let strip = PhoneKeyRow.Strip(rowWidth: geo.size.width, gap: gap, count: count)
+            let atEnd = strip.atEnd(scrolled: scrolled)
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: gap) {
                         ForEach(0..<count, id: \.self) { index in
                             cap(index)
-                                .frame(width: capWidth, height: height)
+                                .frame(width: strip.capWidth, height: height)
+                                .accessibilityFocused($focus, equals: index)
+                                .accessibilityAction(named: Text(PhoneKeyRow.Copy.scrollAction(atEnd: atEnd))) {
+                                    // From the end back to the start, else on to the end, where the arrows are.
+                                    proxy.scrollTo(atEnd ? 0 : count - 1, anchor: atEnd ? UnitPoint.leading : UnitPoint.trailing)
+                                    focus = min(count - 1, PhoneKeyRow.voiceOverFocus(atEnd: atEnd))
+                                }
                                 .id(index)
                         }
                     }
                     .scrollTargetLayout()
-                    .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named("keyStrip")).minX },
-                                      action: { offset = $0 })
+                    .onGeometryChange(for: CGFloat.self, of: { -$0.frame(in: .named(Self.space)).minX },
+                                      action: { scrolled = $0 })
                 }
-                .coordinateSpace(name: "keyStrip")
+                .coordinateSpace(name: Self.space)
                 .scrollTargetBehavior(.viewAligned)
-                .mask(fade(width: width, fadeWidth: Self.peek * capWidth + gap, content: content))
+                .mask(fade(strip))
                 #if DEBUG
                 .onAppear {
                     guard UserDefaults.standard.string(forKey: "SillKeyScroll") == "end" else { return }
@@ -1294,15 +1304,15 @@ private struct PhoneKeyStrip<Cap: View>: View {
         .frame(height: height)
     }
 
-    /// Clear at an edge with caps past it, over `fadeWidth`: the cut cap and the gap before it.
-    private func fade(width: CGFloat, fadeWidth: CGFloat, content: CGFloat) -> LinearGradient {
-        let span = width > 0 ? min(0.5, fadeWidth / width) : 0
-        let before = offset < -0.5
-        let after = content + offset > width + 0.5
-        var stops: [Gradient.Stop] = before ? [.init(color: .clear, location: 0), .init(color: .black, location: span)]
-                                            : [.init(color: .black, location: 0)]
-        stops += after ? [.init(color: .black, location: 1 - span), .init(color: .clear, location: 1)]
-                       : [.init(color: .black, location: 1)]
+    /// Clear at an edge with caps past it (PhoneKeyRow.Strip), over the cut cap and the gap before it.
+    private func fade(_ strip: PhoneKeyRow.Strip) -> LinearGradient {
+        let span = strip.fadeShare
+        var stops: [Gradient.Stop] = strip.fadesLeading(scrolled: scrolled)
+            ? [.init(color: .clear, location: 0), .init(color: .black, location: span)]
+            : [.init(color: .black, location: 0)]
+        stops += strip.fadesTrailing(scrolled: scrolled)
+            ? [.init(color: .black, location: 1 - span), .init(color: .clear, location: 1)]
+            : [.init(color: .black, location: 1)]
         return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
     }
 }
