@@ -14,10 +14,11 @@ import IOKit
 /// The Mac's other disks (#370): the App Store's "Download and install large apps to a separate
 /// disk" puts them in an Applications folder at the top of that disk, /Volumes/Drive/Applications.
 /// `volumes` says which volumes are read, and `applicationFolders(on:)` which of their folders. The
-/// catalog looks twice (WindowCatalog): first at this Mac's own disk alone (`Reach()`), then with
-/// the volumes too, so a volume that is slow, asleep, or waits on macOS asking whether Sill may read
-/// a removable volume never holds up the list of the Mac's own apps. The second look waits for a
-/// device to connect (`secondLookDue`): the app asks for nothing at launch.
+/// catalog looks twice (WindowCatalog): first at this Mac's own disk alone (`Reach()`; of the home
+/// folder, its Applications folder alone), then with the volumes too, so a volume that is slow,
+/// asleep, or waits on macOS asking whether Sill may read a removable volume never holds up the list
+/// of the Mac's own apps. The second look waits for a device to connect (`secondLookDue`): the app
+/// asks for nothing at launch.
 ///
 /// Threading: FileManager, Bundle, the mount table and the I/O Registry only, so any thread.
 enum InstalledApps {
@@ -30,10 +31,10 @@ enum InstalledApps {
         var apps: [App] = []
         for dir in dirs {
             // The folder itself may be a link (~/Applications on another disk, say): it is followed, as
-            // before; the links inside it are not walked into. One that leads into the volumes waits
-            // for the look that reads them.
+            // before; the links inside it are not walked into. One that leads where the first look does
+            // not go (the volumes, the home folder past its Applications folder) waits for the second.
             let folder = URL(fileURLWithPath: dir).resolvingSymlinksInPath()
-            if reach.volumes == nil && inside(folder.path, reach.volumesRoot) { continue }
+            if reach.volumes == nil && !reach.allows(folder.path) { continue }
             for url in bundles(in: folder, reach: reach) {
                 guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !seen.contains(id) else { continue }
                 seen.insert(id)
@@ -83,8 +84,8 @@ enum InstalledApps {
     /// The app a link or an alias points at, at its own path with its links resolved, else nil. Where
     /// it points is read from the link or the alias itself first (`pointsAt`), so one that points
     /// where `reach` does not go is never looked up there: a disk asleep, a network share, a removable
-    /// volume macOS has not let Sill read yet. An alias is resolved without UI and without mounting
-    /// anything, so one whose disk is away is skipped at once.
+    /// volume or a Downloads folder macOS has not let Sill read yet. An alias is resolved without UI
+    /// and without mounting anything, so one whose disk is away is skipped at once.
     static func app(at link: URL, reach: Reach) -> URL? {
         guard let named = pointsAt(link), reach.allows(named),
               let resolved = try? URL(resolvingAliasFileAt: link, options: [.withoutUI, .withoutMounting])
@@ -103,16 +104,23 @@ enum InstalledApps {
         return URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path
     }
 
-    /// Which volumes a look reads. A volume is whatever is mounted in `volumesRoot` (/Volumes; a
-    /// temporary folder in the check); anywhere else is this Mac's own disk, which every look reads.
+    /// Which volumes a look reads, and how far into the home folder. A volume is whatever is mounted in
+    /// `volumesRoot` (/Volumes; a temporary folder in the check); anywhere else is this Mac's own disk.
     struct Reach {
         var volumesRoot = "/Volumes"
+        /// This user's home folder (a temporary folder in the check). Of it, the first look reads the
+        /// Applications folder alone: Desktop, Documents, Downloads, iCloud Drive and other apps' data are
+        /// in the rest, where a read can make macOS ask whether Sill may (or wait for a file to come down
+        /// from the cloud), and the first look runs at launch and holds up the Mac's own apps.
+        var home = FileManager.default.homeDirectoryForCurrentUser.path
         /// The volumes read, by mount point (`volumes(_:root:)`). Nil for the first look, which reads
-        /// none: a folder it is given that leads into `volumesRoot` waits for the second.
+        /// none: a folder it is given that leads into `volumesRoot`, or into `home` past its Applications
+        /// folder, waits for the second.
         var volumes: [String]?
 
         /// Whether a link or an alias found in a folder is followed to `path`.
         func allows(_ path: String) -> Bool {
+            if volumes == nil && InstalledApps.inside(path, home) && !InstalledApps.inside(path, home + "/Applications") { return false }
             guard InstalledApps.inside(path, volumesRoot) else { return true }
             return volumes?.contains { InstalledApps.inside(path, $0) } == true
         }

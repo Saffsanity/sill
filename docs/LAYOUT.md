@@ -161,7 +161,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   one's own, mounted directly in /Volumes, no dot name, local, writable, shown
   in Finder, no APFS role, no macOS of its own and the folder no link, from the
   kernel's mount table and the I/O Registry; `Reach`, which volumes a look
-  reads; `secondLookDue`, when the look with the volumes runs: while a device
+  reads, and the first look none of the home folder but its Applications
+  folder (Downloads, iCloud Drive: macOS may ask); `secondLookDue`, when the look with the volumes runs: while a device
   is connected, so macOS's question about a removable volume never comes at
   launch, and only when they changed; pure, `Tests/checks/installed-apps`),
   `WindowCapture` (ScreenCaptureKit; its line names the scale it captures at),

@@ -50,7 +50,9 @@ app("Volume/Apps/Beta.app", id: "beta")
 try! fm.createSymbolicLink(at: root.appendingPathComponent("UserApps"), withDestinationURL: root.appendingPathComponent("Volume/Apps"))
 let dirs = [root.appendingPathComponent("Applications").path, root.appendingPathComponent("More").path,
             root.appendingPathComponent("Missing").path, root.appendingPathComponent("UserApps").path]
-let found = InstalledApps.find(in: dirs)
+// A home folder of its own: the first look stays out of the real one's rest, wherever TMPDIR is.
+let home = root.appendingPathComponent("Home").path
+let found = InstalledApps.find(in: dirs, reach: InstalledApps.Reach(home: home))
 let ids = found.map(\.bundleID)
 print(found.map { "\($0.name) (\($0.bundleID))" }.joined(separator: ", "))
 
@@ -153,6 +155,17 @@ app("Volumes/Drive/Elsewhere/Via.app", id: "via.app")
 link("Applications/Via link", to: root.appendingPathComponent("Elsewhere2/ToDrive/Via.app").path)
 // ~/Applications on the drive: a folder given that is a link into the volumes.
 link("HomeApps", to: volume("Drive/MyApps"))
+// The home folder: the first look reads its Applications folder alone. A link or an alias into the rest of
+// it (Desktop, Documents, Downloads, iCloud Drive: macOS may ask whether Sill may, or fetch from the cloud)
+// waits for the second look, as does a folder given that leads there.
+app("Home/Applications/Kept.app", id: "home.kept")
+link("Applications/Kept link", to: home + "/Applications/Kept.app")
+app("Home/Downloads/Dl.app", id: "home.downloads")
+alias("Applications/Dl alias", to: "Home/Downloads/Dl.app")
+app("Home/Developer/Built.app", id: "home.built")
+link("Applications/Built.app", to: home + "/Developer/Built.app")      // named like an app: main read it at launch
+app("Home/Library/CloudStorage/Apps/Cloud.app", id: "home.cloud")
+link("CloudApps", to: home + "/Library/CloudStorage/Apps")
 
 func mount(_ path: String, local: Bool = true, readOnly: Bool = false, browsable: Bool = true,
            roles: [String] = []) -> InstalledApps.Volume {
@@ -168,9 +181,10 @@ let mounted = [
 ]
 let own = InstalledApps.volumes(mounted, root: volumesRoot)
 let read = InstalledApps.applicationFolders(on: own)
-let given = [root.appendingPathComponent("Applications").path, root.appendingPathComponent("HomeApps").path]
-let first = InstalledApps.find(in: given, reach: InstalledApps.Reach(volumesRoot: volumesRoot))
-let second = InstalledApps.find(in: given + read, reach: InstalledApps.Reach(volumesRoot: volumesRoot, volumes: own))
+let given = [root.appendingPathComponent("Applications").path, root.appendingPathComponent("HomeApps").path,
+             root.appendingPathComponent("CloudApps").path]
+let first = InstalledApps.find(in: given, reach: InstalledApps.Reach(volumesRoot: volumesRoot, home: home))
+let second = InstalledApps.find(in: given + read, reach: InstalledApps.Reach(volumesRoot: volumesRoot, home: home, volumes: own))
 let firstIDs = Set(first.map(\.bundleID)), secondIDs = second.map(\.bundleID)
 print("first look: " + first.map(\.bundleID).joined(separator: ", "))
 print("second look: " + secondIDs.joined(separator: ", "))
@@ -206,6 +220,12 @@ check(firstIDs.isDisjoint(with: never) && Set(secondIDs).isDisjoint(with: never)
       "nothing on a share, a read-only, hidden or nested volume, one with a role or a macOS, or behind a link at the top")
 check(!secondIDs.contains("a.plugin") && !secondIDs.contains("linked.app") && !secondIDs.contains("gone.alias"),
       "an alias to a bundle that is no app, to a folder, or whose app is gone lists nothing")
+check(firstIDs.contains("home.kept"), "the first look follows a link into the home folder's Applications folder")
+check(!firstIDs.contains("home.downloads") && secondIDs.contains("home.downloads"),
+      "an alias into the rest of the home folder (Downloads) waits for the second look: nothing asked at launch")
+check(!firstIDs.contains("home.built") && secondIDs.contains("home.built"), "so does a link there named like an app")
+check(!firstIDs.contains("home.cloud") && secondIDs.contains("home.cloud"),
+      "a folder given that leads into the home folder past its Applications folder is read by the second look")
 check(InstalledApps.mounted().contains { $0.path == "/" && $0.local }, "the kernel's mount table is read: / is there, local")
 
 // When the second look is due: it can make macOS ask whether Sill may read a removable volume, and the

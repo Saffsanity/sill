@@ -50,7 +50,7 @@ MUTANTS = [
     ("/private/var and /var counted as two folders",
      'path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path', "path"),
     ("the first look reads a folder given that leads into the volumes",
-     "if reach.volumes == nil && inside(folder.path, reach.volumesRoot) { continue }", ""),
+     "if reach.volumes == nil && !reach.allows(folder.path) { continue }", ""),
     # #370: which volumes, and which of their folders.
     ("a network share read",
      "volume.local && ", ""),
@@ -83,6 +83,16 @@ MUTANTS = [
      "        devices > 0 && own != asked\n", "        devices > 0\n"),
     ("no second look while no volume of one's own was ever there",
      "        devices > 0 && own != asked\n", "        devices > 0 && own != (asked ?? [])\n"),
+    # Review of #405: the first look stays out of the home folder but its Applications folder.
+    ("the first look follows links and aliases anywhere in the home folder (Downloads: macOS asks at launch)",
+     "            if volumes == nil && InstalledApps.inside(path, home) && !InstalledApps.inside(path, home + \"/Applications\") { return false }\n", ""),
+    ("the first look stays out of the home folder's Applications folder too",
+     " && !InstalledApps.inside(path, home + \"/Applications\")", ""),
+    ("the second look stays out of the home folder too",
+     "if volumes == nil && InstalledApps.inside(path, home) &&", "if InstalledApps.inside(path, home) &&"),
+    ("the first look reads a folder given that leads into the home folder (the volumes alone left to the second)",
+     "if reach.volumes == nil && !reach.allows(folder.path) { continue }",
+     "if reach.volumes == nil && inside(folder.path, reach.volumesRoot) { continue }"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
