@@ -504,7 +504,7 @@ extension StreamClient {
         homeAsk = ask
         if pairing != .idle { pairing = .idle }
         hostName = ask.name
-        status = DiscoveryPolicy.HomeCopy.pairing(mac: ask.name, cable: ask.cableRow)
+        setStatus(DiscoveryPolicy.HomeCopy.pairing(mac: ask.name, cable: ask.cableRow), kind: .homeAsk)
         let pin = ask.savedID.flatMap { savedMac($0)?.fingerprintData }
         #if DEBUG
         print("home: asking \(ask.name) to pair at \(ask.target.label)\(pin != nil ? ", pinned to its saved key" : "")")
@@ -578,7 +578,7 @@ extension StreamClient {
             ask.answered = w.endpoint
             ask.claimedCable = claimed
             homeAsk = ask
-            status = DiscoveryPolicy.HomeCopy.showing(mac: ask.name, device: Self.deviceWord)
+            setStatus(DiscoveryPolicy.HomeCopy.showing(mac: ask.name, device: Self.deviceWord), kind: .homeAsk)
             #if DEBUG
             // The harness types the code or scans the link the card would (the simulator has no camera,
             // and these gates drive no UI).
@@ -658,9 +658,8 @@ extension StreamClient {
         if ask.phase == .shown, let key = ask.askedKey, let answered = ask.answered {
             withdrawAsk(at: askedTarget(ask, answered), key: key)
         }
-        if idleStatus, status == DiscoveryPolicy.HomeCopy.pairing(mac: ask.name, cable: ask.cableRow)
-            || status == DiscoveryPolicy.HomeCopy.showing(mac: ask.name, device: Self.deviceWord) {
-            status = Self.lookingOnNetwork
+        if idleStatus, statusKind == .homeAsk {
+            setStatus(Self.lookingOnNetwork, kind: .searchingNetwork)
             updateDiscovery()
         }
     }
@@ -744,6 +743,7 @@ extension StreamClient {
         overlayAskDialer?.cancel()
         overlayAskShown = nil
         overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac)
+        overlayAskIsPending = true
         #if DEBUG
         print("home: asking \(mac) for a code over this session's door (Pair This \(Self.deviceWord)…)")
         #endif

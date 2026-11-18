@@ -1397,7 +1397,7 @@ struct ConnectScreen: View {
 
     /// Not the idle "Looking for Macs…" lines, which change as the search does.
     private func announce(_ line: String) {
-        guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
+        guard !line.isEmpty, !client.statusKind.isQuietSearch else { return }
         AccessibilityNotification.Announcement(line).post()
     }
 
@@ -1503,7 +1503,7 @@ struct ConnectScreen: View {
         // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
         // status line above): where to get the new one, while the status line still says why. Not
         // before Sill's App Store address is known (SillLinks): the words say what to do anyway.
-        if let notice = client.notice, notice.storeLink, notice.text == client.status, let url = SillLinks.appStore {
+        if let notice = client.notice, notice.storeLink, let url = SillLinks.appStore {
             Link(destination: url) {
                 Text("Update Sill in the App Store")
                     .font(.system(size: 15, weight: .semibold))
