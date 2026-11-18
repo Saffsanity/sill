@@ -19,10 +19,12 @@ use an emoji and 4) upload their own .svg or icon composer document."
   which the asset compiler writes from the build's icons), and there is no way to hand iOS a picture at run time,
   so an emoji, a Genmoji, an uploaded SVG or an uploaded `.icon` cannot become Sill's icon. (A Shortcuts "Add to
   Home Screen" bookmark can wear any picture, but it is a shortcut that opens Shortcuts first, not Sill's icon;
-  the App Library, Settings, Spotlight and notifications keep the real one.) Noah has been told and is deciding on
-  an alternative. The design leaves room for more bundled icons: a later one is a case in `AppIconChoice`, its
-  document, its preview and its name in the build's alternates, and `Tests/checks/app-icon` names whichever is
-  missing.
+  the App Library, Settings, Spotlight and notifications keep the real one.) Noah has been told and offered more
+  icons bundled in the app instead; of the drawings he saw (Noah, 2026-11-18): "let's just avoid the closest to
+  apple's line for this release. Also, when we eventually have a UI for selecting icons, let's have categories that
+  you scroll through ideally". Those come in a later change. The design leaves room for them: a later icon is a
+  case in `AppIconChoice`, its document, its preview and its name in the build's alternates, and
+  `Tests/checks/app-icon` names whichever is missing.
 - **Sill for Mac keeps one icon**, the original in Liquid Glass. macOS has no alternate icons for apps: changing a
   signed app's own icon means writing a custom icon into its bundle (as Finder's Get Info does), which leaves the
   bundle no longer as it was signed, and Update Now replaces the bundle anyway; the one icon an app may change while
@@ -77,8 +79,8 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   one idiom, about 5 MB: 2.6 MB the original in glass, 2.4 MB the community's. The pictures are what actool makes
   of any Icon Composer icon, the same with an iOS 26 deployment target (measured: it keeps the 1024-pixel pictures
   too); #386's document alone compiles to about the same.
-- **The rule** (`AppIconChoice`, pure, `Tests/checks/app-icon` with 50 mutants): the original is the primary icon
-  (no alternate name) and the standard, first and always there; the community's is the alternate AppIconCommunity,
+- **The rule** (`AppIconChoice`, pure, `Tests/checks/app-icon` with 52 mutants): the original is the primary icon
+  (no alternate name) and the standard, first in the list; the community's is the alternate AppIconCommunity,
   credited "by grub-basket"; the Home Screen's icon is read from iOS's alternate icon name, which iOS keeps across
   launches and updates, and a name this build does not ship reads as the original (iOS shows the primary icon
   when the bundle lacks the alternate, as developers report of updates that dropped one; not tried here);
@@ -90,7 +92,9 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   line: a small "App Icon" title, the pictures in the panel's group style (each icon's Default look at 60 pt,
   growing with the text size to 96 pt, its word under it, "by grub-basket" under the community's), the one the Home Screen
   shows ringed in the accent and checked, and under the group "The icon Sill shows on this iPad’s Home Screen.
-  Original is always here to switch back to." A tap asks iOS, which shows its own alert ("You have changed the icon
+  You can switch back to Original here whenever you’re connected to a Mac." (Settings is a session's, so the way
+  back needs a Mac connected; until the review of #390 it said Original was "always here", which held only in a
+  session.) A tap asks iOS, which shows its own alert ("You have changed the icon
   for “Sill”."); while iOS answers the pictures wait; a refusal shows an orange line under them. VoiceOver: each
   icon one button, "Community icon, by grub-basket", selected when it is the one. The pictures are a grid that
   wraps, so more icons fit. The previews are each document's iOS Default look rendered by ictool at 288 pixels
@@ -106,21 +110,33 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
 
 ## App Review
 
-What the review needs to know (guideline 4.6, Alternate App Icons, and 2.3.8, whose last sentence asks that an
-app's icons, alternate icons included, be similar enough not to confuse):
+The rule is **the last sentence of guideline 2.3.8**: an app's name and icons, alternate icons among them, are to be
+"similar to avoid creating confusion". Nothing else in Apple's App Review Guidelines (last updated October 16, 2026;
+read 2026-11-18) is about alternate icons. Guideline 4.6 was (a change only at the person's request, a setting to go
+back to the original, no automatic or serial changes), but it is now marked as intentionally omitted; this plan
+cited it until the review of #390. Apple's Human Interface Guidelines (App icons, on alternate app icons) say the
+same in design terms: each alternate stays closely related to the app's content and experience and is not one
+people could take for another app; on iPhone and iPad each has its own dark, clear and tinted looks; and each is
+reviewed like the primary icon.
 
-- Both icons ship in the app; nothing is downloaded or generated.
-- The icon changes only when the person taps one in Settings, and iOS confirms each change with its alert; nothing
-  changes it on its own, on a schedule or from the Mac.
-- The original is first in the list and always offered, one tap away.
-- Both show what Sill does, a Mac's window on an iPhone or iPad, under the same name. The community icon's palette
-  differs (blue, a coral title bar, against the original's black and grey), which is the one place a reviewer could
-  apply 2.3.8; if one does, removing it is one case in `AppIconChoice` and one build setting.
+- **Against 2.3.8 and the HIG**: both icons show what Sill does, a Mac's window carried to an iPhone or iPad, under
+  the same name, and both are Icon Composer documents, so each has every look. They differ in drawing as well as
+  colour: the original is a solid grey iMac with an iPad tilted in front, on black; the community icon draws the Mac
+  as a white outline with a dashed gap where the window was, and an iPhone on its side holding the window, on blue
+  with a coral title bar. That difference is the one risk: a reviewer could cite 2.3.8. If one does, removing the
+  community icon is one case in `AppIconChoice` and one build setting.
+- **Good practice kept, not a guideline now** (4.6's old terms): both icons ship in the app, and nothing is
+  downloaded or generated; the icon changes only when the person taps one in Settings, and iOS confirms each change
+  with its alert; nothing changes it on its own, on a schedule or from the Mac; Original is first in the list, so
+  the way back is one tap in any session (Settings is a session's: see the Defaults, 2).
+- **More bundled icons** (the alternative Noah was offered for choices 3 and 4; a later change) meet the same
+  sentence: the further one strays from the original's subject, a Mac's window on an iPhone or iPad, the likelier a
+  reviewer cites 2.3.8.
 
 Proposed words for the review notes (the notes were 3,988 of 4,000 bytes at 0.6.2, so a sentence must go to make
 room): "Settings › App Icon (Settings is the gear in a session's bar) switches Sill's Home Screen icon between the
-original and a community-designed alternate that ships in the app; only a tap changes it, iOS confirms it, and the
-original is always offered."
+original and a community-designed alternate that ships in the app; only a tap changes it, iOS confirms each change,
+and Original, first in the list, switches it back."
 
 ## Words for elsewhere (proposed, not published)
 
@@ -138,7 +154,11 @@ original is always offered."
 
 1. The names: "Original" and "Community", the credit "by grub-basket" (the login, no @) under the community's.
 2. The place: this device's part of Settings, after Take the Tour, right above the version line, with its own
-   "App Icon" title and a footnote.
+   "App Icon" title and a footnote. Settings opens only in a session, so the icon can be changed, and changed back,
+   only while connected to a Mac: someone who picked Community and can no longer reach a Mac (sold, off, or away
+   without Remote Access) gets Original back only by deleting and reinstalling Sill. The footnote says the way back
+   is "here whenever you’re connected to a Mac". Not built, yours to ask for: the group on the connect screen too,
+   for example under its version line.
 3. The pictures show each icon's Default look, not the person's Home Screen style (dark, clear or tinted).
 4. The original's glass: the gloss kept in the fills, rims and shadows the system's, translucency off, a lighter
    iMac in Clear and Tinted.
@@ -146,6 +166,8 @@ original is always offered."
 6. grub-basket's document kept byte for byte, its watchOS circle entry included (harmless: no watch app).
 7. About 5 MB more per device download for the two icons in glass (2.4 MB of it the community's).
 8. The App Store's icon: the primary, the original in glass (App Store Connect takes it from the build).
+9. The toggle rule: the choice is a picker, and the original stays unless the person picks the other, so nothing
+   changes for anyone who never opens it.
 
 ## Verified
 
@@ -155,7 +177,13 @@ original is always offered."
 - CI's build, locally through heavy.sh: `swift build -c release`, `Tests/checks/run-all.sh`, the iOS app for the
   generic simulator (Debug, arm64, unsigned), SillHost's `--internet` refusal; the built app's Info.plist and
   Assets.car as above.
-- `Tests/checks/app-icon` and its 50 mutants (32 of the source, 18 of the wiring in a copy of the files it reads).
+- `Tests/checks/app-icon` (78 cases) and its 52 mutants (34 of the source, 18 of the wiring in a copy of the files
+  it reads).
+- The review of #390 (three findings, each confirmed): the App Review section rests on 2.3.8 and the HIG, read from
+  Apple's pages on 2026-11-18 (4.6 is omitted there); the footnote and every "always offered" say the way back is
+  in a session, since `HostSettingsPanel` is made only by `StreamScreen`, which `ContentView` shows only while
+  `client.connected`; and the merge order below, since the repository does not delete merged branches
+  (`delete_branch_on_merge` false), so GitHub will not move this pull request's base to main by itself.
 - Harness photos of the group on the agents' Duo (iOS 27.1) and iPad, against `settings-pane`: every arrangement
   of the pane, each mark, the refusal, large type, right to left; the stream screens pixel for pixel the
   baseline's. With `-SillAppIconSet community`, iOS's own alert on the simulator ("You have changed the icon for
@@ -175,3 +203,9 @@ original is always offered."
 5. A TestFlight upload (`Scripts/release-ios.sh --upload`): App Store Connect accepts the build with its
    alternate icon, and the store's icon is the original in glass.
 6. The review notes' sentence, and the comment on #386.
+7. The merge order. #390's base is `settings-pane`, and GitHub moves a base to main only when that branch is
+   deleted after its merge, which this repository does not do by itself. So: merge #393 (`settings-pane`) into
+   main first, with a merge commit as main's merges are; then move #390's base by hand, `gh pr edit 390 --repo
+   Saffsanity/sill --base main` (or delete the `settings-pane` branch, and GitHub moves it); check that #390 shows
+   only the icon work against main; and only then merge #390. Merged while its base is still `settings-pane`, the
+   icon work would land in `settings-pane`, not main, though #390 would show as merged.

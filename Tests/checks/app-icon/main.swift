@@ -4,7 +4,8 @@
 //   - The choices: the original first, the primary icon and what a new install shows; the community's an
 //     alternate with its name; their names, previews and ids each its own.
 //   - The words: each title, the community's credit by its author's login, VoiceOver's, the group's title, the
-//     footnote (the device's word, the way back), each tile's hint, the refusal.
+//     footnote (the device's word, the way back while a Mac is connected, never "always"), each tile's hint, the
+//     refusal.
 //   - Which icon shows: no name, each alternate's name, and names this build does not ship (a later icon's, the
 //     primary's own name, an empty one, another case): the original for every unknown one.
 //   - What a tap asks: every choice from every name, nothing when that very icon is set, the original clearing
@@ -56,10 +57,14 @@ check("VoiceOver: \"Original icon\", \"Community icon, by grub-basket\"",
       C.original.spoken == "Original icon" && C.community.spoken == "Community icon, by grub-basket")
 check("the group's title: App Icon", C.Copy.title == "App Icon")
 check("the footnote, on an iPad: what it changes and the way back",
-      C.Copy.footnote(device: "iPad") == "The icon Sill shows on this iPad’s Home Screen. Original is always here to switch back to.")
+      C.Copy.footnote(device: "iPad")
+        == "The icon Sill shows on this iPad’s Home Screen. You can switch back to Original here whenever you’re connected to a Mac.")
 check("the footnote, on an iPhone: its own device's word", C.Copy.footnote(device: "iPhone").contains("this iPhone’s Home Screen")
       && !C.Copy.footnote(device: "iPhone").contains("iPad"))
-check("the footnote names the standard's title as the way back", C.Copy.footnote(device: "iPad").contains("\(C.standard.title) is always here"))
+check("the footnote names the standard's title as the way back", C.Copy.footnote(device: "iPad").contains("switch back to \(C.standard.title) here"))
+check("the footnote says the way back needs a Mac connected (Settings is a session's), and never promises it always",
+      C.Copy.footnote(device: "iPad").hasSuffix("whenever you’re connected to a Mac.")
+      && !C.Copy.footnote(device: "iPad").lowercased().contains("always"))
 check("a tile's hint: what choosing it does; the one set, that it is Sill's icon now",
       C.Copy.hint(selected: false) == "Changes Sill’s icon on the Home Screen to this one." && C.Copy.hint(selected: true) == "Sill’s icon now.")
 check("the refusal's words", C.Copy.failed == "Sill’s icon didn’t change. Try again in a moment.")

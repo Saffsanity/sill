@@ -5,7 +5,8 @@ import UIKit
 /// Sill ships, its picture (the document's Default look, Scripts/app-icon-previews.sh) over its word, the
 /// community's with its credit, the one the Home Screen shows marked with a ring and a check. A tap asks iOS for
 /// that icon (`UIApplication.setAlternateIconName`), and iOS confirms the change with its own alert; nothing else
-/// changes it. The original comes first and stays there, one tap away. In this device's part of Settings, beside
+/// changes it. The original comes first, one tap away in any session (Settings is a session's, so only while a
+/// Mac is connected; the footnote says so). In this device's part of Settings, beside
 /// the version (HostSettingsPanel's `appIcon`, which gives it the group's title and footnote); its pictures wrap
 /// to more rows when more icons come.
 ///

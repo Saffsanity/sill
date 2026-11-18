@@ -7,8 +7,9 @@ import Foundation
 /// anywhere else.
 ///
 /// - `original`: design/AppIcon.svg's iMac with the iPad tilted in front, `Packaging/AppIcon.icon`, the app's
-///   primary icon (ASSETCATALOG_COMPILER_APPICON_NAME, Sill for Mac's too): what a new install shows, first in
-///   Settings and always there, so the original is one tap away.
+///   primary icon (ASSETCATALOG_COMPILER_APPICON_NAME, Sill for Mac's too): what a new install shows, and first
+///   in Settings, one tap away in any session. Settings is a session's, so with no Mac to connect to the icon
+///   stays as it is, the way back included (docs/app-icons-plan.md, "Defaults taken for Noah to confirm").
 /// - `community`: grub-basket's design from pull request #386, `Packaging/AppIconCommunity.icon`, an alternate
 ///   icon (ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES), credited to its author by login.
 ///
@@ -18,8 +19,11 @@ import Foundation
 ///
 /// iOS keeps the alternate's name across launches and updates (`UIApplication.alternateIconName`). A name this
 /// build does not ship reads as the original, which iOS shows then, and choosing the original clears it. Each
-/// change is the person's own tap, which iOS confirms with its alert; nothing here changes the icon by itself
-/// (App Review guideline 4.6).
+/// change is the person's own tap, which iOS confirms with its alert; nothing here changes the icon by itself.
+/// App Review: the rule is the last sentence of guideline 2.3.8 (an app's icons, alternate ones included, alike
+/// enough not to confuse), with the Human Interface Guidelines' alternate app icons (each one closely related to
+/// the app); 4.6, which had a rule for alternate icons, is omitted from the guidelines now, so the tap and the
+/// way back are good practice kept, not a rule (docs/app-icons-plan.md, "App Review").
 ///
 /// Pure: Foundation only, checked in Tests/checks/app-icon.
 enum AppIconChoice: String, CaseIterable, Identifiable {
@@ -111,9 +115,10 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
         /// The group's title, over the pictures.
         static let title = "App Icon"
 
-        /// Under the pictures: what the choice changes, and the way back.
+        /// Under the pictures: what the choice changes, and the way back, here while a Mac is connected (Settings
+        /// is a session's), never "always".
         static func footnote(device: String) -> String {
-            "The icon Sill shows on this \(device)’s Home Screen. \(AppIconChoice.standard.title) is always here to switch back to."
+            "The icon Sill shows on this \(device)’s Home Screen. You can switch back to \(AppIconChoice.standard.title) here whenever you’re connected to a Mac."
         }
 
         /// A tile's hint for VoiceOver: what choosing it does, or that it shows already.
