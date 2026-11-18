@@ -835,6 +835,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   running while it shows, the pause, what ends it, the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
+  `CameraPolicy` (Share Camera, docs/camera-plan.md §6.1: the row and its words, when the device offers and
+  when it captures, the pause and its order, the format inside the Mac's demand, the bitrate and its steps,
+  the keyframes, the chip) and `CameraPacing` (§6.2: the camera's share of the uplink, a picture skipped
+  before the encoder while the bytes the connection has not taken pass the budget or a move's fence
+  stands); pure, `Tests/checks/camera`; pbxproj A462/F462; the device's camera glue, a later step, reads them),
   `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
   Screen, the picture in the screen's room; the swipe in from the left edge, `EdgeSwipe` (a finger landing
   within max(24 pt, the left safe-area inset), judged after 8 pt: right and no steeper than 45°, let go by
