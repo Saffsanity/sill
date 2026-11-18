@@ -91,9 +91,12 @@ These texts are only true once these are:
   TestFlight builds went to the version 0.6.0 (0.5.1's is closed now it is
   released). The fourth is 0.6.1, which main said from App Review's approval of
   0.6.0 (the approval closes 0.6.0's train) until its own, so the nightlies' builds went to it.
-  The fifth is 0.6.2, which main says since App Review approved 0.6.1 (2026-11-12): that night's
-  upload of 0.6.1 (1527) was refused ("The train version '0.6.1' is closed for new build
-  submissions"), so the nightlies' builds go to 0.6.2 from then on.
+  The fifth is 0.6.2, which main said from App Review's approval of 0.6.1 (2026-11-12: that night's
+  upload of 0.6.1 (1527) was refused, "The train version '0.6.1' is closed for new build
+  submissions") until its own, so the nightlies' builds went to it.
+  The sixth is 0.6.3, which main says since App Review approved 0.6.2 (on the App Store since
+  2026-11-17; no nightly's upload was refused, since the scheduled nightly of 2026-11-17 built
+  nothing, main being still the last nightly's commit), so the nightlies' builds go to 0.6.3 from then on.
 - Every claim in the description has been seen working on a device. Still
   open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
   pairing by itself, Remove), three-finger gestures (PR #38's P1 to P13), the
@@ -298,7 +301,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. The version page (0.5, 0.5.1, 0.6.0, then 0.6.1)
+## 5. The version page (0.5, 0.5.1, 0.6.0, 0.6.1, then 0.6.2)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -403,12 +406,12 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 0.6.1 for the fourth version, the same number as Sill for Mac 0.6.1 (main says it since App Review approved 0.6.0; docs/release-checklist.md, part 2's first item). App Store Connect adds it with the + beside iOS App, 0.6.0 being Ready for Distribution (live since 2026-11-02), and copies 0.6.0's description, keywords, screenshots and App Review Information into it. 0.6.0 (1276) was the third, shipped, the same number as Sill for Mac 0.6.0 (main said it from 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release), created in App Store Connect on 2026-11-02. 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
+| Version | 0.6.2 for the fifth version, the same number as Sill for Mac 0.6.2 (main says it since App Review approved 0.6.1, 2026-11-12, PR #364). App Store Connect adds it with the + beside iOS App, 0.6.1 being Ready for Distribution, and copies 0.6.1's description, keywords, screenshots and App Review Information into it. 0.6.1 was the fourth, the same number as Sill for Mac 0.6.1 (main said it since App Review approved 0.6.0; docs/release-checklist.md, part 2's first item). App Store Connect adds it with the + beside iOS App, 0.6.0 being Ready for Distribution (live since 2026-11-02), and copies 0.6.0's description, keywords, screenshots and App Review Information into it. 0.6.0 (1276) was the third, shipped, the same number as Sill for Mac 0.6.0 (main said it from 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release), created in App Store Connect on 2026-11-02. 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
-| Build | 0.6.1 (the commit count of its tagged merge commit, the release pull request's) for 0.6.1, uploaded by that commit's nightly before the tag, or from a clean checkout of it on this Mac with `Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`; never `--bump`. 0.6.0 (1276) for 0.6.0: the commit count of the tagged merge commit a39084f4 (PR #274), uploaded by that commit's nightly (run 41419194155), never `--bump`. 0.5.1 had 0.5.1 (4), 0.5 had 0.5 (3): each the Release archive with the privacy manifest and the export compliance key |
+| Build | 0.6.2 (the commit count of its tagged commit) for 0.6.2, uploaded by that commit's nightly before the tag (Noah's choice between that and an upload from the tag: docs/steps/2026-11-15-release-0.6.2.md), never `--bump`. 0.6.1 (the commit count of its tagged merge commit, the release pull request's) for 0.6.1, uploaded by that commit's nightly before the tag, or from a clean checkout of it on this Mac with `Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`; never `--bump`. 0.6.0 (1276) for 0.6.0: the commit count of the tagged merge commit a39084f4 (PR #274), uploaded by that commit's nightly (run 41419194155), never `--bump`. 0.5.1 had 0.5.1 (4), 0.5 had 0.5 (3): each the Release archive with the privacy manifest and the export compliance key |
 
 ### What's New
 
@@ -519,21 +522,29 @@ While your Mac’s display sleeps, a tap on the Desktop’s black picture now on
 If another user has your Mac’s screen, your iPhone or iPad can show your own account’s desktop and windows instead, with a note that it isn’t the Mac’s screen. Turn on Show this account while another user is on the screen in Sill’s Settings › Devices on your Mac. Taps and keys reach your account once it’s back on the screen. It needs Sill for Mac from this release.
 ```
 
-Held for the next version: Picture in Picture (issue #291, docs/picture-in-picture-plan.md), a
-paragraph of 284 characters for its What's New, once Noah's device tests (the plan's P
-list) have passed; until then it stays out, as Esc's words waited for a device:
-
-```text
-Picture in Picture, in Settings › This iPad (This iPhone): leave Sill while your Mac’s picture shows, and it keeps playing in a small window over your other apps, with its sound when Send Audio is on. Tap the window to come back to Sill. Nothing you do in other apps reaches your Mac.
-```
-
-Held for the next version: Full Screen (issues #279, #92, #280; docs/full-screen-plan.md), a paragraph of 160
-characters for its What's New, once Noah's device tests (the plan's "Noah's test") have passed. It promises
-nothing about the Desktop's shape upright, which keeps its own until the Virtual Desktop can match the
-device:
+0.6.2's, for App Store Connect (980 characters): what changed since 0.6.1 that a person notices on
+the device, a paragraph a change, as the release notes say it. Full Screen and Picture in Picture were held
+for this version (their paragraphs waited here under "Held for the next version" until 0.6.2); the Desktop
+button's screens need Sill for Mac 0.6.2, which its paragraph says. Not in it: Sill for Mac updating itself
+(Update Now, Automatically update Sill, Use nightly builds), which is the Mac's alone, and the Mac's fixes.
+What Noah tried on a device, for these words: Picture in Picture on the iPad mini (2026-11-12, "PiP works
+really really well!"; the iPhone and the plan's P list item by item are untried), and Full Screen's first
+build, which failed and was built again as it is now (the final build's device test is not on record:
+docs/steps/2026-11-12-full-screen.md). The Full Screen paragraph promises nothing about the Desktop's shape
+upright, which keeps its own until the Virtual Desktop can match the device.
 
 ```text
 Full Screen, in Settings, hides Sill’s controls so only your Mac’s picture shows. Swipe in from the left edge, or shake your iPhone or iPad, to bring them back.
+
+Picture in Picture, in Settings › This iPad (This iPhone): leave Sill while your Mac’s picture shows, and it keeps playing in a small window over your other apps, with its sound when Send Audio is on. Tap the window to come back to Sill. Nothing you do in other apps reaches your Mac.
+
+On a Mac with more than one screen, the Desktop button now steps through them, the main screen first, and says which one is up. It needs Sill for Mac from this release.
+
+Sill’s version is now at the bottom of the connect screen and at the end of Settings. Touch and hold it to copy it.
+
+A Mac you reach over a VPN stays reachable after the VPN was off on the Mac for a while: Sill keeps the Mac’s VPN addresses for 90 days.
+
+In Settings, Quality shows the quality’s name alone, so the row stays on one line on an iPhone on its side.
 ```
 
 ## 6. Export compliance (encryption)
@@ -628,13 +639,10 @@ WHAT TO TRY
 - Hold the device upright for a laptop layout with a trackpad and keys.
 - Settings (gear): Quality, Resolution and Frame Rate; Disconnect at the bottom.
 
-NEW IN 0.6.1 (the last two need Sill for Mac 0.6.1)
-- iPhone Duo, half open: the key row stays above the on-screen keyboard; a tall one (emoji) gets a Keyboard button instead.
-- Pencil strokes on the Mac no longer end with a line back to their start.
-- The device stays awake while streaming, until 10 minutes after the last touch.
-- A remote dial that fails with a VPN off names both ends.
-- A tap on the Desktop's black picture while the Mac's display sleeps only wakes it.
-- Mac Settings > Devices: "Show this account while another user is on the screen" (off by default).
+NEW IN 0.6.2
+- Full Screen (in Settings) hides the controls so only the Mac's picture shows. A swipe in from the left edge, or a shake, brings them back.
+- Picture in Picture (Settings > This iPad, off by default): leaving the app floats the Mac's live picture in iOS's Picture in Picture window, with the Mac's sound if Send Audio is on. The audio background mode is declared for this alone; nothing plays in the background otherwise. To try: turn it on, stream a window, swipe home.
+- The Desktop button steps through the Mac's screens (needs Sill for Mac 0.6.2).
 
 IF THE MAC DOES NOT APPEAR
 Guest or office networks can keep devices apart: use a USB-C cable, or turn on Direct Wireless Connection in the Sill menu and tap Search Nearby.
@@ -648,12 +656,18 @@ The attached screen recording, on a physical device, shows pairing, streaming a 
 
 Local-only build: delete the REMOTE ACCESS (optional) paragraph.
 
-The notes for 0.6.1 are 3,998 bytes with the block's last newline (3,997 without), all ASCII: 0.6.0's with
+The notes for 0.6.2 are 3,988 bytes with the block's last newline (3,987 without), all ASCII: 0.6.1's with
+NEW IN 0.6.1 replaced by NEW IN 0.6.2 (guideline 2.3.1(a)): Full Screen, Picture in Picture with what the
+audio background mode is for (below: the line held since 0.6.1, shortened by nothing), and the Desktop
+button's screens, which need Sill for Mac 0.6.2; the version label is left out for room. Nothing else
+changed, and Sill for Mac 0.6.0 or later is still enough for WHAT YOU NEED. App Store Connect copies
+0.6.1's notes into 0.6.2: replace them with this block.
+
+The notes for 0.6.1 were 3,998 bytes with the block's last newline (3,997 without), all ASCII: 0.6.0's with
 NEW IN 0.6.0 replaced by NEW IN 0.6.1 (guideline 2.3.1(a): what is new in this version, specifically),
 the Duo's keyboard, the Pencil, the device staying awake, the VPN message, the waking click on the
 Desktop's picture and the Mac's opt-in for another user's screen; nothing else changed, Sill for Mac
-0.6.0 or later still enough for WHAT YOU NEED (the last two items name 0.6.1). App Store Connect copies
-0.6.0's notes into 0.6.1: replace them with this block.
+0.6.0 or later still enough for WHAT YOU NEED (the last two items named 0.6.1).
 
 The notes for 0.6.0 were 3,993 bytes (local-only 3,819), all ASCII, as this file's measure counts them
 (the block's last newline included). App Store Connect copies 0.5.1's notes into a new version: replace
@@ -667,14 +681,13 @@ quality for slower links."; WHAT TO TRY loses the three-finger line and "Apple P
 (PURPOSE AND AUDIENCE names the Pencil). The answers to App Review's questions about 0.5 (purpose and
 audience, accounts, external services, regions, no VPN functionality) stay.
 
-Held for the next version: Picture in Picture (issue #291) puts the audio background mode in the
+In 0.6.2's notes (held for it since 0.6.1): Picture in Picture (issue #291) puts the audio background mode in the
 binary (`UIBackgroundModes` `audio`, Xcode's "Audio, AirPlay, and Picture in Picture"), which App Review
 sees; guideline 2.5.4 allows background services only for their intended purposes, and Apple's own
 pages make Picture in Picture one of this mode's (Configuring background execution modes; the
 AVPictureInPictureController reference requires it). One developer reported a 2.5.4 rejection for an app
 that declared the mode for AirPlay and Picture in Picture (Apple Developer Forums 671406, unanswered), so
-the next notes say what the mode is for, in their NEW IN list (330 bytes, ASCII; the
-next notes make room as each version's NEW IN list replaces the last's):
+0.6.2's notes say what the mode is for, in their NEW IN list (330 bytes, ASCII):
 
 ```text
 - Picture in Picture (Settings > This iPad, off by default): leaving the app floats the Mac's live picture in iOS's Picture in Picture window, with the Mac's sound if Send Audio is on. The audio background mode is declared for this alone; nothing plays in the background otherwise. To try: turn it on, stream a window, swipe home.
