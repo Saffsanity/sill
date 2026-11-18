@@ -254,7 +254,8 @@ eq(N.clean(giantNoExt), "File", "one character larger than the room and no exten
 let cutAtDot = String(repeating: "c", count: 199) + ".." + String(repeating: "z", count: 40)
 check(!N.clean(cutAtDot).hasSuffix(".") && N.clean(N.clean(cutAtDot)) == N.clean(cutAtDot), "a cut that ends at a dot is trimmed")
 let nfd = "Cafe\u{301}.txt", nfc = "Caf\u{E9}.txt"
-eq(N.clean(nfd), N.clean(nfc), "NFD and NFC twins clean to one name")
+// Swift's String == compares by canonical equivalence: the bytes say whether a name was made NFC.
+eq(Array(N.clean(nfd).utf8), Array(N.clean(nfc).utf8), "NFD and NFC twins clean to one name, byte for byte (NFC)")
 eq(N.maxBytes, 200, "200 bytes"); eq(N.maxExtensionBytes, 16, "16-byte extensions"); eq(N.fallback, "File", "File")
 
 // unique: case-insensitively against a folder, as APFS by default.
@@ -289,7 +290,7 @@ for i in 0..<20_000 {
     else if scalars.contains(where: { [.control, .format, .lineSeparator, .paragraphSeparator].contains($0.properties.generalCategory) }) { why = "an invisible character" }
     else if scalars.first!.properties.isWhitespace || scalars.last!.properties.isWhitespace || scalars.last == "." { why = "untrimmed" }
     else if N.clean(c) != c { why = "not idempotent: \(N.clean(c).debugDescription)" }
-    else if c != c.precomposedStringWithCanonicalMapping { why = "not NFC" }
+    else if Array(c.utf8) != Array(c.precomposedStringWithCanonicalMapping.utf8) { why = "not NFC" }
     if let why, nameBroken == nil { nameBroken = "\(raw.debugDescription) → \(c.debugDescription): \(why)" }
     if let u = N.unique(c, taken: { uniqueFolder.contains($0.lowercased()) }) {
         if uniqueFolder.contains(u.lowercased()) || u.utf8.count > 255 { nameBroken = nameBroken ?? "unique gave \(u) twice or too long" }
@@ -342,6 +343,8 @@ eq(r.end(file: 1, sha256: goodSHA, now: 2), [.deletePartials, .send(.cancel(tran
 func receiving() -> R { var x = two(); _ = x.accept(now: 0); _ = x.part(id: 1, total: 100_000, offset: 0, count: 65_536, now: 1); return x }
 let damagedOut: [R.Action] = [.deletePartials, .send(.cancel(transfer: 9, reason: .damaged)), .stopped("damaged", byPeer: false)]
 r = receiving(); eq(r.part(id: 2, total: 0, offset: 0, count: 1, now: 2), damagedOut, "a part of the next file first: damaged")
+r = receiving(); eq(r.part(id: 7, total: 100_000, offset: 65_536, count: 10, now: 2), damagedOut,
+                    "a part of a file not offered, with this file's total and offset: damaged")
 r = receiving(); eq(r.part(id: 1, total: 99_999, offset: 65_536, count: 10, now: 2), damagedOut, "another total: damaged")
 r = receiving(); eq(r.part(id: 1, total: 100_000, offset: 65_535, count: 10, now: 2), damagedOut, "a gap or an overlap: damaged")
 r = receiving(); eq(r.part(id: 1, total: 100_000, offset: 65_537, count: 10, now: 2), damagedOut, "a gap: damaged")
