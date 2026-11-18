@@ -1566,7 +1566,8 @@ another route never reaches zero sessions, and a reconnect within the 30 s ends 
 connected again within 30 s; this Mac won’t be locked."). At the wait's end nothing is locked when the Mac is locked
 already, another user (or the login window) is on its screen, or it has no display a lock screen could take a
 password at (#298: Sill's own displays and macOS's stand-in for a Mac with no screen don't count; the switch's
-warning says so). The lock is confirmed by the lock's own reading within 3 seconds; when macOS has no such call, or
+warning says so). The lock is confirmed by SessionLock's reading (A locked Mac, above) within 3 seconds; when macOS
+has no such call, or
 the Mac still reads unlocked, the log says so, Settings shows "Sill couldn’t lock this Mac the last time: …", and the
 display sleeps instead (which locks a Mac that asks for its password at once after display sleep). A quit, a logout
 or an update's restart never locks; a crash or a force quit leaves nothing behind that locks later. The switch

@@ -19,6 +19,8 @@ struct LiveDevicesPane: View {
                     showPairingWindowToScreenSharing: $settings.showPairingWindowToScreenSharing,
                     offConsoleView: $settings.config.offConsoleView,
                     lockAfterSession: $settings.config.lockAfterSession,
+                    lockSleepsDisplay: $settings.config.lockSleepsDisplay,
+                    lockOnlyAfterAway: $settings.config.lockOnlyAfterAway,
                     requirePairingProblem: model.requirePairingProblem,
                     privacyLock: model.coordinator?.status.snapshot.privacyLock ?? PrivacyLockStatus(),
                     actions: DevicesPane.Actions(pair: { model.pairDevice() },
@@ -48,8 +50,12 @@ struct DevicesPane: View {
     @Binding var showPairingWindowToScreenSharing: Bool
     /// Show this account while another user is on the screen (HostConfig.offConsoleView; docs/off-console-plan.md).
     @Binding var offConsoleView: Bool
-    /// Lock this Mac when the last device leaves (HostConfig.lockAfterSession; docs/privacy-mode-plan.md, part 1).
+    /// Lock this Mac when the last device leaves (HostConfig.lockAfterSession; docs/privacy-mode-plan.md, part 1), and
+    /// the two switches shown under it while it is on: Turn off its display too (HostConfig.lockSleepsDisplay) and
+    /// Only after a device away from home (HostConfig.lockOnlyAfterAway).
     @Binding var lockAfterSession: Bool
+    @Binding var lockSleepsDisplay: Bool
+    @Binding var lockOnlyAfterAway: Bool
     /// The last Require pairing change the identity store did not keep.
     var requirePairingProblem: AppModel.RequirePairingProblem?
     /// The lock's state as the host runs it: its warning (no display to type the password at, or the last lock
@@ -108,14 +114,20 @@ struct DevicesPane: View {
                 Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
             }
             // Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283, #275): at once, no
-            // restart; the Mac's alone. Its warning, from the host's status, only while the switch is on.
+            // restart; the Mac's alone. While it is on, its two switches (#275's display; the plan's open decision 5's
+            // scope) and its warning, from the host's status.
             Section {
                 Toggle(PrivacyPolicy.Words.toggle, isOn: $lockAfterSession)
-                if lockAfterSession, let warning = privacyLock.warning {
-                    Warning(warning)
+                if lockAfterSession {
+                    Toggle(PrivacyPolicy.Words.sleepToggle, isOn: $lockSleepsDisplay)
+                    Toggle(PrivacyPolicy.Words.awayToggle, isOn: $lockOnlyAfterAway)
+                    if let warning = privacyLock.warning {
+                        Warning(warning)
+                    }
                 }
             } footer: {
-                Footnote(lockAfterSession ? PrivacyPolicy.Words.footnoteOn(PrivacyPolicy.grace) : PrivacyPolicy.Words.footnoteOff)
+                Footnote(lockAfterSession ? PrivacyPolicy.Words.footnoteOn(PrivacyPolicy.grace, sleeps: lockSleepsDisplay, onlyAway: lockOnlyAfterAway)
+                                          : PrivacyPolicy.Words.footnoteOff)
             }
             pairedDevices
         }

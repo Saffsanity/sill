@@ -1,7 +1,9 @@
 # Compiled as one module by ../module.py, each file's `import StreamProtocol` dropped, with main.swift (DarkenPolicy's
-# `package` access needs the package name). HostConfig for the scope, PrivacyPolicy for the lock's constants and readings.
+# `package` access needs the package name). HostConfig for the scope, PrivacyPolicy for the lock's constants and readings,
+# LockPolicy.swift for its Reading (PrivacyPolicy.mac).
 flags: -package-name sill
 Sources/StreamProtocol/*.swift
 Sources/SillHost/HostConfig.swift
+Sources/SillHost/LockPolicy.swift
 Sources/SillHost/PrivacyPolicy.swift
 Sources/SillHost/DarkenPolicy.swift

@@ -32,7 +32,7 @@ DARK = "Privacy (test host): would darken 1 display; nothing is drawn."
 LIGHT = "Privacy (test host): would light this Mac’s screen again; nothing was drawn."
 HINT_LOCK = "Privacy (test host): would show “This Mac is in use from another device. Press any key to lock it.”"
 HINT_PASS = "Privacy (test host): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”"
-LOCK_DRY = "Privacy (test host): would lock this Mac now; nothing is locked."
+LOCK_DRY = "Privacy (dry run): would lock this Mac now; nothing is locked."
 
 verdicts = []
 
@@ -201,7 +201,7 @@ def case_hold(out):
     h = Host(out, "hold", {"SILL_TEST_PRIVACY_GRACE": "3"}, ["--darken=any", "--lock-after-session"])
     c = client(h, "hold", 2, 1.0)
     c.join(); h.at(12); h.stop()
-    asked, _, _ = h.first("Privacy (test host): would lock this Mac now")
+    asked, _, _ = h.first("Privacy (dry run): would lock this Mac now")
     outcome, _, _ = h.first("Privacy: couldn’t lock this Mac (it still read unlocked 3 s later); its display sleeps instead.")
     lit, _, _ = h.first(LIGHT)
     verdict(asked is not None and outcome is not None and lit is not None and lit >= outcome >= asked,

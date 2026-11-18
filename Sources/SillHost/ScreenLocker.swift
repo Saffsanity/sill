@@ -12,12 +12,13 @@ import Darwin
 ///   log at each attempt and in Settings › Devices.
 /// - The display sleep: `/usr/bin/pmset displaysleepnow`, which needs no privilege (#275).
 ///
-/// A test host's locker is a dry run (`dry`): it never loads login.framework, never calls it and never runs pmset;
-/// it prints what it would do (`PrivacyPolicy.Words.dryLock`, `.drySleep`), counts `priv.lockDry` and
-/// `priv.sleepDry`, and answers `.made`, or `.unavailable` under the TEST ONLY SILL_TEST_PRIVACY_NO_SYMBOL. Nothing
-/// on a test host can lock this Mac or put its display to sleep.
+/// Anything but Sill.app itself (PrivacyPolicy.locksForReal: the CLI, the bare SillMenuBar binary, a test host,
+/// `--synthetic` anywhere) gets the dry run (`dry`): it never loads login.framework, never calls it and never runs
+/// pmset; it prints what it would do (`PrivacyPolicy.Words.dryLock`, `.drySleep`), counts `priv.lockDry` and
+/// `priv.sleepDry`, and answers `.made`, or `.unavailable` under the TEST ONLY SILL_TEST_PRIVACY_NO_SYMBOL (a test
+/// host's alone). Nothing but Sill.app itself can lock this Mac or put its display to sleep.
 final class ScreenLocker: @unchecked Sendable {
-    /// Whether this locker acts (Sill.app) or only says what it would do (a test host).
+    /// Whether this locker acts (Sill.app itself) or only says what it would do (everything else).
     enum Mode: Equatable, Sendable {
         case real
         case dry(noSymbol: Bool)
@@ -81,7 +82,7 @@ final class ScreenLocker: @unchecked Sendable {
     static let frameworkPaths = ["/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
                                  "/System/Library/PrivateFrameworks/login.framework/login"]
 
-    /// Looked up once, at the first lock, never on a test host (`mode` is checked first). Nil when the framework or
+    /// Looked up once, at the first lock, never in a dry run (`mode` is checked first). Nil when the framework or
     /// the symbol is missing.
     private static let lockScreenImmediate: LockScreenImmediate? = {
         for path in frameworkPaths {

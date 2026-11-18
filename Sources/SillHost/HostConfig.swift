@@ -76,12 +76,24 @@ package struct HostConfig: Equatable, Sendable {
     /// (`StreamCoordinator.setTarget`: the lock's gate takes it), never by a restart of its own.
     package var offConsoleView: Bool
     /// Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; issues #283 and #275): 30 s after
-    /// the last session ends, unless one comes back, the Mac locks and its display sleeps (PrivacyPolicy, PrivacyLock).
-    /// Off in both `standard` and `app`; the CLI takes it only with --synthetic, where it locks nothing. The Mac's alone,
+    /// the last session ends, unless one comes back, the Mac locks and (`lockSleepsDisplay`) its display sleeps
+    /// (PrivacyPolicy, PrivacyLock). Off in both `standard` and `app`; the CLI takes it only with --synthetic, and only
+    /// Sill.app itself ever locks (PrivacyPolicy.locksForReal: everything else is a dry run). The Mac's alone,
     /// like Share clipboard: absent from StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and
     /// `restartNeeded`, so no device turns it on or off. Applied at once (`StreamCoordinator.setTarget`), never by a
-    /// restart.
+    /// restart. Its two switches below are shown under it, and kept, whatever it says.
     package var lockAfterSession: Bool
+    /// Turn off its display too, under Lock this Mac when the last device leaves (#275's half of it, a switch of its
+    /// own since the review of PR #402, Noah's "a toggle wherever sensible" of 2026-11-18): once the lock shows, the
+    /// displays sleep (`pmset displaysleepnow`); off, the lock screen stays lit until macOS turns the display off. A
+    /// lock that fails still puts the display to sleep instead, either way (PrivacyPolicy). On in both `standard` and
+    /// `app` (the plan's open decision 6). The Mac's alone, applied at once, like `lockAfterSession`.
+    package var lockSleepsDisplay: Bool
+    /// Only after a device away from home, under Lock this Mac when the last device leaves (the plan's open decision 5,
+    /// a switch since the review of PR #402): the last departure starts the wait only when a session of that visit was
+    /// away from home (AwayPolicy.isAway), so an iPad used beside the Mac never locks it. Off in both `standard` and
+    /// `app`: every session counts (#283's words). The Mac's alone, applied at once, like `lockAfterSession`.
+    package var lockOnlyAfterAway: Bool
     /// Darken this Mac's screen while a device uses it (docs/privacy-mode-plan.md, part 2; issues #133 and #323;
     /// DarkenPolicy, PrivacyScreen): off, only while a device away from home is connected, or whenever one is. Off in
     /// both `standard` and `app`; the CLI takes it only with --synthetic (`--darken=away|any`), where it darkens nothing
@@ -105,7 +117,8 @@ package struct HostConfig: Equatable, Sendable {
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
                  internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 lockAfterSession: Bool, darkenScreen: Darken, darkenKeysLock: Bool) {
+                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool,
+                 darkenScreen: Darken, darkenKeysLock: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -122,6 +135,8 @@ package struct HostConfig: Equatable, Sendable {
         self.sendAudio = sendAudio
         self.offConsoleView = offConsoleView
         self.lockAfterSession = lockAfterSession
+        self.lockSleepsDisplay = lockSleepsDisplay
+        self.lockOnlyAfterAway = lockOnlyAfterAway
         self.darkenScreen = darkenScreen
         self.darkenKeysLock = darkenKeysLock
     }
@@ -136,7 +151,8 @@ package struct HostConfig: Equatable, Sendable {
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
     /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too.
     /// Send Audio off here; Sill.app's is on since 2026-10-27
-    /// (`app`). Lock this Mac when the last device leaves off in both: a Mac locks by itself only once its user says so.
+    /// (`app`). Lock this Mac when the last device leaves off in both: a Mac locks by itself only once its user says so;
+    /// under it, Turn off its display too on and Only after a device away from home off (the plan's recommendations).
     /// Darken this Mac's screen off in both, its keys locking once it is on: a screen goes dark only by its user's choice.
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
@@ -144,6 +160,7 @@ package struct HostConfig: Equatable, Sendable {
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
                                              offConsoleView: false, lockAfterSession: false,
+                                             lockSleepsDisplay: true, lockOnlyAfterAway: false,
                                              darkenScreen: .off, darkenKeysLock: true)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
@@ -182,8 +199,9 @@ package struct HostConfig: Equatable, Sendable {
     /// per 60 fps, Retina → points, away bitrate 4 → 15 Mbps per 60 fps, away points → Retina, speed
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
     /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
-    /// send audio off → on, lock when the last device leaves off → on, darken the screen off → away, a key on the dark Mac
-    /// locks → passes".
+    /// send audio off → on, lock when the last device leaves off → on, its display off with the lock on → off, lock
+    /// only after a device away from home off → on, darken the screen off → away, a key on the dark Mac locks →
+    /// passes".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -205,6 +223,12 @@ package struct HostConfig: Equatable, Sendable {
         if offConsoleView != new.offConsoleView { parts.append("off-console view \(onOff(offConsoleView)) → \(onOff(new.offConsoleView))") }
         if lockAfterSession != new.lockAfterSession {
             parts.append("lock when the last device leaves \(onOff(lockAfterSession)) → \(onOff(new.lockAfterSession))")
+        }
+        if lockSleepsDisplay != new.lockSleepsDisplay {
+            parts.append("its display off with the lock \(onOff(lockSleepsDisplay)) → \(onOff(new.lockSleepsDisplay))")
+        }
+        if lockOnlyAfterAway != new.lockOnlyAfterAway {
+            parts.append("lock only after a device away from home \(onOff(lockOnlyAfterAway)) → \(onOff(new.lockOnlyAfterAway))")
         }
         if darkenScreen != new.darkenScreen { parts.append("darken the screen \(darkenScreen.rawValue) → \(new.darkenScreen.rawValue)") }
         if darkenKeysLock != new.darkenKeysLock {

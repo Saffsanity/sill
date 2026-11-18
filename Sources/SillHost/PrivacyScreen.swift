@@ -83,7 +83,7 @@ final class PrivacyScreen {
         self.status = status
         self.gate = gate
         if scope != .off { run(state.screens(screenIDs().count, at: 0)) }
-        run(state.reading(PrivacyLock.mac(gate), at: 0))
+        run(state.reading(PrivacyPolicy.mac(gate.reading, established: gate.established), at: 0))
     }
 
     /// Outside a test host, until G0 fills the seams.
@@ -121,7 +121,7 @@ final class PrivacyScreen {
 
     /// SessionLock's reading changed.
     func readingChanged() {
-        run(state.reading(PrivacyLock.mac(gate), at: now()))
+        run(state.reading(PrivacyPolicy.mac(gate.reading, established: gate.established), at: now()))
     }
 
     /// A paired device's input was taken at the locked screen (rule 8's witness: the unlock that follows is its).

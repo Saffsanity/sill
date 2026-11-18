@@ -36,9 +36,33 @@
   locked." and counts `priv.lockDry`. Sill.app holds App Nap off during a wait (`NapHold.lockWait`, allowing idle
   sleep) so the tick keeps its time. The CLI takes `--lock-after-session` only with `--synthetic`; without the flag
   its stdout is as before.
-- **Never locked this Mac.** No test called `SACLockScreenImmediate` or `pmset`: every host was a synthetic test host
-  on loopback whose locker is the dry run. The symbol was only looked up (`dlopen` and `dlsym` by both paths the
-  locker uses, from a scratch program with no call site; and `dyld_info -exports`): found on macOS 27.2.
+- **Never locked this Mac.** Nothing here called `SACLockScreenImmediate` or `pmset`; a test host's locker is the dry
+  run, and only Sill.app's is real. The symbol was only looked up (`dlopen` and `dlsym` by both paths the locker uses,
+  from a scratch program with no call site; and `dyld_info -exports`): found on macOS 27.2.
+- **Verified.** `Tests/checks/privacy` 157 checks, its 55 mutants every one caught on the final rule (one equivalent
+  mutant found on the way, tick's second guard against a quit, replaced by one a quit catches); `away-quality` with the
+  knob's cases, 49 of 49 mutants (5 new); `stage-release`, `update-install` and `repo-rules`, which read the changed
+  files; `Tests/checks/run-all.sh`, all 75 (run outside the heavy lock at nice 19 while the build waited for it);
+  the host library, the app and the CLI typechecked with swiftc against each other, clean; the merge of #184
+  (5f3a4632) built with `swift build -c release` and its own check passed, 49 of 49; CI on the pull request (run
+  44299093908, at 86cadb58, main merged into the branch): `swift build -c release`, run-all, the iOS app for the
+  simulator and the CLI's paths, all green.
+- **Live, on test hosts** (after a first turn of the heavy lock found 24 GB free and stopped before building, as the rule
+  says; the second, with 38 GB, built): `swift build -c release` of 1655f272, no warning; `Scripts/privacy-check/live.py
+  OUT all`, 39 of 39 verdicts in its twelve cases, each a synthetic loopback host under a minute whose lock is the dry
+  run: the switch off says and counts nothing; the wait from the departure to "would lock" 5.12 s (5 s and a tick), the
+  test's lock file then confirming it 0.53 s later with the display sleep after it, one wait and one lock, `priv.lockDry`
+  and `priv.sleepDry` in the stats; a device back 2 s in ends the wait, its own departure's lock unconfirmed fails at
+  3.08 s with the display sleep instead; two overlapping sessions start no wait until the last leaves; locked already,
+  another user and no display each say why and lock nothing; no lock call fails at once; SIGTERM during the wait says
+  Sill is quitting and locks nothing; SIGKILL during it locks nothing and the next launch, 12 s with no device, starts
+  no wait; a `sill-pair/1` ask (answered `shown`) starts no wait alone and ends none during one; a device the gate
+  refuses (`SILL_TEST_MIN_DEVICE_VERSION=1.2`, hello 0.6) ends none. A session cut off has no headless path (Direct
+  Wireless off needs AWDL; Remove and Require pairing are the app's): the check's model of the server covers it, and
+  Noah's list. H2: main's CLI (8dbbb500, built from `git
+  archive`) and this branch's, idle 45 s (9 lines each) and with a Desktop client 20 s (35 each), identical masked and
+  sorted. The previews from the bare binary (`pane-devices-{lock,locknodisplay,lockfailed}`, light and dark, and the
+  switch off in every other Devices sample): the section after the off-console view's, its footnotes, its warnings.
 - **Defaults taken for Noah to confirm** (the plan's recommendations): the switch in Settings › Devices (open decision
   1); a 30 s wait (4); after any session, home or away (5: so an iPad used as a second screen at the desk locks the Mac
   30 s after it disconnects); the display sleeps after the lock (6) and after a failed one; a quit never locks; a
@@ -60,6 +84,6 @@
     (Settings › Devices)."
   - privacy.html: nothing new is collected or sent; no change needed for part 1.
   - Replies drafted for Noah on #283 and #275 (posted only on his word): "Lock this Mac when the last device leaves is
-    in pull request #‹N› (Settings › Devices, off by default): 30 seconds after the last device disconnects, Sill locks
+    in pull request #402 (Settings › Devices, off by default): 30 seconds after the last device disconnects, Sill locks
     the Mac and its display sleeps; a reconnect within that time keeps it unlocked. Darkening the screen while a
     device uses the Mac (#133) comes after a measurement." and on #184: thanks to addhumal, whose commits are merged in.
