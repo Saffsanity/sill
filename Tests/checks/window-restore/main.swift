@@ -1037,6 +1037,35 @@ do {
           "#366: a tab swap transfers the fit record to the new tab's ID and handle")
     ledger.transfer(from: 3509, to: 3509, handle: 33)
     check(ledger.entries[3509]?.handle == 22, "#366: transferring to the same ID leaves the entry alone")
+    ledger.transfer(from: 4000, to: 4001, handle: 44)
+    check(ledger.entries.count == 1 && ledger.record(4001) == nil, "#366: a window Sill never sized has nothing to transfer")
+}
+
+// #366 in sequence (#368's review): a fitted window's native tab switch, through the real fit and stop on the
+// stand-in Mac, as the coordinator's followTabSwap and select run them: the record goes to the tab that shows,
+// nothing else is put back as it streams, and when it stops that tab (its tab group) goes back to the frame the
+// window had before Sill sized it; the tab left behind, hidden, is not touched.
+do {
+    var mac = Mac()
+    let home = R(100, 100, 900, 600)
+    let kind = AppKind(minSize: S(200, 150), grid: 1, late: false)
+    mac.wins[11] = Win(frame: home, app: kind)
+    var ledger = WindowRestore.Ledger<CGWindowID>()
+    if case .fitted(let before, let after, _) = WindowRestore.fit(11, to: S(1200, 800), fallback: home, on: &mac) {
+        ledger.fitted(11, handle: 11, before: before, after: after, asked: S(1200, 800))
+    }
+    let fitted = mac.wins[11]!.frame
+    check(ledger.record(11)?.original == home && fitted.size == S(1200, 800), "#366 in sequence: tab 11 fitted, its frame before kept")
+    mac.wins[12] = Win(frame: fitted, app: kind)            // another tab shows where 11 was; 11 stays, hidden
+    ledger.transfer(from: 11, to: 12, handle: 12)
+    mac.touched = []
+    check(ledger.restore(keeping: 12, staged: nil, on: &mac).isEmpty && mac.touched.isEmpty,
+          "#366 in sequence: the coordinator's select of tab 12 puts nothing back")
+    let stopped = ledger.restore(keeping: nil, staged: nil, on: &mac)
+    check(stopped.count == 1 && stopped[0].id == 12 && stopped[0].done && mac.wins[12]!.frame == home,
+          "#366 in sequence: when it stops, tab 12 goes back to the frame the window had before Sill sized it: \(mac.wins[12]!.frame)")
+    check(mac.wins[11]!.frame == fitted && !mac.touched.contains(11), "#366 in sequence: the hidden tab 11 is not touched")
+    check(ledger.isEmpty, "#366 in sequence: no record left")
 }
 
 if failures == 0 {
