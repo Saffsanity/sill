@@ -179,11 +179,16 @@ final class InputInjector {
         // a gesture (`postScroll`).
         let placed = event.type != .mouseMoved
         let at = placed ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
-        // A pen's point says its pressure and tilt, as the event carries them.
+        // A pen's point says its pressure and tilt, as the event carries them, and how far back the stroke
+        // clock timed it (PenClock: a point of a stroke whose samples came in a burst is timed as drawn).
         var pen = ""
         if event.type != .scrollWheel, event.getIntegerValueField(.mouseEventSubtype) == Int64(CGEventMouseSubtype.tabletPoint.rawValue) {
             pen = String(format: " pen %.3f tilt %.2f,%.2f", event.getDoubleValueField(.tabletEventPointPressure),
                          event.getDoubleValueField(.tabletEventTiltX), event.getDoubleValueField(.tabletEventTiltY))
+            if event.timestamp != 0 {
+                let back = (Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) - Double(event.timestamp)) / 1_000_000
+                pen += String(format: ", timed %.1f ms back", max(back, 0))
+            }
         }
         print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))\(at)\(pen)")
     }
@@ -228,7 +233,10 @@ final class InputInjector {
     /// (PenEvents.stamp); everything else about it is the mouse event kind 8 posts, but its button,
     /// which is the pen's own (`penButton`): its move is a drag exactly while its tip is down, as
     /// Sidecar posts a Pencil's, whatever kind 8's buttons are doing.
-    private func pointer(_ action: PointerAction, at location: CGPoint, from device: KeyStrokes.Device? = nil, pen: PenPoint? = nil) {
+    /// `time`: a pen's point of a stroke, timed by the stroke clock (PenClock), in seconds on the event
+    /// clock; nil leaves the event the time macOS gives it as it is posted.
+    private func pointer(_ action: PointerAction, at location: CGPoint, from device: KeyStrokes.Device? = nil, pen: PenPoint? = nil,
+                         time: Double? = nil) {
         let type: CGEventType
         let button: CGMouseButton
         var clicks: Int64 = 1
@@ -268,6 +276,7 @@ final class InputInjector {
         // One synthetic "finger": a constant event number keeps a down/drag/up sequence coherent.
         event.setIntegerValueField(.mouseEventNumber, value: 0)
         if let pen { PenEvents.stamp(event, with: pen) }
+        if let time { event.timestamp = PenClock.timestamp(time) }
         watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
         lastPointerLocation = location
         if post(event) { Stats.shared.bump(pen == nil ? "in.pointer" : "in.pen") }
@@ -278,6 +287,12 @@ final class InputInjector {
     /// The Pencil as a tablet pen (docs/pencil-pressure-plan.md §4): what is in range, whose tip is
     /// down. PenTablet decides; `perform` posts.
     private var penTablet = PenTablet()
+    /// The stroke clock (PenClock, from pull request #381): a stroke's events timed by the Pencil's own
+    /// spacing.
+    private var penClock = PenClock()
+    /// TEST ONLY (`SILL_TEST_PEN_CLOCK=arrival`, PenClock.mode, read by every host): no stroke clock,
+    /// every event timed as it is posted, so the two can be compared in drawing apps.
+    var penClockArrival = false
     /// Waits out the pen's last message, then lets it leave (`PenTablet.idleLeave`).
     private var penIdle: Task<Void, Never>?
 
@@ -301,14 +316,27 @@ final class InputInjector {
                 event.location = pointerNow()
                 if post(event) { Stats.shared.bump("in.penProximity") }
             case .move(let place, let pen):
-                pointer(.move, at: point(place.x, place.y, in: rect), from: device, pen: pen)
+                pointer(.move, at: point(place.x, place.y, in: rect), from: device, pen: pen,
+                        time: pen.tipDown ? strokeTime(pen) : nil)
             case .down(let place, let pen):
-                pointer(.leftDown, at: point(place.x, place.y, in: rect), from: device, pen: pen)
+                pointer(.leftDown, at: point(place.x, place.y, in: rect), from: device, pen: pen,
+                        time: penClockArrival ? nil : penClock.down(pen, now: Self.eventClock()))
             case .up(let place, let pen):
-                pointer(.leftUp, at: place.map { point($0.x, $0.y, in: rect) } ?? pointerNow(), from: device, pen: pen)
+                pointer(.leftUp, at: place.map { point($0.x, $0.y, in: rect) } ?? pointerNow(), from: device, pen: pen,
+                        time: strokeTime(pen))
+                penClock.end()
             }
         }
     }
+
+    /// A point of the stroke under way, by the stroke clock (nil: timed as posted).
+    private func strokeTime(_ pen: PenPoint) -> Double? {
+        penClockArrival ? nil : penClock.during(pen, now: Self.eventClock())
+    }
+
+    /// Now on the event clock, in seconds: the Mac's time since it started, which AppKit reads a
+    /// CGEvent's timestamp in (as nanoseconds; PenClock).
+    private static func eventClock() -> Double { Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1_000_000_000 }
 
     /// One task while the pen is in range with its tip up: it sleeps until the pen's last message
     /// is `idleLeave` old, then posts its leave. A message meanwhile only moves the time it waits

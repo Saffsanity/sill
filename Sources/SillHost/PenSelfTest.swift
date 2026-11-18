@@ -88,6 +88,30 @@ package enum PenSelfTest {
             check(ns.subtype != .tabletPoint, "a plain drag: subtype \(ns.subtype.rawValue), pressure \(ns.pressure) (not a tablet point)")
         }
 
+        // The event clock (PenClock, the stroke clock): what AppKit reads a timestamp Sill sets as. It is
+        // documented as nanoseconds since the Mac started; on Apple silicon the mach clock ticks 41.7 times
+        // slower than that, and a time written in its ticks would read 41.7 times too early. So: a time of
+        // CLOCK_UPTIME_RAW's nanoseconds reads as NSEvent's own clock, systemUptime, and 10 ms of them as 10 ms.
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let nowSeconds = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1_000_000_000
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if let first = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: at, mouseButton: .left),
+           let second = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: at, mouseButton: .left) {
+            check(first.timestamp == 0, "Event clock: a new event's own time is \(first.timestamp) (0: macOS times it as it is posted)")
+            first.timestamp = PenClock.timestamp(nowSeconds)
+            second.timestamp = PenClock.timestamp(nowSeconds + 0.010)
+            if let a = delivered(first), let b = delivered(second) {
+                check(abs(a.timestamp - uptime) < 0.05,
+                      "Event clock: a time of now in CLOCK_UPTIME_RAW's nanoseconds reads \(a.timestamp) s; systemUptime \(uptime) s "
+                      + "(mach clock \(timebase.numer)/\(timebase.denom))")
+                check(abs((b.timestamp - a.timestamp) - 0.010) < 1e-6,
+                      "Event clock: 10 ms later in nanoseconds reads \(String(format: "%.6f", b.timestamp - a.timestamp)) s later")
+            } else {
+                check(false, "Event clock: not delivered")
+            }
+        }
+
         print(failed == 0 ? "All readings are what was written." : "\(failed) reading(s) differ.")
         exit(failed == 0 ? 0 : 1)
     }

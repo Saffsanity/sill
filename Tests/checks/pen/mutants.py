@@ -111,10 +111,22 @@ MUTANTS = [
     ("a maximum of 0 divided by", STROKES, FORCE, "guard force.isFinite, maximum.isFinite else { return 0 }"),
     ("34 samples a message", STROKES, "min(start + PenInput.maxSamples, readings.count)]", "min(start + PenInput.maxSamples + 2, readings.count)]"),
     ("readings after the 32nd dropped", STROKES, "while start < readings.count {", "if start < readings.count {"),
-    ("times from the callback's last reading", STROKES, "let last = chunk[chunk.endIndex - 1].time", "let last = readings[readings.count - 1].time"),
-    ("times in seconds", STROKES, "let ms = (last - reading.time) * 1000", "let ms = (last - reading.time)"),
-    ("the last sample carries a time", STROKES, "t: ms > 0.05 ? ms : nil)", "t: ms)"),
-    ("a move's readings reversed", STROKES, "chunk.map { sample($0, before: last) }", "chunk.reversed().map { sample($0, before: last) }"),
+    ("times in seconds", STROKES, "let ms = began.map { (reading.time - $0) * 1000 }", "let ms = began.map { (reading.time - $0) }"),
+    ("times not counted from the stroke's down (the device's clock leaves it)", STROKES,
+     "let ms = began.map { (reading.time - $0) * 1000 }", "let ms = Optional(reading.time * 1000)"),
+    ("a time at the down written out, or one before it", STROKES, "t: ms.flatMap { $0 > 0.05 ? $0 : nil })", "t: ms)"),
+    ("a move's readings reversed", STROKES, "chunk.map { sample($0, since: began) }", "chunk.reversed().map { sample($0, since: began) }"),
+    ("an up's time dropped", STROKES, "PenInput(phase: phase, samples: [sample(reading, since: began)])", "PenInput(phase: phase, samples: [sample(reading, since: nil)])"),
+    ("the stroke's start not kept", STROKES, "        stroke = mode
+        strokeBegan = time
+", "        stroke = mode
+"),
+    ("the stroke's start kept after its end", STROKES, "        stroke = nil
+        strokeBegan = nil
+        checkAt", "        stroke = nil
+        checkAt"),
+    ("the surface going keeps the stroke's start", STROKES, "defer { stroke = nil; strokeBegan = nil; hovering = false; told = false; checkAt = nil }",
+     "defer { stroke = nil; hovering = false; told = false; checkAt = nil }"),
     # The device: the leave
     ("a leave while touching", STROKES, LEAVE, "guard !hovering, canHover, told else { return false }"),
     ("a leave while hovering", STROKES, LEAVE, "guard stroke == nil, canHover, told else { return false }"),
@@ -126,13 +138,35 @@ MUTANTS = [
     ("a hover's end checks nothing", STROKES, "        hovering = false\n        checkAt = now + Self.leaveDelay\n", "        hovering = false\n"),
     ("a stroke's end checks nothing", STROKES, "        stroke = nil\n        checkAt = now + Self.leaveDelay\n", "        stroke = nil\n"),
     ("the surface going tells of nothing", STROKES, "told = false; checkAt = nil }\n        return told", "told = false; checkAt = nil }\n        return false"),
-    ("the surface going keeps the Mac told", STROKES, "defer { stroke = nil; hovering = false; told = false; checkAt = nil }", "defer { stroke = nil; hovering = false; checkAt = nil }"),
+    ("the surface going keeps the Mac told", STROKES, "defer { stroke = nil; strokeBegan = nil; hovering = false; told = false; checkAt = nil }",
+     "defer { stroke = nil; strokeBegan = nil; hovering = false; checkAt = nil }"),
     # The device: a resting palm
     ("fingers speak while the tip is down", STROKES, "            if touching { return true }\n", ""),
     ("a finger from before the lift speaks after it", STROKES, "return began <= last + PenStrokes.palmLinger", "return began >= last && began <= last + PenStrokes.palmLinger"),
     ("no quiet after the lift", STROKES, "return began <= last + PenStrokes.palmLinger", "return began <= last"),
     ("a second of quiet", STROKES, "static let palmLinger = 0.5", "static let palmLinger = 1.0"),
     ("the lift's time not kept", STROKES, "            self.touching = touching\n            lastTouchedAt = time\n", "            self.touching = touching\n            if touching { lastTouchedAt = time }\n"),
+    # The stroke clock (PenClock, from #381)
+    ("a point loses its sample's time", TABLET, "tipDown: tipDown,\n                        elapsed: sample.t)", "tipDown: tipDown,\n                        elapsed: nil)"),
+    ("the down not timed now", TABLET, "        let time = max(now, last)\n", "        let time = last\n"),
+    ("the down's own time ignored", TABLET, "anchor = time - (point.elapsed ?? 0) / 1000", "anchor = time"),
+    ("a stroke's points timed as they arrive", TABLET, "        var time = anchor + elapsed / 1000\n", "        var time = now\n"),
+    ("the clock not moved back for a point it would time after now", TABLET,
+     "        if time > now {\n            anchor = now - elapsed / 1000\n            self.anchor = anchor\n            time = now\n        }\n", ""),
+    ("no least step between two times", TABLET, "time = min(max(time, last + Self.minStep), max(now, last))", "time = min(max(time, last), max(now, last))"),
+    ("times may go back", TABLET, "time = min(max(time, last + Self.minStep), max(now, last))", "time = min(time, max(now, last))"),
+    ("times may pass now", TABLET, "time = min(max(time, last + Self.minStep), max(now, last))", "time = max(time, last + Self.minStep)"),
+    ("the last time not kept", TABLET, "        last = time\n        return time\n    }\n\n    /// The stroke ended", "        return time\n    }\n\n    /// The stroke ended"),
+    ("a point without its time timed", TABLET, "guard var anchor, let elapsed = point.elapsed else { return nil }",
+     "guard var anchor else { return nil }\n        let elapsed = point.elapsed ?? 0"),
+    ("no stroke down, timed anyway", TABLET, "guard var anchor, let elapsed = point.elapsed else { return nil }",
+     "guard let elapsed = point.elapsed else { return nil }\n        var anchor = self.anchor ?? now"),
+    ("the stroke never ends", TABLET, "package mutating func end() { anchor = nil }", "package mutating func end() { }"),
+    ("a time in mach ticks", TABLET, "return UInt64((time * 1_000_000_000).rounded())", "return UInt64((time * 24_000_000).rounded())"),
+    ("a huge time written out", TABLET, "guard time.isFinite, time > 0, time < 1e9 else { return 0 }", "guard time.isFinite, time > 0 else { return 0 }"),
+    ("arrival ignored", TABLET, '            return (true, "TEST: an Apple Pencil', '            return (false, "TEST: an Apple Pencil'),
+    ("the variable's value echoed", TABLET, 'return (false, "\\(variable) ignored: it takes arrival or stroke;', 'return (false, "\\(variable)=\\(value) ignored: it takes arrival or stroke;'),
+    ("the variable's name", TABLET, 'package static let variable = "SILL_TEST_PEN_CLOCK"', 'package static let variable = "SILL_TEST_PENCLOCK"'),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

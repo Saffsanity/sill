@@ -7,7 +7,8 @@
 # pressure and tilt as macOS wants them, the pointer event a message amounts to for kind 8's rules,
 # and what still goes with nowhere to land.
 # Scenarios with the exact posts, and random sessions of two devices' pens and mouse input against
-# a model and its invariants.
+# a model and its invariants. PenClock (the same file): the stroke clock, a stroke's events timed by
+# the Pencil's own spacing (pull request #381's idea), with random strokes against its rules.
 # PenStrokes (iOSClient): what the device sends: whether a stroke goes as a pen's or the mouse's,
 # fixed as the tip lands; a touch's force and angles as the wire's samples, every reading of a
 # callback in messages of 32 at most; the leave, only when a Pencil that can hover is neither
@@ -15,7 +16,7 @@
 # glass (a resting palm). Then a Pencil's session through both: what the device sends, as the Mac
 # posts it. Compiled with StreamProtocol's sources as one module (build.sh).
 #   Tests/checks/pen/run.sh             compile and run the check
-#   Tests/checks/pen/run.sh --mutants   one-line mutants of PenTablet.swift and PenStrokes.swift; each must fail it
+#   Tests/checks/pen/run.sh --mutants   one-line mutants of PenTablet.swift, CursorClass.swift and PenStrokes.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py" "$root"; exit; fi

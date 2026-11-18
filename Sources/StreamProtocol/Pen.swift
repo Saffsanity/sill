@@ -87,7 +87,10 @@ public struct PenSample: Codable, Equatable, Sendable {
     /// Azimuth in the frame, in radians: the direction the Pencil's top points, 0 along +x, π/2
     /// along +y (down the frame).
     public var az: Double?
-    /// Milliseconds before the message's last sample; 0 or nil for the last one.
+    /// Milliseconds since the stroke's first sample, its down (the Pencil's own clock): nil on the down
+    /// itself and on a hover. An elapsed time only, so no clock of the device leaves it; the Mac times a
+    /// stroke's events by it (the host's PenClock), so a stroke whose samples cross the network in a burst
+    /// keeps the spacing it was drawn with.
     public var t: Double?
 
     public init(x: Double, y: Double, p: Double? = nil, alt: Double? = nil, az: Double? = nil, t: Double? = nil) {
@@ -103,8 +106,8 @@ public struct PenSample: Codable, Equatable, Sendable {
     static func rounded(_ v: Double, places: Double) -> Double { (v * places).rounded() / places }
 
     /// The sample as a host uses it, or nil when a value it has is not finite: the pressure
-    /// clamped to 0…1, the altitude to 0…π/2, a time before the last sample never negative. The
-    /// position is left as it is: off the frame is off the frame, as for kind 8.
+    /// clamped to 0…1, the altitude to 0…π/2, a time never negative. The position is left as it is:
+    /// off the frame is off the frame, as for kind 8.
     public func checked() -> PenSample? {
         guard x.isFinite, y.isFinite, [p, alt, az, t].allSatisfy({ $0?.isFinite ?? true }) else { return nil }
         var sample = self

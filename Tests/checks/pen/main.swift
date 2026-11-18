@@ -21,7 +21,9 @@ func sample(_ x: Double, _ y: Double, p: Double? = nil, alt: Double? = nil, az: 
 func message(_ phase: String, _ samples: PenSample...) -> PenInput { PenInput(phase: phase, samples: samples.isEmpty ? nil : samples) }
 func place(_ x: Double, _ y: Double) -> PenTablet.Place { PenTablet.Place(x: x, y: y) }
 func hovering(_ tiltX: Double = 0, _ tiltY: Double = 0) -> PenPoint { PenPoint(pressure: 0, tiltX: tiltX, tiltY: tiltY, tipDown: false) }
-func drawing(_ pressure: Double, _ tiltX: Double = 0, _ tiltY: Double = 0) -> PenPoint { PenPoint(pressure: pressure, tiltX: tiltX, tiltY: tiltY, tipDown: true) }
+func drawing(_ pressure: Double, _ tiltX: Double = 0, _ tiltY: Double = 0, at elapsed: Double? = nil) -> PenPoint {
+    PenPoint(pressure: pressure, tiltX: tiltX, tiltY: tiltY, tipDown: true, elapsed: elapsed)
+}
 let lifted = PenPoint(pressure: 0, tipDown: false)
 func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
 
@@ -300,20 +302,34 @@ check(PenStrokes.message(PenInput.down, reading(0.123456, 0.5, p: 0.31, alt: 1.0
 check(PenStrokes.message(PenInput.hover, reading(0.2, 0.3, alt: 0.9, az: -1, at: 5)).samples?.first?.p == nil, "a hover carries no pressure")
 check(PenStrokes.message(PenInput.up, reading(0.2, 0.3, at: 5)).checked() != nil && PenStrokes.message(PenInput.cancel, reading(0.2, 0.3, at: 5)).checked() != nil,
       "an up and a cancel are messages a Mac takes")
-check(PenStrokes.moves([]) == [], "no readings: no message")
+check(PenStrokes.moves([], since: 1) == [], "no readings: no message")
+// The times: milliseconds since the stroke's down (the Pencil's own clock, which the Mac's stroke clock
+// times the stroke's events by), an elapsed time only; none on the down itself or on a hover.
+check(PenStrokes.message(PenInput.up, reading(0.2, 0.3, at: 5.25), since: 5).samples?.first?.t == 250, "an up 0.25 s after its down: t 250 ms")
+check(PenStrokes.message(PenInput.cancel, reading(0.2, 0.3, at: 7.0123), since: 7).samples?.first?.t == 12.3, "a cancel's time, to 0.1 ms")
+check(PenStrokes.message(PenInput.hover, reading(0.2, 0.3, at: 9)).samples?.first?.t == nil, "a hover: no time")
+check(PenStrokes.message(PenInput.up, reading(0.2, 0.3, at: 5), since: 5).samples?.first?.t == nil
+      && PenStrokes.message(PenInput.up, reading(0.2, 0.3, at: 4.9), since: 5).samples?.first?.t == nil,
+      "a reading at its down's time, or before it: no time (never 0 written out, never negative)")
+check(PenStrokes.moves([reading(0.1, 0.5, at: 3)], since: nil).first?.samples?.first?.t == nil, "a stroke whose down is not known: no time")
 do {
     let frame = 1.0 / 240
-    let three = PenStrokes.moves([reading(0.1, 0.5, p: 0.2, at: 10), reading(0.2, 0.5, p: 0.3, at: 10 + frame), reading(0.3, 0.5, p: 0.4, at: 10 + 2 * frame)])
-    check(three == [PenInput(phase: "move", samples: [PenSample(x: 0.1, y: 0.5, p: 0.2, t: 8.3), PenSample(x: 0.2, y: 0.5, p: 0.3, t: 4.2), PenSample(x: 0.3, y: 0.5, p: 0.4)])],
-          "a callback's three readings: one move, oldest first, each its milliseconds before the last, the last none")
-    let many = (0..<70).map { reading(Double($0) / 100, 0.5, p: 0.5, at: 20 + Double($0) * frame) }
-    let messages = PenStrokes.moves(many)
+    let three = PenStrokes.moves([reading(0.1, 0.5, p: 0.2, at: 10 + frame), reading(0.2, 0.5, p: 0.3, at: 10 + 2 * frame),
+                                  reading(0.3, 0.5, p: 0.4, at: 10 + 3 * frame)], since: 10)
+    check(three == [PenInput(phase: "move", samples: [PenSample(x: 0.1, y: 0.5, p: 0.2, t: 4.2), PenSample(x: 0.2, y: 0.5, p: 0.3, t: 8.3),
+                                                      PenSample(x: 0.3, y: 0.5, p: 0.4, t: 12.5)])],
+          "a callback's three readings: one move, oldest first, each its milliseconds since the stroke's down")
+    let many = (0..<70).map { reading(Double($0) / 100, 0.5, p: 0.5, at: 20 + Double($0 + 1) * frame) }
+    let messages = PenStrokes.moves(many, since: 20)
     check(messages.map { $0.samples?.count ?? 0 } == [32, 32, 6], "70 readings after a stall: 32, 32 and 6")
     check(messages.allSatisfy { $0.phase == PenInput.move && $0.checked() != nil }, "each a move a Mac takes")
     check(messages.flatMap { $0.samples ?? [] }.map(\.x) == many.map { PenSample(x: $0.x, y: 0).x }, "every reading sent, in order")
-    check(messages.allSatisfy { $0.samples?.last?.t == nil && ($0.samples?.first?.t ?? 0) > 0 }, "each message's times count from its own last sample")
-    check(messages[0].samples?.first?.t == 129.2 && messages[2].samples?.first?.t == 20.8, "31 and 5 readings before the last: 129.2 and 20.8 ms")
-    check(PenStrokes.moves(Array(many.prefix(32))).count == 1 && PenStrokes.moves(Array(many.prefix(33))).count == 2, "32 fit one message, 33 take two")
+    let times = messages.flatMap { $0.samples ?? [] }.compactMap(\.t)
+    check(times.count == 70 && zip(times, times.dropFirst()).allSatisfy { $0 < $1 }, "every sample timed, rising across the messages")
+    check(messages[0].samples?.first?.t == 4.2 && messages[2].samples?.first?.t == 270.8,
+          "the 1st and the 65th reading: 4.2 and 270.8 ms since the down, whichever message carries them")
+    check(PenStrokes.moves(Array(many.prefix(32)), since: 20).count == 1 && PenStrokes.moves(Array(many.prefix(33)), since: 20).count == 2,
+          "32 fit one message, 33 take two")
 }
 
 // A stroke's mode is fixed as the tip lands.
@@ -321,10 +337,13 @@ do {
     var strokes = PenStrokes()
     check(strokes.stroke == nil && !strokes.hovering && !strokes.told && !strokes.canHover, "a new one: nothing")
     check(strokes.touchEnded(now: 1) == nil, "an end without a stroke: none")
-    check(strokes.touchBegan(penMode: true) == .pen && strokes.stroke == .pen && strokes.told, "the tip lands in pen mode: a pen's stroke, and the Mac is told")
-    check(strokes.touchEnded(now: 2) == .pen && strokes.stroke == nil, "its end goes as a pen's")
+    check(strokes.touchBegan(penMode: true, at: 1.5) == .pen && strokes.stroke == .pen && strokes.told, "the tip lands in pen mode: a pen's stroke, and the Mac is told")
+    check(strokes.strokeBegan == 1.5, "the stroke's samples count their times from the down")
+    check(strokes.touchEnded(now: 2) == .pen && strokes.stroke == nil && strokes.strokeBegan == nil, "its end goes as a pen's, and the stroke's start is forgotten")
+    _ = strokes.touchBegan(penMode: true, at: 3)
+    check(strokes.gone() && strokes.strokeBegan == nil, "the surface going forgets it too")
     var mouse = PenStrokes()
-    check(mouse.touchBegan(penMode: false) == .mouse && mouse.stroke == .mouse && !mouse.told, "the tip lands in mouse mode: the mouse's, and the Mac is told of no pen")
+    check(mouse.touchBegan(penMode: false, at: 1) == .mouse && mouse.stroke == .mouse && !mouse.told, "the tip lands in mouse mode: the mouse's, and the Mac is told of no pen")
     check(mouse.hover(isPencil: true, penMode: true) == .ignore, "a hover during a stroke is not sent")
     check(mouse.touchEnded(now: 2) == .mouse, "its end goes as the mouse's")
 }
@@ -340,7 +359,7 @@ do {
     // A hover that ends because the tip landed.
     _ = strokes.hover(isPencil: true, penMode: true)
     strokes.hoverEnded(now: 20)
-    _ = strokes.touchBegan(penMode: true)
+    _ = strokes.touchBegan(penMode: true, at: 0)
     check(!strokes.leaveDue(now: 20.11), "the hover ended as the tip landed: no leave")
     _ = strokes.touchEnded(now: 21)
     _ = strokes.hover(isPencil: true, penMode: true)
@@ -348,12 +367,12 @@ do {
     strokes.hoverEnded(now: 22)
     check(strokes.leaveDue(now: 22.11), "then the Pencil leaves: one leave")
     // The tip lifts straight out of range.
-    _ = strokes.hover(isPencil: true, penMode: true); strokes.hoverEnded(now: 30); _ = strokes.touchBegan(penMode: true); _ = strokes.touchEnded(now: 31)
+    _ = strokes.hover(isPencil: true, penMode: true); strokes.hoverEnded(now: 30); _ = strokes.touchBegan(penMode: true, at: 0); _ = strokes.touchEnded(now: 31)
     check(!strokes.leaveDue(now: 31.05) && strokes.leaveDue(now: 31.1), "a Pencil that can hover, lifted straight out of range: a leave 0.1 s after the lift")
 }
 do {
     var strokes = PenStrokes()   // a Pencil that cannot hover
-    _ = strokes.touchBegan(penMode: true)
+    _ = strokes.touchBegan(penMode: true, at: 0)
     _ = strokes.touchEnded(now: 10)
     check(!strokes.leaveDue(now: 10.2) && strokes.told, "a Pencil that cannot hover sends no leave between strokes (the Mac lets its pen go by itself)")
     check(strokes.gone() && !strokes.told, "the surface going away: the Mac hears it left")
@@ -372,7 +391,7 @@ for penMode in [true, false] {
     var strokes = PenStrokes()
     _ = strokes.hover(isPencil: true, penMode: penMode)
     strokes.hoverEnded(now: 10)
-    _ = strokes.touchBegan(penMode: penMode)
+    _ = strokes.touchBegan(penMode: penMode, at: 0)
     check(strokes.hover(isPencil: true, penMode: penMode) == .ignore, "\(penMode ? "pen" : "mouse") mode: a Pencil hover while the tip is down goes nowhere")
     check(strokes.hover(isPencil: false, penMode: penMode) == .ignore, "\(penMode ? "pen" : "mouse") mode: nor one that does not look like the Pencil's")
     check(!strokes.hovering, "and it does not count as hovering")
@@ -383,7 +402,7 @@ do {
     var strokes = PenStrokes()
     _ = strokes.hover(isPencil: true, penMode: true)
     strokes.hoverEnded(now: 10)
-    _ = strokes.touchBegan(penMode: true)
+    _ = strokes.touchBegan(penMode: true, at: 0)
     _ = strokes.hover(isPencil: true, penMode: true)                // the stale one
     _ = strokes.touchEnded(now: 11)                                  // lifted straight out of range: no hover after
     check(strokes.leaveDue(now: 11.1), "a stale hover during the touch does not keep the Pencil hovering: the leave still comes")
@@ -420,18 +439,118 @@ do {
     }
     if device.hover(isPencil: true, penMode: true) == .pen { send(PenStrokes.message(PenInput.hover, reading(0.3, 0.5, alt: .pi / 4, az: 0, at: 1)), at: 1) }
     device.hoverEnded(now: 1.2)
-    if device.touchBegan(penMode: true) == .pen { send(PenStrokes.message(PenInput.down, reading(0.3, 0.5, p: 0.2, alt: .pi / 2, az: 0, at: 1.2)), at: 1.2) }
+    if device.touchBegan(penMode: true, at: 1.2) == .pen { send(PenStrokes.message(PenInput.down, reading(0.3, 0.5, p: 0.2, alt: .pi / 2, az: 0, at: 1.2)), at: 1.2) }
     check(!device.leaveDue(now: 1.31), "no leave as the tip lands")
-    for message in PenStrokes.moves([reading(0.32, 0.5, p: 0.4, alt: .pi / 2, az: 0, at: 1.21), reading(0.34, 0.5, p: 0.6, alt: .pi / 2, az: 0, at: 1.214)]) { send(message, at: 1.214) }
+    for message in PenStrokes.moves([reading(0.32, 0.5, p: 0.4, alt: .pi / 2, az: 0, at: 1.21), reading(0.34, 0.5, p: 0.6, alt: .pi / 2, az: 0, at: 1.214)],
+                                    since: device.strokeBegan) { send(message, at: 1.214) }
     // The stale hover as the tip lifts, at where the Pencil hovered before it landed: nothing goes.
     check(device.hover(isPencil: true, penMode: true) == .ignore, "the stale hover as the tip lifts is not sent")
-    if device.touchEnded(now: 1.4) == .pen { send(PenStrokes.message(PenInput.up, reading(0.34, 0.5, at: 1.4)), at: 1.4) }
+    let began = device.strokeBegan
+    if device.touchEnded(now: 1.4) == .pen { send(PenStrokes.message(PenInput.up, reading(0.34, 0.5, at: 1.4), since: began), at: 1.4) }
     if device.leaveDue(now: 1.5) { send(PenInput(phase: PenInput.leave), at: 1.5) }
     let tilt = PenTablet.tilt(altitude: PenSample(x: 0, y: 0, alt: .pi / 4).alt, azimuth: 0)
+    var liftedAt200 = lifted
+    liftedAt200.elapsed = 200
     check(posts == [.enter, .move(place(0.3, 0.5), hovering(tilt.x, tilt.y)), .down(place(0.3, 0.5), drawing(0.2)),
-                    .move(place(0.32, 0.5), drawing(0.4)), .move(place(0.34, 0.5), drawing(0.6)), .up(place(0.34, 0.5), lifted), .leave],
-          "a hover, a stroke and the Pencil leaving, end to end: \(posts)")
+                    .move(place(0.32, 0.5), drawing(0.4, at: 10)), .move(place(0.34, 0.5), drawing(0.6, at: 14)), .up(place(0.34, 0.5), liftedAt200), .leave],
+          "a hover, a stroke and the Pencil leaving, end to end, each point of the stroke with its time since the down: \(posts)")
     check(!mac.inProximity && !mac.tipDown && !device.told, "both ends agree nothing is left")
+}
+
+// MARK: The stroke clock (PenClock: pull request #381's idea, on the stroke's own times)
+
+check(PenTablet.point(PenSample(x: 0.5, y: 0.5, p: 0.5, t: 12.5), tipDown: true).elapsed == 12.5
+      && PenTablet.point(PenSample(x: 0.5, y: 0.5), tipDown: false).elapsed == nil, "a point carries its sample's time, and none without one")
+check(PenClock.minStep == 0.0005, "two times at least half a millisecond apart")
+do {
+    var clock = PenClock()
+    check(clock.during(drawing(0.5, at: 10), now: 100) == nil, "no stroke down: no time (the event keeps macOS's)")
+    check(clock.down(drawing(0.3), now: 100) == 100, "the down: timed as it is posted")
+    check(clock.anchor == 100, "and the stroke's clock starts there")
+    // Samples that crossed the network in a burst keep the spacing they were drawn with.
+    let burst = [4.2, 8.3, 12.5, 16.7].map { clock.during(drawing(0.5, at: $0), now: 100.200) }
+    check(burst.map { $0.map { ($0 - 100) * 1000 } }.enumerated().allSatisfy { i, ms in abs((ms ?? -1) - [4.2, 8.3, 12.5, 16.7][i]) < 1e-6 },
+          "a burst 0.2 s late: each timed at the down's time plus its own t, \(burst)")
+    check(clock.during(lifted, now: 100.3) == nil, "a point without its time: none")
+    var up = lifted; up.elapsed = 30
+    check(near(clock.during(up, now: 100.3) ?? 0, 100.030), "the up at its own time too")
+    clock.end()
+    check(clock.anchor == nil && clock.during(drawing(0.5, at: 40), now: 100.4) == nil, "after the up: nothing until the next down")
+}
+do {
+    // The down came later than the rest (its message was held up): a point its time would put in the
+    // future is timed now, and the stroke's clock moves back with it.
+    var clock = PenClock()
+    _ = clock.down(drawing(0.3), now: 50)
+    check(clock.during(drawing(0.5, at: 30), now: 50.010) == 50.010, "30 ms in, but only 10 ms since the down arrived: timed now, never later")
+    check(near(clock.anchor ?? 0, 49.980), "the stroke's clock moved back 20 ms")
+    check(near(clock.during(drawing(0.5, at: 34), now: 50.020) ?? 0, 49.980 + 0.034), "the next one by the moved clock")
+}
+do {
+    // In order: never before the last time given, at least minStep after it, unless that passes now.
+    var clock = PenClock()
+    _ = clock.down(drawing(0.3), now: 10)
+    let a = clock.during(drawing(0.5, at: 5), now: 10.1) ?? 0
+    let b = clock.during(drawing(0.5, at: 5), now: 10.1) ?? 0
+    let c = clock.during(drawing(0.5, at: 3), now: 10.1) ?? 0
+    check(near(a, 10.005) && near(b, 10.0055) && near(c, 10.006), "the same time twice, then an earlier one: half a millisecond apart, in order (\(a), \(b), \(c))")
+    let d = clock.during(drawing(0.5, at: 1_000_000), now: 10.2) ?? 0
+    check(d == 10.2, "a time far past now: now")
+    let e = clock.during(drawing(0.5, at: 1_000_001), now: 10.2) ?? 0
+    check(e == 10.2, "and one more at the same now: still now, never after it")
+    let f = clock.down(drawing(0.3, at: 1e300), now: 10.2)
+    check(f == 10.2 && clock.during(drawing(0.5, at: .greatestFiniteMagnitude), now: 10.3) == 10.3, "huge times: held to now, no trap")
+}
+do {
+    // A down that carries a time of its own (none from a device): the stroke counts from its t 0.
+    var clock = PenClock()
+    _ = clock.down(drawing(0.3, at: 5), now: 20)
+    check(near(clock.anchor ?? 0, 19.995) && near(clock.during(drawing(0.5, at: 15), now: 21) ?? 0, 20.010), "a down at 5 ms: the stroke's 15 ms 10 ms after it")
+}
+check(PenClock.timestamp(1.5) == 1_500_000_000 && PenClock.timestamp(470_740.345632041) == 470_740_345_632_041,
+      "a time as nanoseconds on the event clock")
+check([0, -1, .nan, .infinity, 1e10].allSatisfy { PenClock.timestamp($0) == 0 }, "anything else: 0, which macOS replaces with the time it posts at")
+do {
+    func mode(_ value: String?) -> (Bool, String?) {
+        let m = PenClock.mode(environment: value.map { [PenClock.variable: $0] } ?? [:]); return (m.arrival, m.line)
+    }
+    check(PenClock.variable == "SILL_TEST_PEN_CLOCK", "the TEST ONLY variable's name")
+    check(mode(nil) == (false, nil) && mode("") == (false, nil), "unset: the stroke clock, and no line")
+    check(mode("arrival") == (true, "TEST: an Apple Pencil's events are timed as they are posted, not by the Pencil's own clock (SILL_TEST_PEN_CLOCK=arrival)."),
+          "arrival: no stroke clock, said once")
+    check(mode("stroke") == (false, "TEST: an Apple Pencil's events are timed by the Pencil's own clock, as without SILL_TEST_PEN_CLOCK."), "stroke: as without it")
+    check(mode("ARRIVAL").0 == false && mode("x<y>").1 == "SILL_TEST_PEN_CLOCK ignored: it takes arrival or stroke; a Pencil's events are timed by its own clock.",
+          "anything else: ignored, and its value never echoed")
+}
+// Random strokes with random network delays: the times never pass now, never go back, and keep the
+// Pencil's spacing exactly while nothing held them.
+do {
+    var rnd = Random(state: 0x5111_175)
+    var strokes = 0, kept = 0, held = 0
+    for _ in 0..<3_000 {
+        var clock = PenClock()
+        var now = Double(rnd.below(1_000_000))
+        var last = 0.0
+        for _ in 0..<(1 + rnd.below(4)) {
+            strokes += 1
+            now += rnd.unit() * 2
+            let down = clock.down(drawing(0.3), now: now)
+            if down < last || down > now { check(false, "a down timed \(down) after \(last), now \(now)"); break }
+            last = down
+            var t = 0.0, previous: (time: Double, t: Double)? = nil
+            for _ in 0..<(1 + rnd.below(60)) {
+                t += [4.1667, 4.1667, 8.333, 0, 30][rnd.below(5)]
+                now += [0, 0, 0.004, 0.0042, 0.03, 0.25][rnd.below(6)]          // bursts and stalls
+                guard let time = clock.during(drawing(0.5, at: t), now: now) else { check(false, "a point of a stroke untimed"); break }
+                if time > now + 1e-12 { check(false, "timed after now: \(time) > \(now)") }
+                if time < last { check(false, "timed back: \(time) < \(last)") }
+                if let p = previous, t - p.t >= 1, abs((time - p.time) - (t - p.t) / 1000) < 1e-9 { kept += 1 } else if previous != nil { held += 1 }
+                previous = (time, t); last = time
+            }
+            clock.end()
+        }
+    }
+    check(strokes > 6_000 && kept > 50_000 && held > 1_000, "\(strokes) random strokes: \(kept) intervals kept as drawn, \(held) held to now or to order")
 }
 
 // MARK: Random sessions against a model

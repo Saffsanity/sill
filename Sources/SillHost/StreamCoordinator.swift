@@ -417,6 +417,7 @@ package final class StreamCoordinator {
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
         let displaysHook = DesktopDisplaysHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                     environment: env)
+        let penClock = PenClock.mode(environment: env)       // TEST ONLY, every host: the Pencil's stroke clock off
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
@@ -431,7 +432,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, penClock.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -471,6 +472,7 @@ package final class StreamCoordinator {
         injector.watch = pointer
         injector.dryRun = synthetic
         injector.testLog = synthetic && inputLog.on
+        injector.penClockArrival = penClock.arrival
         // A held key repeats (KeyRepeat) only while its device is heard from: a network can hold the
         // key's up back for seconds before the device is given up.
         injector.heardFrom = { [server] id in server.lastHeard(from: id) }

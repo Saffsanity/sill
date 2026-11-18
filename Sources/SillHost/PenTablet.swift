@@ -9,12 +9,17 @@ package struct PenPoint: Equatable, Sendable {
     package var tiltY: Double
     /// The tip is on the glass: the pen's first button, as a tablet driver reports it.
     package var tipDown: Bool
+    /// The sample's own time, as the device sent it (`PenSample.t`): milliseconds since its stroke's
+    /// first sample. Nil for a hover and for what the host makes (the up of a pen it lets go). The
+    /// stroke clock (`PenClock`) times a stroke's events by it.
+    package var elapsed: Double?
 
-    package init(pressure: Double, tiltX: Double = 0, tiltY: Double = 0, tipDown: Bool) {
+    package init(pressure: Double, tiltX: Double = 0, tiltY: Double = 0, tipDown: Bool, elapsed: Double? = nil) {
         self.pressure = min(max(pressure, 0), 1)
         self.tiltX = min(max(tiltX, -1), 1)
         self.tiltY = min(max(tiltY, -1), 1)
         self.tipDown = tipDown
+        self.elapsed = elapsed
     }
 }
 
@@ -168,7 +173,8 @@ package struct PenTablet: Sendable {
     /// then; full, as a mouse's, when the device sent none), its angles as tilt.
     package static func point(_ sample: PenSample, tipDown: Bool) -> PenPoint {
         let tilt = tilt(altitude: sample.alt, azimuth: sample.az)
-        return PenPoint(pressure: tipDown ? max(sample.p ?? 1, pressureFloor) : 0, tiltX: tilt.x, tiltY: tilt.y, tipDown: tipDown)
+        return PenPoint(pressure: tipDown ? max(sample.p ?? 1, pressureFloor) : 0, tiltX: tilt.x, tiltY: tilt.y, tipDown: tipDown,
+                        elapsed: sample.t)
     }
 
     /// The Pencil's angles as macOS's tilt. With θ the lean from upright (π/2 − altitude), the tilt
@@ -227,4 +233,91 @@ package struct PenTablet: Sendable {
     /// and a leave, which the coordinator then posts only as `stillGoes` says and the tablet takes
     /// only from the device whose pen it is. A hover, a down and a move go no further.
     package static func mayLetGo(_ input: PenInput) -> Bool { stillGoes(input, tipDown: true) }
+}
+
+/// The stroke clock: each event of a stroke timed by the Pencil's own clock, not by when its message
+/// reached the Mac. The idea and its first form are cubelikeplayDaniel's (pull request #381, "hardware
+/// timestamp sync"): samples that cross Wi-Fi in a burst would otherwise reach an app at once, and an app
+/// that reads a stroke's speed from its events' times (a brush that thins as it speeds up) drew beads
+/// where the burst landed. The device sends each sample's `t`, the milliseconds since its stroke's first
+/// sample, an elapsed time only (no clock of the device's leaves it); the stroke's down is timed as it is
+/// posted, and every later point of the stroke at the down's time plus its own `t`, so the stroke keeps
+/// the spacing the Pencil drew it with.
+///
+/// Its rules, whatever arrives:
+/// - never later than now: a point the down's time would put in the future (the down came later than
+///   the rest) is timed now, and the stroke's clock moves back with it;
+/// - in order: each time at least `minStep` after the last one given, unless that would pass now;
+/// - only a stroke the Mac has down: a hover, a move with the tip up, a proximity event and a point
+///   without its time keep the time macOS gives them as they are posted (`nil`).
+///
+/// AppKit reads a CGEvent's timestamp as nanoseconds since the Mac started, the clock of
+/// `CLOCK_UPTIME_RAW` and of `NSEvent.timestamp` (measured on Apple silicon, whose mach clock ticks 41.7
+/// times slower: `SillHost --pen-selftest`'s "Event clock" readings). Its times are seconds on that clock.
+/// TEST ONLY: `SILL_TEST_PEN_CLOCK=arrival` turns it off for a run (`mode`), every event then timed as it
+/// is posted, as before it, so the two can be compared in drawing apps. Pure: the injector posts.
+package struct PenClock: Sendable {
+    /// Two times given are at least this far apart (seconds), so samples that share a time stay in
+    /// their order. A Pencil's samples are 4.2 ms apart (240 a second).
+    package static let minStep = 0.0005
+    /// The time (seconds, the event clock) the stroke's first sample, `t` 0, is timed at; nil between
+    /// strokes.
+    package private(set) var anchor: Double?
+    /// The last time given.
+    package private(set) var last = 0.0
+
+    package init() {}
+
+    /// The stroke's down, posted at `now`: timed now (never before the last time given), and the
+    /// stroke's clock starts from it, less its own `t` (0 from a device, which sends none on a down).
+    package mutating func down(_ point: PenPoint, now: Double) -> Double {
+        let time = max(now, last)
+        anchor = time - (point.elapsed ?? 0) / 1000
+        last = time
+        return time
+    }
+
+    /// A point of the stroke after its down (each drag, and its up), posted at `now`: the down's time
+    /// plus its own `t`, held to the rules above. Nil while no stroke is down, or for a point without
+    /// its time: the event then keeps the time it is posted at.
+    package mutating func during(_ point: PenPoint, now: Double) -> Double? {
+        guard var anchor, let elapsed = point.elapsed else { return nil }
+        var time = anchor + elapsed / 1000
+        if time > now {
+            anchor = now - elapsed / 1000
+            self.anchor = anchor
+            time = now
+        }
+        time = min(max(time, last + Self.minStep), max(now, last))
+        last = time
+        return time
+    }
+
+    /// The stroke ended: its up was posted, or the pen was let go.
+    package mutating func end() { anchor = nil }
+
+    /// TEST ONLY: the variable that turns the stroke clock off for a run, read by every host (Sill.app
+    /// too: it changes only the times of a Pencil's events, so it lets no one in), and the one line it
+    /// prints at start; nil when it is not set. The value is never echoed.
+    package static let variable = "SILL_TEST_PEN_CLOCK"
+
+    package static func mode(environment: [String: String]) -> (arrival: Bool, line: String?) {
+        guard let value = environment[variable], !value.isEmpty else { return (false, nil) }
+        switch value {
+        case "arrival":
+            return (true, "TEST: an Apple Pencil's events are timed as they are posted, not by the Pencil's own clock (\(variable)=arrival).")
+        case "stroke":
+            return (false, "TEST: an Apple Pencil's events are timed by the Pencil's own clock, as without \(variable).")
+        default:
+            return (false, "\(variable) ignored: it takes arrival or stroke; a Pencil's events are timed by its own clock.")
+        }
+    }
+
+    /// A time as a CGEvent's timestamp: nanoseconds on the event clock. Only times this gave (between
+    /// `minStep` and a real now) reach it, so it never traps; anything else is 0, which macOS replaces
+    /// with the time it posts the event at.
+    package static func timestamp(_ time: Double) -> UInt64 {
+        guard time.isFinite, time > 0, time < 1e9 else { return 0 }
+        return UInt64((time * 1_000_000_000).rounded())
+    }
 }

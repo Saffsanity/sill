@@ -13,7 +13,7 @@ struct PenLink {
     /// The tip landed (`true`) or lifted, at a touch's time.
     var touching: (Bool, TimeInterval) -> Void = { _, _ in }
     /// Whether a finger stroke that began at this time says nothing: a palm resting while the Pencil
-    /// draws (PenStrokes.Palm).
+    /// draws (PenStrokes.Palm), while Ignore Fingers While Drawing is on.
     var fingersSilent: (TimeInterval) -> Bool = { _ in false }
 }
 
@@ -796,7 +796,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// hover's.
     private func pencilDown(_ reading: PenStrokes.Reading?, at time: TimeInterval) -> Bool {
         pen.touching(true, time)
-        guard penStrokes.touchBegan(penMode: pen.asPen()) == .pen else { return false }
+        guard penStrokes.touchBegan(penMode: pen.asPen(), at: time) == .pen else { return false }
         guard let reading else { return true }
         pen.send(PenStrokes.message(PenInput.down, reading))
         setOwnPointer(CGPoint(x: reading.x, y: reading.y), .pencil)
@@ -807,7 +807,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// callback comes once a frame), oldest first, so a stroke loses none.
     private func pencilMoved(_ readings: [PenStrokes.Reading]) -> Bool {
         guard penStrokes.stroke == .pen else { return false }
-        for message in PenStrokes.moves(readings) { pen.send(message) }
+        for message in PenStrokes.moves(readings, since: penStrokes.strokeBegan) { pen.send(message) }
         if let last = readings.last { setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil) }
         return true
     }
@@ -817,10 +817,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// alone, which lets the button up where the Mac's pointer is.
     private func pencilUp(_ reading: PenStrokes.Reading?, at time: TimeInterval, as phase: String) -> Bool {
         pen.touching(false, time)
+        let began = penStrokes.strokeBegan
         guard penStrokes.touchEnded(now: time) == .pen else { return false }
         if var reading {
             reading.pressure = nil
-            pen.send(PenStrokes.message(phase, reading))
+            pen.send(PenStrokes.message(phase, reading, since: began))
             setOwnPointer(CGPoint(x: reading.x, y: reading.y), .pencil)
         } else {
             pen.send(PenInput(phase: PenInput.cancel))

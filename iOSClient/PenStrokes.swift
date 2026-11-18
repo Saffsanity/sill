@@ -44,30 +44,33 @@ struct PenStrokes: Equatable {
         return min(max(force / maximum, 0), 1)
     }
 
-    /// A one-sample message: a hover, a down, an up or a cancel.
-    static func message(_ phase: String, _ reading: Reading) -> PenInput {
-        PenInput(phase: phase, samples: [sample(reading, before: reading.time)])
+    /// A one-sample message: a hover and a down without a time (a down is its stroke's first sample),
+    /// an up or a cancel with its time since its stroke's down (`since`, the down's reading's time).
+    static func message(_ phase: String, _ reading: Reading, since began: Double? = nil) -> PenInput {
+        PenInput(phase: phase, samples: [sample(reading, since: began)])
     }
 
     /// One touch callback's readings, oldest first, as "move" messages: at most
     /// `PenInput.maxSamples` each (a callback after a stall can bring more), every reading sent,
-    /// each sample's `t` the milliseconds before its own message's last.
-    static func moves(_ readings: [Reading]) -> [PenInput] {
+    /// each sample's `t` the milliseconds since its stroke's down (`since`), the Pencil's own clock,
+    /// which the Mac times the stroke's events by (its PenClock: pull request #381's idea).
+    static func moves(_ readings: [Reading], since began: Double?) -> [PenInput] {
         var messages: [PenInput] = []
         var start = 0
         while start < readings.count {
             let chunk = readings[start..<min(start + PenInput.maxSamples, readings.count)]
-            let last = chunk[chunk.endIndex - 1].time
-            messages.append(PenInput(phase: PenInput.move, samples: chunk.map { sample($0, before: last) }))
+            messages.append(PenInput(phase: PenInput.move, samples: chunk.map { sample($0, since: began) }))
             start += PenInput.maxSamples
         }
         return messages
     }
 
-    private static func sample(_ reading: Reading, before last: Double) -> PenSample {
-        let ms = (last - reading.time) * 1000
+    /// A reading as the wire's sample; its time only after its stroke's down, an elapsed time (no clock of
+    /// this device leaves it).
+    private static func sample(_ reading: Reading, since began: Double?) -> PenSample {
+        let ms = began.map { (reading.time - $0) * 1000 }
         return PenSample(x: reading.x, y: reading.y, p: reading.pressure, alt: reading.altitude, az: reading.azimuth,
-                         t: ms > 0.05 ? ms : nil)
+                         t: ms.flatMap { $0 > 0.05 ? $0 : nil })
     }
 
     // MARK: A stroke, a hover, and leaving
@@ -75,6 +78,9 @@ struct PenStrokes: Equatable {
     /// A Pencil touch is down, in this mode. Fixed as the tip lands, so a stroke's up always goes
     /// the way its down did, whatever the switch or the Mac say meanwhile.
     private(set) var stroke: Mode?
+    /// When the stroke's tip landed (its down's reading's time), which its samples' times count from;
+    /// nil between strokes.
+    private(set) var strokeBegan: Double?
     /// The Pencil is over the glass, not touching.
     private(set) var hovering = false
     /// A hover was seen: this Pencil and iPad report one, so its end means the Pencil left. One
@@ -84,10 +90,11 @@ struct PenStrokes: Equatable {
     private(set) var told = false
     private var checkAt: Double?
 
-    /// The tip landed. The stroke's mode, for all of it.
-    mutating func touchBegan(penMode: Bool) -> Mode {
+    /// The tip landed, at `time`. The stroke's mode, for all of it.
+    mutating func touchBegan(penMode: Bool, at time: Double) -> Mode {
         let mode: Mode = penMode ? .pen : .mouse
         stroke = mode
+        strokeBegan = time
         if mode == .pen { told = true }
         return mode
     }
@@ -96,6 +103,7 @@ struct PenStrokes: Equatable {
     mutating func touchEnded(now: Double) -> Mode? {
         let mode = stroke
         stroke = nil
+        strokeBegan = nil
         checkAt = now + Self.leaveDelay
         return mode
     }
@@ -147,7 +155,7 @@ struct PenStrokes: Equatable {
 
     /// The surface is going away. True when the Mac was told of the pen and should hear it left.
     mutating func gone() -> Bool {
-        defer { stroke = nil; hovering = false; told = false; checkAt = nil }
+        defer { stroke = nil; strokeBegan = nil; hovering = false; told = false; checkAt = nil }
         return told
     }
 
@@ -174,3 +182,4 @@ struct PenStrokes: Equatable {
         }
     }
 }
+
