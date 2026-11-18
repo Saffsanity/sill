@@ -85,7 +85,7 @@ its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit
   set of the same name, each preview, and Sill for Mac's icon the original.
 - **The picker** (`AppIconPicker`): Settings, this device's part, after Take the Tour and right above the version
   line: a small "App Icon" title, the pictures in the panel's group style (each icon's Default look at 60 pt,
-  growing with the text size, its word under it, "by grub-basket" under the community's), the one the Home Screen
+  growing with the text size to 96 pt, its word under it, "by grub-basket" under the community's), the one the Home Screen
   shows ringed in the accent and checked, and under the group "The icon Sill shows on this iPad’s Home Screen.
   Original is always here to switch back to." A tap asks iOS, which shows its own alert ("You have changed the icon
   for “Sill”."); while iOS answers the pictures wait; a refusal shows an orange line under them. VoiceOver: each

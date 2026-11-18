@@ -20,10 +20,14 @@ struct AppIconPicker: View {
     @State private var changing = false
     /// iOS did not change the icon: the orange line under the pictures, until the next tap.
     @State private var failed = AppIconPicker.startsFailed
-    /// The picture's side, 60 pt at the standard text size, growing with it.
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 60
-    /// A picture's column: the picture and its ring, with room for its word beside them.
-    @ScaledMetric(relativeTo: .footnote) private var column: CGFloat = 92
+    /// The picture's side: 60 pt at the standard text size, growing with it to 96 pt (the previews' 288 pixels
+    /// at 3x), so at the accessibility sizes the words grow and the pictures stay whole on a phone.
+    @ScaledMetric(relativeTo: .body) private var scaledSide: CGFloat = 60
+    private var side: CGFloat { min(scaledSide, 96) }
+    /// A picture's column: room for its word at the footnote's size ("Community"), and never narrower than the
+    /// picture and its ring. At the accessibility sizes two no longer fit side by side on a phone: they stack.
+    @ScaledMetric(relativeTo: .footnote) private var scaledColumn: CGFloat = 92
+    private var column: CGFloat { max(scaledColumn, side + 20) }
 
     /// Whether Settings shows the group: where iOS can change this app's icon.
     static var offered: Bool {
@@ -105,10 +109,11 @@ struct AppIconPicker: View {
         }
         .buttonStyle(.plain)
         .disabled(changing)
-        .accessibilityElement(children: .ignore)
+        // The button is one element already; its words replace what its picture and lines would say (the
+        // picture's asset name among them).
         .accessibilityLabel(choice.spoken)
         .accessibilityHint(AppIconChoice.Copy.hint(selected: selected))
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// A tap: what AppIconChoice says to ask of iOS, if anything, then iOS's own name again once it answers.
