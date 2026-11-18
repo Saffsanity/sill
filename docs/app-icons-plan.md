@@ -125,8 +125,8 @@ original is always offered."
 - A comment on #386 (for Noah to post): "Thank you, @grub-basket, for this icon and for making it an Icon Composer
   document. Sill keeps its original icon as the default, now redrawn in Liquid Glass too, and yours ships beside it
   as the Community icon: Settings › App Icon on iPhone and iPad, credited to you by name, with your commit and
-  authorship kept (#NNN). The menu bar glyph, site, disk image and design changes don't come with it, since the
-  original stays Sill's face on the Mac and the site, so I'll close this pull request once #NNN merges. Thank you
+  authorship kept (#390). The menu bar glyph, site, disk image and design changes don't come with it, since the
+  original stays Sill's face on the Mac and the site, so I'll close this pull request once #390 merges. Thank you
   again."
 
 ## Defaults taken for Noah to confirm
