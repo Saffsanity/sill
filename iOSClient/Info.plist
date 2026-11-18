@@ -19,6 +19,14 @@
 	<array>
 		<string>_sill._tcp</string>
 	</array>
+	<!-- Picture in Picture (docs/picture-in-picture-plan.md): AVKit takes a picture into iOS's floating
+	     window, and keeps the app running while it shows, only with the audio background mode (Xcode's
+	     "Audio, AirPlay, and Picture in Picture"). Nothing else uses it: Sill's sound still stops in the
+	     background unless that window plays it (PictureInPicturePolicy.soundHeard). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<!-- Add a Mac: the embedded scanner reads the pairing code the Mac shows. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Sill scans the code on your Mac to pair with it.</string>

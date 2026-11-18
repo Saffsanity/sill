@@ -67,11 +67,19 @@ package struct HostConfig: Equatable, Sendable {
     /// shared field: Noah, 2026-10-27, docs/audio-plan.md's Q8 as revised); each device mutes it for
     /// itself alone, and that never reaches the Mac.
     package var sendAudio: Bool
+    /// Show this account while another user is on the screen (docs/off-console-plan.md, issue #316): while
+    /// another user's session, the login window or nobody holds this Mac's console, devices see this session's
+    /// own desktop and windows, to look at, and nothing they send acts on it (LockPolicy's off-console view).
+    /// Off in both `standard` and `app`: by default such a Mac shows nothing of this session (0.6.0's rule).
+    /// The Mac's alone, like Share clipboard: absent from StreamSettings, HostSettingsChange,
+    /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on. Applied at once
+    /// (`StreamCoordinator.setTarget`: the lock's gate takes it), never by a restart of its own.
+    package var offConsoleView: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -86,6 +94,7 @@ package struct HostConfig: Equatable, Sendable {
         self.requirePairing = requirePairing
         self.shareClipboard = shareClipboard
         self.sendAudio = sendAudio
+        self.offConsoleView = offConsoleView
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -103,7 +112,8 @@ package struct HostConfig: Equatable, Sendable {
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
-                                             requirePairing: true, shareClipboard: true, sendAudio: false)
+                                             requirePairing: true, shareClipboard: true, sendAudio: false,
+                                             offConsoleView: false)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -160,6 +170,7 @@ package struct HostConfig: Equatable, Sendable {
         if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
         if shareClipboard != new.shareClipboard { parts.append("share clipboard \(onOff(shareClipboard)) → \(onOff(new.shareClipboard))") }
         if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
+        if offConsoleView != new.offConsoleView { parts.append("off-console view \(onOff(offConsoleView)) → \(onOff(new.offConsoleView))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

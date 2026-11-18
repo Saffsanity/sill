@@ -61,6 +61,8 @@ final class UpdateChecker {
     private(set) var automatic: Bool
 
     @ObservationIgnored let configuration: Configuration
+    /// After every check GitHub answered: the automatic update decides then (AppUpdater.considerAutomatic).
+    @ObservationIgnored var onAnswered: (() -> Void)?
     @ObservationIgnored private let running: SillVersion?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let session: URLSession
@@ -86,7 +88,8 @@ final class UpdateChecker {
                 : Date(timeIntervalSince1970: d.double(forKey: UpdatePolicy.Stored.lastCheckKey)),
             etag: d.string(forKey: UpdatePolicy.Stored.etagKey),
             latestTag: d.string(forKey: UpdatePolicy.Stored.tagKey),
-            latestURL: d.string(forKey: UpdatePolicy.Stored.urlKey))
+            latestURL: d.string(forKey: UpdatePolicy.Stored.urlKey),
+            latestSigned: d.object(forKey: UpdatePolicy.Stored.signedKey) as? Bool)
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = configuration.timeout
         c.timeoutIntervalForResource = configuration.timeout
@@ -110,6 +113,11 @@ final class UpdateChecker {
     /// without a test feed.
     var canCheck: Bool { running != nil && !testPatternOnly }
     private var testPatternOnly: Bool { configuration.testPattern && !configuration.testFeed }
+
+    /// The stored release, newer or not (Update Now's choice beside a nightly).
+    var latest: UpdatePolicy.Offer? {
+        UpdatePolicy.latest(stored: stored, anyReleaseURL: configuration.testFeed)
+    }
 
     /// The stored release, when it is newer than what runs.
     var offer: UpdatePolicy.Offer? {
@@ -243,6 +251,7 @@ final class UpdateChecker {
             retryAt = now.addingTimeInterval(configuration.retry)
         }
         schedule()
+        if outcome.answered { onAnswered?() }
     }
 
     private func save(_ s: UpdatePolicy.Stored) {
@@ -253,6 +262,7 @@ final class UpdateChecker {
         set(s.etag, UpdatePolicy.Stored.etagKey)
         set(s.latestTag, UpdatePolicy.Stored.tagKey)
         set(s.latestURL, UpdatePolicy.Stored.urlKey)
+        set(s.latestSigned, UpdatePolicy.Stored.signedKey)
     }
 
     /// One GET, as UpdatePolicy reads it: the status, at most `maxBody` of the body, the ETag and

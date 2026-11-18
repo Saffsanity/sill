@@ -42,6 +42,21 @@ check(interpret(ok(body("0.4")), running: v03).0 == .newer(P.Offer(version: v04,
 // A 200 without an ETag clears the stored one.
 (o, s) = interpret(ok(body(), etag: nil), storedRelease)
 check(s.etag == nil && s.latestTag == "v0.4.0", "200 without an ETag clears it: \(s)")
+// A release that carries Update Now's signed manifest (docs/one-click-update-plan.md §4.3): offered as
+// signed, kept through a 304, and forgotten when a 200 lists it no more.
+func signedBody() -> Data {
+    try! JSONSerialization.data(withJSONObject: ["tag_name": "v0.4.0", "html_url": page, "draft": false, "prerelease": false,
+                                                 "assets": [["name": "Sill.zip"], ["name": "Sill.zip.manifest"]]])
+}
+(o, s) = interpret(ok(signedBody()))
+check(o == .newer(P.Offer(version: v04, tag: "v0.4.0", url: URL(string: page)!, signed: true)) && s.latestSigned == true, "a signed release: \(o) \(s)")
+check(P.offer(stored: s, running: v03)?.signed == true, "the stored offer is signed")
+(o, s) = interpret(status(304), s)
+check(o == .newer(P.Offer(version: v04, tag: "v0.4.0", url: URL(string: page)!, signed: true)) && s.latestSigned == true, "304 keeps it signed")
+(o, s) = interpret(ok(body()), s)
+check(s.latestSigned == nil && o == .newer(offer04), "a 200 without the manifest: not signed")
+check(interpret(ok(try! JSONSerialization.data(withJSONObject: ["tag_name": "v0.4.0", "html_url": page,
+      "assets": [["name": "Sill.zip.manifest.txt"]]]))).1.latestSigned == nil, "only that asset's exact name")
 // 304 with a stored release: as for it, newer or not; only the time moves.
 (o, s) = interpret(status(304), storedRelease)
 check(o == .newer(offer04) && s == P.Stored(lastCheck: now, etag: storedRelease.etag, latestTag: "v0.4.0", latestURL: page), "304 newer: \(o) \(s)")

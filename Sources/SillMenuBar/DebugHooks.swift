@@ -16,7 +16,7 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              shareClipboard, offConsoleView, remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
@@ -369,6 +369,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
+        case "offConsoleView": config.offConsoleView = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -401,6 +402,7 @@ enum DebugHooks {
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
                                    showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
+                                   offConsoleView: .constant(sample.offConsoleView),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -449,6 +451,28 @@ enum DebugHooks {
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-updates-\(sample.name)-\(name).png"))
             }
+        }
+        // Update Now's states, as a build with an update key draws them (this branch's builds have none).
+        let offered = updatePaneSamples().first { $0.name == "available" }!.pane
+        for sample in updateNowSamples() {
+            // "auto-updated" runs the version it updated to, and "nightly-running-off" a nightly newer than any
+            // release: the check's line is the up-to-date one.
+            let checkPane = ["auto-updated", "nightly-running-off"].contains(sample.name)
+                ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
+            let section = Form { UpdatesSection(pane: checkPane, install: sample.install, installAvailable: true, automatic: .constant(sample.checkOn),
+                                                autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn),
+                                                nightlySwitch: sample.nightlySwitch, nightly: .constant(sample.nightlyOn)) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-update-now-\(sample.name)-\(name).png"))
+            }
+            // Larger text: SwiftUI on macOS has no Dynamic Type for a Settings form (dynamicTypeSize renders the
+            // same, byte for byte), so the section's own text is set at 17 points instead of 13, to see every row
+            // wrap rather than cut off at the pane's width.
+            render(section.font(.system(size: 17)), appearance: .aqua,
+                   to: out.appendingPathComponent("pane-update-now-\(sample.name)-light-larger.png"))
         }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
@@ -510,6 +534,19 @@ enum DebugHooks {
                                               update: (offer: previewOffer, running: SillVersion("0.3.0")!))
             menuText += "=== update-available (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            // With Update Now (a build with an update key): the item opens Settings, and says an update's step.
+            let installStates: [(String, MenuBuilder.UpdateMenuState)] = [
+                ("update-now-available", MenuBuilder.UpdateMenuState(phase: .idle, available: true)),
+                ("update-now-refused", MenuBuilder.UpdateMenuState(phase: .idle, available: true, refusal: .notWritable("/Applications"))),
+                ("update-now-downloading", MenuBuilder.UpdateMenuState(phase: .downloading(received: 2_400_000, total: 5_920_002), available: true)),
+                ("update-now-waiting", MenuBuilder.UpdateMenuState(phase: .waiting, available: true)),
+            ]
+            for (label, install) in installStates {
+                let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: idle.permissions,
+                                                  update: (offer: previewOffer, running: SillVersion("0.3.0")!), install: install)
+                menuText += "=== \(label) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
+                menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            }
         }
         try? menuText.write(to: out.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
         renderGlyphSheet(to: out.appendingPathComponent("glyphs.png"))
@@ -766,6 +803,9 @@ enum DebugHooks {
         waiting.network = .waiting("POSIXErrorCode(rawValue: 50): Network is down")
         var failed = HostStatusSnapshot()
         failed.network = .failed("POSIXErrorCode(rawValue: 48): Address already in use")
+        // The off-console view (docs/off-console-plan.md): another user on the screen, this account shown.
+        var offConsoleView = streaming
+        offConsoleView.offConsoleView = true
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -784,6 +824,7 @@ enum DebugHooks {
             Sample(name: "waiting", snapshot: waiting),
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
+            Sample(name: "off-console-view", snapshot: offConsoleView),
         ]
     }
 }
@@ -825,6 +866,123 @@ extension DebugHooks {
             UpdatePaneSample(name: "testpattern", pane: pane(testPatternOnly: true)),
         ]
     }
+
+    struct UpdateNowSample {
+        var name: String
+        var install: UpdateInstallPolicy.Pane
+        /// Automatically update Sill's switch, as the section draws it.
+        var autoSwitch = UpdateAutoPolicy.Switch(shown: true, enabled: true)
+        var autoOn = false
+        /// The daily check's switch.
+        var checkOn = true
+        /// "Use nightly builds", as the section draws it (plan §16).
+        var nightlySwitch = UpdateAutoPolicy.Switch()
+        var nightlyOn = false
+    }
+
+    /// pane-update-now-*: the section with Update Now (a build with an update key), Sill 0.4 offered to
+    /// a running 0.3, in each of Update Now's states and refusals (docs/one-click-update-plan.md §4.7).
+    static func updateNowSamples() -> [UpdateNowSample] {
+        typealias P = UpdateInstallPolicy
+        typealias A = UpdateAutoPolicy
+        let v04 = previewOffer.version, now = previewNow
+        func pane(_ phase: P.Phase, mode: P.Mode = .manual, refusal: P.Refusal? = nil, keptAt: String? = nil, offered: SillVersion? = v04,
+                  automatic: P.AutomaticPane = P.AutomaticPane(), offeredBuild: Int? = nil, ownLine: Bool = false, version: SillVersion? = nil) -> P.Pane {
+            P.pane(P.State(phase: phase, mode: mode), offered: version ?? offered, running: SillVersion("0.3.0")!, available: true,
+                   refusal: refusal, keptAt: keptAt, automatic: automatic, offeredBuild: offeredBuild, ownLine: ownLine)
+        }
+        let v062 = SillVersion("0.6.2")!
+        func nightlySwitch(on: Bool) -> UpdateAutoPolicy.Switch {
+            A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: on, runningNightly: nil)
+        }
+        // What the automatic update remembers in each sample, and its part of the pane.
+        let on = A.switched(A.Memory(), on: true)
+        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04, build: Int? = nil,
+                  release: (version: SillVersion, tag: String, waitUntil: Date?)? = nil) -> P.AutomaticPane {
+            A.pane(m, offered: offered, offeredTag: build != nil ? "nightly" : offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil,
+                   now: now, offeredBuild: build, release: release)
+        }
+        let nightlyOn = A.switchedNightly(on, on: true)
+        let tried = A.began(on, v04, now: now.addingTimeInterval(-26 * 3600))
+        let twice = A.failed(A.began(tried, v04, now: now.addingTimeInterval(-2 * 3600)), v04, why: "the download stopped")
+        let updated = A.updated(on, to: v04, at: now.addingTimeInterval(-2 * 3600))
+        let switchOn = UpdateAutoPolicy.Switch(shown: true, enabled: true)
+        return [
+            UpdateNowSample(name: "available", install: pane(.idle)),
+            UpdateNowSample(name: "refused-folder", install: pane(.idle, refusal: .notWritable("/Applications"))),
+            UpdateNowSample(name: "refused-account", install: pane(.idle, refusal: .otherAccount("Alex Example"))),
+            UpdateNowSample(name: "refused-owner", install: pane(.idle, refusal: .otherOwner("Alex Example"))),
+            UpdateNowSample(name: "refused-translocated", install: pane(.idle, refusal: .translocated)),
+            UpdateNowSample(name: "confirming", install: pane(.confirming(devices: [P.Device(key: "1", name: "iPad (iPad14,1)")]))),
+            UpdateNowSample(name: "fetching", install: pane(.fetching)),
+            UpdateNowSample(name: "downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002))),
+            UpdateNowSample(name: "downloading-start", install: pane(.downloading(received: 0, total: 0))),
+            UpdateNowSample(name: "checking", install: pane(.checking)),
+            UpdateNowSample(name: "ready", install: pane(.ready(devices: [P.Device(key: "1", name: "iPad (iPad14,1)"), P.Device(key: "2", name: "iPhone (iPhone16,1)")]))),
+            UpdateNowSample(name: "installing", install: pane(.installing)),
+            UpdateNowSample(name: "restarting", install: pane(.restarting)),
+            UpdateNowSample(name: "failed-download", install: pane(.failed(.download("The network connection was lost.")))),
+            // The two checks, named apart: Apple's (Developer ID, notarization) and Sill's update key's.
+            UpdateNowSample(name: "failed-signature", install: pane(.failed(.bundle(.wrongSigner)))),
+            UpdateNowSample(name: "failed-notarized", install: pane(.failed(.bundle(.notNotarized)))),
+            UpdateNowSample(name: "failed-codesignature", install: pane(.failed(.bundle(.invalidSignature(-67061))))),
+            UpdateNowSample(name: "failed-notsigned", install: pane(.failed(.notSigned))),
+            UpdateNowSample(name: "failed-updatekey", install: pane(.failed(.manifest(.badSignature)))),
+            UpdateNowSample(name: "failed-otherkey", install: pane(.failed(.manifest(.unknownKey("1a2b3c4d"))))),
+            UpdateNowSample(name: "failed-mismatch", install: pane(.failed(.manifestMismatch("sha256")))),
+            UpdateNowSample(name: "failed-notthecode", install: pane(.failed(.bundle(.notManifest("code"))))),
+            UpdateNowSample(name: "failed-stopped", install: pane(.failed(.stopped(tag: "v0.4.0")))),
+            UpdateNowSample(name: "failed-stopunreadable", install: pane(.failed(.stopUnreadable(.badSignature)))),
+            UpdateNowSample(name: "failed-didnotstart", install: pane(.failed(.didNotStart("it quit as it started", putBack: true)))),
+            UpdateNowSample(name: "failed-lost", install: pane(.failed(.didNotStart("it quit as it started", putBack: false)),
+                                                               keptAt: "/private/var/folders/xy/T/TemporaryItems/Sill previous copy ab12Cd/Sill.app")),
+            UpdateNowSample(name: "failed-gone", install: pane(.failed(.checkAfterSwap(.invalidSignature(-67054), putBack: false)))),
+            // Automatically update Sill (§15): the switch and every state it adds.
+            UpdateNowSample(name: "auto-off", install: pane(.idle)),
+            UpdateNowSample(name: "auto-on", install: pane(.idle, automatic: auto(on)), autoOn: true),
+            UpdateNowSample(name: "auto-coolingoff", install: pane(.idle, automatic: auto(on, waitUntil: now.addingTimeInterval(30 * 3600))), autoOn: true),
+            UpdateNowSample(name: "auto-downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-waiting", install: pane(.waiting, mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed", install: pane(.failed(.download("The network connection was lost.")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed-twice", install: pane(.failed(.hashMismatch), mode: .automatic, automatic: auto(twice)), autoOn: true),
+            UpdateNowSample(name: "auto-notautomatic", install: pane(.failed(.notAutomatic("it was signed more than 120 days ago")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-restored", install: pane(.failed(.didNotStart("it quit before it had run for long enough", putBack: true)), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-rollback", install: pane(.idle, automatic: auto(A.signedRelease(on, SillVersion("0.5")!))), autoOn: true),
+            UpdateNowSample(name: "auto-stopped", install: pane(.idle, automatic: auto(A.stopped(on, "v0.4.0"))), autoOn: true),
+            UpdateNowSample(name: "auto-updated", install: pane(.idle, offered: nil, automatic: auto(updated, running: "0.4.0", offered: nil)), autoOn: true),
+            UpdateNowSample(name: "auto-checkoff", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: false), checkOn: false),
+            UpdateNowSample(name: "auto-nokeychain", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false)),
+            UpdateNowSample(name: "auto-refused", install: pane(.idle, refusal: .translocated, automatic: auto(on)),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: true), autoOn: true),
+            // The second security pass: Install Now's second look at GitHub (G1), and an item Sill couldn't read (A3).
+            UpdateNowSample(name: "auto-lookingagain", install: pane(.lookingAgain(devices: []), automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-unreadable", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)),
+            // Use nightly builds (plan §16): the switch in a build with a nightly key, on and off, a nightly offered
+            // (with Automatically update Sill on: releases only, and with a release it would install meanwhile),
+            // Update Now downloading one, failed, and this Sill a nightly with the switch off. No sample has a nightly
+            // installing by itself: none can (option 4).
+            UpdateNowSample(name: "nightly-off", install: pane(.idle), nightlySwitch: nightlySwitch(on: false), nightlyOn: false),
+            UpdateNowSample(name: "nightly-offered", install: pane(.idle, offeredBuild: 1471, ownLine: true, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-auto", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, ownLine: true, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-auto-release", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471,
+                                                                                                release: (version: v04, tag: "v0.4", waitUntil: nil)),
+                                                                        offeredBuild: 1471, ownLine: true, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-downloading", install: pane(.downloading(received: 2_400_000, total: 6_210_000),
+                                                                       automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-failed-key", install: pane(.failed(.manifest(.badSignature)), offeredBuild: 1471, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-running-off", install: pane(.idle, offered: nil),
+                            nightlySwitch: A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (SillVersion("0.6.3")!, 1520)),
+                            nightlyOn: false),
+        ].map { var s = $0; if s.autoSwitch == switchOn, s.autoOn { s.autoSwitch = A.switchState(available: true, canKeep: true, checkOn: s.checkOn, refusal: nil, on: true) }; return s }
+    }
 }
 
 // MARK: Remote access previews
@@ -849,6 +1007,7 @@ extension DebugHooks {
         var status: RemoteStatus
         var requirePairing = true
         var showPairingWindowToScreenSharing = false
+        var offConsoleView = false
     }
 
     /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
@@ -872,6 +1031,7 @@ extension DebugHooks {
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
                               showPairingWindowToScreenSharing: true),
+            DevicesPaneSample(name: "offconsoleview", status: RemoteStatus(homeDoor: .pairingRequired), offConsoleView: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),
