@@ -22,6 +22,12 @@ try? fm.removeItem(at: scratch)
 try! fm.createDirectory(at: scratch, withIntermediateDirectories: true)
 defer { try? fm.removeItem(at: scratch) }
 func now() -> Double { ProcessInfo.processInfo.systemUptime }
+// A whole run takes seconds; one that stalls everywhere (a mutant) fails here, well before module.py's 300 s limit.
+Thread.detachNewThread {
+    sleep(200)
+    print("FAIL: the check ran past 200 s: \(checks - failures)/\(checks) checks passed by then")
+    exit(1)
+}
 func waitFor(_ limit: Double, _ ok: () -> Bool) -> Bool {
     let end = now() + limit
     while now() < end { if ok() { return true }; usleep(2_000) }
