@@ -73,6 +73,8 @@ check(fmt(CameraDemand(width: 720, height: 1280, fps: 30)) == "1280x720@30" && f
       "a tall demand read in the camera's own terms, then turned as the device stands")
 check(fmt(CameraDemand(width: 1024, height: 768, fps: 24), supports: { w, _, _ in w != 1024 }) == "1280x720@24", "no format at that size: 1280×720, the rate kept")
 check(fmt(CameraDemand(width: 1280, height: 720, fps: 60)) == "1280x720@30", "never over 30 fps")
+check(fmt(CameraDemand(width: 1920, height: 1080, fps: 60), supports: { _, _, fps in fps <= 30 }) == "1920x1080@30",
+      "a 60 fps demand: the camera's format asked for at 30 fps, so 1080p is kept")
 check(fmt(CameraDemand(width: 1280, height: 720, fps: 30), p: .fair) == "1280x720@30", "fair: as asked")
 check(fmt(CameraDemand(width: 1920, height: 1080, fps: 30), p: .serious) == "1920x1080@20", "serious: 20 fps")
 check(fmt(CameraDemand(width: 1920, height: 1080, fps: 30), p: .critical) == "1280x720@15", "critical: 15 fps and 1280×720 at most")
@@ -145,6 +147,8 @@ check(note(st("idle")) == "Apps on Mac mini can choose “Sill Camera”. The ca
 check(note(inUse) == "FaceTime on Mac mini is using this iPad’s camera." && note(st("inUse")) == "An app on Mac mini is using this iPad’s camera.", "in use, named or not")
 check(note(st("another", holder: "iPhone")) == "iPhone is Mac mini’s camera now. Turn Share Camera off and on to use this iPad instead.", "another device")
 check(note(st("another")) == "Another device is Mac mini’s camera now. Turn Share Camera off and on to use this iPad instead.", "another, unnamed")
+check(note(st("another", holder: "")) == "Another device is Mac mini’s camera now. Turn Share Camera off and on to use this iPad instead.",
+      "another, its name empty (a name SafeText left nothing of)")
 check(note(pause: "denied") == "Sill isn’t allowed to use the camera. Open Settings and turn on Camera for Sill." && C.showsOpenSettings(pause: "denied")
       && !C.showsOpenSettings(pause: "busy") && C.openSettings == "Open Settings", "denied: the words and Open Settings")
 check(note(pause: "unavailable") == "This iPad has no camera Sill can use.", "no camera")

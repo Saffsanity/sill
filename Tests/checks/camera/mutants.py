@@ -12,7 +12,10 @@ M = [
     # Offering, capturing, the pause.
     ("offers with the switch off", F, "        switchOn && connected && (hostCamera ?? 0) >= CameraCodec.generation", "        connected && (hostCamera ?? 0) >= CameraCodec.generation"),
     ("offers to a Mac that says 0", F, "(hostCamera ?? 0) >= CameraCodec.generation\n    }\n\n    /// The capture", "(hostCamera ?? -1) >= 0\n    }\n\n    /// The capture"),
-    ("captures without being wanted", F, "        offering && state?.wanted == true && pause(state: state, device: device) == nil", "        offering && pause(state: state, device: device) == nil"),
+    # Both guards at once: `pause` says waiting whenever kind 16 does not say inUse, so either alone is equivalent.
+    ("captures without being wanted", F,
+     ["        offering && state?.wanted == true && pause(state: state, device: device) == nil", "        if state?.wanted != true { return CameraFormat.waiting }\n"],
+     ["        offering && pause(state: state, device: device) == nil", ""]),
     ("captures in the background", F, "        if !d.front { return CameraFormat.background }\n", ""),
     ("captures while multitasking", F, "        if d.multitasking { return CameraFormat.multitasking }\n", ""),
     ("captures at shutdown pressure", F, "        if d.pressure == .shutdown { return CameraFormat.thermal }\n", ""),
