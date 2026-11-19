@@ -47,6 +47,9 @@ struct DisplayWake {
         /// A device's left or right press that `pass` held back because the display it lands on read
         /// asleep: it declares at once, as a connect does, whatever the interval.
         case wakingPress
+        /// A device's offer of files (kind 49 `offer`; docs/files-plan.md §7.1), which FileHub reports, since
+        /// files never reach the coordinator's `handle`. Never a part, an end or an acknowledgement.
+        case files
     }
 
     /// A person's activity at the device, which a declaration is made for (and its line says).
@@ -66,6 +69,8 @@ struct DisplayWake {
         case nextDisplay
         /// A press held back on a display that read asleep (`pass`): it only wakes the display.
         case wakingPress
+        /// Files sent from the device (an offer).
+        case files
     }
 
     enum Decision: Equatable {
@@ -121,6 +126,8 @@ struct DisplayWake {
             return .connect
         case .wakingPress:
             return .wakingPress
+        case .files:
+            return .files
         case .message(let kind, let input):
             switch kind {
             case .launchApp: return .launch
@@ -238,6 +245,7 @@ struct DisplayWake {
         case .gesture: return "made a trackpad gesture"
         case .nextDisplay: return "stepped the Desktop to the next display"
         case .wakingPress: return "clicked while the display was asleep; the click was held back"
+        case .files: return "sent files"
         }
     }
 

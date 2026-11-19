@@ -43,11 +43,15 @@ enum DeviceIdlePolicy {
         var session: Double?
         /// The moment the window's scene came to the front (foreground active).
         var front: Double?
+        /// The last progress of a transfer of files the person started (StreamClient+Files): one that runs
+        /// keeps the device awake as the person's use does (the overview's §2.3), so a long one is never
+        /// cut off by auto-lock; once it ends, `idleLimit` counts from its last progress.
+        var transfer: Double?
     }
 
     /// A window's last use: the latest of its uses; nil when it has none.
     static func lastUse(_ uses: Uses) -> Double? {
-        [uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.max()
+        [uses.input, uses.control, uses.session, uses.front, uses.transfer].compactMap { $0 }.max()
     }
 
     /// What a session's start leaves as `Uses.session`, at `now` as it connects (StreamClient's

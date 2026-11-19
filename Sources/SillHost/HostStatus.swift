@@ -135,6 +135,9 @@ package struct HostStatusSnapshot: Equatable {
     /// The off-console view applies (docs/off-console-plan.md): another user is on this Mac's screen and devices
     /// see this session anyway, to look at. The card says so under its header.
     package var offConsoleView = false
+    /// Transfers of files from devices running now (FileHub, docs/files-plan.md §7.1): while any is, Sill.app
+    /// keeps the Mac from idle sleep, at home too, as for a device away (AppModel's App Nap hold).
+    package var fileTransfers = 0
     /// The Mac's sound while it is wanted (Send Audio on, something streams, a device plays it); nil
     /// otherwise.
     package var audio: Audio?

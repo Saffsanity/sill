@@ -100,6 +100,14 @@ public struct WindowList: Codable {
     /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
     /// is (`LockedMac.viewLine`).
     public var offConsoleView: Bool?
+    /// What this host does with files (kinds 34 and 49, Files.swift; docs/files-plan.md): 0, it has them but
+    /// its Share files with devices is off; 1, it takes files from a paired device (`FilePolicy.takes`); 2,
+    /// and gives files to one (`FilePolicy.gives`: the Open panel, the menu). A device offers files only to a
+    /// host that says 1 or more, and asks for its files only at 2. Left out by every host before, by a host
+    /// without an identity (the CLI's plain door, where no device can pair), and while the Mac is locked or
+    /// another user is on its screen (LockPolicy.list, as `clipboard`). An Int, as `clipboard`: #66's and
+    /// #189's `fileDrop: Bool?` is not used. Set after the initializer, as `keyRepeat`.
+    public var files: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

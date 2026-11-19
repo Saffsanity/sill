@@ -257,6 +257,13 @@ struct ContentView: View {
 ///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
+/// * `-SillFilesHost off|old|none|gives` — files and photos (docs/files-plan.md): the mock Mac takes files
+///   (`WindowList.files` 1) in every settings case but `legacy` and `cli`; this says its switch is off (0),
+///   it is an older Sill (no `files`, a version: "update Sill"), it says nothing (the rows hidden), or it
+///   also gives files (2). `-SillFiles preparing|offering|sending|finishing|saved|saved3|cancelled|refused|
+///   lost|folder|ask` shows a transfer to the Mac in that state on the chip over the stream and on the
+///   line under the Settings panel's Files rows (`ask`: a file shared into Sill, "Send ‹name› to ‹Mac›?");
+///   neither goes away by itself. `-SillSettingsScroll files` starts the panel at the Files rows.
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
 ///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and
 ///   `offConsole` for 2), its placeholder streams as the Desktop, the cover over the stream says why
@@ -1499,6 +1506,25 @@ struct ConnectScreen: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
+
+        // A file shared into Sill (StreamClient+Files) waits for a session that takes files: once there is one,
+        // the stream's chip asks to send it; until then this line says so, with Cancel.
+        if let shared = client.filesShared, !client.connected {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "square.and.arrow.up").foregroundStyle(Palette.muted).accessibilityHidden(true)
+                Text(DeviceFilesCopy.sharedWaits(shared.names))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(DeviceFilesCopy.cancel) { client.cancelShared() }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("Don’t send \(DeviceFilesCopy.what(shared.names))")
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
 
         // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
         // status line above): where to get the new one, while the status line still says why. Not

@@ -112,10 +112,11 @@ for raw in 0...255 {
     eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
 // A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 34, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+eq(kinds, 36, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
                     (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
-                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request")] as [(UInt8, String)] {
+                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request"),
+                    (34, "a part of a file"), (49, "a file transfer's message (its offer is judged where FileHub reports it)")] as [(UInt8, String)] {
     let kind = Kind(rawValue: raw)!
     eq(fresh.activity(msg(kind), at: 100), nil, "never kind \(raw), \(what)")
     eq(fresh.activity(msg(kind, tap), at: 100), nil, "never kind \(raw), whatever input rides with it")
@@ -277,6 +278,18 @@ do {
     eq(w.decide(.message(.nextDisplay, nil), at: 5), .declare(.nextDisplay), "a step 5 s on declares again")
     var t = W(testHost: true)
     eq(t.decide(.message(.nextDisplay, nil), at: 0), .count, "a test host counts kind 47, declares nothing")
+}
+// Files (docs/files-plan.md §7.1): a device's offer, which FileHub reports, is a person's; its parts and every other
+// kind 49 never reach the rule (the kinds 34 and 49 above are none of a person's).
+eq(fresh.activity(.files, at: 100), .files, "files offered: a person's")
+eq(W.why(.files), "sent files", "why: files")
+do {
+    var w = W(testHost: false)
+    eq(w.decide(.files, at: 0), .declare(.files), "an offer declares, a display asleep wakes")
+    eq(w.decide(.files, at: 1), .nothing, "a second within the interval: the display is counted in use")
+    eq(w.decide(.files, at: 5), .declare(.files), "one 5 s on declares again")
+    var t = W(testHost: true)
+    eq(t.decide(.files, at: 0), .count, "a test host counts it, declares nothing")
 }
 check(Set(W.Activity.allCases.map(W.why)).count == W.Activity.allCases.count, "each activity's words its own")
 eq(W.wokeLine(device: "iPad (iPad14,1)", activity: .connect), "Woke the display for iPad (iPad14,1), which connected.",
@@ -566,7 +579,7 @@ let five: TimeInterval = 5, two: TimeInterval = 2
 /// The model's own table of what is a person at the device.
 func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) -> Bool {
     switch event {
-    case .connect, .wakingPress: return true
+    case .connect, .wakingPress, .files: return true
     case .message(let kind, let input):
         switch kind.rawValue {
         case 7, 15, 25, 28, 47: return true

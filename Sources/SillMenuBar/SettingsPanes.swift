@@ -162,6 +162,8 @@ private struct GeneralPane: View {
             ClipboardSection(shareClipboard: $settings.config.shareClipboard,
                              access: previewClipboardAccess ?? model.permissions.clipboardAccess,
                              allow: { model.permissions.allowClipboard() })
+            // Files from devices (FileHub, docs/files-plan.md §9): at once, no restart; off stops every transfer.
+            FilesSection(shareFiles: $settings.config.shareFiles, folderPath: $settings.config.filesFolder)
             if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
@@ -287,6 +289,66 @@ struct ClipboardSection: View {
             }
         } footer: {
             Footnote(ClipboardPolicy.Copy.macFootnote)
+        }
+    }
+}
+
+// MARK: Files
+
+/// Share files with devices (FileHub, docs/files-plan.md §9): the switch, where files from devices are kept
+/// (Downloads › Sill unless another folder is chosen), Show in Finder, Other Folder… and, with another folder,
+/// the way back to Downloads › Sill, and the footnote. Sill never opens or reveals a file by itself; Show in
+/// Finder is the Mac's person's own click. The Open panel is `begin`, never `runModal` (the modal-loop rule),
+/// and a folder that is a link or that Sill cannot write is refused here, its reason inline (never an alert).
+struct FilesSection: View {
+    @Binding var shareFiles: Bool
+    /// `HostConfig.filesFolder`: a folder's path, nil for Downloads › Sill.
+    @Binding var folderPath: String?
+    @State private var refusal: String?
+
+    private var folder: URL { folderPath.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? FileStore.defaultDestination }
+
+    var body: some View {
+        Section {
+            Toggle("Share files with devices", isOn: $shareFiles)
+            LabeledContent("Save files from devices in") {
+                Text(folderPath == nil ? FilesCopy.defaultPlace : folder.lastPathComponent)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            HStack(spacing: 8) {
+                Button("Show in Finder") {
+                    try? FileStore(destination: folder).prepare()
+                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                }
+                Button("Other Folder…") { chooseFolder() }
+                if folderPath != nil {
+                    Button("Use \(FilesCopy.defaultPlace)") { folderPath = nil; refusal = nil }
+                }
+            }
+            if let refusal { Warning(refusal) }
+        } footer: {
+            Footnote("A paired iPhone or iPad can send files to this Mac. Files from devices are marked as downloaded, so macOS checks them before they open. Never while this Mac is locked.")
+        }
+    }
+
+    /// The Mac's person picks the folder: their choice is what lets Sill write there.
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        panel.prompt = "Choose"
+        panel.message = "Choose where Sill saves files from your iPhone and iPad."
+        panel.directoryURL = folder.deletingLastPathComponent()
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            if let why = FileStore.refusal(forFolder: url) { refusal = why; return }
+            refusal = nil
+            folderPath = url.standardizedFileURL == FileStore.defaultDestination.standardizedFileURL ? nil : url.path
         }
     }
 }

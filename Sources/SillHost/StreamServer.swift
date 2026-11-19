@@ -151,8 +151,17 @@ final class StreamServer {
         /// Its hello said it shows a Mac's off-console view (`Hello.offConsoleView`; docs/off-console-plan.md):
         /// it is sent the view's window list (`broadcastList`), every other device the plain one.
         var viewsOffConsole = false
+        /// The bytes of its kinds 34 and 49 handed to FileHub and not dealt with yet (`onFileMessage`): past
+        /// `fileBacklog` its receive loop waits for the hub, so a device that ignores its window (FileFlow)
+        /// holds no more than that of this Mac's memory, and a slow volume slows only its own sender.
+        var filesQueued = 0
+        var readPaused = false
         init(_ c: NWConnection) { connection = c }
     }
+
+    /// How much of one device's files may wait for FileHub before its receive loop waits too: four times
+    /// the largest window a well-behaved device keeps (FileFlow.homeIdle), so one never meets it.
+    static let fileBacklog = 4 * FileFlow.homeIdle
 
     /// The network queue: both doors, their connections, the verify blocks and the timers.
     let queue: DispatchQueue
@@ -173,6 +182,10 @@ final class StreamServer {
     /// A message from a client (selectSource, launchApp), with the lock's reading as it arrived (the
     /// gate's, LockPolicy.restrictive). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection, LockPolicy.Reading) -> Void)?
+    /// Kinds 34 and 49 from a client (FileHub, docs/files-plan.md §7.2), with the lock's reading as they
+    /// arrived, never through `onMessage`; the last argument is called once the message is dealt with (on
+    /// any queue). Nil (the harnesses): they go to `onMessage`, which ignores them. Called on the network queue.
+    var onFileMessage: ((StreamMessage, NWConnection, LockPolicy.Reading, @escaping () -> Void) -> Void)?
     /// A locked Mac (LockPolicy, docs/locked-mac-plan.md): SessionLock's gate, set before `start()`. From
     /// the moment it reads locked, the server sends no picture of the Mac but its placeholder, no thumbnail,
     /// icon, app list, sound, clipboard, pointer or cursor shape (`LockPolicy.withheld`), whatever the main
@@ -1477,6 +1490,21 @@ final class StreamServer {
         }
     }
 
+    /// A transfer's message to one device (kind 49, from FileHub on `sill.files`), skipped without a word
+    /// once the device is gone. While the gate withholds files (a locked Mac, the off-console view) only a
+    /// refusal or a cancel goes (LockPolicy.passesLocked), so a device hears at once why its transfer
+    /// stopped. Thread-safe.
+    func sendFileMessage(_ t: FileTransfer, to connection: NWConnection) {
+        guard let payload = t.payload else { return }
+        let data = StreamMessage(kind: .fileTransfer, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload).serialized()
+        let passes = LockPolicy.passesLocked(t)
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)], client.connection.state == .ready else { return }
+            if !passes, lockGate.withholds(.fileTransfer) { withheld(.fileTransfer, for: ObjectIdentifier(connection)); return }
+            send(data, to: client)
+        }
+    }
+
     /// A window list in two forms (StreamCoordinator.listMessages; docs/off-console-plan.md): the off-console
     /// view's to each device whose hello said it shows it (`Client.viewsOffConsole`), the plain one, as Sill for
     /// Mac 0.6.0 sends it, to every other. Thread-safe.
@@ -1602,6 +1630,13 @@ final class StreamServer {
                     }
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.
+                } else if header.kind == .fileChunk || header.kind == .fileTransfer, let onFile = self.onFileMessage {
+                    // Files (FileHub): off this queue at once; the loop reads on unless too much of them waits.
+                    let size = payload.count
+                    client.filesQueued += size
+                    onFile(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload),
+                           c, arrived) { self.fileHandled(client, size) }
+                    if client.filesQueued > Self.fileBacklog { client.readPaused = true; return }
                 } else {
                     self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 }
@@ -1615,6 +1650,17 @@ final class StreamServer {
                 }
                 deliver(data)
             }
+        }
+    }
+
+    /// FileHub dealt with `size` bytes of `client`'s files: a loop waiting for it reads on once half the
+    /// backlog is left. Any queue.
+    private func fileHandled(_ client: Client, _ size: Int) {
+        queue.async { [self] in
+            client.filesQueued -= size
+            guard client.readPaused, client.filesQueued <= Self.fileBacklog / 2 else { return }
+            client.readPaused = false
+            if clients[ObjectIdentifier(client.connection)] === client { receiveLoop(client) }
         }
     }
 

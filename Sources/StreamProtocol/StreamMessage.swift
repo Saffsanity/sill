@@ -75,6 +75,10 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case fileChunk = 34      // either way: FileChunk (Files.swift) — a part of one file of an accepted transfer,
+                             // #66's layout byte for byte (kept from #189). Only within a transfer kind 49 offered
+                             // and its receiver accepted: device → host only to a host whose list says `files` 1 or
+                             // more, host → device only to a device whose hello says `files`
     // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28,
     // and after 29–42, which PR #66 (Sill Viewer, with #72 and #73) and #78 (the clipboard's 32) take. Older readers
     // map it to `.unknown` and skip it.
@@ -99,6 +103,12 @@ public enum StreamMessageKind: UInt8 {
                              // whose window list says `desktopDisplays` 2 or more; ignored unless the Desktop
                              // streams, refused while the Mac is locked. A person at the device (DisplayWake).
                              // `{"number": n}` is kept for PR #296's list
+    // Files and photos (Files.swift, docs/files-plan.md), after 48, which the allocation of 2026-11-18 gives
+    // the microphone (45 the pen, 46 the camera, 50 #175's cursor kind). Older readers map it to `.unknown`
+    // and skip it.
+    case fileTransfer = 49   // both ways: JSON FileTransfer — a transfer's offer, answer, acknowledgements, each
+                             // file's SHA-256, its result, a cancel, and a device's pick of the Mac's files; only
+                             // where kind 34 may go (FilePolicy)
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

@@ -42,6 +42,11 @@ config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 // A --synthetic host shares a pasteboard of its own, never this Mac's clipboard.
 config.shareClipboard = !CommandLine.arguments.contains("--no-clipboard")
 
+// `SillHost --no-files`: take no files from devices for this run (kinds 34 and 49, docs/files-plan.md). On by
+// default, as in Sill.app, but only with an identity (--pairing or --remote): the plain door has no pairing, and
+// files come only from a paired device. A --synthetic host keeps them in a folder of its own, never ~/Downloads.
+config.shareFiles = !CommandLine.arguments.contains("--no-files")
+
 // `SillHost --audio`: Send Audio for this run, a beta (docs/audio-plan.md): every connected device that
 // plays the Mac's sound (its hello lists a codec) gets the streamed app's sound, or every app's for the
 // Desktop, or with --synthetic a test tone. Off by default, as in Sill.app: the Mac keeps playing its

@@ -1,0 +1,4 @@
+# Compiled as one module by ../module.py, each file's `import StreamProtocol` dropped, with main.swift.
+flags: -package-name sill
+Sources/StreamProtocol/*.swift
+Sources/SillHost/FileStore.swift

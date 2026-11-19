@@ -119,11 +119,16 @@ public struct Hello: Codable, Sendable, Equatable {
     /// docs/off-console-plan.md): a host sends it the view's list. Nil from every device before: a host sends
     /// it the locked list without windows, as Sill for Mac 0.6.0 does.
     public var offConsoleView: Int?
+    /// 1 from a device that takes files from the Mac (kinds 34 and 49, Files.swift; docs/files-plan.md): a
+    /// host offers it the files its person sends and answers its pick. Nil from every device before: a host
+    /// sends it neither kind.
+    public var files: Int?
 
     public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil,
-                audio: [String]? = nil, offConsoleView: Int? = nil) {
+                audio: [String]? = nil, offConsoleView: Int? = nil, files: Int? = nil) {
         self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
         self.audio = audio
         self.offConsoleView = offConsoleView
+        self.files = files
     }
 }

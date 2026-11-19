@@ -370,6 +370,7 @@ enum DebugHooks {
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
         case "offConsoleView": config.offConsoleView = flag
+        case "shareFiles": config.shareFiles = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -441,6 +442,17 @@ enum DebugHooks {
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-clipboard-\(sampleName)-\(name).png"))
+            }
+        }
+        // Files from devices (docs/files-plan.md §9): the switch on and off, the default folder and another.
+        let filesSamples: [(String, Bool, String?)] = [("on", true, nil), ("off", false, nil), ("folder", true, "/Volumes/Stick/From iPad")]
+        for (sampleName, on, folder) in filesSamples {
+            let section = Form { FilesSection(shareFiles: .constant(on), folderPath: .constant(folder)) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-files-\(sampleName)-\(name).png"))
             }
         }
         for sample in updatePaneSamples() {

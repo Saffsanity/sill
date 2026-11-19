@@ -23,6 +23,8 @@ enum TestHooks {
         "SILL_TEST_REQUIRE_PAIRING",
         // The device gate's (DeviceGate): a floor above "0" refuses devices.
         "SILL_TEST_MIN_DEVICE_VERSION", "SILL_TEST_GOODBYE",
+        // Files' (FileHub, docs/files-plan.md §7.6): the folder, each decision logged, the free space the rule reads.
+        "SILL_TEST_FILES_DIR", "SILL_TEST_FILES_LOG", "SILL_TEST_FILES_FREE",
     ]
 
     /// One line for each such variable set on a host that does not honour them; nothing on a test
