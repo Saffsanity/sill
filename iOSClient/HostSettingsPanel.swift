@@ -76,9 +76,6 @@ struct HostSettingsPanel: View {
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
-    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on
-    /// (`TouchHold.defaultOn`), read by the picture's input view as each hold begins, never sent.
-    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -96,6 +93,9 @@ struct HostSettingsPanel: View {
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on
+    /// (`TouchHold.defaultOn`), read by the picture's input view as each hold begins, never sent.
+    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -122,7 +122,6 @@ struct HostSettingsPanel: View {
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
-    /// `holddrag`, to Hold, Then Drag's switch and its footnote (#292).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     private static var startsAt: String? {
         #if DEBUG
@@ -143,13 +142,14 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    /// DEBUG `-SillSettingsScroll holddrag`: Hold, Then Drag's switch and its footnote (#292).
+    private static let holdThenDragRowID = "holdThenDrag"
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
-    private static let holdThenDragRowID = "holdThenDrag"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
