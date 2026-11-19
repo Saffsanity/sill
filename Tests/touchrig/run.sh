@@ -54,7 +54,7 @@ for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/Poi
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
          iOSClient/HardwareKeyboardPolicy.swift iOSClient/TextComposition.swift iOSClient/StreamZoom.swift \
          iOSClient/PhonePortraitLayout.swift iOSClient/FullScreenPolicy.swift iOSClient/RevealEdgePan.swift \
-         iOSClient/DuoPosture.swift; do
+         iOSClient/DuoPosture.swift iOSClient/PinchRouting.swift; do
     fetch "$f"
 done
 # StreamProtocol whole, as REV or the working tree has it: the surfaces and their rules use more of it than

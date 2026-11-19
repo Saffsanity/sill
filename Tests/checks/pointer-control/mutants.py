@@ -36,8 +36,8 @@ MUTANTS = [
     ("a change across a gap is motion", CONTROL, "if watched, let before = previous, before != p { changedAt = now }",
      "if let before = previous, before != p { changedAt = now }"),
     # Which inputs move the pointer
-    ("a scroll gesture moves nothing", CONTROL, "        case .pointer, .scroll, .scrollGesture: return true\n        case .text, .key: return false\n",
-     "        case .pointer, .scroll: return true\n        case .text, .key, .scrollGesture: return false\n"),
+    ("a scroll gesture moves nothing", CONTROL, "        case .pointer, .scroll, .scrollGesture, .magnify: return true\n        case .text, .key: return false\n",
+     "        case .pointer, .scroll, .magnify: return true\n        case .text, .key, .scrollGesture: return false\n"),
     ("an undecodable payload moves the pointer", CONTROL, ".map(movesPointer) ?? false", ".map(movesPointer) ?? true"),
     # The fraction
     ("inside judged after rounding", CONTROL, "let inside = x >= 0 && x < 1 && y >= 0 && y < 1",

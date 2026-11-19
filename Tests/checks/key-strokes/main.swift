@@ -894,7 +894,7 @@ struct Board {
         case .text:
             for s in keys.text(from: d) { post(s, for: d) }
             posted.append(Posted(what: "text", device: d, up: false, thing: "text"))
-        case .scroll, .scrollGesture: posted.append(Posted(what: "scroll", device: d, up: false, thing: "scroll"))
+        case .scroll, .scrollGesture, .magnify: posted.append(Posted(what: "scroll", device: d, up: false, thing: "scroll"))
         }
     }
     /// A gesture's shortcut (InputInjector.chord): none of a device's keys, down and up at once.

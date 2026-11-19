@@ -4242,6 +4242,7 @@ final class StreamClient: ObservableObject {
         case .pointer(let action, _, _): what = "a pointer \(action)"
         case .scroll: what = "a scroll"
         case .scrollGesture(let phase, _, _): what = "a scroll's \(phase)"
+        case .magnify(let phase, _, _, _): what = "a pinch's \(phase)"
         case .text: what = "text"
         case .key(let usage, let down, _): what = "key \(usage) \(down ? "down" : "up")"
         }
