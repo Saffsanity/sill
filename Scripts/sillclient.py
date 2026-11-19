@@ -165,6 +165,8 @@ list's camera= when it says it:
   --camera-pause=REASON@T  a type 1 pause (background, multitasking, busy, scanner, thermal, denied, unavailable,
                      or none to end it) T seconds in; no frame while it pauses
   --raw46=HEX@T      this literal kind 46 payload T seconds in, as hex (a hostile or malformed one)
+  --camera-corrupt=N with --camera: the Nth frame this session sends (from 1) carries bytes no decoder reads instead of
+                     its access unit (its header and keyframe flag kept), once; a line says when it went
   --expect=cameraState=S,camera=N  (with --expect's other keys, or alone) at exit, the last kind 16's
                      camera state (none when it said none) and the last window list's camera (none)
 A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
@@ -210,7 +212,7 @@ INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "camera")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "camera", "camera-corrupt")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -654,6 +656,9 @@ try:
     # The camera: only to a --synthetic test host on this Mac (one with SILL_TEST_CAMERA decodes into a counter
     # or PNGs of its own; no other host takes a camera from this script).
     camera_file = valued("camera")
+    camera_corrupt = number(valued("camera-corrupt"), "--camera-corrupt") if valued("camera-corrupt") is not None else None
+    if camera_corrupt is not None and (camera_file is None or camera_corrupt < 1):
+        raise ValueError("--camera-corrupt=N takes a frame's number from 1, with --camera")
     if camera_file is not None or any(e[2] in ("camera-claim", "camera-stop", "camera-pause", "raw46") for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--camera and its flags only go to a --synthetic host on this Mac; nothing on port {port} is one.")
@@ -842,6 +847,7 @@ aud_formats = 0; aud_orphans = 0
 cam_offered = False; cam_state = None; cam_sending = False; cam_paused = False; cam_stopped = False
 cam_epoch = 0; cam_index = 0; cam_seq = 0; cam_next = 0.0
 cam_sent = 0; cam_keys = 0; cam_epochs = 0; cam_demands = 0; cam_demand_keys = 0; cam_states = []; last_camera_list = None
+cam_sec_frames = 0; cam_sec_bytes = 0; cam_pause_reason = ""
 def camera_send(payload, key=False, stamp=None):
     s.sendall(struct.pack(">BdBI", 46, stamp if stamp is not None else time.time(), 1 if key else 0, len(payload)) + payload)
 def camera_format(body):
@@ -930,8 +936,8 @@ def fire(e, now):
         global cam_sending
         camera_format({"stop": True}); cam_offered = False; cam_sending = False; cam_stopped = True; print(f"  sent camera stop at {at}")
     elif name == "camera-pause":
-        global cam_paused
-        cam_paused = text != "none"
+        global cam_paused, cam_pause_reason
+        cam_paused = text != "none"; cam_pause_reason = text
         camera_format({"position": "front", **({"pause": text} if cam_paused else {})}); print(f"  sent camera pause {text} at {at}")
         if cam_paused: cam_sending = False
         elif cam_state == "inUse" and not cam_stopped: camera_start(now)
@@ -950,11 +956,21 @@ while time.time() - t0 < dur:
             s.sendall(msg(10, struct.pack(">d", now)))
             nextping = now + (min(0.25, ping_every) if any(a <= now - t0 < b for a, b in holds) else ping_every)
         if pinging and stats and now >= nextstats:
-            s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
+            report = {"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}
+            if cam_sent > 0:
+                # The camera's second, once it has run this session, as a device reports it (ClientStats' camera fields).
+                report.update(cameraFps=cam_sec_frames, cameraKbps=cam_sec_bytes * 8 // 1000, cameraDropped=0)
+                if cam_paused: report["cameraPause"] = cam_pause_reason
+            cam_sec_frames = 0; cam_sec_bytes = 0
+            s.sendall(msg(12, json.dumps(report).encode())); nextstats = now + 1
         while cam_sending and now >= cam_next:
             k, data = camera_frames[cam_index]
+            if camera_corrupt is not None and cam_sent + 1 == camera_corrupt:
+                # A length of 0xFFFFFFFF before the first NAL unit: no decoder reads it.
+                data = b"\xff" * len(data)
+                print(f"  camera frame {cam_sent + 1} (epoch {cam_epoch}, seq {cam_seq}) sent corrupted at {time.time()-t0:.3f}s")
             camera_send(bytes([2]) + struct.pack(">HI", cam_epoch, cam_seq) + data, key=k, stamp=time.time())
-            cam_sent += 1; cam_keys += 1 if k else 0; cam_seq += 1
+            cam_sent += 1; cam_keys += 1 if k else 0; cam_seq += 1; cam_sec_frames += 1; cam_sec_bytes += 7 + len(data)
             cam_index = (cam_index + 1) % len(camera_frames); cam_next += 1 / camera_size[2]
     except OSError as e:
         print(f"send failed at {now - t0:.2f}s: {e}"); break

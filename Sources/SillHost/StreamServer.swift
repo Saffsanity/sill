@@ -1510,6 +1510,20 @@ final class StreamServer {
         }
     }
 
+    /// The client line's camera (docs/camera-plan.md §11), from ClientStats' camera fields, which a device sends once
+    /// its camera has run this session (display only): ", camera 30 fps 2.4 Mbps" and its drops that second, or the
+    /// pause it said, one of CameraFormat.pauses (anything else reads as `unavailable`: never a device's own text in the
+    /// log). Nothing for a device whose camera has not run, so the line of every other device is as it was.
+    static func cameraPart(_ stats: ClientStats) -> String {
+        if let pause = stats.cameraPause {
+            return ", camera paused (\(CameraFormat.pauses.contains(pause) ? pause : CameraFormat.unavailable))"
+        }
+        guard let fps = stats.cameraFps else { return "" }
+        let mbps = stats.cameraKbps.map { String(format: " %.1f Mbps", Double(min(max(0, $0), 10_000_000)) / 1000) } ?? ""
+        let dropped = (stats.cameraDropped ?? 0) > 0 ? ", \(stats.cameraDropped ?? 0) dropped" : ""
+        return ", camera \(fps) fps\(mbps)\(dropped)"
+    }
+
     /// A camera's type 3 to one device (CameraReceiver, from `sill.camera`): only to a device whose hello said it
     /// reads them (`Client.camera`), skipped without a word once it is gone, and withheld while the Mac is locked
     /// (LockPolicy: a device's camera is refused then). Thread-safe.
@@ -1609,7 +1623,7 @@ final class StreamServer {
                                 sound = ", sound \(behind) ms behind" + (client.audioLateSincePrint > 0 ? ", \(client.audioLateSincePrint) late" : "")
                             }
                             client.audioLateSincePrint = 0
-                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)")
+                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)\(Self.cameraPart(stats))")
                             client.worstFrameAgeSincePrint = -1
                             client.worstRttSincePrint = -1
                         }

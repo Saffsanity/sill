@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 """TEST ONLY: the devices' cameras on the Mac against synthetic test hosts on loopback (docs/camera-plan.md §13.2,
-gates H1 to H8). Each case starts .build/release/SillHost --synthetic --pairing (a throwaway identity in a folder of
+gates H1 to H5 and H7 to H10, H2 as a frame that does not decode). Each case starts .build/release/SillHost
+--synthetic --pairing (a throwaway identity in a folder of
 the test's own) with SILL_TEST_LOOPBACK, SILL_TEST_SOFTWARE_ENCODER, SILL_TEST_NO_ROUTER and SILL_TEST_NO_SCREEN, so
 nothing touches the hardware encoder, the router or ScreenCaptureKit, and SILL_TEST_CAMERA (a counter, or PNGs in a
 folder under OUT; its decoder VideoToolbox's software one) with SILL_TEST_CAMERA_DEMAND scripting what Sill Camera's
 apps would do. It pairs test clients by the host's links and drives Scripts/sillclient.py's --camera (the fixture,
 Scripts/camera/fixture-640x360.bin, made with VideoToolbox's software encoder), --camera-claim, --camera-stop,
---camera-pause and --raw46 against it. No camera, no window, no encoder of this Mac's. Every host runs under a
+--camera-pause, --camera-corrupt and --raw46 against it. No camera, no window, no encoder of this Mac's. Every
+host runs under a
 minute. Prints a verdict per rule; exits 1 on any FAIL.
 
-    python3 Scripts/camera-check/live.py OUT [live|two|lock|unpaired|hostile|nohook|all]"""
-import os, re, signal, subprocess, sys, threading, time
+    python3 Scripts/camera-check/live.py OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|all]
+
+stdout (H9) compares this build's CLI with main's, whose SillHost SILL_MAIN_HOST names (a release build of origin/main
+made beside this one); without it, `stdout` fails and `all` skips it, saying so."""
+import difflib, os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOST = os.path.join(ROOT, ".build/release/SillHost")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
-FIXTURE = os.path.join(ROOT, "Scripts/camera/fixture-640x360.bin")
+# SILL_CAMERA_FIXTURE: another fixture of the same format, such as the device's own encoder's (encoder.sh OUT.bin).
+FIXTURE = os.environ.get("SILL_CAMERA_FIXTURE") or os.path.join(ROOT, "Scripts/camera/fixture-640x360.bin")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1"}
 verdicts = []
 
@@ -28,14 +34,14 @@ def verdict(ok, what):
 
 class Host:
     """One synthetic --pairing host with a test Sill Camera: its stdout's lines and its port."""
-    def __init__(self, out, label, env=None, camera="count"):
+    def __init__(self, out, label, env=None, camera="count", binary=HOST):
         self.out, self.label, self.lines = out, label, []
         remote = os.path.join(out, label + ".remote"); os.makedirs(remote, exist_ok=True); os.chmod(remote, 0o700)
         e = dict(os.environ); e.update(BASE_ENV); e.update({"SILL_TEST_REMOTE_DIR": remote, "SILL_TEST_ASK_FROM_THIS_MAC": "1"})
         if camera: e["SILL_TEST_CAMERA"] = camera
         e.update(env or {})
         self.start = time.time()
-        self.p = subprocess.Popen(["nice", "-n", "10", HOST, "--synthetic", "--pairing"], stdout=subprocess.PIPE,
+        self.p = subprocess.Popen(["nice", "-n", "10", binary, "--synthetic", "--pairing"], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, env=e, start_new_session=True, text=True, bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
         self.port = None
@@ -148,6 +154,7 @@ def case_live(out):
         decoded = h.count("cam.decoded")
         verdict(c is not None and c[0] - 3 <= decoded <= c[0], f"the host decoded every frame sent while wanted ({decoded} of {c and c[0]})")
         verdict(bool(h.all(r"^Camera: .*'s camera is live: 640×360, 30 fps, HEVC, 0\.4 Mbps\.$")), "the live line")
+        verdict(bool(h.all(r"^client ipad: .*, camera (2[89]|3[0-2]) fps \d+\.\d Mbps$")), "the client line says the device's camera that second (ClientStats' camera fields)")
         pngs = sorted(f for f in os.listdir(dump) if f.endswith(".png"))
         verdict(len(pngs) >= 5 and pngs[0] == "frame-00001.png", f"every 30th frame dumped as a PNG: {pngs[:3]}…")
         dropped = h.all(r"cam\.(refused|dropped)")
@@ -256,7 +263,103 @@ def case_nohook(out):
         h.stop()
 
 
-CASES = {"live": case_live, "two": case_two, "lock": case_lock, "unpaired": case_unpaired, "hostile": case_hostile, "nohook": case_nohook}
+def case_corrupt(out):
+    print("== corrupt (H2): a frame that does not decode: the host asks for a keyframe within a second, and decoding resumes at it", flush=True)
+    h = Host(out, "corrupt", env={"SILL_TEST_CAMERA_DEMAND": "1 on 640x360@30"})
+    try:
+        ident = paired(h, out, "ipad")
+        if not ident: return
+        text, code = client(h, "session", 9, "--tls", "--device=ipad", f"--camera={FIXTURE}", "--camera-corrupt=40",
+                            "--camera-pause=background@6.5", "--expect=cameraState=inUse", identity=ident)
+        verdict(code == 0 and "EXPECT ok" in text and "EOF from host" not in text, "the session kept, still in use")
+        sent = re.search(r"camera frame 40 \(epoch \d+, seq \d+\) sent corrupted at ([\d.]+)s", text)
+        asks = [(float(t), int(tok)) for t, tok in re.findall(r"camera demand at ([\d.]+)s: \S+ keyframe=1 maxBitrate=\d+ token=(\d+)", text)]
+        later = [a for a in asks if sent and a[0] >= float(sent.group(1))]
+        verdict(sent is not None and len(later) == 1 and later[0][0] - float(sent.group(1)) < 1.0,
+                f"one keyframe asked within a second of the frame that did not decode: sent at {sent and sent.group(1)}, asks {asks}")
+        verdict(bool(h.all(r"^Camera: a frame from .* did not decode \(-?\d+\); asked for a keyframe\.$")) and h.count("cam.decodeFailed") >= 1,
+                f"the host's line, and its count ({h.count('cam.decodeFailed')} failed)")
+        h.next_tick()
+        c = camera_line(text)
+        skipped = h.count("cam.dropped.awaitingKeyframe")
+        decoded = h.count("cam.decoded")
+        # On loopback the ask comes back before the next frame goes, so none may have to wait for the keyframe.
+        verdict(c is not None and decoded >= c[0] - 1 - skipped - 3,
+                f"decoding resumed at the keyframe: {decoded} of {c and c[0]} decoded, {skipped} waited for it, the bad one not")
+        verdict(h.count("cam.keyframeAsked") == 1, f"one ask, not one per frame that waited ({h.count('cam.keyframeAsked')})")
+        verdict(bool(h.all(r"^client ipad: .*, camera paused \(background\)$")), "the client line says the device's pause (ClientStats' cameraPause)")
+    finally:
+        h.stop()
+
+
+def case_move(out):
+    print("== move (H10): the session's connection goes and the same device comes back within 10 s: it keeps the camera", flush=True)
+    h = Host(out, "move", env={"SILL_TEST_CAMERA_DEMAND": "1 on 640x360@30 FaceTime"})
+    try:
+        ident = paired(h, out, "ipad")
+        if not ident: return
+        ta, ca = client(h, "first", 5, "--tls", "--device=ipad", f"--camera={FIXTURE}", identity=ident)
+        time.sleep(2)                        # the device away for two seconds: its offer stands (CameraHostPolicy.grace)
+        tb, cb = client(h, "second", 6, "--tls", "--device=ipad", f"--camera={FIXTURE}", "--expect=cameraState=inUse", identity=ident)
+        sa, sb = [s[0] for s in states(ta)], [s[0] for s in states(tb)]
+        verdict("inUse" in sa and code_ok(ca), f"the first connection: in use: {sa}")
+        verdict(code_ok(cb) and "EXPECT ok" in tb and sb[-1:] == ["inUse"] and "another" not in sb,
+                f"the second connection, the same device: in use again, never another's: {sb}")
+        verdict(not h.all(r"is gone; Sill Camera is free|is Sill Camera now|took Sill Camera"),
+                f"the holder kept through the gap: {h.all(r'is gone|Sill Camera now|took Sill Camera')[:2]}")
+        h.next_tick()
+        a, b = camera_line(ta), camera_line(tb)
+        decoded = h.count("cam.decoded")
+        verdict(a is not None and b is not None and b[2] == 1 and decoded >= a[0] + b[0] - 6,
+                f"the second connection's new epoch decoded too ({decoded} of {a and a[0]} + {b and b[0]})")
+        verdict(len(h.all(r"^Camera: .*'s camera is live: 640×360")) == 2, "a live line for each connection's epoch")
+    finally:
+        h.stop()
+
+
+def code_ok(code):
+    return code == 0
+
+
+def normalized(h):
+    # A host's lines with what differs from run to run made the same: the pairing's codes and links, keys, every
+    # number (ports, counts, times); the periodic lines ([1s], [30s]), the client lines and the installed apps' line,
+    # whose count and timing vary, left out. Sorted: two runs of the same build may print two lines in either order.
+    out = []
+    for _, l in h.lines:
+        if l.startswith("[") or re.match(r"client \S+: \d+ fps", l) or l.startswith("installed apps:"): continue
+        l = re.sub(r"sill://pair\S+", "LINK", l)
+        l = re.sub(r"\(key [^)]*\)", "(key KEY)", l)
+        out.append(re.sub(r"\d+", "N", l))
+    return sorted(out)
+
+
+def case_stdout(out):
+    print("== stdout (H9): the CLI without the camera's hooks prints what main's prints, at the same flags and the same session", flush=True)
+    main = os.environ.get("SILL_MAIN_HOST")
+    if not main or not os.path.exists(main):
+        # Asked for by name it fails; within `all`, a run without main's build skips it, saying so.
+        if sys.argv[2:3] == ["stdout"]: verdict(False, "no build of main to compare with: SILL_MAIN_HOST names none")
+        else: print("skipped: SILL_MAIN_HOST names no build of main", flush=True)
+        return
+    texts = []
+    for label, binary in (("stdout-branch", HOST), ("stdout-main", main)):
+        h = Host(out, label, camera=None, binary=binary)
+        try:
+            ident = paired(h, out, "ipad")
+            if not ident: return
+            text, code = client(h, "session", 5, "--tls", "--device=ipad", f"--camera={FIXTURE}", "--raw46=017b7d@2", identity=ident)
+            verdict(code == 0 and "EOF from host" not in text, f"{label}: the session ran its 5 s")
+            h.next_tick()
+        finally:
+            h.stop()
+        texts.append(normalized(h))
+    diff = [d for d in difflib.unified_diff(texts[1], texts[0], "main", "branch", lineterm="") if d[:1] in "+-" and d[:3] not in ("+++", "---")]
+    verdict(not diff and len(texts[0]) >= 8, f"the same {len(texts[0])} lines, numbers, codes, keys and ports aside: {diff[:6]}")
+
+
+CASES = {"live": case_live, "two": case_two, "lock": case_lock, "unpaired": case_unpaired, "hostile": case_hostile, "nohook": case_nohook,
+         "corrupt": case_corrupt, "move": case_move, "stdout": case_stdout}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: print(__doc__); sys.exit(2)
