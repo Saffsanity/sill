@@ -76,8 +76,9 @@ struct HostSettingsPanel: View {
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
-    /// Record Sound (#284): the Mac's sound in the next recording, while it sends it.
-    @AppStorage("Sill.recordSound") private var recordSound = true
+    /// Record Sound (#284, #303's key): the Mac's sound in the next recording, while it sends it; on unless turned
+    /// off, never sent.
+    @AppStorage(StreamClient.recordSoundKey) private var recordSound = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -133,6 +134,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "recording"?: return recordingRowsID
         default: return nil
         }
         #else
@@ -146,6 +148,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let recordingRowsID = "recording"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -158,6 +161,8 @@ struct HostSettingsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // While this window counts or records (#284): Cancel or Stop, pinned, never a scroll away.
+            recordingTopRow
             // The rows at their own height when they fit, a scroll view in the room left when not.
             ViewThatFits(in: .vertical) {
                 middle
@@ -413,31 +418,6 @@ struct HostSettingsPanel: View {
                     Footnote(text: note, warning: true)
                 }
                 Footnote(text: Self.sendAudioFooter(send, muted: client.soundMuted, mac: mac, device: device))
-                // The stream recorded on this device (#284, StreamRecorder): started here after a count
-                // over the picture (the panel closes for it), stopped here; with the sound while the Mac
-                // sends it.
-                Rows {
-                    Toggle(isOn: $recordSound) { Text("Record Sound").foregroundStyle(Palette.text) }
-                        .disabled(send != true)
-                        .accessibilityHint(send == true ? "" : "Turn on Send Audio to record the sound.")
-                        .rowFrame()
-                    RowDivider()
-                    Button {
-                        if client.recordingSince != nil || client.recordingCount != nil {
-                            client.stopRecording()
-                        } else {
-                            client.startRecording(withSound: recordSound)
-                            close()
-                        }
-                    } label: {
-                        Text(client.recordingSince != nil || client.recordingCount != nil ? "Stop Recording" : "Start Recording")
-                            .foregroundStyle(client.recordingSince != nil ? Color.red : Palette.accent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .rowFrame()
-                }
-                Footnote(text: "Saves the stream as a movie in Files › On My \(device) › Sill › Sill Recordings: what \(mac) shows, the lock screen and typed passwords included.")
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the compact halves' 259 pt shows the rest
@@ -697,7 +677,110 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
+    // MARK: Recording the stream (#284, docs/recording-plan.md)
+
+    /// This iPad's (This iPhone's) first rows: Start Recording (Settings closes for the count over the picture;
+    /// Cancel Recording during the count, Stop Recording while it records, both also pinned at the top), Record
+    /// Sound (shown while the Mac has sound, dimmed and off while Send Audio is off), and the footnote: what is
+    /// recorded, where it goes, what the Mac says. For every Mac, an older one too (it records; the footnote says
+    /// its menu won't show it); dimmed, with its hint, while nothing streams. When the whole-screen Settings pane
+    /// (draft #393) lands, these go into its device part and the Stop row into its header.
+    @ViewBuilder private var recordingRows: some View {
+        let row = client.recordingRow
+        let soundRow = RecordingPolicy.soundRow(macHasSound: client.macHasSound, sendAudio: client.settings.displayed?.sendAudio)
+        let dimmed: Bool = { if case .startDimmed = row { return true } else { return false } }()
+        Rows {
+            Button {
+                switch row {
+                case .start:
+                    client.startRecording()
+                    if case .counting = client.recording.phase { close() }
+                case .cancel:
+                    client.stopRecording(.cancel)
+                case .stop:
+                    client.stopRecording(.stop)
+                case .startDimmed:
+                    break
+                }
+            } label: {
+                Text(Self.recordingTitle(row))
+                    .foregroundStyle(dimmed ? Palette.muted : (row == .start ? Palette.accent : Color.red))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(dimmed)
+            .accessibilityHint(dimmed ? RecordingPolicy.Copy.dimmedHint : "")
+            .rowFrame()
+            if soundRow != .hidden {
+                RowDivider()
+                // Dimmed shows off, not its stored value: no sound can be recorded while Send Audio is off.
+                Toggle(isOn: soundRow == .dimmed ? .constant(false) : $recordSound) {
+                    Text(RecordingPolicy.Copy.recordSound).foregroundStyle(Palette.text)
+                }
+                .disabled(soundRow == .dimmed)
+                .rowFrame()
+                .onChange(of: recordSound) { _, _ in client.noteAction() }
+            }
+        }
+        .id(Self.recordingRowsID)
+        Footnote(text: (dimmed ? RecordingPolicy.Copy.dimmedHint + " " : "")
+                 + RecordingPolicy.Copy.footnote(mac: client.macName.isEmpty ? nil : client.macName, device: device,
+                                                 macShowsIt: RecordingPolicy.Copy.macShowsIt(recordings: client.hostRecordings),
+                                                 soundRow: soundRow))
+    }
+
+    static func recordingTitle(_ row: RecordingPolicy.Row) -> String {
+        switch row {
+        case .start, .startDimmed: return RecordingPolicy.Copy.start
+        case .cancel: return RecordingPolicy.Copy.cancel
+        case .stop: return RecordingPolicy.Copy.stop
+        }
+    }
+
+    /// Pinned under the header while this window counts or records: Cancel Recording, or Stop Recording with the
+    /// light's words under it ("Recording · 1:42 · 230 MB"); after a recording ends, its note in its place while
+    /// the note lasts (Stop tapped here: its "Saved…" right where it was tapped; a Start refused for space: why).
+    @ViewBuilder private var recordingTopRow: some View {
+        let r = client.recording
+        switch r.phase {
+        case .counting, .starting, .recording:
+            let counting: Bool = { if case .counting = r.phase { return true } else { return false } }()
+            let seconds: Double? = r.phase == .recording ? r.seconds ?? 0 : nil
+            Button {
+                client.stopRecording(counting ? .cancel : .stop)
+            } label: {
+                HStack(spacing: 10) {
+                    Circle().fill(Color.red).frame(width: 10, height: 10).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(counting ? RecordingPolicy.Copy.cancel : RecordingPolicy.Copy.stop)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.red)
+                        if !counting {
+                            Text(RecordingPolicy.Copy.topRow(seconds: seconds, bytes: r.bytes, minutesLeft: r.minutesLeft))
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(r.minutesLeft == nil ? Palette.muted : Color.orange)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
+            .accessibilityLabel(counting ? RecordingPolicy.Copy.cancel
+                                         : RecordingPolicy.Copy.topRowSpoken(seconds: seconds, bytes: r.bytes, minutesLeft: r.minutesLeft))
+            .padding(.bottom, 10)
+        case .idle, .finishing:
+            if let note = client.recordingNote {
+                Footnote(text: note.text, warning: note.warning, top: 0)
+            }
+        }
+    }
+
+    /// This device's own group, after the Mac's: recording the stream first (#284, `recordingRows`), then Picture
+    /// in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
     /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
@@ -719,6 +802,8 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        // Recording the stream (#284): this device's action, its first rows.
+        recordingRows
         // Picture in Picture (#291, docs/picture-in-picture-plan.md): where iOS has it. The group's first row:
         // the newest, and the one the issue names. The hub looks again when it changes.
         if PictureInPicture.supported {

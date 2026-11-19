@@ -51,4 +51,16 @@ enum SillDocuments {
     static func protect(_ file: URL, in folder: Folder) {
         try? FileManager.default.setAttributes([.protectionKey: protection(folder)], ofItemAtPath: file.path)
     }
+
+    /// The free space of the volume Documents is on, for important usage (the recording's space rule: the privacy
+    /// manifest's DiskSpace, E174.1 and 85F4.1; the value never leaves the device); nil when it cannot be read.
+    /// DEBUG `-SillRecordingSpace <bytes>` says that many instead.
+    static func availableCapacity() -> Int64? {
+        #if DEBUG
+        let fake = UserDefaults.standard.double(forKey: "SillRecordingSpace")
+        if fake > 0 { return Int64(fake) }
+        #endif
+        let values = try? URL.documentsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage
+    }
 }

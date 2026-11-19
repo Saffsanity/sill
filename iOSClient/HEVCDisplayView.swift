@@ -372,9 +372,6 @@ final class HEVCDisplayView: UIView {
         }
     }
 
-    /// The stream's recording (#284), each frame as it is shown. On `renderQueue`, as `enqueue`.
-    var recorder: StreamRecorder?
-
     func enqueue(_ data: Data, isKeyframe: Bool) {
         // Picture in Picture paused: nothing decoded, the last picture kept (`setFrozen`).
         guard let desc = formatDescription, !frozen else { return }
@@ -402,7 +399,6 @@ final class HEVCDisplayView: UIView {
                                         sampleTimingEntryCount: 1, sampleTimingArray: &timing,
                                         sampleSizeEntryCount: 1, sampleSizeArray: &size,
                                         sampleBufferOut: &sample) == noErr, let sample else { return }
-        recorder?.frame(sample, isKeyframe: isKeyframe)
 
         // Show each frame as soon as it decodes instead of scheduling by timestamp.
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,

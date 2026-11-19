@@ -939,6 +939,12 @@ for f in ["RecordingPolicy.swift", "RecordingClock.swift", "RecordedSound.swift"
     let imports = source("iOSClient/" + f).split(separator: "\n").filter { $0.hasPrefix("import ") }.map(String.init)
     check(imports == ["import Foundation"], "\(f) imports Foundation alone: \(imports)")
 }
+// The recorder never UIKit or SwiftUI: the rig (Scripts/recording-check) compiles it on the Mac, with its folder,
+// protection and free space from its caller.
+let recorderImports = Set(source("iOSClient/StreamRecorder.swift").split(separator: "\n").filter { $0.hasPrefix("import ") }
+    .map { String($0.dropFirst("import ".count)) })
+check(!recorderImports.isEmpty && recorderImports.isSubset(of: ["AudioToolbox", "AVFoundation", "CoreMedia", "Foundation", "SillAudio", "StreamProtocol"]),
+      "StreamRecorder imports AVFoundation, CoreMedia and AudioToolbox, never UIKit: \(recorderImports.sorted())")
 
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

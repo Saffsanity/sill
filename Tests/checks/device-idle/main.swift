@@ -108,6 +108,13 @@ eq(P.lastUse(Uses(input: 5, control: 9, session: 3, front: 1)), 9, "the latest o
 eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 1)), 9, "the latest of the four: input")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 9, front: 3)), 9, "the latest of the four: a session's start")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 9)), 9, "the latest of the four: the front")
+// The window's recording (#284, docs/recording-plan.md, decision 9): now while it records, so it holds.
+eq(P.lastUse(Uses(input: nil, control: nil, session: nil, front: nil, recording: 11)), 11, "a recording alone")
+eq(P.lastUse(Uses(input: 5, control: 6, session: 7, front: 8, recording: 12)), 12, "the latest of the five: the recording")
+eq(P.lastUse(Uses(input: 5, control: 6, session: 7, front: 13, recording: 12)), 13, "the latest of the five: the front, after a recording")
+let recorded = P.Window(foregroundActive: true, streaming: true, lastUsedAt: P.lastUse(Uses(input: 0, control: nil, session: 0, front: 0, recording: 1_800)))
+eq(P.holdEnds([recorded], now: 1_800), 1_800 + P.idleLimit, "recording 30 minutes untouched: still held, 10 minutes past the recording's last look")
+eq(P.holdEnds([recorded], now: 1_800 + P.idleLimit), nil, "and its usual 10 minutes after it stopped")
 eq(P.sessionStart(previous: nil, reconnected: false, now: 50), 50,
    "a session the person started (a tap, Connect Remotely, a pairing): its start counts")
 eq(P.sessionStart(previous: 10, reconnected: false, now: 50), 50, "a new one the person started counts from its own start")
