@@ -94,7 +94,8 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, headlessDisplay: true, virtualDesktop: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, headlessDisplay: true, virtualDesktop: false,
+                          virtualDesktopSize: "device", virtualDesktopHz: 0)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -114,7 +115,8 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, headlessDisplay: true, virtualDesktop: false)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, headlessDisplay: true, virtualDesktop: false,
+                          virtualDesktopSize: "device", virtualDesktopHz: 0)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -136,7 +138,8 @@ do {
     check(!off.validated().headlessDisplay && standard.validated().headlessDisplay, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: false, virtualDesktop: false)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: false, virtualDesktop: false,
+                          virtualDesktopSize: "device", virtualDesktopHz: 0)
     check(!made.headlessDisplay, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
@@ -159,8 +162,40 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: true,
-                          virtualDesktop: true)
+                          virtualDesktop: true, virtualDesktopSize: "1920x1080@2", virtualDesktopHz: 60)
     check(made.virtualDesktop, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
+    // Its size and rate, the person's choice on the Mac (Noah, 2026-11-18: "allow the user to select resolution"): the
+    // device's by default in both, kept by validated when offered, anything else the device's; named in the log's line.
+    check(standard.virtualDesktopSize == "device" && HostConfig.app.virtualDesktopSize == "device" && standard.virtualDesktopHz == 0
+          && HostConfig.app.virtualDesktopHz == 0, "standard and app: the size and rate the device's")
+    check(made.virtualDesktopSize == "1920x1080@2" && made.virtualDesktopHz == 60 && made.validated() == made,
+          "a size and a rate offered: kept as made, and by validated")
+    for bad in ["", "Device", "1920x1080", "1920x1080@3", "999x999@2", "main ", "8192x8192@2"] {
+        var b = made; b.virtualDesktopSize = bad
+        check(b.validated().virtualDesktopSize == "device", "validated: a size not offered (\(bad)) is the device's")
+    }
+    for good in ["device", "main", "1440x900@2", "2560x1440@2", "3440x1440@1"] {
+        var g = made; g.virtualDesktopSize = good
+        check(g.validated().virtualDesktopSize == good, "validated: \(good) kept")
+    }
+    for hz in [-1, 1, 24, 59, 75, 90, 144, 240] {
+        var b = made; b.virtualDesktopHz = hz
+        check(b.validated().virtualDesktopHz == 0, "validated: a rate not offered (\(hz)) is the device's")
+    }
+    for hz in [0, 30, 60, 120] {
+        var g = made; g.virtualDesktopHz = hz
+        check(g.validated().virtualDesktopHz == hz, "validated: \(hz) kept")
+    }
+    var sized = standard
+    sized.virtualDesktopSize = "1920x1080@2"; sized.virtualDesktopHz = 60
+    eq(standard.changes(to: sized), "virtual desktop size Match the device → 1920 × 1080 (Retina), virtual desktop rate Match the device → 60 Hz",
+       "changes: its size and rate")
+    var mainSized = standard; mainSized.virtualDesktopSize = "main"
+    eq(sized.changes(to: mainSized), "virtual desktop size 1920 × 1080 (Retina) → Same as main display, virtual desktop rate 60 Hz → Match the device",
+       "changes: back, by words")
+    check(standard.applying(HostSettingsChange(token: 1, maxFPS: 60, virtualDesktop: true)).virtualDesktopSize == "device"
+          && sized.applyingAway(HostSettingsChange(bitrate: 8_000_000)).virtualDesktopSize == "1920x1080@2",
+          "a device's change never moves the size or the rate (phase 3's)")
     check(standard.applying(HostSettingsChange(virtualDesktop: true)).virtualDesktop && !on.applying(HostSettingsChange(virtualDesktop: false)).virtualDesktop,
           "a device's change lays it, on and off")
     check(standard.applyingAway(HostSettingsChange(virtualDesktop: true)).virtualDesktop

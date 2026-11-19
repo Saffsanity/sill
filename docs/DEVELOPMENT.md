@@ -2133,7 +2133,7 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
   takes these too.
 - The Settings window on a short screen (issue #59):
   `-SillSettingsAfter '<s> <tab>[; <s> <tab> …]'` opens Settings on that tab
-  (its name or the start of one: `remote`, `general`, `virtual`) s seconds
+  (its name or the start of one: `remote`, `general`, `displays`, `virtual`) s seconds
   after launch, as the menu does, and 0.6 s later prints the window's frame,
   the pane's whole height and how much of it shows ("shows 596 of 909,
   scrolls"), the visible frame it fits in and the cap. A step can also be

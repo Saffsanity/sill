@@ -557,6 +557,13 @@ private struct VirtualDisplayPane: View {
             } footer: {
                 Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is.")
             }
+            // The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18; HostConfig.virtualDesktop, off
+            // by default): a desktop of Sill's own after this Mac's screens, its size and rate by default the device's (Noah,
+            // 2026-11-18), which the person may choose instead ("allow the user to select resolution"); its status.
+            VirtualDesktopSection(on: $settings.config.virtualDesktop, size: $settings.config.virtualDesktopSize,
+                                  hz: $settings.config.virtualDesktopHz, snapshot: snapshot,
+                                  accessibility: model.permissions.accessibility,
+                                  tryAgain: model.coordinator.map { c in { c.tryDisplaysAgain() } })
             // A Mac with no working screen (PR #200, #61, #298): Sill's own display, on by default (Noah on #61), with a
             // switch of its own (Noah, 2026-11-18: "Anything that it would make sense to add a toggle to you should add a
             // toggle"), apart from "Stream from a virtual display", which is the windows'. A row while the display exists.
@@ -594,6 +601,80 @@ private struct VirtualDisplayPane: View {
         if s.virtualDisplayAPIMissing { return false }
         if s.displayMakeHeld { return true }
         return s.virtualDisplayProblem != nil && model.permissions.allGranted
+    }
+}
+
+/// Settings › Displays' Virtual Desktop section: the switch, the size and rate the person may choose (This device by
+/// default), and what it is doing now (VirtualDesktopWords: every sentence that names it).
+struct VirtualDesktopSection: View {
+    @Binding var on: Bool
+    @Binding var size: String
+    @Binding var hz: Int
+    let snapshot: HostStatusSnapshot
+    let accessibility: Bool
+    /// The coordinator's Try Again for the guard for #380; nil without one (the previews).
+    let tryAgain: (() -> Void)?
+
+    var body: some View {
+        Section {
+            Toggle(VirtualDesktopWords.macSwitch, isOn: $on)
+            Picker("Resolution", selection: $size) {
+                ForEach(VirtualDesktopSize.choiceIDs, id: \.self) { id in
+                    Text(Self.sizeTitle(id)).tag(id)
+                }
+            }
+            Picker("Refresh Rate", selection: $hz) {
+                ForEach(VirtualDesktopSize.rateChoices, id: \.self) { hz in
+                    Text(VirtualDesktopSize.rateWords(hz)).tag(hz)
+                }
+            }
+            LabeledContent("Status") {
+                HStack(spacing: 8) {
+                    Text(statusText).multilineTextAlignment(.trailing)
+                    // The guard for #380 holds every display Sill makes: Try Again lifts it.
+                    if snapshot.displayMakeHeld {
+                        Button("Try Again") { tryAgain?() }
+                            .disabled(tryAgain == nil)
+                    }
+                }
+            }
+        } header: {
+            Text(VirtualDesktopWords.name)
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                Footnote(VirtualDesktopWords.macFootnote)
+                Footnote(VirtualDesktopWords.pickersFootnote)
+                if Self.wide(size) { Footnote(VirtualDesktopWords.wideFootnote) }
+            }
+        }
+    }
+
+    /// "Match the device", "Same as main display (1512 × 982)", "1920 × 1080 (Retina)".
+    private static func sizeTitle(_ id: String) -> String {
+        guard id == VirtualDesktopSize.mainChoice, let mode = CGDisplayCopyDisplayMode(CGMainDisplayID()), mode.width > 0,
+              let main = VirtualDesktopSize.main(points: CGSize(width: mode.width, height: mode.height),
+                                                 scale: max(1, Int((Double(mode.pixelWidth) / Double(mode.width)).rounded())))
+        else { return VirtualDesktopSize.words(id) }
+        return VirtualDesktopSize.words(id) + " (\(main.widthPt) × \(main.heightPt))"
+    }
+
+    /// A chosen size more than 4096 pixels wide (some Macs' encoders take none).
+    private static func wide(_ id: String) -> Bool {
+        if case .fixed(let s)? = VirtualDesktopSize.choice(id) { return s.widthPt * s.scale > 4096 }
+        return false
+    }
+
+    /// What it is doing now: shown, made, or why it cannot be made; without Accessibility, that its windows stay where
+    /// macOS puts them.
+    private var statusText: String {
+        let vd = snapshot.virtualDesktop
+        if snapshot.displayMakeHeld { return StatusText.displayGuardHeld }
+        if let note = vd.note { return note }
+        if let d = snapshot.sillDisplay, d.virtualDesktop {
+            return VirtualDesktopWords.status(widthPt: d.widthPt, heightPt: d.heightPt, hz: d.hz, device: d.device, shown: vd.shown)
+        }
+        if !accessibility { return VirtualDesktopWords.withoutAccessibility }
+        return VirtualDesktopWords.available
     }
 }
 

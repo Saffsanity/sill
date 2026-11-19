@@ -26,15 +26,17 @@ import CoreGraphics
 /// default not at all until the display is made again, the one way that rests on nothing unmeasured).
 ///
 /// Pure (CoreGraphics); checked by Tests/checks/virtual-desktop.
-enum VirtualDesktopSize {
+package enum VirtualDesktopSize {
     /// A display's size in points and its scale (pixels a point).
-    struct Size: Equatable {
-        var widthPt: Int
-        var heightPt: Int
-        var scale: Int
+    package struct Size: Equatable {
+        package var widthPt: Int
+        package var heightPt: Int
+        package var scale: Int
+
+        package init(widthPt: Int, heightPt: Int, scale: Int) { self.widthPt = widthPt; self.heightPt = heightPt; self.scale = scale }
 
         /// The same size a quarter turned: the device held the other way.
-        var turned: Size { Size(widthPt: heightPt, heightPt: widthPt, scale: scale) }
+        package var turned: Size { Size(widthPt: heightPt, heightPt: widthPt, scale: scale) }
     }
 
     static let minSide = 800
@@ -101,6 +103,83 @@ enum VirtualDesktopSize {
         let whose = device.map { "for \($0), its screen" } ?? "at \(fallback.widthPt)×\(fallback.heightPt): no device's screen known yet"
         return "Headless display: created \(mode)\(askedWords) (\(what)) \(whose)."
     }
+
+    // MARK: The person's choice (Noah, 2026-11-18: "allow the user to select resolution"; the plan's §4 choices)
+
+    /// The Virtual Desktop's size as the person chooses it (HostConfig.virtualDesktopSize: Sill for Mac's Settings ›
+    /// Displays, the CLI's --virtual-desktop=…; a device's pickers are phase 3's): This device (`deviceChoice`, the
+    /// default: `device(room:panel:)`, and it follows the device), the main display's mode (`mainChoice`: `main`), or one
+    /// of `offered` by its id ("1920x1080@2"). None but This device follows a device.
+    package enum Choice: Equatable {
+        case device
+        case main
+        case fixed(Size)
+    }
+
+    package static let deviceChoice = "device"
+    package static let mainChoice = "main"
+
+    /// The sizes offered after This device and Same as main display, from the plan's list (§4, the 11-12 plan's §3) held
+    /// to Sill's own bounds: at Retina, 1440 × 900 to 2560 × 1440 ("5K"), no side under 800 points; at 1x, 1920 × 1080,
+    /// 2560 × 1440 and 3440 × 1440. The 6K and 8K entries and 1280 × 720 wait for phase 3's self test of each size.
+    package static let offered: [Size] = [
+        Size(widthPt: 1440, heightPt: 900, scale: 2), Size(widthPt: 1512, heightPt: 982, scale: 2),
+        Size(widthPt: 1728, heightPt: 1117, scale: 2), Size(widthPt: 1920, heightPt: 1080, scale: 2),
+        Size(widthPt: 1920, heightPt: 1200, scale: 2), Size(widthPt: 2560, heightPt: 1440, scale: 2),
+        Size(widthPt: 1920, heightPt: 1080, scale: 1), Size(widthPt: 2560, heightPt: 1440, scale: 1),
+        Size(widthPt: 3440, heightPt: 1440, scale: 1),
+    ]
+
+    /// A size's id: "1920x1080@2" (VirtualDesktopState.size's form).
+    package static func id(_ s: Size) -> String { "\(s.widthPt)x\(s.heightPt)@\(s.scale)" }
+
+    /// Every id the person may choose, in the pickers' order.
+    package static var choiceIDs: [String] { [deviceChoice, mainChoice] + offered.map(id) }
+
+    /// The choice an id names; nil for anything not offered (HostConfig.validated takes This device then).
+    package static func choice(_ id: String) -> Choice? {
+        if id == deviceChoice { return .device }
+        if id == mainChoice { return .main }
+        return offered.first { Self.id($0) == id }.map { .fixed($0) }
+    }
+
+    /// The refresh rates offered: 0, the device's (the default), then 30, 60 and 120 Hz.
+    package static let rateChoices = [0, 30, 60, 120]
+
+    /// The display's rate for the person's choice `choice` (0: the device's, `rate(viewportFPS:limit:)`), held to 24 and
+    /// to the Mac's Frame Rate limit (`limit`); an unknown choice is the device's.
+    static func rate(choice: Int, viewportFPS: Int?, limit: Int) -> Int {
+        guard choice != 0, rateChoices.contains(choice) else { return rate(viewportFPS: viewportFPS, limit: limit) }
+        return min(max(24, limit), choice)
+    }
+
+    /// "Same as main display": the main display's mode as the person set it (`points`, its "looks like" size; `scale`, its
+    /// pixels a point, 1 or 2), the 11-12 plan's §2: its scale kept, its pixels held inside 3840 × 2160 turned to its
+    /// shape (its points shrinking evenly at its scale, whole points), then, at 2x, as Sill's displays are held (no side
+    /// under 800 points, none over 4096). Nil with no size. Its rate is the person's rate choice, as for any size.
+    package static func main(points: CGSize, scale: Int) -> Size? {
+        guard usable(points) else { return nil }
+        let s = scale >= 2 ? 2 : 1
+        var w = Double(points.width).rounded(), h = Double(points.height).rounded()
+        let box = w >= h ? (wide: 3840.0, high: 2160.0) : (wide: 2160.0, high: 3840.0)
+        let fit = min(1, box.wide / (w * Double(s)), box.high / (h * Double(s)))
+        if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }   // the box's own edge kept whole
+        if s == 2 { return device(room: CGSize(width: w, height: h), panel: nil) }
+        return Size(widthPt: max(1, Int(w)), heightPt: max(1, Int(h)), scale: 1)
+    }
+
+    /// The person's choice in words, for Sill for Mac's pickers and the log: "Match the device", "Same as main display",
+    /// "1920 × 1080 (Retina)", "3440 × 1440"; an id not offered reads as This device.
+    package static func words(_ id: String) -> String {
+        switch choice(id) ?? .device {
+        case .device: return "Match the device"
+        case .main: return "Same as main display"
+        case .fixed(let s): return "\(s.widthPt) × \(s.heightPt)" + (s.scale == 2 ? " (Retina)" : "")
+        }
+    }
+
+    /// A rate choice in words: "Match the device", "30 Hz", "60 Hz", "120 Hz".
+    package static func rateWords(_ hz: Int) -> String { hz == 0 || !rateChoices.contains(hz) ? "Match the device" : "\(hz) Hz" }
 
     // MARK: Following the device (phase 2b, docs/virtual-desktop-plan.md §5 as revised 2026-11-18)
 

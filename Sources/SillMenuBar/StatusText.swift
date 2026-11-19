@@ -39,6 +39,8 @@ struct StatusPresentation: Equatable {
     var attention: [Attention]
     /// Under the menu's Virtual Display item.
     var virtualDisplayNote: String
+    /// Under the menu's Virtual Desktop item (phase 2b): off, on, shown on a device, or why it cannot be made.
+    var virtualDesktopNote: String
     var tooltip: String
     var accessibilityLabel: String
     /// The name devices see this Mac as, once Bonjour has registered it.
@@ -66,8 +68,9 @@ enum StatusText {
     static let olderDeviceShownFor: TimeInterval = 600
 
     /// `now`: the clock the menu's items that last a while are judged by (fixed in the previews).
+    /// `virtualDesktopOn`: the Virtual Desktop's switch (HostConfig.virtualDesktop), for its menu item's subtitle.
     static func present(snapshot s: HostStatusSnapshot, permissions: PermissionState,
-                        startupError: String?, hasCoordinator: Bool, now: Date = Date()) -> StatusPresentation {
+                        startupError: String?, hasCoordinator: Bool, now: Date = Date(), virtualDesktopOn: Bool = false) -> StatusPresentation {
         let (header, subtitle) = headline(s, permissions, startupError, hasCoordinator)
 
         var attention: [StatusPresentation.Attention] = []
@@ -135,6 +138,7 @@ enum StatusText {
         return StatusPresentation(glyph: glyph, header: header, subtitle: subtitle,
                                   source: sourceRow(s), devices: s.devices.map(deviceRow), attention: attention,
                                   virtualDisplayNote: virtualDisplayNote(s),
+                                  virtualDesktopNote: virtualDesktopNote(s, on: virtualDesktopOn),
                                   tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
                                   advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
                                   canPair: s.remote.map { $0.identityProblem == nil } ?? false, away: s.away)
@@ -247,12 +251,15 @@ enum StatusText {
     /// picture: "120 fps, still"), and with one device, how it is connected: "… · 30 Mbps · Wi-Fi".
     /// With two or more, each device's own row says it. "· sound" ends it while a device gets the
     /// Mac's sound. The Desktop on Sill's own display (a Mac with no working screen, PR #200): "Sill’s
-    /// display · 1218×800", its size in points.
+    /// display · 1218×800", its size in points; on the Virtual Desktop (phase 2b): "Virtual Desktop · 1218×800".
     private static func sourceRow(_ s: HostStatusSnapshot) -> StatusPresentation.Row? {
         guard let stream = s.stream else { return nil }
         let title: String, symbol: String
         switch stream.kind {
         case .window: title = middleTruncated(stream.title, to: 44); symbol = "macwindow"
+        case .desktop where stream.onSillDisplay && s.sillDisplay?.virtualDesktop == true:
+            title = s.sillDisplay.map { VirtualDesktopWords.cardTitle(widthPt: $0.widthPt, heightPt: $0.heightPt) } ?? VirtualDesktopWords.name
+            symbol = "rectangle.dashed"
         case .desktop where stream.onSillDisplay: title = sillDisplayTitle(s.sillDisplay); symbol = "rectangle.dashed"
         case .desktop: title = "Whole Desktop"; symbol = "menubar.dock.rectangle"
         case .testPattern: title = "Test Pattern"; symbol = "checkerboard.rectangle"
@@ -365,6 +372,14 @@ enum StatusText {
     /// One of a device's reported times. Negative is the client's "no sample this second" (-1),
     /// never a time.
     private static func ms(_ v: Int) -> String { v < 0 ? "–" : "\(v) ms" }
+
+    /// The menu's Virtual Desktop subtitle (VirtualDesktopWords.menuSubtitle): "A desktop for your devices, after your
+    /// screens" off; why it cannot be made; "On iPad mini: 1218 × 800, 60 Hz" while a device shows it; else how to reach it.
+    private static func virtualDesktopNote(_ s: HostStatusSnapshot, on: Bool) -> String {
+        let d = s.sillDisplay.flatMap { $0.virtualDesktop ? $0 : nil }
+        return VirtualDesktopWords.menuSubtitle(on: on, note: s.virtualDesktop.note, shownOn: s.virtualDesktop.shown ? (d?.device ?? "a device") : nil,
+                                                size: d.map { ($0.widthPt, $0.heightPt) }, hz: d?.hz)
+    }
 
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
         if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }

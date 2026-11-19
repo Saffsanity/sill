@@ -15,7 +15,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
 rm -f "$out/check"
-swiftc -O Sources/SillHost/VirtualDesktopSize.swift Sources/SillHost/DisplayMakeGuard.swift Sources/SillHost/VirtualDesktopLife.swift \
+swiftc -O -package-name sill Sources/SillHost/VirtualDesktopSize.swift Sources/SillHost/DisplayMakeGuard.swift Sources/SillHost/VirtualDesktopLife.swift \
     Sources/SillHost/DesktopWindowLedger.swift Sources/SillHost/WindowRestore.swift Sources/StreamProtocol/VirtualDesktopWords.swift \
     Sources/StreamProtocol/DesktopDisplays.swift "$here/main.swift" -o "$out/check"
 "$out/check" "$out"

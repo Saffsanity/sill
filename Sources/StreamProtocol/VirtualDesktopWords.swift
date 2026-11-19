@@ -63,4 +63,40 @@ public enum VirtualDesktopWords {
 
     /// The switch on a session the Mac does not say is paired: disabled, and why.
     public static func unpaired(mac: String) -> String { "Only a device paired with \(mac) can change this." }
+
+    // MARK: Sill for Mac (Settings › Displays, the status menu, the card)
+
+    /// Settings › Displays' switch.
+    public static let macSwitch = "Add a desktop for your devices"
+    /// Its footnote.
+    public static let macFootnote = "Your iPhone or iPad gets a desktop of its own after this Mac’s screens: tap Desktop on the device to step to it. It is the size of the device that shows it, unless you choose another, and is here only while a device shows it. Windows you leave on it move to your main screen 30 seconds after no device shows it, and go back when it returns. Your devices can turn it on from their Settings too."
+    /// Under the Resolution and Refresh Rate pickers.
+    public static let pickersFootnote = "A new size or rate applies the next time the Virtual Desktop is made. Larger sizes and 120 Hz may not keep their full frame rate on every Mac: Sill drops frames rather than letting the picture fall behind. 120 Hz needs a ProMotion iPhone or iPad."
+    /// Beside a size more than 4096 pixels wide.
+    public static let wideFootnote = "Some Macs’ video encoders take no picture wider than 4096 pixels; on those Sill streams it scaled down, or more slowly."
+    /// Its status while it can be made and nothing shows it.
+    public static let available = "Available"
+    /// Without Accessibility: it works, but Sill moves no window off it or back.
+    public static let withoutAccessibility = "Without Accessibility, windows left on it go where macOS puts them"
+
+    /// "Showing on iPad mini: 1218 × 800, 60 Hz" (Settings › Displays' status), or "1218 × 800, 60 Hz, for iPad mini" while
+    /// it exists and no device shows it.
+    public static func status(widthPt: Int, heightPt: Int, hz: Int, device: String?, shown: Bool) -> String {
+        let size = "\(widthPt) × \(heightPt), \(hz) Hz"
+        if shown { return device.map { "Showing on \($0): \(size)" } ?? "Showing: \(size)" }
+        return size + (device.map { ", for \($0)" } ?? "") + ", until no device has shown it for 30 seconds"
+    }
+
+    /// The status menu's item.
+    public static let menuItem = "Virtual Desktop"
+    /// Its subtitle: off; on, not made or not shown; shown ("On iPad mini: 1218 × 800, 60 Hz"); or why it cannot be made.
+    public static func menuSubtitle(on: Bool, note: String?, shownOn device: String?, size: (widthPt: Int, heightPt: Int)?, hz: Int?) -> String {
+        guard on else { return "A desktop for your devices, after your screens" }
+        if let note { return note }
+        if let size, let hz, let device { return "On \(device): \(size.widthPt) × \(size.heightPt), \(hz) Hz" }
+        return "Tap Desktop on your device to step to it"
+    }
+
+    /// The card's title for the Desktop on it: "Virtual Desktop · 1218×800".
+    public static func cardTitle(widthPt: Int, heightPt: Int) -> String { "\(name) · \(widthPt)×\(heightPt)" }
 }

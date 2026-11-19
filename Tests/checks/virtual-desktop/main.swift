@@ -354,6 +354,72 @@ for run in 0..<2_000 {
     check(bad == nil, "random rooms \(run): \(bad ?? "")")
 }
 
+// MARK: The person's choice of its size and rate (Noah, 2026-11-18: "allow the user to select resolution")
+
+typealias VS = VirtualDesktopSize
+check(VS.choice("device") == .device && VS.choice("main") == .main, "This device and Same as main display by their ids")
+check(VS.choiceIDs.first == "device" && VS.choiceIDs.dropFirst().first == "main" && VS.choiceIDs.count == VS.offered.count + 2,
+      "the pickers' order: This device, Same as main display, then the list")
+check(Set(VS.choiceIDs).count == VS.choiceIDs.count, "no id twice")
+for s in VS.offered {
+    check(VS.choice(VS.id(s)) == .fixed(s), "\(VS.id(s)) chosen by its id")
+    check([1, 2].contains(s.scale) && (s.scale == 1 || min(s.widthPt, s.heightPt) >= VS.minSide) && max(s.widthPt, s.heightPt) <= VS.maxSide
+          && s.widthPt * s.scale <= 8192 && s.heightPt * s.scale <= 8192, "\(VS.id(s)) within Sill's own bounds")
+}
+check(VS.offered.contains(VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)) && VS.offered.contains(VS.Size(widthPt: 3440, heightPt: 1440, scale: 1)),
+      "4K at Retina and the 34-inch ultrawide at 1x among them")
+for bad in ["", "Device", "1920x1080", "1920x1080@3", "1280x720@2", "999x999@2", " main", "3840x2160@2"] {
+    check(VS.choice(bad) == nil, "\(bad.debugDescription): not offered")
+}
+check(VS.id(VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)) == "1920x1080@2", "an id, as VirtualDesktopState.size writes a size")
+check(VS.words("device") == "Match the device" && VS.words("main") == "Same as main display" && VS.words("1920x1080@2") == "1920 × 1080 (Retina)"
+      && VS.words("3440x1440@1") == "3440 × 1440" && VS.words("nonsense") == "Match the device", "the choices' words")
+check(VS.rateChoices == [0, 30, 60, 120] && VS.rateWords(0) == "Match the device" && VS.rateWords(120) == "120 Hz" && VS.rateWords(75) == "Match the device",
+      "the rates and their words")
+check(VS.rate(choice: 0, viewportFPS: 120, limit: 120) == 120 && VS.rate(choice: 0, viewportFPS: nil, limit: 120) == 60,
+      "the rate: the device's by default")
+check(VS.rate(choice: 30, viewportFPS: 120, limit: 120) == 30 && VS.rate(choice: 120, viewportFPS: 60, limit: 120) == 120,
+      "…a chosen rate, whatever the device's")
+check(VS.rate(choice: 120, viewportFPS: 60, limit: 60) == 60, "…held to the Frame Rate limit")
+check(VS.rate(choice: 75, viewportFPS: 120, limit: 120) == 120, "…one not offered is the device's")
+// Same as main display, the 11-12 plan's §2 table.
+let mainRows: [(String, CGSize, Int, VS.Size)] = [
+    ("14-inch MacBook Pro", CGSize(width: 1512, height: 982), 2, VS.Size(widthPt: 1512, heightPt: 982, scale: 2)),
+    ("16-inch MacBook Pro", CGSize(width: 1728, height: 1117), 2, VS.Size(widthPt: 1670, heightPt: 1080, scale: 2)),
+    ("Studio Display (5K)", CGSize(width: 2560, height: 1440), 2, VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)),
+    ("Pro Display XDR (6K)", CGSize(width: 3008, height: 1692), 2, VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)),
+    ("24-inch iMac (4.5K)", CGSize(width: 2240, height: 1260), 2, VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)),
+    ("a 34-inch ultrawide", CGSize(width: 3440, height: 1440), 1, VS.Size(widthPt: 3440, heightPt: 1440, scale: 1)),
+    ("a 49-inch ultrawide", CGSize(width: 5120, height: 1440), 1, VS.Size(widthPt: 3840, heightPt: 1080, scale: 1)),
+    ("a 1080p monitor", CGSize(width: 1920, height: 1080), 1, VS.Size(widthPt: 1920, heightPt: 1080, scale: 1)),
+    ("a 4K monitor upright", CGSize(width: 1080, height: 1920), 2, VS.Size(widthPt: 1080, heightPt: 1920, scale: 2)),
+    ("a small Retina mode", CGSize(width: 1024, height: 640), 2, VS.Size(widthPt: 1280, heightPt: 800, scale: 2)),
+]
+for (name, points, scale, want) in mainRows {
+    let got = VS.main(points: points, scale: scale)
+    check(got == want, "Same as main display on \(name): \(String(describing: got)), want \(want)")
+}
+check(VS.main(points: .zero, scale: 2) == nil && VS.main(points: CGSize(width: Double.nan, height: 900), scale: 2) == nil, "no size: none")
+for _ in 0..<2_000 {
+    let w = Double.random(in: 320...7000, using: &rng).rounded(), h = Double.random(in: 320...7000, using: &rng).rounded()
+    let scale = Bool.random(using: &rng) ? 2 : 1
+    guard let m = VS.main(points: CGSize(width: w, height: h), scale: scale) else { check(false, "main of \(w)×\(h): none"); continue }
+    let wide = w >= h
+    var ok = m.scale == scale
+    if scale == 2 {
+        ok = ok && min(m.widthPt, m.heightPt) >= VS.minSide && max(m.widthPt, m.heightPt) <= VS.maxSide
+    } else {
+        ok = ok && m.widthPt * 1 <= (wide ? 3840 : 2160) && m.heightPt * 1 <= (wide ? 2160 : 3840)
+    }
+    // Inside the box at its scale whenever no floor grew it; the shape kept within the rounding.
+    let grown = scale == 2 && min(w, h) * min(1, (wide ? 3840 : 2160) / (w * 2), (wide ? 2160 : 3840) / (h * 2)) < Double(VS.minSide)
+    if !grown { ok = ok && m.widthPt * m.scale <= (wide ? 3840 : 2160) && m.heightPt * m.scale <= (wide ? 2160 : 3840) }
+    // Each side its own share of the box, whole points, rounded down: the shape kept within a point a side.
+    let fit = min(1, (wide ? 3840 : 2160) / (w * Double(scale)), (wide ? 2160 : 3840) / (h * Double(scale)))
+    if !grown { ok = ok && abs(Double(m.widthPt) - w * fit) < 1.0001 && abs(Double(m.heightPt) - h * fit) < 1.0001 }
+    check(ok, "main \(w)×\(h)@\(scale): \(m)")
+}
+
 // MARK: VirtualDesktopLife: when the Virtual Desktop exists (plan §6 and §10)
 
 typealias Life = VirtualDesktopLife
@@ -611,6 +677,22 @@ check(Words.panelFootnote(on: true, mac: "Mac mini", size: nil, hz: 60) == "Tap 
       "on with no size said: no size")
 check(Words.sizeLine(widthPt: 800, heightPt: 1218, hz: nil) == "Its size: 800 × 1218.", "a size with no rate")
 check(Words.unpaired(mac: "Mac mini") == "Only a device paired with Mac mini can change this.", "unpaired: why the switch is disabled")
+// Sill for Mac: Settings › Displays' status, the menu's subtitle, the card.
+check(Words.status(widthPt: 1218, heightPt: 800, hz: 60, device: "iPad mini", shown: true) == "Showing on iPad mini: 1218 × 800, 60 Hz",
+      "the status while a device shows it, as the plan words it")
+check(Words.status(widthPt: 1218, heightPt: 800, hz: 60, device: "iPad mini", shown: false)
+      == "1218 × 800, 60 Hz, for iPad mini, until no device has shown it for 30 seconds", "…made and kept, no device showing it")
+check(Words.status(widthPt: 1920, heightPt: 1080, hz: 60, device: nil, shown: true) == "Showing: 1920 × 1080, 60 Hz", "…no device known")
+check(Words.menuSubtitle(on: false, note: "x", shownOn: "iPad mini", size: (1218, 800), hz: 60) == "A desktop for your devices, after your screens",
+      "the menu, off: what it is, whatever else")
+check(Words.menuSubtitle(on: true, note: "Needs Screen Recording.", shownOn: nil, size: nil, hz: nil) == "Needs Screen Recording.",
+      "…on where it cannot be made: why")
+check(Words.menuSubtitle(on: true, note: nil, shownOn: "iPad mini", size: (1218, 800), hz: 60) == "On iPad mini: 1218 × 800, 60 Hz",
+      "…shown: on which device, its size and rate")
+check(Words.menuSubtitle(on: true, note: nil, shownOn: nil, size: nil, hz: nil) == "Tap Desktop on your device to step to it", "…on, not shown")
+check(Words.cardTitle(widthPt: 1218, heightPt: 800) == "Virtual Desktop · 1218×800", "the card's source row")
+check(Words.macSwitch == "Add a desktop for your devices" && Words.macFootnote.contains("30 seconds") && Words.pickersFootnote.contains("next time"),
+      "Settings › Displays' switch and footnotes")
 
 // 5,000 random sessions: devices showing it and stepping away, the switch flipped (a fifth of them as fast as a device
 // can, a fifth with the switch on and a device stepping onto it now and then), locks, user switches, monitors coming and going, macOS or the person making it the main display, the guard and

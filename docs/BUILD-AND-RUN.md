@@ -83,7 +83,8 @@ Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
 virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck,
-showPairingWindowToScreenSharing; the update check keeps
+showPairingWindowToScreenSharing, virtualDesktop, virtualDesktopSize (device, main or WxH@S),
+virtualDesktopHz (0, 30, 60, 120); the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,

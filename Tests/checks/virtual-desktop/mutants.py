@@ -119,8 +119,8 @@ MUTANTS = [
      "        case .listedModes, .newModes: return []"),
     ("a square's turn listed", "size", "return size.turned == size ? [] : [size.turned]", "return [size.turned]"),
     ("the turn listed for every way", "size", "        case .nextMake, .remake: return []\n", "        case .nextMake, .remake: return [size.turned]\n"),
-    ("a turn keeps its sides", "size", "        var turned: Size { Size(widthPt: heightPt, heightPt: widthPt, scale: scale) }",
-     "        var turned: Size { Size(widthPt: widthPt, heightPt: heightPt, scale: scale) }"),
+    ("a turn keeps its sides", "size", "        package var turned: Size { Size(widthPt: heightPt, heightPt: widthPt, scale: scale) }",
+     "        package var turned: Size { Size(widthPt: widthPt, heightPt: heightPt, scale: scale) }"),
     ("a follow to the size it has", "size", "        if to == display { return .nothing }\n", ""),
     ("followed while locked", "size", "        if locked { return .later }\n", ""),
     ("a listed mode never switched", "size", "        case .listedModes: return listed.contains(to) ? .switchMode : .nextMake",
@@ -149,6 +149,25 @@ MUTANTS = [
     ("the next make said as in place", "size",
      "        case .nextMake: return \"\\(display): \\(device) \\(what); the next one is made at \\(size).\"",
      "        case .nextMake: return \"\\(display): \\(device) \\(what); \\(size) in place.\""),
+    # The person's choice of its size and rate (commit 10)
+    ("a size not offered chosen", "size", "        return offered.first { Self.id($0) == id }.map { .fixed($0) }\n", "        return .device\n"),
+    ("Same as main display not chosen", "size", "        if id == mainChoice { return .main }\n", ""),
+    ("an id without its scale", "size", "static func id(_ s: Size) -> String { \"\\(s.widthPt)x\\(s.heightPt)@\\(s.scale)\" }",
+     "static func id(_ s: Size) -> String { \"\\(s.widthPt)x\\(s.heightPt)\" }"),
+    ("8K offered", "size", "Size(widthPt: 1920, heightPt: 1200, scale: 2), Size(widthPt: 2560, heightPt: 1440, scale: 2),",
+     "Size(widthPt: 1920, heightPt: 1200, scale: 2), Size(widthPt: 3840, heightPt: 2160, scale: 2),"),
+    ("a chosen rate past the limit", "size", "        return min(max(24, limit), choice)\n", "        return choice\n"),
+    ("a rate not offered taken", "size", "        guard choice != 0, rateChoices.contains(choice) else {", "        guard choice != 0 else {"),
+    ("the main display's scale ignored", "size", "        let s = scale >= 2 ? 2 : 1\n", "        let s = 2\n"),
+    ("the box never turned", "size", "        let box = w >= h ? (wide: 3840.0, high: 2160.0) : (wide: 2160.0, high: 3840.0)\n",
+     "        let box = (wide: 3840.0, high: 2160.0)\n"),
+    ("main's floor left out", "size", "        if s == 2 { return device(room: CGSize(width: w, height: h), panel: nil) }\n",
+     "        if s == 2 { return Size(widthPt: Int(w), heightPt: Int(h), scale: 2) }\n"),
+    ("main's sides rounded up", "size", "        if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }",
+     "        if fit < 1 { w = (w * fit).rounded(); h = (h * fit).rounded() }"),
+    ("main never shrunk", "size", "        if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }", "        if false { }"),
+    ("the words without Retina", "size", "+ (s.scale == 2 ? \" (Retina)\" : \"\")", "+ \"\""),
+    ("a rate not offered named", "size", "hz == 0 || !rateChoices.contains(hz) ? \"Match the device\"", "hz == 0 ? \"Match the device\""),
     # VirtualDesktopLife: when it exists (plan §6, §10)
     ("the grace 300 s", "life", "    static let grace: Double = 30\n", "    static let grace: Double = 300\n"),
     ("the grace 3 s", "life", "    static let grace: Double = 30\n", "    static let grace: Double = 3\n"),
@@ -238,6 +257,10 @@ MUTANTS = [
     ("the panel's on and off swapped", "words", "        let what = on ? \"Tap Desktop", "        let what = !on ? \"Tap Desktop"),
     ("the size's rate dropped", "words", "(hz.map { \" at \\($0) Hz\" } ?? \"\")", "\"\""),
     ("the size turned", "words", "\"Its size: \\(widthPt) × \\(heightPt)\"", "\"Its size: \\(heightPt) × \\(widthPt)\""),
+    ("the status shown when kept", "words", "        if shown { return device.map {", "        if true { return device.map {"),
+    ("the menu's note hidden", "words", "        if let note { return note }\n", ""),
+    ("the menu shown with no device", "words", "        if let size, let hz, let device { return", "        if let size, let hz { return"),
+    ("the card's size turned", "words", "\"\\(name) · \\(widthPt)×\\(heightPt)\"", "\"\\(name) · \\(heightPt)×\\(widthPt)\""),
     ("unpaired without the Mac", "words", "\"Only a device paired with \\(mac) can change this.\"", "\"Only a paired device can change this.\""),
     # DesktopWindowLedger: out and back (plan §7)
     ("the same area recomputed", "ledger", "        if from == to { return frame }\n", ""),
@@ -286,7 +309,7 @@ for name, which, old, new in MUTANTS:
     other = [p for k, p in FILES.items() if k != which]
     exe = os.path.join(OUT, "mutant")
     if os.path.exists(exe): os.remove(exe)
-    c = subprocess.run(["swiftc", "-O", src, *other, os.path.join(SP, "main.swift"), "-o", exe], capture_output=True, text=True)
+    c = subprocess.run(["swiftc", "-O", "-package-name", "sill", src, *other, os.path.join(SP, "main.swift"), "-o", exe], capture_output=True, text=True)
     os.remove(src)
     if c.returncode != 0:
         print(f"{name}: did not compile: {c.stderr.strip().splitlines()[0] if c.stderr.strip() else ''}"); continue

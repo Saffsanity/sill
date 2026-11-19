@@ -430,8 +430,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/test-host`),
   `HostSettings` (UserDefaults; the presets are StreamProtocol's
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
-  (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` (its
-  height capped to the screen, issue #59) + `SettingsPanes`,
+  (all status copy; the Virtual Desktop's card row and menu subtitle from VirtualDesktopWords), `StatusCard`,
+  `StatusGlyph`, `SettingsWindow` (its height capped to the screen, issue #59; the fourth tab "Displays", raw
+  value `virtualDisplay`) + `SettingsPanes` (Displays' `VirtualDesktopSection`: the switch, Resolution and
+  Refresh Rate from VirtualDesktopSize's choices, its status, Try Again for the guard),
   `SettingsWindowFit` (how tall Settings may be on its screen and where it
   goes; pure, `Tests/checks/settings-window`), `Permissions`, `LoginItem`,
   `LogWindow`, `MainMenu` (key

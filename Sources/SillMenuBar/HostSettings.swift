@@ -54,6 +54,7 @@ final class HostSettings {
         static let offConsoleView = "offConsoleView"
         static let headlessDisplay = "headlessDisplay"
         static let virtualDesktop = "virtualDesktop"
+        static let virtualDesktopSize = "virtualDesktopSize", virtualDesktopHz = "virtualDesktopHz"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -150,6 +151,9 @@ final class HostSettings {
             Key.headlessDisplay: base.headlessDisplay,
             // Off, like the CLI (Noah, 2026-11-11: the Virtual Desktop off by default); a saved key wins.
             Key.virtualDesktop: base.virtualDesktop,
+            // Its size and rate the device's (Noah, 2026-11-18), as the CLI's; a saved choice wins.
+            Key.virtualDesktopSize: base.virtualDesktopSize,
+            Key.virtualDesktopHz: base.virtualDesktopHz,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -172,7 +176,9 @@ final class HostSettings {
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
                             headlessDisplay: defaults.bool(forKey: Key.headlessDisplay),
-                            virtualDesktop: defaults.bool(forKey: Key.virtualDesktop)).validated()
+                            virtualDesktop: defaults.bool(forKey: Key.virtualDesktop),
+                            virtualDesktopSize: defaults.string(forKey: Key.virtualDesktopSize) ?? base.virtualDesktopSize,
+                            virtualDesktopHz: defaults.integer(forKey: Key.virtualDesktopHz)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -202,6 +208,8 @@ final class HostSettings {
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
         if config.headlessDisplay != old.headlessDisplay { defaults.set(config.headlessDisplay, forKey: Key.headlessDisplay) }
         if config.virtualDesktop != old.virtualDesktop { defaults.set(config.virtualDesktop, forKey: Key.virtualDesktop) }
+        if config.virtualDesktopSize != old.virtualDesktopSize { defaults.set(config.virtualDesktopSize, forKey: Key.virtualDesktopSize) }
+        if config.virtualDesktopHz != old.virtualDesktopHz { defaults.set(config.virtualDesktopHz, forKey: Key.virtualDesktopHz) }
     }
 
     // MARK: Remote devices seen (display only)

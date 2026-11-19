@@ -3959,11 +3959,11 @@ package final class StreamCoordinator {
         defer { virtualDesktopChanging = false }
         let matched = VirtualDesktopSize.matched(asker: desktopAsker, newest: newestViewport, sent: Set(viewports.keys))
         let vp = matched.flatMap { viewports[$0] }
-        let asked = VirtualDesktopSize.device(room: vp?.room.map { CGSize(width: $0.width, height: $0.height) },
-                                              panel: vp.map { CGSize(width: $0.width, height: $0.height) }) ?? VirtualDesktopSize.fallback
-        let hz = VirtualDesktopSize.rate(viewportFPS: vp?.fps, limit: maxFPS)
+        let (asked, hz) = virtualDesktopWanted(target: config, viewport: vp)
         let device = vp == nil ? nil : matched.map { deviceName(id: $0) }
-        let listed = [asked] + VirtualDesktopSize.otherModes(asked, way: VirtualDesktopSize.followWay)
+        // The turn listed beside it only when it follows the device (This device) in a way in place (P2's verdict).
+        let follows = VirtualDesktopSize.choice(config.virtualDesktopSize) == .device
+        let listed = [asked] + (follows ? VirtualDesktopSize.otherModes(asked, way: VirtualDesktopSize.followWay) : [])
         sayVirtualDesktopWaited(.make, now: now)
         // The guard's marker from just before the private calls until the display is up or failed (#380; SillDisplays).
         displays.willMake(.desktop)
@@ -4009,6 +4009,35 @@ package final class StreamCoordinator {
         await catalog.refreshWindows()
         // The windows Sill moved off it before, back in their places (or the same share of its new area).
         bringVirtualDesktopWindowsBack(to: b)
+    }
+
+    /// The size and rate the Virtual Desktop has when it is made now, by the person's choice (`t`'s virtualDesktopSize and
+    /// virtualDesktopHz; Sill.app's Settings › Displays, the CLI's --virtual-desktop=…): This device's (the device's room at
+    /// Retina, VirtualDesktopSize.device, for viewport `vp`; #200's 1920×1080 with none), the main display's mode
+    /// (VirtualDesktopSize.main), or a fixed size; the rate the chosen one, else the device's, held to the Frame Rate limit.
+    private func virtualDesktopWanted(target t: HostConfig, viewport vp: Viewport?) -> (size: VirtualDesktopSize.Size, hz: Int) {
+        let hz = VirtualDesktopSize.rate(choice: t.virtualDesktopHz, viewportFPS: vp?.fps, limit: t.maxFPS)
+        switch VirtualDesktopSize.choice(t.virtualDesktopSize) ?? .device {
+        case .device:
+            return (VirtualDesktopSize.device(room: vp?.room.map { CGSize(width: $0.width, height: $0.height) },
+                                              panel: vp.map { CGSize(width: $0.width, height: $0.height) }) ?? VirtualDesktopSize.fallback, hz)
+        case .fixed(let size):
+            return (size, hz)
+        case .main:
+            let m = mainDisplayMode()
+            return (m.flatMap { VirtualDesktopSize.main(points: $0.points, scale: $0.scale) } ?? VirtualDesktopSize.fallback, hz)
+        }
+    }
+
+    /// The main display's mode as the person set it (its "looks like" points and its pixels a point), for "Same as main
+    /// display"; a test host's first stop under SILL_TEST_DISPLAYS. Nil with none.
+    private func mainDisplayMode() -> (points: CGSize, scale: Int)? {
+        if synthetic {
+            guard let first = catalog.testDisplays?.first else { return nil }
+            return (first.frame.size, Int(testDisplayScales[first.id] ?? 1))
+        }
+        guard let mode = CGDisplayCopyDisplayMode(CGMainDisplayID()), mode.width > 0 else { return nil }
+        return (CGSize(width: mode.width, height: mode.height), max(1, Int((Double(mode.pixelWidth) / Double(mode.width)).rounded())))
     }
 
     /// What the Virtual Desktop now is, for following its device, kind 16, Sill.app's card and the Desktop's rate.
@@ -4169,7 +4198,9 @@ package final class StreamCoordinator {
     /// its switch is on, each device's own state says the size the Virtual Desktop would have for it (kind 16).
     private func virtualDesktopViewport(_ v: Viewport, from id: ObjectIdentifier) {
         if target.virtualDesktop { publishSettings() }
-        guard var follow = desktopFollow, virtualDesktopNow?.device == id, desktopLife.role == .virtualDesktop,
+        // Only This device follows a device (a size the person chose, or the main display's, stays as chosen).
+        guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device,
+              var follow = desktopFollow, virtualDesktopNow?.device == id, desktopLife.role == .virtualDesktop,
               let size = VirtualDesktopSize.device(room: v.room.map { CGSize(width: $0.width, height: $0.height) },
                                                    panel: CGSize(width: v.width, height: v.height)) else { return }
         follow.saw(size, at: CFAbsoluteTimeGetCurrent())
@@ -4863,19 +4894,20 @@ package final class StreamCoordinator {
 
     /// The Virtual Desktop as connection `id` sees it (kind 16's `virtualDesktopState`, phase 2b): whether this Mac can make
     /// it now and why not, whether the Desktop shows it, and, while its switch is on, the size and rate it has, or would
-    /// have for this device (its last viewport: VirtualDesktopSize.device and rate; none before it sent one). Pure of the
-    /// target, the snapshot and the connection's viewport, each of which publishes when it changes (a viewport while the
-    /// switch is on: `virtualDesktopViewport`).
+    /// have for this device (`virtualDesktopWanted`: the person's choice, This device's for its last viewport, none before
+    /// it sent one). Pure of the target, the snapshot and the connection's viewport, each of which publishes when it
+    /// changes (a viewport while the switch is on: `virtualDesktopViewport`), and for "Same as main display" of the main
+    /// display's mode, read then.
     private func virtualDesktopState(target t: HostConfig, snapshot s: HostStatusSnapshot, viewport vp: Viewport?) -> VirtualDesktopState {
         var state = VirtualDesktopState(available: s.virtualDesktop.available, note: s.virtualDesktop.note, shown: s.virtualDesktop.shown)
         guard t.virtualDesktop else { return state }
         if let d = s.sillDisplay, d.virtualDesktop {
             state.size = VirtualDesktopState.size(widthPt: d.widthPt, heightPt: d.heightPt, scale: d.scale)
             state.hz = d.hz
-        } else if let vp, let size = VirtualDesktopSize.device(room: vp.room.map { CGSize(width: $0.width, height: $0.height) },
-                                                              panel: CGSize(width: vp.width, height: vp.height)) {
-            state.size = VirtualDesktopState.size(widthPt: size.widthPt, heightPt: size.heightPt, scale: size.scale)
-            state.hz = VirtualDesktopSize.rate(viewportFPS: vp.fps, limit: t.maxFPS)
+        } else if vp != nil || VirtualDesktopSize.choice(t.virtualDesktopSize) != .device {
+            let wanted = virtualDesktopWanted(target: t, viewport: vp)
+            state.size = VirtualDesktopState.size(widthPt: wanted.size.widthPt, heightPt: wanted.size.heightPt, scale: wanted.size.scale)
+            state.hz = wanted.hz
         }
         return state
     }

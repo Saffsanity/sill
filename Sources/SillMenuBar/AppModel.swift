@@ -392,7 +392,8 @@ final class AppModel {
         StatusText.present(snapshot: coordinator?.status.snapshot ?? HostStatusSnapshot(),
                            permissions: PermissionState(screenRecording: permissions.screenRecording,
                                                         accessibility: permissions.accessibility),
-                           startupError: startupError, hasCoordinator: coordinator != nil, now: Date())
+                           startupError: startupError, hasCoordinator: coordinator != nil, now: Date(),
+                           virtualDesktopOn: settings.config.virtualDesktop)
     }
 
     /// The older-device item ends 10 minutes after the connection it tells of, when nothing else
