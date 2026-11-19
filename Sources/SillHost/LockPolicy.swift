@@ -376,7 +376,8 @@ enum LockPolicy {
 
     /// What the server drops at `r`: every picture of the Mac but the placeholder (the display too,
     /// unless it streams at a locked screen), its thumbnails, icons and installed apps, its sound, its
-    /// clipboard, its pointer and cursor shape. The window list, settings, the Mac's identity, the
+    /// clipboard, its pointer and cursor shape, and the camera's demands (kind 46: a device's camera is
+    /// refused at any lock, docs/camera-plan.md §6.3). The window list, settings, the Mac's identity, the
     /// menus' answers (none has items while locked), pongs and ticks go as ever.
     static func withheld(_ kind: StreamMessageKind, picture: Picture?, reading r: Reading, offConsoleView view: Bool = false) -> Bool {
         // The off-console view: its pictures, thumbnails, icons and apps go; nothing of the console's.
@@ -391,16 +392,20 @@ enum LockPolicy {
             }
         case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer:
             return true
+        case .camera:
+            return true
         default:
             return false
         }
     }
 
     /// The off-console view's gate (`offConsoleViewAllowed`): the sound, the clipboard, the pointer and the
-    /// cursor shape; every picture (a window's, the display's, the placeholder's) and the catalog go.
+    /// cursor shape, and the camera's demands; every picture (a window's, the display's, the placeholder's)
+    /// and the catalog go.
     static func viewWithholds(_ kind: StreamMessageKind) -> Bool {
         switch kind {
         case .audio, .clipboard, .cursorShape, .macPointer: return true
+        case .camera: return true
         default: return false
         }
     }
@@ -430,6 +435,10 @@ enum LockPolicy {
         case clipboardSubscription
         /// Kind 8. `letsGo`: it is the up of a key or a button this device holds down on the Mac.
         case input(letsGo: Bool)
+        /// Kind 46 from a device: its camera's offer, pause, format or frame (CameraReceiver, on its own queue,
+        /// never through the main actor; docs/camera-plan.md §6.3). Refused at any lock, a paired device's
+        /// too: nothing a device sends acts on a locked Mac but the password typed at its lock screen.
+        case camera
         /// Anything else: settings (17), the viewport (9), a keyframe (44), Pair This iPad… (21, whose
         /// ask answers "locked" by itself), pings, stats, the hello.
         case other
@@ -437,7 +446,7 @@ enum LockPolicy {
 
     /// What the lock refuses, one line each a minute at most.
     enum Refusal: String, CaseIterable, Equatable {
-        case pick, launch, windowCommand, menus, gesture, clipboard, input
+        case pick, launch, windowCommand, menus, gesture, clipboard, input, camera
     }
 
     enum Decision: Equatable {
@@ -465,6 +474,7 @@ enum LockPolicy {
         case .gesture: return .refuse(.gesture)
         case .clipboardText: return .refuse(.clipboard)
         case .input(let letsGo): return takesInput(r, paired: paired) ? .take : (letsGo ? .letGo : .refuse(.input))
+        case .camera: return .refuse(.camera)
         case .menuSubscription, .clipboardSubscription, .other: return .take
         }
     }
@@ -488,7 +498,8 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
+    /// then, and offers no Paste), no `camera` (a device sends no kind 46, and its camera stops), no
+    /// `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
     /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
     /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
     /// were before this change.
@@ -500,6 +511,7 @@ enum LockPolicy {
         var l = list
         l.windows = []
         l.clipboard = nil
+        l.camera = nil
         l.desktopDisplays = nil
         l.desktopDisplay = nil
         l.desktopDisplayNames = nil
@@ -690,6 +702,9 @@ enum LockPolicy {
         case .input:
             return "Locked: dropped " + (n == 1 ? "an input event" : "\(n) input events")
                 + "; only a paired device types at a locked Mac, and no device at one switched to another user."
+        case .camera:
+            return "Locked: dropped " + (n == 1 ? "a device's camera message" : "\(n) camera messages from devices")
+                + "; Sill Camera waits for this Mac to be unlocked."
         }
         return "Locked: refused \(what); devices see none of this Mac until it is unlocked."
     }

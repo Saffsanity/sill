@@ -40,6 +40,13 @@ import Network
 /// §3.3): each report (kind 26) says how many the Mac had read on the connection, and one built before
 /// it read this device's latest input is dropped.
 ///
+/// It also keeps the uplink ledger (UplinkLedger; the overview's §2.3, docs/camera-plan.md §6.2): every
+/// message handed to the session's connection is counted until the connection has taken it
+/// (`contentProcessed`), by lane, and what it took in the last second. Everything `send` hands goes at
+/// once, as before; a camera frame (kind 46 type 2) goes only through `sendCamera`, never into `waiting`:
+/// refused while a fence or a hold stands, so the camera never queues in front of the person's input in
+/// Sill's own queue, and the camera's pacing (CameraPacing) reads `uplink` before each picture it encodes.
+///
 /// Foundation and Network only: it is checked on its own with swiftc against a local stand-in for
 /// the Mac whose old connection is slow (docs/direct-wireless-plan.md, the review fixes).
 final class SessionLink {
@@ -81,6 +88,36 @@ final class SessionLink {
     /// Input messages counted for the session's connection: those handed to it since it became the
     /// session's, and those waiting to go out on it (see `inputsOnSession`).
     private var inputs = 0
+    /// What the session's connection was handed and has not taken yet, by lane, and what it took in the
+    /// last second (UplinkLedger).
+    private var ledger = UplinkLedger()
+
+    /// The uplink as the camera's pacing reads it (CameraPacing.encodes): whether a fence or a hold stands,
+    /// the bytes the session's connection was handed and has not taken yet, every lane's, and what it took in
+    /// the last second.
+    struct Uplink: Equatable {
+        let fenced: Bool
+        let unsent: Int
+        let takenLastSecond: Int
+    }
+
+    var uplink: Uplink {
+        lock.lock(); defer { lock.unlock() }
+        let now = ProcessInfo.processInfo.systemUptime
+        let id = current.map(ObjectIdentifier.init)
+        return Uplink(fenced: !fences.isEmpty || holding != nil, unsent: id.map { ledger.pending(for: $0) } ?? 0,
+                      takenLastSecond: id.map { ledger.takenLastSecond(for: $0, at: now) } ?? 0)
+    }
+
+    /// The bytes the session's connection was handed and has not taken yet, by lane (for the checks).
+    var pendingBytes: [UplinkLedger.Lane: Int] {
+        lock.lock(); defer { lock.unlock() }
+        var out: [UplinkLedger.Lane: Int] = [:]
+        for lane in UplinkLedger.Lane.allCases {
+            out[lane] = current.map { ledger.pending(lane, for: ObjectIdentifier($0)) } ?? 0
+        }
+        return out
+    }
 
     /// The number of input messages (kind 8) counted for the session's connection: those `send` handed
     /// to it since it became the session's, and those waiting to go out on it once the fences and the
@@ -117,8 +154,33 @@ final class SessionLink {
             if Self.isInput(data) { inputs += 1 }
             return
         }
-        current?.send(content: data, completion: .contentProcessed { _ in })
+        if let c = current { handLocked(data, .first, to: c) }
         if current != nil, Self.isInput(data) { inputs += 1 }
+    }
+
+    /// A camera frame (kind 46 type 2, DeviceCamera) to the Mac: handed to the session's connection at once,
+    /// counted in the camera's lane until it is taken, or refused (false) while a fence or a hold stands or
+    /// there is no connection. Never kept in `waiting`: a frame that cannot go now is dropped by its sender,
+    /// whose next frame is then a keyframe (CameraPacing.sends), so the camera never waits in front of input.
+    func sendCamera(_ data: Data) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard fences.isEmpty, holding == nil, let c = current else { return false }
+        handLocked(data, .camera, to: c)
+        return true
+    }
+
+    /// Hands `data` to `c`, counted in `lane` until `c` has taken it. Under the lock.
+    private func handLocked(_ data: Data, _ lane: UplinkLedger.Lane, to c: NWConnection) {
+        let bytes = data.count
+        let epoch = ledger.handed(bytes, lane, to: ObjectIdentifier(c))
+        c.send(content: data, completion: .contentProcessed { [weak self] _ in self?.taken(bytes, lane, epoch: epoch) })
+    }
+
+    /// A connection took what it was handed (or failed with it, which ends it): the ledger counts it off and
+    /// into the last second's. On the connection's queue.
+    private func taken(_ bytes: Int, _ lane: UplinkLedger.Lane, epoch: Int) {
+        lock.lock(); defer { lock.unlock() }
+        ledger.taken(bytes, lane, epoch: epoch, at: ProcessInfo.processInfo.systemUptime)
     }
 
     /// Whether `c` is still read: the session's connection, or the old one of a hand-over until its
@@ -211,7 +273,7 @@ final class SessionLink {
         }
         let out = waiting
         waiting = []
-        for data in out { current?.send(content: data, completion: .contentProcessed { _ in }) }
+        if let c = current { for data in out { handLocked(data, .first, to: c) } }
         let close = fencedOff
         fencedOff = []
         return Released(held: out.count, waiting: 0, clear: true, seconds: seconds, close: close)
@@ -229,5 +291,68 @@ final class SessionLink {
         waiting = []
         fencedOff = []
         return connections
+    }
+}
+
+/// The uplink ledger (the overview's §2.3; docs/camera-plan.md §6.2): what the device has handed its
+/// session's connection and the connection has not taken yet (`contentProcessed`), by lane, for one
+/// connection at a time, and what that connection took in the last second. The person's input, pings, stats
+/// and every other message (`first`) go at once, always; the camera's frames (`camera`) only while no fence
+/// or hold stands (`SessionLink.sendCamera`), and their pacing reads the ledger (CameraPacing: the bytes not
+/// taken, every lane's, within the budget the last second's rate gives). Files' and the microphone's lanes
+/// join it when their work lands (the files branch keeps the same ledger with a `files` lane). Pure:
+/// SessionLink keeps one under its lock; the fence check holds it.
+struct UplinkLedger: Equatable {
+    enum Lane: Int, CaseIterable, Hashable {
+        case first, camera
+    }
+
+    /// The connection counted, and its generation: handing to another starts the counts again, and a
+    /// completion of what an earlier one was handed counts nothing.
+    private(set) var connection: ObjectIdentifier?
+    private(set) var epoch = 0
+    private(set) var pending = [Int](repeating: 0, count: Lane.allCases.count)
+    /// What the counted connection took, each completion's time and bytes, the last second's only.
+    private(set) var recent: [(at: Double, bytes: Int)] = []
+
+    static let window: Double = 1
+
+    /// What the counted connection holds in all.
+    var total: Int { pending.reduce(0, +) }
+
+    /// What `c` holds that it was handed and has not taken: nothing for a connection not counted (nothing
+    /// was handed to it yet).
+    func pending(for c: ObjectIdentifier) -> Int { connection == c ? total : 0 }
+    func pending(_ lane: Lane, for c: ObjectIdentifier) -> Int { connection == c ? pending[lane.rawValue] : 0 }
+
+    /// What `c` took in the second before `now`: nothing for a connection not counted.
+    func takenLastSecond(for c: ObjectIdentifier, at now: Double) -> Int {
+        guard connection == c else { return 0 }
+        return recent.reduce(0) { $0 + (now - $1.at < Self.window ? $1.bytes : 0) }
+    }
+
+    /// `bytes` handed to `c` in `lane`; returns the epoch its completion names.
+    mutating func handed(_ bytes: Int, _ lane: Lane, to c: ObjectIdentifier) -> Int {
+        if connection != c {
+            connection = c
+            epoch += 1
+            pending = [Int](repeating: 0, count: Lane.allCases.count)
+            recent = []
+        }
+        pending[lane.rawValue] += bytes
+        return epoch
+    }
+
+    /// The connection took `bytes` of `lane` it was handed at `epoch`, at `now`.
+    mutating func taken(_ bytes: Int, _ lane: Lane, epoch: Int, at now: Double) {
+        guard epoch == self.epoch else { return }
+        pending[lane.rawValue] = max(0, pending[lane.rawValue] - bytes)
+        recent.removeAll { now - $0.at >= Self.window }
+        recent.append((now, bytes))
+    }
+
+    static func == (a: UplinkLedger, b: UplinkLedger) -> Bool {
+        a.connection == b.connection && a.epoch == b.epoch && a.pending == b.pending
+            && a.recent.map(\.at) == b.recent.map(\.at) && a.recent.map(\.bytes) == b.recent.map(\.bytes)
     }
 }

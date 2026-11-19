@@ -295,5 +295,12 @@ M = [
     ("list: a locked list keeps the displays", F, "        l.desktopDisplays = nil\n", ""),
     ("list: a locked list keeps which display", F, "        l.desktopDisplay = nil\n", ""),
     ("list: a locked list keeps the displays' names", F, "        l.desktopDisplayNames = nil\n", ""),
+    # The camera (kind 46, docs/camera-plan.md §6.3): refused at any lock, left out of a locked list, no demand sent.
+    ("decide: the camera taken while locked", F, "        case .camera: return .refuse(.camera)", "        case .camera: return .take"),
+    ("decide: the camera taken at a locked screen", F, "        case .camera: return .refuse(.camera)", "        case .camera: return r == .offConsole ? .refuse(.camera) : .take"),
+    ("list: a locked list keeps the camera", F, "        l.camera = nil\n", ""),
+    ("withheld: the camera's demand sent while locked", F, "        case .camera:\n            return true\n", ""),
+    ("withheld: the camera's demand sent in the view", F, "        case .camera: return true\n", ""),
+    ("refusedLine: the camera's line the input's", F, "                + \"; Sill Camera waits for this Mac to be unlocked.\"", "                + \"; only a paired device types at a locked Mac, and no device at one switched to another user.\""),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)

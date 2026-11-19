@@ -150,6 +150,25 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
   --expect-pair=R    the pairing's last kind 20 must be R: ok (a proof checked), cable, shown, openOnMac,
                      locked, closed, code, busy, expired or stopped; prints EXPECT-PAIR ok or EXPECT-PAIR
                      FAIL (exit 1). A match that is not a pairing ends the run with exit 0
+The camera (kind 46; docs/camera-plan.md §13.2), only to a --synthetic test host with SILL_TEST_CAMERA. Each type 3
+(the Mac's demand) is printed on one line, "camera demand at 1.234s: 640x360@30 keyframe=1 maxBitrate=625000 token=1",
+each change of kind 16's camera as "camera state at 1.234s: inUse app=Test" (holder= with another), and the window
+list's camera= when it says it:
+  --camera=FILE      the hello (sent even without --hello) says camera 1; when a list says camera 1 this client
+                     offers its front camera (type 1), and while kind 16's camera says inUse it sends FILE's
+                     frames (Scripts/camera/fixture-640x360.bin, made by Scripts/camera/make-fixture.swift with
+                     VideoToolbox's software encoder) at their rate: a new epoch's format each time it becomes
+                     wanted, then type 2 frames from the keyframe on, looping, again from the keyframe when a
+                     demand asks for one. A CAMERA line at exit counts them
+  --camera-claim@T   a type 1 claim T seconds in: Share Camera just turned on, so this client becomes the camera
+  --camera-stop@T    a type 1 stop T seconds in: Share Camera off; no frame after it
+  --camera-pause=REASON@T  a type 1 pause (background, multitasking, busy, scanner, thermal, denied, unavailable,
+                     or none to end it) T seconds in; no frame while it pauses
+  --raw46=HEX@T      this literal kind 46 payload T seconds in, as hex (a hostile or malformed one)
+  --camera-corrupt=N with --camera: the Nth frame this session sends (from 1) carries bytes no decoder reads instead of
+                     its access unit (its header and keyframe flag kept), once; a line says when it went
+  --expect=cameraState=S,camera=N  (with --expect's other keys, or alone) at exit, the last kind 16's
+                     camera state (none when it said none) and the last window list's camera (none)
 A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
 and against the Mac ID), 20 and 22 (its reason, then message, minimumVersion and reconnect when sent)
 are printed one line each; a session prints the order of the
@@ -171,7 +190,7 @@ with status 2 (--raw17, --raw9 and --input go out as written). Find PORT with: l
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",43:"audio"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",43:"audio",46:"camera"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "persistent", "virtualDisplayAvailable",
              "thisConnectionAway", "awayRunning", "sessionPaired"}
@@ -182,14 +201,18 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 # The Desktop's stops (DesktopDisplays), from the last window list: a number, or none for a list without it.
 LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
+# The camera (kind 46): kind 16's camera state, and the window list's camera.
+CAMERA_KEYS = {"cameraState", "camera"}
+CAMERA_PAUSES = ("waiting", "background", "multitasking", "busy", "scanner", "thermal", "denied", "unavailable", "none")
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS | CAMERA_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display",
+         "camera-claim", "camera-stop", "camera-pause", "raw46")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "camera", "camera-corrupt")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -216,8 +239,10 @@ def value(k, v):
         return v
     if k == "clipboard":
         return None if v == "none" else unescape(v)
-    if k in LIST_KEYS:
+    if k in LIST_KEYS or k == "camera":
         return None if v == "none" else number(v, k)
+    if k == "cameraState":
+        return None if v == "none" else v
     if k in ("captureScale", "homeCaptureScale", "awayCaptureScale"):
         f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
     return number(v, k)
@@ -506,12 +531,16 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|camera-claim|camera-stop)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "camera-claim", "camera-stop") and text: raise ValueError(f"--{name}@T takes no value")
+            if name == "camera-pause" and text not in CAMERA_PAUSES: raise ValueError(f"--camera-pause: one of {', '.join(CAMERA_PAUSES)}")
+            if name == "raw46":
+                try: bytes.fromhex(text)
+                except ValueError: raise ValueError(f"--raw46: hex bytes, got {text[:40]!r}") from None
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -624,6 +653,25 @@ try:
     if any(e[2] == "raw15" for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--raw15 only goes to a --synthetic host on this Mac; nothing on port {port} is one.")
+    # The camera: only to a --synthetic test host on this Mac (one with SILL_TEST_CAMERA decodes into a counter
+    # or PNGs of its own; no other host takes a camera from this script).
+    camera_file = valued("camera")
+    camera_corrupt = number(valued("camera-corrupt"), "--camera-corrupt") if valued("camera-corrupt") is not None else None
+    if camera_corrupt is not None and (camera_file is None or camera_corrupt < 1):
+        raise ValueError("--camera-corrupt=N takes a frame's number from 1, with --camera")
+    if camera_file is not None or any(e[2] in ("camera-claim", "camera-stop", "camera-pause", "raw46") for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--camera and its flags only go to a --synthetic host on this Mac; nothing on port {port} is one.")
+    camera_frames = []; camera_ps = b""; camera_size = (0, 0, 30)
+    if camera_file is not None:
+        raw = open(camera_file, "rb").read()
+        if raw[:8] != b"SILLCAM1": raise ValueError(f"--camera: {camera_file} is not a camera fixture (make-fixture.swift's)")
+        cw, ch, cfps, cn = struct.unpack(">HHHH", raw[8:16]); off = 16
+        (pl,) = struct.unpack(">I", raw[off:off + 4]); camera_ps = raw[off + 4:off + 4 + pl]; off += 4 + pl
+        for _ in range(cn):
+            k = raw[off] == 1; (fl,) = struct.unpack(">I", raw[off + 1:off + 5]); camera_frames.append((k, raw[off + 5:off + 5 + fl])); off += 5 + fl
+        if not camera_frames or not camera_frames[0][0]: raise ValueError(f"--camera: {camera_file}'s first frame is not a keyframe")
+        camera_size = (cw, ch, cfps)
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -644,6 +692,9 @@ if plays_audio:
 # 0.6.1 on: docs/off-console-plan.md), so a host with the switch on sends it the view's list (windows, offConsoleView).
 if "--off-console-view" in flags:
     hello = dict(hello if hello is not None else {"device": device}, offConsoleView=1)
+# --camera: this client sends its camera as generation 1 and reads type 3 (the hello says camera 1).
+if camera_file is not None:
+    hello = dict(hello if hello is not None else {"device": device}, camera=1)
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -791,6 +842,24 @@ last_list = None       # the last window list (--expect=desktopDisplay checks it
 # when the host runs on this Mac).
 aud_sec = 0; aud_total = 0; aud_epochs = []; aud_next = {}; aud_gaps = 0; aud_starts = 0; aud_first = None; aud_last = None; aud_ages = []
 aud_formats = 0; aud_orphans = 0
+# The camera (kind 46): offered to the Mac (its list said camera 1), the last kind 16 camera, sending now, the
+# epoch and the fixture's next frame, and what went and came.
+cam_offered = False; cam_state = None; cam_sending = False; cam_paused = False; cam_stopped = False
+cam_epoch = 0; cam_index = 0; cam_seq = 0; cam_next = 0.0
+cam_sent = 0; cam_keys = 0; cam_epochs = 0; cam_demands = 0; cam_demand_keys = 0; cam_states = []; last_camera_list = None
+cam_sec_frames = 0; cam_sec_bytes = 0; cam_pause_reason = ""
+def camera_send(payload, key=False, stamp=None):
+    s.sendall(struct.pack(">BdBI", 46, stamp if stamp is not None else time.time(), 1 if key else 0, len(payload)) + payload)
+def camera_format(body):
+    camera_send(bytes([1]) + json.dumps(body).encode())
+def camera_start(now):
+    """Wanted: a new epoch's format, then frames from the keyframe on."""
+    global cam_sending, cam_epoch, cam_index, cam_seq, cam_next, cam_epochs
+    cam_epoch = (cam_epoch + 1) % 65536; cam_index = 0; cam_seq = 0; cam_next = now; cam_epochs += 1; cam_sending = True
+    w, h, f = camera_size
+    camera_format({"position": "front", "codec": "hevc", "width": w, "height": h, "fps": f, "epoch": cam_epoch,
+                   "parameterSets": base64.b64encode(camera_ps).decode(), "bitrate": 400000})
+    print(f"  camera epoch {cam_epoch} at {now - t0:.3f}s: {w}x{h}@{f}")
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
@@ -860,6 +929,20 @@ def fire(e, now):
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
     elif name in ("raw7", "raw15"):
         s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
+    elif name == "camera-claim":
+        global cam_offered, cam_stopped
+        camera_format({"position": "front", "claim": True}); cam_offered = True; cam_stopped = False; print(f"  sent camera claim at {at}")
+    elif name == "camera-stop":
+        global cam_sending
+        camera_format({"stop": True}); cam_offered = False; cam_sending = False; cam_stopped = True; print(f"  sent camera stop at {at}")
+    elif name == "camera-pause":
+        global cam_paused, cam_pause_reason
+        cam_paused = text != "none"; cam_pause_reason = text
+        camera_format({"position": "front", **({"pause": text} if cam_paused else {})}); print(f"  sent camera pause {text} at {at}")
+        if cam_paused: cam_sending = False
+        elif cam_state == "inUse" and not cam_stopped: camera_start(now)
+    elif name == "raw46":
+        camera_send(bytes.fromhex(text)); print(f"  sent raw kind 46, {len(text) // 2} bytes, at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     try:
@@ -873,7 +956,22 @@ while time.time() - t0 < dur:
             s.sendall(msg(10, struct.pack(">d", now)))
             nextping = now + (min(0.25, ping_every) if any(a <= now - t0 < b for a, b in holds) else ping_every)
         if pinging and stats and now >= nextstats:
-            s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
+            report = {"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}
+            if cam_sent > 0:
+                # The camera's second, once it has run this session, as a device reports it (ClientStats' camera fields).
+                report.update(cameraFps=cam_sec_frames, cameraKbps=cam_sec_bytes * 8 // 1000, cameraDropped=0)
+                if cam_paused: report["cameraPause"] = cam_pause_reason
+            cam_sec_frames = 0; cam_sec_bytes = 0
+            s.sendall(msg(12, json.dumps(report).encode())); nextstats = now + 1
+        while cam_sending and now >= cam_next:
+            k, data = camera_frames[cam_index]
+            if camera_corrupt is not None and cam_sent + 1 == camera_corrupt:
+                # A length of 0xFFFFFFFF before the first NAL unit: no decoder reads it.
+                data = b"\xff" * len(data)
+                print(f"  camera frame {cam_sent + 1} (epoch {cam_epoch}, seq {cam_seq}) sent corrupted at {time.time()-t0:.3f}s")
+            camera_send(bytes([2]) + struct.pack(">HI", cam_epoch, cam_seq) + data, key=k, stamp=time.time())
+            cam_sent += 1; cam_keys += 1 if k else 0; cam_seq += 1; cam_sec_frames += 1; cam_sec_bytes += 7 + len(data)
+            cam_index = (cam_index + 1) % len(camera_frames); cam_next += 1 / camera_size[2]
     except OSError as e:
         print(f"send failed at {now - t0:.2f}s: {e}"); break
     if not reading:
@@ -884,6 +982,7 @@ while time.time() - t0 < dur:
     # Wake in time for the next timed send (a few ms matter for the race checks).
     wait = 0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now))
     if (holds or ping_every < 1) and pinging: wait = min(wait, max(0.001, nextping - now))    # pings on time
+    if cam_sending: wait = min(wait, max(0.001, cam_next - now))                              # camera frames on time
     s.settimeout(wait)
     try:
         chunk = s.recv(1 << 20)
@@ -934,7 +1033,15 @@ while time.time() - t0 < dur:
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
                   + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
-                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else "")
+                  + (f" camera={d['camera']}" if "camera" in d else ""))
+            last_camera_list = d.get("camera")
+            if camera_file is not None:
+                # Offered once each time the Mac says camera 1 anew; nothing to a Mac that says none or 0.
+                if (d.get("camera") or 0) >= 1 and not cam_offered and not cam_stopped:
+                    camera_format({"position": "front"}); cam_offered = True; print(f"  sent camera offer at {time.time()-t0:.3f}s")
+                elif (d.get("camera") or 0) < 1:
+                    cam_offered = False; cam_sending = False
         elif kind == 32:
             try:
                 d = json.loads(payload)
@@ -982,6 +1089,18 @@ while time.time() - t0 < dur:
                 aud_ages.append((time.time() - ts) * 1000)
                 if aud_first is None: aud_first = at; print(f"  first audio packet at {at:.3f}s (epoch {epoch}, seq {seq})")
                 aud_last = at
+        elif kind == 46:
+            if payload[:1] == b"\x03":
+                try:
+                    dm = json.loads(payload[1:])
+                except ValueError:
+                    print(f"  camera demand at {time.time()-t0:.3f}s: undecodable"); continue
+                cam_demands += 1; cam_demand_keys += 1 if dm.get("keyframe") else 0
+                print(f"  camera demand at {time.time()-t0:.3f}s: {dm.get('width')}x{dm.get('height')}@{dm.get('fps')} "
+                      f"keyframe={1 if dm.get('keyframe') else 0} maxBitrate={dm.get('maxBitrate')} token={dm.get('token')}")
+                if dm.get("keyframe") and cam_sending: cam_index = 0       # the fixture's keyframe next, as an encoder makes one
+            else:
+                print(f"  camera message at {time.time()-t0:.3f}s of type {payload[:1].hex() or 'none'} (a host sends type 3 alone)")
         elif kind == 22:
             g = json.loads(payload)
             extra = "".join(f"; {k}: {json.dumps(g[k], ensure_ascii=False)}" for k in ("message", "minimumVersion", "reconnect") if k in g)
@@ -1015,6 +1134,15 @@ while time.time() - t0 < dur:
                 print(f"  settings at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
             last_state = d
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
+            c = d.get("camera") if isinstance(d.get("camera"), dict) else None
+            st = c.get("state") if c else None
+            if st != cam_state:
+                cam_state = st; cam_states.append(st or "none")
+                print(f"  camera state at {time.time()-t0:.3f}s: {st or 'none'}" + (f" app={c['app']}" if c and c.get("app") else "")
+                      + (f" holder={c['holder']}" if c and c.get("holder") else ""))
+                if camera_file is not None:
+                    if st == "inUse" and cam_offered and not cam_paused and not cam_stopped: camera_start(time.time())
+                    elif st != "inUse": cam_sending = False
     if now - last >= 1:
         f = per.get("frame", 0)
         # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
@@ -1045,6 +1173,9 @@ if plays_audio:
     print(f"AUDIO {aud_total} packets, {aud_formats} formats, epochs {aud_epochs}, {aud_starts} segment starts, {aud_gaps} seq gaps, "
           f"{aud_orphans} before their format; first at {first_at}, last at {last_at}; "
           f"age p50 {pct(aud_ages, .5):.2f} p95 {pct(aud_ages, .95):.2f} max {max(aud_ages) if aud_ages else float('nan'):.2f} ms")
+if camera_file is not None or cam_states:
+    print(f"CAMERA sent {cam_sent} frames ({cam_keys} keyframes) in {cam_epochs} epochs; {cam_demands} demands ({cam_demand_keys} with a keyframe); "
+          f"states {' > '.join(cam_states) or 'none'}")
 s.close()
 menus_failed = False
 if expect_menus is not None:
@@ -1055,6 +1186,12 @@ if expect is not None:
     if "clipboard" in expect:
         want = expect.pop("clipboard"); got = clipboards[-1] if clipboards else None
         if got != want: problems.append(f"clipboard: want {want!r}, got {got!r} ({len(clipboards)} received)")
+    if "cameraState" in expect:
+        want = expect.pop("cameraState"); got = ((last_state or {}).get("camera") or {}).get("state")
+        if got != want: problems.append(f"cameraState: want {want}, got {got}")
+    if "camera" in expect:
+        want = expect.pop("camera")
+        if last_camera_list != want: problems.append(f"camera: want {want}, got {last_camera_list}")
     for k in sorted(LIST_KEYS & set(expect)):
         want = expect.pop(k); got = (last_list or {}).get(k)
         if got != want: problems.append(f"{k}: want {want}, got {got}" + ("" if last_list is not None else " (no window list)"))

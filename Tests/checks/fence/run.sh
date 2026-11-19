@@ -7,14 +7,15 @@
 # no mode's result depends on how fast the machine runs it, so a slower or busier one only takes
 # longer (main.swift's header). Every mode also checks SessionLink's count of the inputs meant for the
 # session's connection against what the stand-in read there, and count checks that count step by step
-# (docs/pointer-visibility-plan.md §3.3).
+# (docs/pointer-visibility-plan.md §3.3). camera checks the uplink ledger and SessionLink's camera frames, which never
+# wait for a fence or a hold (docs/camera-plan.md §6.2).
 #   Tests/checks/fence/run.sh [MODE...]   compile, then run every mode (or the ones named)
 #   Tests/checks/fence/run.sh --mutants   one-line mutants of SessionLink.swift; each must fail a mode
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
 swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/*.swift "$here/main.swift" -o "$out/check"
-modes=(ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count remotehome remotedead)
+modes=(ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count remotehome remotedead camera)
 if [ $# -gt 0 ]; then modes=("$@"); fi
 failed=()
 for mode in "${modes[@]}"; do

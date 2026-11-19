@@ -119,6 +119,10 @@ public struct Hello: Codable, Sendable, Equatable {
     /// docs/off-console-plan.md): a host sends it the view's list. Nil from every device before: a host sends
     /// it the locked list without windows, as Sill for Mac 0.6.0 does.
     public var offConsoleView: Int?
+    /// 1 from a device that sends its camera as generation 1 (kind 46 types 1 and 2, Camera.swift) and reads
+    /// type 3 (`CameraCodec.generation`). Nil from every device before 2026-11-18: a host sends it no kind 46.
+    /// Set after the initializer, whose parameters stay as they were: `hello.camera = CameraCodec.generation`.
+    public var camera: Int?
 
     public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil,
                 audio: [String]? = nil, offConsoleView: Int? = nil) {

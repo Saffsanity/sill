@@ -151,6 +151,9 @@ final class StreamServer {
         /// Its hello said it shows a Mac's off-console view (`Hello.offConsoleView`; docs/off-console-plan.md):
         /// it is sent the view's window list (`broadcastList`), every other device the plain one.
         var viewsOffConsole = false
+        /// Its hello's `camera` (docs/camera-plan.md §5): 1 or more from a device that reads kind 46 type 3,
+        /// which goes to it alone (`sendCamera`); 0 for every other.
+        var camera = 0
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -204,6 +207,11 @@ final class StreamServer {
     /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
+    /// Kind 46 from a client (CameraReceiver, docs/camera-plan.md §9), with the lock's reading as it arrived,
+    /// in arrival order, after the revoked check and never through `onMessage` or the main actor. Nil (the
+    /// CLI, which takes no camera, and the harnesses): kind 46 goes to `onMessage`, which ignores it. Called
+    /// on the network queue.
+    var onCameraMessage: ((StreamMessage, NWConnection, LockPolicy.Reading) -> Void)?
     /// A device's link changed (LinkJudge, docs/remote-bundle-plan.md §6): behind, stalled, fine again,
     /// fine because the stream restarted at another quality (`reset`), or the same state once its
     /// carried rate is first measured. Called on the network queue, from the once-a-second sweep and
@@ -1315,6 +1323,7 @@ final class StreamServer {
         // The Mac's sound goes only to a device that said it plays a codec this host makes.
         client.audioCodec = AudioCodec.choose(offered: hello.audio)
         client.viewsOffConsole = (hello.offConsoleView ?? 0) >= LockedMac.viewGeneration
+        client.camera = max(0, hello.camera ?? 0)
         updateAudioListeners()
         onClientHello?(c, hello)
     }
@@ -1501,6 +1510,33 @@ final class StreamServer {
         }
     }
 
+    /// The client line's camera (docs/camera-plan.md §11), from ClientStats' camera fields, which a device sends once
+    /// its camera has run this session (display only): ", camera 30 fps 2.4 Mbps" and its drops that second, or the
+    /// pause it said, one of CameraFormat.pauses (anything else reads as `unavailable`: never a device's own text in the
+    /// log). Nothing for a device whose camera has not run, so the line of every other device is as it was.
+    static func cameraPart(_ stats: ClientStats) -> String {
+        if let pause = stats.cameraPause {
+            return ", camera paused (\(CameraFormat.pauses.contains(pause) ? pause : CameraFormat.unavailable))"
+        }
+        guard let fps = stats.cameraFps else { return "" }
+        let mbps = stats.cameraKbps.map { String(format: " %.1f Mbps", Double(min(max(0, $0), 10_000_000)) / 1000) } ?? ""
+        let dropped = (stats.cameraDropped ?? 0) > 0 ? ", \(stats.cameraDropped ?? 0) dropped" : ""
+        return ", camera \(fps) fps\(mbps)\(dropped)"
+    }
+
+    /// A camera's type 3 to one device (CameraReceiver, from `sill.camera`): only to a device whose hello said it
+    /// reads them (`Client.camera`), skipped without a word once it is gone, and withheld while the Mac is locked
+    /// (LockPolicy: a device's camera is refused then). Thread-safe.
+    func sendCamera(_ message: StreamMessage, to connection: NWConnection) {
+        let data = message.serialized()
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)], client.camera >= CameraCodec.generation,
+                  client.connection.state == .ready else { return }
+            if lockGate.withholds(.camera) { withheld(.camera, for: ObjectIdentifier(connection)); return }
+            send(data, to: client)
+        }
+    }
+
     /// A message the gate withheld (LockPolicy): counted, and an icon's or the apps' reported
     /// (`onCatalogWithheld`). On the network queue.
     private func withheld(_ kind: StreamMessageKind, for id: ObjectIdentifier?) {
@@ -1587,7 +1623,7 @@ final class StreamServer {
                                 sound = ", sound \(behind) ms behind" + (client.audioLateSincePrint > 0 ? ", \(client.audioLateSincePrint) late" : "")
                             }
                             client.audioLateSincePrint = 0
-                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)")
+                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)\(Self.cameraPart(stats))")
                             client.worstFrameAgeSincePrint = -1
                             client.worstRttSincePrint = -1
                         }
@@ -1602,6 +1638,10 @@ final class StreamServer {
                     }
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.
+                } else if header.kind == .camera, let onCamera = self.onCameraMessage {
+                    // The device's camera (CameraReceiver): off this queue at once, in order; it drops a frame
+                    // rather than queue too much of them, so this loop never waits for it.
+                    onCamera(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 } else {
                     self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 }

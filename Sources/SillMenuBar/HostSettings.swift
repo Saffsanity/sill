@@ -163,7 +163,11 @@ final class HostSettings {
                             requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
-                            offConsoleView: defaults.bool(forKey: Key.offConsoleView)).validated()
+                            offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            // Use iPhone and iPad cameras: no key yet. Its switch comes with Sill Camera's
+                            // extension (docs/camera-plan.md §15, step 8); until then Sill.app never takes a
+                            // device's camera.
+                            deviceCamera: false).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
