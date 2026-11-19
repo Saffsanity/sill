@@ -22,12 +22,14 @@ MUTANTS = [
     ("M10 the automatic reconnect's start counts as use", "reconnected ? previous : now", "now"),
     ("M11 the automatic reconnect forgets the person's session start", "reconnected ? previous : now", "reconnected ? nil : now"),
     ("M12 a session the person started keeps the last one's start", "reconnected ? previous : now", "reconnected ? previous : (previous ?? now)"),
-    ("M13 input the person sent never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.control, uses.session, uses.front]"),
-    ("M14 a stream screen's control never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.session, uses.front]"),
-    ("M15 a session's start never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.front]"),
-    ("M16 coming to the front never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.session]"),
-    ("M17 the earliest use, not the latest", "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.max()",
-        "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.min()"),
+    ("M13 input the person sent never counts", "[uses.input, uses.control, uses.session, uses.front, uses.camera]", "[uses.control, uses.session, uses.front, uses.camera]"),
+    ("M14 a stream screen's control never counts", "[uses.input, uses.control, uses.session, uses.front, uses.camera]", "[uses.input, uses.session, uses.front, uses.camera]"),
+    ("M15 a session's start never counts", "[uses.input, uses.control, uses.session, uses.front, uses.camera]", "[uses.input, uses.control, uses.front, uses.camera]"),
+    ("M16 coming to the front never counts", "[uses.input, uses.control, uses.session, uses.front, uses.camera]", "[uses.input, uses.control, uses.session, uses.camera]"),
+    ("M17 the earliest use, not the latest", "[uses.input, uses.control, uses.session, uses.front, uses.camera].compactMap { $0 }.max()",
+        "[uses.input, uses.control, uses.session, uses.front, uses.camera].compactMap { $0 }.min()"),
+    # Share Camera (docs/camera-plan.md §6.1 point 10): the camera's last second keeps the device awake.
+    ("M18 the camera's use never counts", "[uses.input, uses.control, uses.session, uses.front, uses.camera]", "[uses.input, uses.control, uses.session, uses.front]"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
