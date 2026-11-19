@@ -24,6 +24,9 @@ let package = Package(
         .executableTarget(name: "SillHostCLI", dependencies: ["SillHostCore", "StreamProtocol"]),
         // The menu bar app: status item, Settings and Log windows (AppKit lifecycle, SwiftUI panes).
         .executableTarget(name: "SillMenuBar", dependencies: ["SillHostCore", "StreamProtocol"]),
+        // Sill Camera's rules (CameraFeedPolicy, docs/camera-plan.md §6.4), shared by the extension and Sill.app's sink:
+        // Foundation only, and no product, so the iOS project never sees it.
+        .target(name: "CameraFeed"),
         // Milestone 3 spike: virtual display + window move + capture. Its VirtualDisplay.swift
         // is a symlink to the host's copy. Not shipped.
         .executableTarget(name: "CaptureProbe"),

@@ -406,6 +406,16 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
   on its own stdout), `--print-cable` and `--no-clipboard`.
+- `Sources/CameraFeed/` — `CameraFeedPolicy` (docs/camera-plan.md §6.4), Sill Camera's
+  rules as one reducer: its formats (NV12 `420v`, 1280×720 then 1920×1080, 15 to 30 fps), the
+  state Sill for Mac writes (`off`, `unavailable`, `waiting`, a device's name and pause; JSON, a
+  name cleaned and at most 40 characters) and the demand it reads (running, size, rate, the apps
+  by signing identifier and pid), who may feed Sill Camera (Sill for Mac alone, by its signing
+  identifier and, where the sandbox lets the extension check, its team's signature; one at a
+  time), what goes out at each tick (a frame as it comes, again at the app's rate while under a
+  second old, else the placeholder) and the placeholder's words (only a device state names a
+  device). Its own library target, no product (the iOS project never sees it), because Sill.app's
+  sink shares its encodings; pure, `Tests/checks/camera-feed`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
