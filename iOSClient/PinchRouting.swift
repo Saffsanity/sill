@@ -106,7 +106,10 @@ enum PinchRouting {
 
     static let title = "Pinch"
     static let zoomPictureTitle = "Zoom Picture"
-    static func zoomOnMacTitle(mac: String) -> String { "Zoom on \(mac)" }
+    /// The Mac's segment: "Zoom on ‹Mac›" with a name of at most `segmentNameLimit` characters, "Zoom on the Mac"
+    /// past it, as a segmented control neither wraps nor shrinks and a long name would push it off the panel.
+    static func zoomOnMacTitle(mac: String) -> String { "Zoom on \(mac.count <= segmentNameLimit ? mac : "the Mac")" }
+    static let segmentNameLimit = 12
     static func rotateTitle(mac: String) -> String { "Rotate on \(mac)" }
 
     /// Under Pinch, for ‹Mac› (its name, or "the Mac") and this ‹device› ("iPad" or "iPhone"): what each choice

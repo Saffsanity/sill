@@ -72,6 +72,9 @@ struct HostSettingsPanel: View {
     /// picture) or Zoom App (true, the Mac's own pinch): Zoom Stream unless chosen, read by the input
     /// view at each touch, never sent.
     @AppStorage(PinchRouting.zoomOnMacKey) private var pinchZoomsMac = PinchRouting.zoomOnMacDefault
+    /// This device's Rotate on ‹Mac› (PinchRouting): off unless turned on, read as each stroke begins and as a
+    /// trackpad's turn begins, never sent.
+    @AppStorage(PinchRouting.rotateKey) private var rotateOnMac = PinchRouting.rotateDefault
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
@@ -120,6 +123,7 @@ struct HostSettingsPanel: View {
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// `pinch`, to Pinch's row, Rotate on ‹Mac› under it, and their footnote (PR #261).
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
@@ -133,6 +137,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "pinch"?: return pinchRowID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
         default: return nil
@@ -147,6 +152,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let pinchRowID = "pinch"
     private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
@@ -784,24 +790,39 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
-        // Only for a Mac that takes the pinch (`WindowList.magnify`): for any other Zoom App would do nothing.
-        if client.hostPinch != nil {
-            Rows {
-                AdaptiveRow(title: "Pinch Behavior", since: nil) {
-                    Picker("Pinch Behavior", selection: $pinchZoomsMac) {
-                        Text("Zoom Stream").tag(false)
-                        Text("Zoom App").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
+        // Pinch (PinchRouting; issue #260, PR #261 and its review of 2026-11-18): Zoom Picture or Zoom on ‹Mac›, this
+        // device's own, never sent, and Rotate on ‹Mac› under it while Zoom on ‹Mac› is. For every Mac: one that cannot
+        // take the pinch shows Zoom Picture, dimmed, whatever is stored (the picture zooms there), and says to update
+        // Sill on it. Here, after the gestures, until the whole-screen Settings pane (draft PR #393) gives these rows
+        // its Touch and Zoom group.
+        Rows {
+            AdaptiveRow(title: PinchRouting.title, since: nil) {
+                Picker(PinchRouting.title, selection: Binding(
+                    get: { PinchRouting.shownZoomOnMac(stored: pinchZoomsMac, macTakesPinch: macTakesPinch) },
+                    set: { pinchZoomsMac = $0 })) {
+                    Text(PinchRouting.zoomPictureTitle).tag(false)
+                    Text(PinchRouting.zoomOnMacTitle(mac: mac)).tag(true)
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!PinchRouting.enabled(macTakesPinch: macTakesPinch))
             }
-            Footnote(text: "What two fingers pinching the picture do. Zoom Stream magnifies the picture on this \(device) "
-                     + "and sends nothing to \(mac). Zoom App sends the pinch to \(mac) as a trackpad pinch, so an app "
-                     + "that zooms (Maps, Photos, Safari, Preview) zooms its own content and the picture keeps its "
-                     + "size. The \(device)’s trackpad pinch always zooms the app.")
+            if PinchRouting.rotateRowShown(zoomOnMac: pinchZoomsMac, macTakesPinch: macTakesPinch) {
+                RowDivider()
+                Toggle(isOn: $rotateOnMac) {
+                    Text(PinchRouting.rotateTitle(mac: mac)).foregroundStyle(Palette.text)
+                }
+                .padding(.vertical, 6)          // a long Mac name takes two lines
+                .rowFrame()
+            }
         }
+        .id(Self.pinchRowID)
+        Footnote(text: PinchRouting.footnote(mac: mac, device: device, macTakesPinch: macTakesPinch)
+                 + (PinchRouting.rotateRowShown(zoomOnMac: pinchZoomsMac, macTakesPinch: macTakesPinch) ? " " + PinchRouting.rotateFootnote : ""))
     }
+
+    /// The Mac's window list said it takes a two-finger pinch and turn (`WindowList.pinch`).
+    private var macTakesPinch: Bool { PinchRouting.macTakes(client.hostPinch) }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every
     /// device hears it and that Mute silences this one alone; off, what turning it on does, and Mute

@@ -194,6 +194,11 @@ struct TourFeatures: Equatable {
     var pasteRightAway: Bool
     /// The Mac has sound: its settings carry Send Audio, on or off.
     var sound: Bool
+    /// Pinch is Zoom on ‹Mac›, and the Mac takes the pinch (PinchRouting, PR #261): two fingers pinch what is under
+    /// them on the Mac, not the picture. Zoom Picture unless chosen.
+    var pinchOnMac = false
+    /// …and Rotate on ‹Mac› is on: they turn it too.
+    var rotateOnMac = false
     /// The Settings panel offers Larger Picture here: an iPhone without a hinge, where it is larger.
     var largerPicture: Bool
 }
@@ -587,8 +592,15 @@ enum TourPolicy {
                         row("hand.draw", [strong("Drag"), plain(" to scroll.")])]
             if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" works as a mouse.")])) }
             // Pinch to zoom (StreamZoom, PR #196): this device's alone, 1× to 5× about the pinch;
-            // zoomed in, two fingers are the picture's and one finger still the Mac's.
+            // zoomed in, two fingers are the picture's and one finger still the Mac's. Under Pinch's Zoom on ‹Mac›
+            // (PinchRouting, PR #261) the pinch is the Mac's instead, and with Rotate on ‹Mac› a turn too.
+            if features.pinchOnMac {
+                rows.append(row("plus.magnifyingglass", features.rotateOnMac
+                    ? [strong("Pinch"), plain(" or "), strong("turn two fingers"), plain(" to zoom or rotate what’s under them on \(mac), as its trackpad would.")]
+                    : [strong("Pinch"), plain(" to zoom what’s under your fingers on \(mac), as its trackpad would.")], new: true))
+            } else {
             rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on \(mac).")], new: true))
+            }
             // The three-finger gestures (TrackpadGestures, the Mac's GestureChords): only while this
             // device's switch is on and the Mac takes them. The pinch and the spread are the Settings
             // panel's rows.

@@ -317,9 +317,11 @@ struct StreamScreen: View {
     @AppStorage(StreamScreen.fullScreenHintsKey) private var hintsShown = 0
     /// Shake to Show Controls (Settings › This iPad): on unless turned off (FullScreenPolicy.shakeShows).
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
-    /// Pinch (Settings › This iPad, PinchRouting, PR #261): Zoom Picture unless Zoom on ‹Mac› is chosen. Watched
-    /// only to undo the picture's zoom as fingers' pinch changes hands (`fingersPinch`).
+    /// Pinch (Settings › This iPad, PinchRouting, PR #261): Zoom Picture unless Zoom on ‹Mac› is chosen. Watched to
+    /// undo the picture's zoom as fingers' pinch changes hands (`fingersPinch`), and for the tour's pinch row.
     @AppStorage(PinchRouting.zoomOnMacKey) private var pinchZoomsMac = PinchRouting.zoomOnMacDefault
+    /// Rotate on ‹Mac› (PinchRouting): off unless turned on; for the tour's pinch row.
+    @AppStorage(PinchRouting.rotateKey) private var rotateOnMac = PinchRouting.rotateDefault
     /// This screen turned iOS's Shake to Undo off for the app (FullScreenPolicy.shakeToUndoOff), so it is the
     /// one to turn it back on.
     @State private var shakeToUndoTurnedOff = false
@@ -447,7 +449,7 @@ struct StreamScreen: View {
                     // With Larger Picture no thumbnails: the bar card is about Apps, and the cards
                     // upright stand in the picture's whole room, the black under a short picture. The
                     // words follow what this Mac and this device have now (TourFeatures).
-                    let features = tourFeatures(offersLarger: offersLarger)
+                    let features = withPinch(tourFeatures(offersLarger: offersLarger))
                     let copy = tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
                                         thumbnails: largerKeyboard == nil, features: features)
                     TourOverlay(run: run, copy: copy,
@@ -1019,6 +1021,16 @@ struct StreamScreen: View {
     /// Zoom on ‹Mac› for a Mac that takes it (PinchRouting).
     private var fingersPinch: PinchRouting.Owner {
         PinchRouting.owner(.fingers, zoomOnMac: pinchZoomsMac, macTakesPinch: PinchRouting.macTakes(client.hostPinch))
+    }
+
+    /// The tour's features with Pinch and Rotate on ‹Mac› as fingers have them now (TourFeatures.pinchOnMac): the
+    /// picture's card says what a pinch does.
+    private func withPinch(_ features: TourFeatures) -> TourFeatures {
+        var f = features
+        f.pinchOnMac = fingersPinch == .mac
+        f.rotateOnMac = PinchRouting.turns(.fingers, zoomOnMac: pinchZoomsMac, rotate: rotateOnMac,
+                                           macTakesPinch: PinchRouting.macTakes(client.hostPinch))
+        return f
     }
 
     /// What is open over the stream that takes the keyboard for itself or must keep keys from the Mac
