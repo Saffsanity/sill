@@ -77,3 +77,25 @@ exception for that one window, the source switched to it and back; the plan's sp
 run, since no Open panel may be shown on this Mac in a test), so Sill.app says `files` 1 until then and its devices
 show no Get Files row; Sill's menu Send Files to ‹device›… and drops on the menu bar icon; the status menu's card for
 a transfer; H8's pacing cases for the Mac's sending.
+
+**Heavy results** (one hold, 05:36 to 07:32, on a snapshot of dbb91c48; the scripts are in the handoff folder):
+- `swift build -c release` in 64 s, only the known CaptureProbe warning.
+- The gates H3 to H6 (`Scripts/files-check/live.py all`): 56 of 56 against the release build, among them the files
+  branch's corrected locked verdict and H6's 18 (offered on cue and kept byte for byte with nothing half written and
+  no name in the host's output; nothing offered to a device that takes no files; declined; a pick answered as asked
+  for with the list saying files=2; a second pick within 5 s refused `rate`; an unpaired session's pick `notPaired`;
+  `--no-files` refusing a pick `off`; the device's cancel mid-file; the Mac locking mid-file).
+- H2, the CLI's stdout against main's (eb48ac9f) in the same hold: the same lines, masked, and no counter main never
+  prints (2 of 2).
+- Mutants: files 115 of 115, device-files 38 of 38, file-hub 31 of 33. The two file-hub survivors were gaps in the
+  check, not bugs: a folder is refused anyway for having no size (the regular-file test is there for a named pipe,
+  which has a size, 0, and would block the hub's queue on its first read), and a file that shrank stopped `cantRead`
+  one read later anyway (the check now looks at every part handed); sharpened in 06c7567b, those two run again in a
+  follow-up hold.
+- `Tests/checks/run-all.sh`: all passed but device-files, 104 of 105: the second run's case "the copy and its folder
+  deleted after the transfer" looked at once, while DeviceFiles deletes its own copies just after it publishes the
+  end, so on a busy Mac the check could look first (it passed locally, in CI and in every mutant run). It now waits
+  for them, here (7497f070) and on `files` (1f774638), merged in (93ce9a2c).
+- The iOS app, Release for a device, not signed: built in 60 s; its one warning is main's own (StreamClient's window
+  drop-off, line 4583), as in the second run.
+- CI on #417 green at dfff57b3 (run 44507553550): release build, run-all, the iOS app for the simulator, the CLI.
