@@ -88,6 +88,21 @@ MUTANTS = {
         "        if hand != nil, let d = deadline, now >= d { out.add(handOver(fadeOut: true)) }\n", ""),
     "M38 a packet that waited behind the engine counted when the playout took it": (
         "        let arrival = came ?? now\n", "        let arrival = now\n"),
+    # The microphone's mode (docs/microphone-plan.md §3.4).
+    "M39 the microphone's cover starts at 40 ms at home": (
+        "    public static let microphoneCoverStartHome = 0.110", "    public static let microphoneCoverStartHome = 0.040"),
+    "M40 the microphone's start away as at home": (
+        "let start = away ? Self.coverStartAway : mode == .microphone ? Self.microphoneCoverStartHome : Self.coverStartHome",
+        "let start = mode == .microphone ? Self.microphoneCoverStartHome : away ? Self.coverStartAway : Self.coverStartHome"),
+    "M41 frames taken in the microphone's mode": ("        guard mode == .sound else { return }\n", ""),
+    "M42 the picture's guard in the microphone's mode": (
+        "let guardDelay = mode == .sound ? lag.map { $0 + 1 / streamFPS } ?? -.infinity : -.infinity",
+        "let guardDelay = lag.map { $0 + 1 / streamFPS } ?? -.infinity"),
+    "M43 a message counts nothing before its packets": (
+        "            record(raw: arrival - (stamp + Double(i * framesPerPacket) / Self.rate), arrival: arrival)\n", ""),
+    "M44 a message counts its duplicates": ("            guard !recentSet.contains(key) else { continue }\n", ""),
+    "M45 a message counted in the sound's mode alone": (
+        "        guard mode == .microphone, let playing = self.epoch,", "        guard mode == .sound, let playing = self.epoch,"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

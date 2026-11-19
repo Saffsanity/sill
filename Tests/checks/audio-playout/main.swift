@@ -100,6 +100,8 @@ struct World {
     /// A decode fails at these seqs of the first epoch.
     var decodeFails: Set<Int> = []
     var label = ""
+    /// What the model times: the Mac's sound, or a device's microphone on the Mac (no picture).
+    var mode = AudioPlayout.Mode.sound
 
     func wall(_ t: Double) -> Double {
         wallBase + t * (1 + hostDrift) + hostSteps.filter { $0.at <= t }.reduce(0) { $0 + $1.by }
@@ -130,7 +132,7 @@ struct Played {
 
 final class Run {
     let w: World
-    var model = AudioPlayout()
+    var model: AudioPlayout
     var played: [Played] = []
     /// One per packet: its first part; and the tails.
     var packets: [Played] { played.filter(\.first) }
@@ -147,6 +149,8 @@ final class Run {
     var duplicatesSent = 0
     var dupChangedWindows = 0
     var formatsIgnored = 0
+    /// The microphone's mode: packets a message already counted for the floor and the cover.
+    var messageCounted = Set<Int64>()
     /// The jumps the model reported for the console (`takeJump`): when, how far and why.
     var jumpsMade: [(t: Double, by: Double, cause: AudioPlayout.JumpCause)] = []
     // The output: the timeline starts at t0 (nil: not running), in IO-sized renders.
@@ -162,6 +166,7 @@ final class Run {
 
     init(_ w: World, seed: UInt64 = 7) {
         self.w = w
+        model = AudioPlayout(mode: w.mode)
         outputLatency = w.outputLatency
         io = w.io
         rng = RNG(seed)
@@ -375,7 +380,17 @@ final class Run {
                 let before = (model.floor, model.cover(now: t), model.need(now: t))
                 if engineAt == nil, !muted { engineAt = t + w.engineStart }
                 feedReading(t)
-                let plan = model.packet(epoch: ep, seq: sq, stamp: stamp, segmentStart: start, now: t)
+                // The microphone's mode: the packets that came together are one message, counted whole first.
+                let key = Int64(ep) << 32 | Int64(sq)
+                if w.mode == .microphone, !messageCounted.contains(key) {
+                    var n = 1
+                    while i - 1 + n < events.count, case .packet(let e2, let s2, _, _, let a2) = events[i - 1 + n].e,
+                          e2 == ep, s2 == sq &+ UInt32(n), abs(a2 - arrival) < 1e-9 { n += 1 }
+                    model.message(epoch: ep, seq: sq, count: n, stamp: stamp, arrival: t)
+                    for k in 0..<n { messageCounted.insert(Int64(ep) << 32 | Int64(sq &+ UInt32(k))) }
+                }
+                let plan = model.packet(epoch: ep, seq: sq, stamp: stamp, segmentStart: start,
+                                        recorded: w.mode == .microphone && messageCounted.remove(key) != nil && !dup, now: t)
                 if dup, (model.floor != before.0 || model.cover(now: t) != before.1 || model.need(now: t) != before.2) { dupChangedWindows += 1 }
                 if dup, plan.decode { violation("a duplicate (seq \(sq)) decoded") }
                 decode(plan, epoch: ep, seq: sq, segmentStart: start, arrival: arrival, stamp: stamp)
@@ -1098,6 +1113,79 @@ do {
     check(!p.decode && p.id == nil && m.floor != nil, "muted: the floor counts it, nothing decoded")
 }
 
+// MARK: - The microphone's mode (docs/microphone-plan.md §3.4)
+
+// A device's tap gives 100 ms at a time: a packet finished at τ leaves with the rest of its buffer, at the
+// next tenth of a second, and then crosses the link.
+func bursts(_ link: Double, every: Double = 0.1) -> (Double) -> Double {
+    { t in (t / every).rounded(.up) * every - t + link }
+}
+do {
+    var m = AudioPlayout(mode: .microphone)
+    check(m.mode == .microphone && AudioPlayout().mode == .sound, "the sound's mode by default, the microphone's when asked")
+    check(abs(m.cover(now: 0) - 0.110) < 1e-12 && AudioPlayout.microphoneCoverStartHome == 0.110, "the microphone's cover starts at 110 ms at home")
+    m.away(true)
+    check(abs(m.cover(now: 0) - 0.150) < 1e-12, "and at 150 ms away, as the sound's")
+    m.away(false)
+    _ = m.format(epoch: 1, framesPerPacket: 480, primingFrames: 240, cookie: Data([1]))
+    m.frame(stamp: 10, arrival: 10.5)
+    _ = m.packet(epoch: 1, seq: 0, stamp: 9.99, segmentStart: true, now: 10.0)
+    check(m.pictureLag(now: 10.6) == nil, "a frame fed in the microphone's mode is not taken: no picture's lag")
+    check(abs(m.delay(now: 10.6, lag: 0.5) - m.need(now: 10.6)) < 1e-12, "no picture's guard: the delay is the need, whatever lag is offered")
+    var sound = AudioPlayout()
+    sound.latency(output: 0.01, io: 0.005, refresh: 1.0 / 60, streamFPS: 60)
+    _ = sound.format(epoch: 1, framesPerPacket: 480, primingFrames: 240, cookie: Data([1]))
+    _ = sound.packet(epoch: 1, seq: 0, stamp: 9.99, segmentStart: true, now: 10.0)
+    check(sound.delay(now: 10.6, lag: 0.5) > 0.5, "the sound's mode keeps its guard")
+}
+for (label, away, link, io, ol) in [("at home", false, 0.004, 0.005, 0.0), ("at home, a 20 ms IO buffer", false, 0.004, 0.020, 0.002),
+                                    ("away", true, 0.060, 0.010, 0.0), ("at home, a 10 ms feed", false, 0.008, 0.010, 0.005),
+                                    ("away, a jittery link", true, -1, 0.010, 0.0)] {
+    var w = World()
+    w.mode = .microphone
+    w.label = "the microphone \(label)"
+    w.seconds = 30
+    w.videoFPS = 0
+    w.away = away
+    w.io = io
+    w.outputLatency = ol
+    // The jittery link's delay is the message's, one for its ten packets.
+    w.transit = link >= 0 ? bursts(link) : { t in let b = (t / 0.1).rounded(.up) * 0.1; return b - t + 0.050 + 0.020 * abs(sin(b * 7.3)) }
+    let r = simulate(w)
+    noViolations(r, w.label)
+    check(r.lateAfter(1) == 0, "\(w.label): ten-packet bursts every 100 ms, nothing late after the first second (\(r.lateAfter(1)))")
+    let delays = r.seconds.filter { $0.t > 3 }.map(\.s.delay)
+    let spread = (delays.max() ?? 0) - (delays.min() ?? 0)
+    check(!delays.isEmpty && spread < 0.010, "\(w.label): the delay steady after 3 s (\(ms(delays.min() ?? 0)) to \(ms(delays.max() ?? 0)))")
+    if away {
+        // Away the cover starts at 150 ms, as the sound's: a link that measures under 110 ms closes the
+        // difference with one jump as the first 2 s end, and never again.
+        let late = r.jumpsMade.filter { $0.t > 2.5 }
+        check(late.isEmpty && r.underruns(after: 2.5) == 0 && r.totalJumps <= 1,
+              "\(w.label): no jump or gap after the first 2 s (\(r.jumpsMade.map { "\(String(format: "%.2f s %+.0f ms", $0.t, $0.by * 1000))" }))")
+    } else {
+        check(r.totalJumps == 0 && r.underruns(after: 1) == 0, "\(w.label): no jump, no gap (\(r.totalJumps), \(r.underruns(after: 1)))")
+    }
+    check(r.packets.count > 2900, "\(w.label): every packet played (\(r.packets.count))")
+}
+do {
+    // A takeover is a new epoch, its format first; a move's duplicates count nowhere.
+    var w = World()
+    w.mode = .microphone; w.label = "the microphone, a new epoch"; w.seconds = 12; w.videoFPS = 0
+    w.transit = bursts(0.004)
+    w.epochs = [6]
+    let r = simulate(w)
+    noViolations(r, w.label)
+    check(r.packets.contains { $0.epoch == 2 } && r.lateAfter(1) <= 10, "\(w.label): the new epoch plays (late after 1 s: \(r.lateAfter(1)))")
+    var d = World()
+    d.mode = .microphone; d.label = "the microphone through a move"; d.seconds = 10; d.videoFPS = 0
+    d.transit = bursts(0.004)
+    d.duplicate = (from: 300, to: 420, extra: 0.03)
+    let dr = simulate(d)
+    noViolations(dr, d.label)
+    check(dr.duplicatesSent > 100 && dr.dupChangedWindows == 0, "\(d.label): \(dr.duplicatesSent) duplicates, none counted")
+}
+
 // MARK: - 5,000 random runs
 
 let failuresBeforeRandom = failures
@@ -1137,6 +1225,7 @@ for k in 0..<total {
         return d
     }
     if rng.chance(0.3) { let lag = rng.range(0, 1.0); w.videoTransit = { t in base + lag + 0.01 * sin(t) } }
+
     if rng.chance(0.15) { w.hostSteps = [(at: rng.range(1, w.seconds), by: rng.range(-1.5, 1.5))]; events += 1 }
     if rng.chance(0.2) { w.pauses = [(at: rng.range(0.5, w.seconds), pause: rng.range(0.02, 1.0))]; events += 1 }
     if rng.chance(0.1) { w.epochs = [rng.range(0.5, w.seconds)]; events += 1 }
@@ -1166,6 +1255,62 @@ for k in 0..<total {
     }
 }
 check(failures == failuresBeforeRandom && runs > 0, "\(runs) random runs, \(steadyRuns) of them on a steady link, \(played) packets played: every invariant held")
+
+// MARK: - 1,000 random runs in the microphone's mode
+
+// A device's microphone on the Mac: no picture; the capture's 100 ms buffers, each one message whose ten
+// packets cross the link together; messages the device skipped (its 200 ms cap) or sent twice (a move); new
+// recordings; the feed's output changing; the clocks drifting and stepping.
+let failuresBeforeMic = failures
+var micSteady = 0, micPlayed = 0
+var mrng = RNG(20261119)
+for k in 0..<(total >= 1000 ? 1000 : total / 5) {
+    var w = World()
+    w.mode = .microphone
+    w.videoFPS = 0
+    w.label = "microphone random \(k)"
+    w.seconds = mrng.range(4, 12)
+    w.outputLatency = mrng.range(0.002, 0.03)
+    w.io = mrng.range(0.002, 0.020)
+    w.away = mrng.chance(0.3)
+    w.hostDrift = mrng.range(-200e-6, 200e-6)
+    w.outDrift = mrng.range(-200e-6, 200e-6)
+    w.readingJitter = mrng.chance(0.3) ? mrng.range(0, 0.0005) : 0
+    w.engineStart = mrng.chance(0.3) ? mrng.range(0, 0.2) : 0
+    w.rtt = mrng.chance(0.2) ? nil : mrng.range(0.001, 0.2)
+    let base = w.away ? mrng.range(0.02, 0.2) : mrng.range(0.001, 0.02)
+    let jitter = mrng.range(0, w.away ? 0.05 : 0.01)
+    let phase = mrng.range(0, 100)
+    var events = 0, stallAt = -1.0, stallFor = 0.0
+    if mrng.chance(0.15) { stallAt = mrng.range(1, w.seconds); stallFor = mrng.range(0.05, 2.0); events += 1 }
+    w.transit = { t in
+        let b = (t / 0.1).rounded(.up) * 0.1
+        var d = base + jitter * abs(sin(b * 3.1 + phase))
+        if stallAt >= 0, b >= stallAt, b < stallAt + stallFor { d += stallAt + stallFor - b }
+        return b - t + d
+    }
+    if mrng.chance(0.15) { w.hostSteps = [(at: mrng.range(1, w.seconds), by: mrng.range(-1.5, 1.5))]; events += 1 }
+    if mrng.chance(0.2) { w.pauses = [(at: mrng.range(0.5, w.seconds), pause: mrng.range(0.1, 2.0))]; events += 1 }
+    if mrng.chance(0.15) { w.epochs = [mrng.range(0.5, w.seconds)]; events += 1 }
+    if mrng.chance(0.2) { let s = mrng.int(20, 600); w.skipped = Set(s..<(s + 10 * mrng.int(1, 2))); events += 1 }
+    if mrng.chance(0.2) { let s = mrng.int(20, 500); w.duplicate = (from: s, to: s + mrng.int(9, 60), extra: mrng.range(0, 0.2)); events += 1 }
+    if mrng.chance(0.1) { w.routes = [(at: mrng.range(0.5, w.seconds), outputLatency: mrng.range(0.002, 0.05))]; events += 1 }
+    // (An IO buffer that changes without a reset is the sound's scenario alone: the feed's comes with its
+    // configuration change, which resets the timeline as a route does.)
+    if mrng.chance(0.1) { _ = mrng.range(0.5, w.seconds); _ = mrng.range(0.002, 0.020) }
+    let r = simulate(w, seed: mrng.next())
+    micPlayed += r.packets.count
+    if !r.violations.isEmpty {
+        check(false, "\(w.label): \(r.violations.prefix(3).joined(separator: "; "))")
+        if failures > failuresBeforeMic + 30 { break }
+        continue
+    }
+    if events == 0, jitter < (w.away ? 0.045 : 0.009) {
+        micSteady += 1
+        if r.lateAfter(2) != 0 { check(false, "\(w.label): a steady link lost \(r.lateAfter(2)) packets as late after 2 s") }
+    }
+}
+check(failures == failuresBeforeMic && micPlayed > 0, "the microphone's random runs, \(micSteady) on a steady link, \(micPlayed) packets played: every invariant held")
 
 print("\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

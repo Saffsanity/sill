@@ -8,10 +8,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
   is a library target with no product, so the iOS project never sees it.
 - `Sources/SillAudio/` — the sound's code both apps link (AudioToolbox and Foundation only, public, nothing of
-  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; `Tests/checks/audio-codec`),
-  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time; the `audio-codec` check and the sound
-  harness's device compile it too), `AudioPacketizer` (`PCMChunk` in, `AudioBlock`s out: blocks, stamps and
-  segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the device's timing of the Mac's sound; pure,
+  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; mono at 64 kbps for a device's
+  microphone, `channels` and `bitrate` at init; `Tests/checks/audio-codec`),
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time, a mono one's buffer as both; the
+  `audio-codec` check and the sound harness's device compile it too), `AudioPacketizer` (`PCMChunk` in,
+  `AudioBlock`s out: blocks, stamps and segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the
+  device's timing of the Mac's sound, and in its `.microphone` mode the Mac's timing of a device's microphone:
+  no picture's guard, a 110 ms first cover, a message's ten packets counted whole; pure,
   `Tests/checks/audio-playout`); SillHostCore depends on it and the iOS project links its product (pbxproj
   AA05, DA01).
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,

@@ -2,7 +2,8 @@ import AudioToolbox
 import Foundation
 
 /// The Mac's sound as AAC-ELD (docs/audio-plan.md §4.4): 48 kHz stereo Float32 in, one packet of
-/// 480 or 512 frames out per block, at 128 kbps. AudioToolbox only (no CoreMedia, no AVFoundation),
+/// 480 or 512 frames out per block, at 128 kbps; and a device's microphone the same way, mono at 64 kbps
+/// (`channels` and `bitrate` at init; docs/microphone-plan.md §3.4). AudioToolbox only (no CoreMedia, no AVFoundation),
 /// so the encoder-free harness (Scripts/audio) and the `audio-codec` check link it. Public: SillAudio,
 /// which SillHostCore and the iOS app both link.
 ///
@@ -29,8 +30,12 @@ public final class AudioEncoder {
     }
 
     public static let sampleRate = 48_000.0
+    /// The Mac's sound's: stereo at 128 kbps.
     public static let channels = 2
     public static let bitrate = 128_000
+
+    /// Interleaved channels a block carries (1 or 2).
+    public let channels: Int
 
     /// The frames each packet decodes to (the converter's own figure, read back).
     public let framesPerPacket: Int
@@ -46,10 +51,11 @@ public final class AudioEncoder {
     private let output: UnsafeMutableRawPointer
     private let feed = Feed()
 
-    /// A converter from interleaved stereo Float32 at 48 kHz to AAC-ELD at 48 kHz, `framesPerPacket`
-    /// (480 or 512) frames a packet, `bitrate` bits a second.
-    public init(framesPerPacket: Int, bitrate: Int = AudioEncoder.bitrate) throws {
-        let ch = UInt32(Self.channels)
+    /// A converter from interleaved Float32 at 48 kHz, `channels` of them (1 or 2), to AAC-ELD at 48 kHz,
+    /// `framesPerPacket` (480 or 512) frames a packet, `bitrate` bits a second.
+    public init(framesPerPacket: Int, bitrate: Int = AudioEncoder.bitrate, channels: Int = AudioEncoder.channels) throws {
+        guard channels == 1 || channels == 2 else { throw Failure(status: -50, step: "the channel count") }
+        let ch = UInt32(channels)
         var input = AudioStreamBasicDescription(mSampleRate: Self.sampleRate, mFormatID: kAudioFormatLinearPCM,
                                                 mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
                                                 mBytesPerPacket: 4 * ch, mFramesPerPacket: 1, mBytesPerFrame: 4 * ch,
@@ -99,6 +105,8 @@ public final class AudioEncoder {
         if AudioConverterGetProperty(converter, kAudioConverterEncodeBitRate, &size, &readRate) != noErr { readRate = UInt32(bitrate) }
 
         self.converter = converter
+        self.channels = channels
+        feed.channels = channels
         self.framesPerPacket = Int(got.mFramesPerPacket)
         self.priming = Int(prime.leadingFrames)
         self.cookie = cookie
@@ -112,11 +120,11 @@ public final class AudioEncoder {
         output.deallocate()
     }
 
-    /// One packet for exactly one block: `framesPerPacket` frames of interleaved stereo Float32.
-    /// Nil for a block of another size, or when the converter makes nothing (it never has, in the
+    /// One packet for exactly one block: `framesPerPacket` frames of interleaved Float32, `channels` of
+    /// them. Nil for a block of another size, or when the converter makes nothing (it never has, in the
     /// probe or the checks).
     public func encode(_ block: [Float]) -> Data? {
-        guard block.count == framesPerPacket * Self.channels else { return nil }
+        guard block.count == framesPerPacket * channels else { return nil }
         return block.withUnsafeBufferPointer { samples -> Data? in
             feed.samples = UnsafeRawPointer(samples.baseAddress)
             feed.frames = framesPerPacket
@@ -124,7 +132,7 @@ public final class AudioEncoder {
             var packets: UInt32 = 1
             var description = AudioStreamPacketDescription()
             var list = AudioBufferList(mNumberBuffers: 1,
-                                       mBuffers: AudioBuffer(mNumberChannels: UInt32(Self.channels),
+                                       mBuffers: AudioBuffer(mNumberChannels: UInt32(channels),
                                                              mDataByteSize: UInt32(maxPacketBytes), mData: output))
             let status = AudioConverterFillComplexBuffer(converter, Self.supply, Unmanaged.passUnretained(feed).toOpaque(),
                                                          &packets, &list, &description)
@@ -147,6 +155,7 @@ public final class AudioEncoder {
     private final class Feed {
         var samples: UnsafeRawPointer?
         var frames = 0
+        var channels = AudioEncoder.channels
     }
 
     private static let supply: AudioConverterComplexInputDataProc = { _, count, data, _, context in
@@ -158,10 +167,10 @@ public final class AudioEncoder {
         let frames = min(Int(count.pointee), feed.frames)
         count.pointee = UInt32(frames)
         data.pointee.mNumberBuffers = 1
-        data.pointee.mBuffers.mNumberChannels = UInt32(AudioEncoder.channels)
-        data.pointee.mBuffers.mDataByteSize = UInt32(frames * AudioEncoder.channels * MemoryLayout<Float>.size)
+        data.pointee.mBuffers.mNumberChannels = UInt32(feed.channels)
+        data.pointee.mBuffers.mDataByteSize = UInt32(frames * feed.channels * MemoryLayout<Float>.size)
         data.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: samples)
-        feed.samples = samples.advanced(by: frames * AudioEncoder.channels * MemoryLayout<Float>.size)
+        feed.samples = samples.advanced(by: frames * feed.channels * MemoryLayout<Float>.size)
         feed.frames -= frames
         return noErr
     }

@@ -59,7 +59,18 @@ import Foundation
 ///    or the path changing. The floor starts again from that second's packets (or that packet), the
 ///    picture's window from its next frame, and the difference is closed by a jump.
 /// The engine's idle (rule 14) is AudioOutput's.
+///
+/// The microphone's mode (`Mode.microphone`, docs/microphone-plan.md §3.4): the same model times a device's
+/// microphone on the Mac (MicrophoneReceiver), where no picture rides along. No frame is fed and none is
+/// taken (`frame` ignores one), so rule 3 has no lag and rule 4's delay is the need; the cover starts at
+/// `microphoneCoverStartHome` at home (a capture buffer's 100 ms burst and a packet, which the device's ten
+/// packets a message arrive in), away as the sound's; and a message's packets, which arrive together, count
+/// for rule 1 and rule 2 all before its first is placed (`message`), so the first message of a session is
+/// not placed by a floor its own last packet lowers 90 ms later. Every other rule is the sound's.
 public struct AudioPlayout {
+    /// What the model times: the Mac's sound on the device (with the picture's guard), or a device's
+    /// microphone on the Mac (none).
+    public enum Mode: Equatable, Sendable { case sound, microphone }
     // MARK: - Constants (§7.2's table)
 
     /// The player's timeline: 48 kHz, whatever the route (the mixer converts).
@@ -69,6 +80,8 @@ public struct AudioPlayout {
     /// Rule 2: the jitter cover's first value, and how long the session's first packets are left out.
     public static let coverStartHome = 0.040
     public static let coverStartAway = 0.150
+    /// The microphone's at home: a burst of ten 10 ms packets every 100 ms, and one packet.
+    public static let microphoneCoverStartHome = 0.110
     public static let coverGrace = 2.0
     public static let coverHome: ClosedRange<Double> = 0.020...0.150
     public static let coverAway: ClosedRange<Double> = 0.060...0.600
@@ -336,7 +349,10 @@ public struct AudioPlayout {
     /// A packet was placed this session: the stats say so from then on.
     public private(set) var placedThisSession = false
 
-    public init() {}
+    /// What it times; the sound's by default.
+    public let mode: Mode
+
+    public init(mode: Mode = .sound) { self.mode = mode }
 
     // MARK: - Inputs
 
@@ -359,6 +375,7 @@ public struct AudioPlayout {
 
     /// A video frame (kind 1), stamped at arrival: for the picture's lag (rule 3).
     public mutating func frame(stamp: Double, arrival: Double) {
+        guard mode == .sound else { return }
         let raw = arrival - stamp
         guard raw.isFinite else { return }
         frameArrivals.append(arrival)
@@ -401,14 +418,28 @@ public struct AudioPlayout {
         return out
     }
 
+    /// The microphone's mode: a message of `count` packets of `epoch` from `seq`, each `framesPerPacket` apart
+    /// from `stamp`, which arrived together at `arrival`: each one's (arrival − stamp) counts for the floor and
+    /// the cover now, before the first is placed (rule 1), and its `packet` call then takes none
+    /// (`recorded`). Duplicates (rule 7) and packets of another epoch count nowhere, as in `packet`.
+    public mutating func message(epoch: Int, seq: UInt32, count: Int, stamp: Double, arrival: Double) {
+        guard mode == .microphone, let playing = self.epoch, epoch == playing, stamp.isFinite, arrival.isFinite else { return }
+        for i in 0..<max(0, count) {
+            let key = Int64(epoch & 0xFFFF) << 32 | Int64(seq &+ UInt32(i))
+            guard !recentSet.contains(key) else { continue }
+            record(raw: arrival - (stamp + Double(i * framesPerPacket) / Self.rate), arrival: arrival)
+        }
+    }
+
     /// One packet of kind 43's type 2, with its own stamp (the message's + its place × F ÷ rate), taken
     /// `now`. Its (arrival − stamp) is taken now too, not when the network queue read it: what the
     /// packet in hand waits for is the next packet reaching the playout (rule 10), so the hop between
     /// the two queues is part of what the cover must cover. But a packet that waited behind Sill's own
     /// engine starting or stopping gives `arrival`, when it came: that wait is not the link's, and the
     /// floor and the cover take `arrival`, the late test and the placement `now` (rule 6).
+    /// `recorded`: the microphone's `message` counted it already.
     public mutating func packet(epoch: Int, seq: UInt32, stamp: Double, segmentStart: Bool, arrival came: Double? = nil,
-                         now: Double) -> Plan {
+                         recorded: Bool = false, now: Double) -> Plan {
         let arrival = came ?? now
         guard let playing = self.epoch, epoch == playing, stamp.isFinite, arrival.isFinite else { return Plan() }
         // Rule 7: before anything counts.
@@ -418,7 +449,7 @@ public struct AudioPlayout {
             return Plan()
         }
         remember(key)
-        record(raw: arrival - stamp, arrival: arrival)
+        if !recorded { record(raw: arrival - stamp, arrival: arrival) }
         if muted {
             // Nothing decoded: the decoder's next packet starts afresh.
             expectedSeq = nil
@@ -556,7 +587,7 @@ public struct AudioPlayout {
 
     /// Rule 2's cover.
     public func cover(now: Double) -> Double {
-        let start = away ? Self.coverStartAway : Self.coverStartHome
+        let start = away ? Self.coverStartAway : mode == .microphone ? Self.microphoneCoverStartHome : Self.coverStartHome
         guard let begun = sessionStart, now - begun >= Self.coverGrace, let floor,
               let top = buckets.compactMap(\.max).max() else { return start }
         let bounds = away ? Self.coverAway : Self.coverHome
@@ -582,7 +613,7 @@ public struct AudioPlayout {
 
     /// Rule 4.
     public func delay(now: Double, lag: Double?) -> Double {
-        let guardDelay = lag.map { $0 + 1 / streamFPS } ?? -.infinity
+        let guardDelay = mode == .sound ? lag.map { $0 + 1 / streamFPS } ?? -.infinity : -.infinity
         return max(need(now: now), guardDelay)
     }
 

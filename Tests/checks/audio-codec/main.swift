@@ -9,7 +9,8 @@ import Foundation
 // time of the frame it decodes to first): each click must land at its whole second ±2 frames, a
 // segment's first packet starting clean after a gap and the encoder's reset included. Then the
 // packet size, the priming and the cookie read back, one packet per block from the first, a late
-// join's first packet, and 5 s of a busy signal at 120–140 kbps.
+// join's first packet, and 5 s of a busy signal at 120–140 kbps. And a device's microphone (docs/microphone-plan.md
+// §3.4): mono at 64 kbps in a capture buffer's 4,800-frame chunks, ten packets each, every click at its second.
 var failures = 0
 var checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
@@ -53,21 +54,25 @@ struct Run {
     var framesPerPacket = 0
     var priming = 0
     var cookie = Data()
+    var bitrate = 0
+    /// How many blocks each chunk completed.
+    var blocksPerChunk = Set<Int>()
 }
 
 /// The tone from wall time `wall0` for `seconds`, in `chunk`-frame chunks, through the packetizer and
 /// the encoder, each packet decoded at once and placed on a timeline by its stamp. `gapAt`: chunks
 /// dropped there (a gap of `gapChunks`), so a new segment starts; the encoder is reset for it as the
 /// pipeline does, and the decoder as the device does for a segment's first packet.
-func run(chunk: Int, seconds: Double, gapAt: Int? = nil, gapChunks: Int = 0) -> Run {
+func run(chunk: Int, seconds: Double, gapAt: Int? = nil, gapChunks: Int = 0, channels: Int = 2, bitrate: Int = AudioEncoder.bitrate) -> Run {
     var r = Run()
     let F = AudioPacketizer.packetSize(firstChunkFrames: chunk)
-    guard let enc = try? AudioEncoder(framesPerPacket: F) else { check(false, "the encoder at \(F) frames"); return r }
+    guard let enc = try? AudioEncoder(framesPerPacket: F, bitrate: bitrate, channels: channels) else { check(false, "the encoder at \(F) frames"); return r }
     r.framesPerPacket = enc.framesPerPacket
     r.priming = enc.priming
     r.cookie = enc.cookie
-    guard let dec = try? AudioDecoder(framesPerPacket: enc.framesPerPacket, cookie: enc.cookie) else { check(false, "the decoder"); return r }
-    var packetizer = AudioPacketizer(framesPerPacket: enc.framesPerPacket, priming: enc.priming, channels: 2, sampleRate: rate)
+    r.bitrate = enc.bitrate
+    guard let dec = try? AudioDecoder(framesPerPacket: enc.framesPerPacket, cookie: enc.cookie, channels: channels) else { check(false, "the decoder"); return r }
+    var packetizer = AudioPacketizer(framesPerPacket: enc.framesPerPacket, priming: enc.priming, channels: channels, sampleRate: rate)
     // The host clock and the wall clock, as SyntheticAudio maps them: frame 0 is at both.
     let host0 = 5_000.0, wall0 = 1_790_000_000.25
     let tone = TestTone(sampleRate: rate, wallAtFrame0: wall0)
@@ -78,9 +83,11 @@ func run(chunk: Int, seconds: Double, gapAt: Int? = nil, gapChunks: Int = 0) -> 
     for k in 0..<total {
         if let g = gapAt, k >= g, k < g + gapChunks { continue }
         if k == 0 || k == (gapAt ?? -1) + gapChunks { segmentStarts.append(k * chunk) }
-        let c = PCMChunk(samples: tone.samples(from: k * chunk, frames: chunk), channels: 2, sampleRate: rate,
-                         hostTime: host0 + Double(k * chunk) / rate)
+        let stereo = tone.samples(from: k * chunk, frames: chunk)
+        let samples = channels == 2 ? stereo : stride(from: 0, to: stereo.count, by: 2).map { stereo[$0] }
+        let c = PCMChunk(samples: samples, channels: channels, sampleRate: rate, hostTime: host0 + Double(k * chunk) / rate)
         let blocks = packetizer.push(c)
+        r.blocksPerChunk.insert(blocks.count)
         for b in blocks {
             if b.segmentStart { enc.reset(); dec.reset() }
             guard let packet = enc.encode(b.samples) else { r.perBlock = false; continue }
@@ -138,6 +145,28 @@ check(g.segmentStartErrors.count == 2 && g.segmentStartErrors.allSatisfy { $0 < 
       "both segments start clean (the encoder and the decoder reset): the first packet's kept frames within -20 dB of the tone: \(g.segmentStartErrors.map { Int($0) })")
 let g2 = run(chunk: 1024, seconds: 6.5, gapAt: 180, gapChunks: 23)   // ~0.5 s missing across a second
 check(g2.clicks.values.allSatisfy { abs($0) <= 2 } && g2.clicks.count >= 5, "after a 0.5 s gap (512-frame packets): clicks at their seconds: \(g2.clicks.sorted { $0.key < $1.key })")
+
+// MARK: - A device's microphone: mono at 64 kbps, in a capture buffer's 4,800-frame chunks
+
+let mic = run(chunk: 4800, seconds: 6.5, channels: 1, bitrate: 64_000)
+check(mic.framesPerPacket == 480 && mic.priming == 240, "the microphone: 480 frames a packet, 240 of priming (\(mic.framesPerPacket), \(mic.priming))")
+check(mic.bitrate == 64_000, "the encoder reads back 64 kbps (\(mic.bitrate))")
+check(mic.perBlock && mic.decodedPerPacket && mic.packets == 650, "one packet a block, each decoding to 480 frames (\(mic.packets))")
+check(mic.blocksPerChunk == [10], "ten packets a capture buffer: \(mic.blocksPerChunk.sorted())")
+check(mic.clicks.count == 6 && mic.clicks.values.allSatisfy { abs($0) <= 2 }, "the microphone: every click at its whole second ±2 frames: \(mic.clicks.sorted { $0.key < $1.key })")
+check(Double(mic.bytes * 8) / 6.5 / 1000 < 72, "the microphone's tone under 72 kbps (\(String(format: "%.1f", Double(mic.bytes * 8) / 6.5 / 1000)))")
+let micGap = run(chunk: 4800, seconds: 6.5, gapAt: 25, gapChunks: 1, channels: 1, bitrate: 64_000)   // a capture buffer lost at 2.5 s
+check(micGap.clicks.count == 6 && micGap.clicks.values.allSatisfy { abs($0) <= 2 } && micGap.packets == 640,
+      "a lost capture buffer: a new segment, nothing made for it, the clicks at their seconds (\(micGap.packets))")
+check(micGap.segmentStartErrors.count == 2 && micGap.segmentStartErrors.allSatisfy { $0 < -20 },
+      "both microphone segments start clean: \(micGap.segmentStartErrors.map { Int($0) })")
+check((try? AudioEncoder(framesPerPacket: 480, channels: 3)) == nil && (try? AudioDecoder(framesPerPacket: 480, cookie: mic.cookie, channels: 0)) == nil,
+      "1 or 2 channels only")
+if let monoDec = try? AudioDecoder(framesPerPacket: 480, cookie: mic.cookie, channels: 1), let monoEnc = try? AudioEncoder(framesPerPacket: 480, bitrate: 64_000, channels: 1),
+   let p = monoEnc.encode([Float](repeating: 0.1, count: 480)), let (l, r2) = monoDec.decode(p) {
+    check(l == r2 && l.count == 480 && monoEnc.channels == 1 && monoDec.channels == 1, "a mono decoder gives its one buffer as both")
+    check(monoEnc.encode([Float](repeating: 0, count: 960)) == nil, "a mono encoder refuses a stereo block")
+} else { check(false, "a mono encoder and decoder") }
 
 // MARK: - A late join: the first packet on a fresh decoder is not the signal
 
