@@ -695,7 +695,7 @@ private struct PermissionsPane: View {
                     permissions.requestScreenRecording()
                 }
                 PermissionRow(title: "Accessibility", allowed: permissions.accessibility,
-                              explanation: "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams.",
+                              explanation: "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams, and move windows off the Virtual Desktop and back.",
                               button: model.settings.askedAccessibility ? "Open System Settings…" : "Allow…") {
                     permissions.requestAccessibility()
                 }

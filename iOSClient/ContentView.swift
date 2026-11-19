@@ -551,7 +551,12 @@ struct ContentView: View {
 ///   on|muted` makes the mock Mac send its sound and this device play it or have it muted (Mute off or
 ///   on; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote|nosound` the Send
 ///   Audio row on, off, on with the Mac's note (why no sound comes), or a Mac without sound (the row
-///   disabled, "Update Sill…", no Mute). In the normal app and under `-SillLive 1`: `-SillSoundSink
+///   disabled, "Update Sill…", no Mute).
+/// * The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md): `-SillSettingsCase
+///   vdesk|vdeskon|vdeskunpaired|vdeskunavailable` its switch off, on and shown at 1218 × 800, 60 Hz, on a
+///   session the Mac does not say is paired (disabled), or where the Mac cannot make it (disabled, the
+///   Mac's note), with `-SillSettingsScroll vdesk` at its row; `-SillDesktopDisplays 3,3,v` the last
+///   stop the Virtual Desktop (the button's dashed screen over "Virtual"). In the normal app and under `-SillLive 1`: `-SillSoundSink
 ///   manual|device` (the engine renders offline and opens no output device, the simulator's default
 ///   in every build, or it plays to the output; `device` in the simulator plays through the Mac's
 ///   speakers: never in a gate), `-SillSoundVolume 0` (the player's volume, a second guard),
