@@ -71,7 +71,20 @@ window picker tucked away while a keyboard is up part of the same change (the pr
   bringing it into row 1 instead would move the Keyboard button under the finger as the keyboard comes up.
 - Its place: This iPhone, after Larger Picture, on the Duo too.
 
-**Merges with the other drafts (trial merges, see the pull request):** to come.
+**Merges with the other drafts** (trial merges of this branch at 61a22f42, by `git merge` in a throwaway worktree; the pure
+checks run on each result):
+- **#397 (`ready-276`, Hold to Lock Modifiers), #410 (`ready-315`, Arrow Keys), #393 (`settings-pane`):** each merges
+  cleanly. On each result `phone-keyboard-lift` passes (183), and `key-strokes` (607), `phone-key-row` (159) and
+  `settings-pane` (258) respectively. With #397 the phone's key row now really is on screen whenever
+  `ModifierLock.keyRowOnScreen` says so (on main a tall keyboard covered it while a lock rode it unseen). With #410
+  the scrolling strip lives inside the key row's rect, which the lift moves. With #393 the switch's rows land in
+  `thisDevice`, inside the pane's `devicePart`, and `-SillSettingsScroll typing` reaches them there. #397 and #410
+  conflict with each other (their Keys group), not with this branch.
+- **#383 (cubelikeplayDaniel):** one conflict, `InputOverlay.swift`: both give the input view an
+  `inputAccessoryView`. Resolve with one override: nil while the hardware keyboard holds the keyboard; in DEBUG the
+  harness's stand-in first when `-SillTallKeyboard` is set; else #383's bar. With this branch the bar no longer
+  covers the key row upright (UIKit's frame includes it, so the rows lift over it), but it still repeats the key
+  row's keys there.
 
 **Verified:** to come (the check and its mutants, run-all, the builds, CI, the harness photos).
 
