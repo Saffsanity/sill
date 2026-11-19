@@ -25,7 +25,8 @@ import StreamProtocol
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
-/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
+/// device's text; Hold, Then Drag, `TouchHold.key`, #292; Reverse Scrolling,
+/// `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
 /// rows, as accessibility actions, do their gestures
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
@@ -68,6 +69,9 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on
+    /// (`TouchHold.defaultOn`), read by the picture's input view as each hold begins, never sent.
+    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
@@ -116,6 +120,7 @@ struct HostSettingsPanel: View {
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// `holddrag`, to Hold, Then Drag's switch and its footnote (#292).
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
@@ -129,6 +134,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "holddrag"?: return holdThenDragRowID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
         default: return nil
@@ -143,6 +149,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let holdThenDragRowID = "holdThenDrag"
     private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
@@ -679,6 +686,9 @@ struct HostSettingsPanel: View {
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
     /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
+    /// Hold, Then Drag (`TouchHold`, #292) comes right before Reverse Scrolling, the first of the rows about
+    /// touch, for every Mac: it changes only what a finger held on the picture sends, a drag being the
+    /// left button's down, moves and up, which every Sill for Mac takes.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
@@ -750,6 +760,18 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        // Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on, this device's own, never sent.
+        // The first of the rows about touch; under Touch Mode's Direct Touch once #222's row is here (in Trackpad
+        // mode the pad over the picture takes the fingers, and has its own hold, then drag), and in the
+        // whole-screen Settings pane's Touch and Zoom group once #393 is.
+        Rows {
+            Toggle(isOn: $holdThenDrag) {
+                Text(TouchHold.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.holdThenDragRowID)
+        Footnote(text: TouchHold.footnote)
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)

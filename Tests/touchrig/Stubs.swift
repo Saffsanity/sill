@@ -35,4 +35,9 @@ enum EscapeKey {
 /// pad's scroll would come out the other way, which compare.py does not judge.
 enum StreamClient {
     static let reverseScrollOn = false
+    /// Hold, Then Drag (#178, PR #292, TouchHold), read as each hold on the picture begins: off, as on a fresh
+    /// install, so the picture's hold right-clicks at once as before it and H7 holds it to the surfaces before
+    /// (`--rev`); RIG_HOLD=drag turns it on (`RIG_ONLY=hold RIG_HOLD=drag`: the drag and the right click at the
+    /// lift). Surfaces from before the switch never ask.
+    static var holdThenDragOn: Bool { ProcessInfo.processInfo.environment["RIG_HOLD"] == "drag" }
 }

@@ -988,7 +988,7 @@ func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 
 // Every row of every card, as the plan's table has it (docs/first-run-walkthrough-plan.md, "The tour
 // once more, for 0.6"), for Mac mini and an iPad unless said.
-let T1 = "Tap to click.", T2 = "Touch and hold to right-click, or hold, then drag, to move a window or select text.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
+let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
 let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Mac mini."
 let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
 let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
@@ -1035,6 +1035,40 @@ check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the pi
       "the Mac's name in the pinch row")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")
+// Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, off unless turned on (the
+// right click, as before), on the drag beside it; the same symbol and place, never "New:", read whole; nothing
+// else on any card changes with it, in every layout, on either device, under VoiceOver or not, for all 128.
+let T2drag = "Touch and hold to right-click, or hold, then drag, to move a window or select text."
+let holdDrag = with { $0.holdThenDrag = true }
+check(!allOn.holdThenDrag && !allOff.holdThenDrag && everyFeatures.allSatisfy { !$0.holdThenDrag }, "Hold, Then Drag off unless turned on")
+check(texts(words(.touch, L, features: holdDrag)) == [T1, T2drag, T3, T4, T5, T6], "Hold, Then Drag on: the drag in the hold's row: \(texts(words(.touch, L, features: holdDrag)))")
+check(words(.touch, L, features: holdDrag).rows[1].spans == [TourSpan(text: "Touch and hold", strong: true),
+                                                             TourSpan(text: " to right-click, or hold, then drag, to move a window or select text.", strong: false)],
+      "Hold, Then Drag on: the control's name semibold, as off")
+check(texts(words(.touch, F, device: "iPhone", features: with(allOff) { $0.holdThenDrag = true })) == [T1, T2drag, T3, T5], "Hold, Then Drag on, on a phone with nothing else on")
+for f in everyFeatures {
+    let on = with(f) { $0.holdThenDrag = true }
+    for layout in [L, P, F] {
+        for device in ["iPad", "iPhone"] {
+            let label = "\(layout) \(device) \(f)"
+            let before = words(.touch, layout, device: device, first: true, features: f), after = words(.touch, layout, device: device, first: true, features: on)
+            check(before.rows[1].text == T2 && after.rows[1].text == T2drag, "the hold's row follows Hold, Then Drag: \(label)")
+            check(after.rows[1].symbol == before.rows[1].symbol && !after.rows[1].isNew && after.rows[1].spoken == T2drag,
+                  "the drag's row: the hold's symbol, no New, read whole: \(label)")
+            var same = after
+            same.rows[1] = before.rows[1]
+            check(same == before, "nothing else on the picture's card changes with it: \(label)")
+            for voiceOver in [false, true] {
+                for step in TourPolicy.steps(layout, voiceOver: voiceOver) where step != .touch {
+                    check(words(step, layout, device: device, voiceOver: voiceOver, first: true, features: on)
+                          == words(step, layout, device: device, voiceOver: voiceOver, first: true, features: f),
+                          "no other card changes with Hold, Then Drag: \(step) vo \(voiceOver) \(label)")
+                }
+            }
+        }
+    }
+}
+check(TourPolicy.steps(L, voiceOver: true).allSatisfy { $0 != .touch }, "under VoiceOver no picture card, so no hold's row of either form")
 for f in everyFeatures {
     check(words(.touch, L, features: f).rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "the swipe row follows the gestures: \(f)")
 }
@@ -1123,7 +1157,7 @@ check(laptopFirst.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "A hard
 check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "keyboard.badge.ellipsis", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
 check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
 check(everyFeatures.allSatisfy { words(.laptop, P, first: true, features: $0) == laptopFirst }, "the halves' laptop card is the same for every Mac")
-check(touchPad.rows[1].spoken == T2, "a row is spoken as it reads")
+check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
 
 // The iPhone Duo open: its keys and trackpad come with the device on its side (the laptop pose, open
 // flat upright), so the words say so where an iPhone's and the Duo's cover's say upright.

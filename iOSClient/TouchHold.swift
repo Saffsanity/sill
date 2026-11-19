@@ -8,14 +8,34 @@ import Foundation
 /// The right click came at the hold itself before this, 0.45 s in; it waits for the lift now, as only the
 /// lift tells a right click from a drag.
 ///
-/// Pure: CoreGraphics only, checked in Tests/checks/touch-hold. InputOverlay's long press feeds it and
-/// sends what it returns.
+/// Behind a switch of this device's own, Settings › This iPad (This iPhone) › Hold, Then Drag (`key`), off
+/// unless turned on (`defaultOn`): it moves the right click from the hold to the lift, so nobody gets it
+/// without asking (Noah, 2026-11-18: community pull requests get toggles, new behaviour off by default;
+/// docs/steps/2026-11-19-ready-292.md). Off, the hold is a right click at once, as before #178, and the
+/// finger's moves and lift send nothing (`began(at:drags:)`).
+///
+/// Pure: CoreGraphics only, checked in Tests/checks/touch-hold. InputOverlay's long press feeds it, with
+/// the switch as each hold begins (`StreamClient.holdThenDragOn`), and sends what it returns.
 struct TouchHold {
     /// How long a finger is held before it right-clicks or drags (`UILongPressGestureRecognizer`'s
     /// `minimumPressDuration`).
     static let press: TimeInterval = 0.45
     /// How far the held finger moves, in points, before it drags rather than right-clicks.
     static let slop: CGFloat = 8
+
+    /// The UserDefaults key of Hold, Then Drag (`@AppStorage` in the Settings panel). `-Sill.holdThenDrag 1`
+    /// turns it on for one run, in the normal app too. Never sent to the Mac.
+    static let key = "Sill.holdThenDrag"
+    /// The switch's default: off, so a hold right-clicks at once as it always did, until this device's
+    /// owner turns it on. The one place the default is written.
+    static let defaultOn = false
+
+    // MARK: Words
+
+    /// The switch's title in the Settings panel.
+    static let title = "Hold, Then Drag"
+    /// Under the switch, on or off.
+    static let footnote = "Touch and hold a moment, then move your finger to drag what’s under it: a window, a slider or a selection. Lift without moving to right-click. Off, touch and hold right-clicks at once."
 
     /// What goes to the Mac, in the overlay's points.
     enum Send: Equatable {
@@ -31,10 +51,14 @@ struct TouchHold {
 
     var isHeld: Bool { start != nil }
 
-    /// The hold recognized at `point`, where the overlay has already put the Mac's pointer.
-    mutating func began(at point: CGPoint) {
+    /// The hold recognized at `point`, where the overlay has already put the Mac's pointer. With Hold, Then
+    /// Drag off (`drags` false), a right click there at once, as before #178, and nothing is held, so the
+    /// finger's moves, its lift and a cancel send nothing; on, nothing yet: the moves and the lift decide.
+    mutating func began(at point: CGPoint, drags: Bool) -> [Send] {
+        guard drags else { return [.rightClick(point)] }
         start = point
         last = point
+        return []
     }
 
     mutating func moved(to point: CGPoint) -> [Send] {

@@ -5,7 +5,8 @@
 // the surfaces before the gestures and on this branch's, and compare.py judges the two logs.
 //
 // Environment (simctl launch's SIMCTL_CHILD_ prefix): RIG_SWITCH=off makes `sendGesture` answer false,
-// as StreamClient does with the device's switch off; RIG_TRACE=1 also logs recognizer transitions.
+// as StreamClient does with the device's switch off; RIG_HOLD=drag turns the device's Hold, Then Drag on
+// (#292; off by default, as on a fresh install); RIG_TRACE=1 also logs recognizer transitions.
 import UIKit
 
 // MARK: - Log
@@ -631,6 +632,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             for (title, steps) in scenarios(oc) { runner.add("OVERLAY \(title)", root.overlay, steps) }
         }
         if only == "hold" {
+            // Hold, Then Drag (#292) as the stub reads it: off, a right click at the hold as before; RIG_HOLD=drag, on.
+            print("RIG hold: Hold, Then Drag \(StreamClient.holdThenDragOn ? "on (RIG_HOLD=drag)" : "off")")
             for (title, steps) in holdScenarios(oc) { runner.add("OVERLAY HOLD \(title)", root.overlay, steps) }
         }
         #if ZOOM
