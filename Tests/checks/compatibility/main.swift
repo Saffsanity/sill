@@ -345,7 +345,18 @@ check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName 
       "a reader from before them skips all three")
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
 check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
-      "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
+      "45 and 46 not this build's (open pull requests' pen and camera)")
+// Kind 48, the device's microphone (Microphone.swift, docs/microphone-plan.md §4): its number, the window list's
+// `microphone` and kind 16's `microphone`, which an older reader skips. The rest of its wire is the microphone
+// check's.
+check(StreamMessageKind.microphone.rawValue == 48 && StreamMessageKind(rawValue: 48) == .microphone, "kind 48 is the microphone")
+let micMessage = MicrophoneMessage.message(.end, now: 2)?.serialized() ?? Data()
+check(StreamMessage.parseHeader(micMessage).map { $0.kind == .microphone && $0.payloadLength == 1 } == true
+      && micMessage.first == 48 && micMessage.last == MicrophoneMessage.typeEnd, "a kind 48 end: its header and its one byte")
+var micList = WindowList(macName: "Mac mini", windows: [], active: .desktop)
+micList.microphone = MicrophoneCodec.generation
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(micList)).map { $0.macName == "Mac mini" } == true, "a reader from before skips the list's microphone")
+check(Wire.decode(WindowList.self, from: Wire.encode(micList))?.microphone == 1, "the list's microphone round-trips")
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")

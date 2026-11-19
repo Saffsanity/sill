@@ -79,7 +79,22 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
   `AudioPackets` (epoch, seq, the segment flag, 1–255 packets); `AudioCodec`
   ("aac-eld", and `choose`: the first of a device's `Hello.audio` the host
-  makes); only to a device whose hello lists one. `ScrollDirection.swift` —
+  makes); only to a device whose hello lists one. `Microphone.swift` — the
+  device's microphone as Sill Microphone on the Mac (kind 48, device → host
+  only; docs/microphone-plan.md §4, #191's feature redone): `MicrophoneMessage`,
+  type 1 a JSON `MicrophoneFormat` (kind 43's `AudioFormat` keys with `claim`
+  and `pause` beside: the offer, and with a codec an epoch's format), type 2
+  kind 43's `AudioPackets` (the header's stamp the capture time), type 3 the
+  end; `MicrophoneCodec` (generation 1: AAC-ELD 48 kHz mono, 480 frames, 64
+  kbps, ten packets a message; `choose`); only to a host whose
+  `WindowList.microphone` is 1 or more, packets only while kind 16's
+  `MicrophoneState` (HostSettings.swift) says `inUse`. `MicrophonePolicy.swift`
+  — both ends' rules and every word: the device's (`Device`: when it offers,
+  pauses and records; `DeviceLink`: the offers, claims and ends each step
+  sends; `chosen`: the window it records from; `row`: the Settings row's
+  words) and the Mac's (`Host`, a reducer: who holds Sill Microphone, claims,
+  takeovers, the grace, refusals, limits, kind 16 per session, the playout's
+  source, the lines); pure, `Tests/checks/microphone`. `ScrollDirection.swift` —
   which way a scroll on the device moves the Mac's content: the device's
   Reverse Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a
   finger's drag over the picture and two fingers on the on-screen trackpad

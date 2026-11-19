@@ -100,6 +100,15 @@ public struct WindowList: Codable {
     /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
     /// is (`LockedMac.viewLine`).
     public var offConsoleView: Bool?
+    /// What this host takes of a device's microphone (kind 48, Microphone.swift; #191's field): 1 is
+    /// generation 1 (`MicrophoneCodec.generation`: AAC-ELD mono, the three types' layouts), from paired
+    /// sessions, answered by kind 16's `microphone`; 0 is a Mac that has the receiving side with its Use iPhone
+    /// and iPad microphones off or Sill Microphone not set up, to which a device sends no kind 48 but whose row
+    /// says why. Left out by every host before, by the CLI (which cannot feed Sill Microphone), and while the
+    /// Mac is locked or another user is on its screen (`LockPolicy.list`): a device sends no kind 48 to any of
+    /// them. A later generation says 2 and goes only to a device that says so. Set after the initializer, as
+    /// `keyRepeat`.
+    public var microphone: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
