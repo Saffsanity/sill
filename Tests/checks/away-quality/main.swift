@@ -112,6 +112,10 @@ do {
     eq(standard.changes(to: on), "device microphones off → on", "changes: the device microphones' switch")
     eq(on.changes(to: standard), "device microphones on → off", "changes: and back")
     check(on.validated().deviceMicrophone && !standard.validated().deviceMicrophone, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, deviceMicrophone: true)
+    check(made.deviceMicrophone, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
     check(on.applying(all).deviceMicrophone && on.applyingAway(all).deviceMicrophone && !standard.applying(all).deviceMicrophone
