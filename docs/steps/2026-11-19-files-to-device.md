@@ -90,8 +90,11 @@ a transfer; H8's pacing cases for the Mac's sending.
 - Mutants: files 115 of 115, device-files 38 of 38, file-hub 31 of 33. The two file-hub survivors were gaps in the
   check, not bugs: a folder is refused anyway for having no size (the regular-file test is there for a named pipe,
   which has a size, 0, and would block the hub's queue on its first read), and a file that shrank stopped `cantRead`
-  one read later anyway (the check now looks at every part handed); sharpened in 06c7567b, those two run again in a
-  follow-up hold.
+  one read later anyway (the check now looks at every part handed); sharpened in 06c7567b. In a follow-up hold
+  (07:53, ef4c1af3: file-hub 80 and device-files 105 pass) the short read was caught; the regular-file mutant was not,
+  and cannot be: Foundation gives no file size for a folder, a named pipe, a socket or a device, so the size's test
+  refuses each anyway. FileHub keeps both tests; the mutant now removes both (5023aec4), caught at 07:58 by the
+  named pipe and the folder. So every file-hub mutant is caught (33).
 - `Tests/checks/run-all.sh`: all passed but device-files, 104 of 105: the second run's case "the copy and its folder
   deleted after the transfer" looked at once, while DeviceFiles deletes its own copies just after it publishes the
   end, so on a busy Mac the check could look first (it passed locally, in CI and in every mutant run). It now waits
