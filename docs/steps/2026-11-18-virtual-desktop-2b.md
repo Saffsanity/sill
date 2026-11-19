@@ -74,8 +74,25 @@ commits 1 to 3 of twelve; nothing a person sees changes, and nothing changes on 
 - SillHostCore typechecks clean after each commit (`swiftc -typecheck` against the StreamProtocol module built from this
   tree). `virtual-display-api` 302 checks, `sill-displays` 45, `stage-release` 847, each passing; every mutant's pattern
   found once (92, 33 and 25) before the mutants ran.
-- PENDING: the release build, the mutants and run-all (one turn of the heavy lock), the live gates and H2 against 2a's
-  CLI; filled in below when they finish.
+- GitHub's CI on de243b10 (run 44399067304): every step of Build and check passed: the release build, every pure check
+  (`Tests/checks/run-all.sh`, `sill-displays` among them), the iOS app, the CLI's two paths. Its mutant jobs are skipped
+  on pull requests, as on #395, so the mutants ran here.
+- One turn of the heavy lock (2026-11-18 23:27–23:40, slot B; queued at 15:39): `swift build -c release` in 65 s with no
+  warning but CaptureProbe's known one; `SillHost --internet` exits 2 with "--internet needs --remote."; the mutants:
+  `virtual-display-api` 302 checks and 92 of 92 mutants caught, `sill-displays` 45 checks and 33 of 33, `stage-release`
+  847 checks and 25 of 25; the working tree clean after (two of the three patch sources in place and put them back).
+  run-all was not run again there: CI had run it on the same head.
+- The live gates on this branch's CLI, synthetic test hosts on 127.0.0.1 (the software encoder, no router, no screen),
+  outside the lock: `Scripts/headless-check/live.py OUT all` 66 of 66 verdicts (19 scenarios, as on #395: the said
+  display now SillDisplays' `say`); `Scripts/desktop-check/live.py` 24 of 24; `Scripts/lock-check/live.py` poll 42 of
+  42, start 4 of 4, view 26 of 26, and paired 6 of 6 on a second run: its first run, at 23:49 while a simulator booted
+  beside it (load average 136), gave 5 of 6, the held key's down posted at 11.3 s, 2.3 s after it was sent and outside
+  the gate's window, with the software encoder stalled 3.7 s in the same second ("the encoder was busy, not stuck");
+  at 00:05, load 9, the same gate gave 6 of 6, the down at 9.14 s.
+- H2, this branch's CLI against #395's (built from 576d86cb's code, #395's head but for docs), each host's stdout masked
+  and sorted (`~/Downloads/sill-handoff/next/vd-2b/verify/h2.py`): idle identical (7 distinct lines), with a test client
+  identical (14), started locked identical (11), and with `--virtual-display` and a test client identical (17: the
+  AppKit loop, so SillDisplays' reconfiguration callback is registered for real; nothing is staged on a synthetic host).
 
 **For Noah** (only he can: each makes a display, or needs Sill.app on his Mac; the same list is in the pull request):
 1. P2, the modes probe, on a Mac at rest (Sill quit, nothing streaming, no device connected; it makes "Sill Probe" for
