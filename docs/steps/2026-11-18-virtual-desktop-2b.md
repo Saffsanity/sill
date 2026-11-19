@@ -314,8 +314,9 @@ Sill for Mac has its Settings, menu item and card row; the CLI has its flag; the
 
 **Verified in the third part** (on this Mac; nothing made a display, posted input, locked, slept or switched anything;
 every live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtual Desktop only said to be made):
-- Each module typechecked after each commit (`swiftc` of StreamProtocol, SillHostCore, SillHostCLI and SillMenuBar against
-  each other, and of the iOS app's sources for the simulator against StreamProtocol): clean, no warning.
+- The Mac's modules typechecked after each commit with Swift in it (`swiftc` of StreamProtocol, SillHostCore, SillHostCLI
+  and SillMenuBar against each other), and the iOS app's sources for the simulator against StreamProtocol after commit 9:
+  clean, no warning. CI built the iOS app on every head pushed since.
 - Commit 8 live on its CLI (`~/Downloads/sill-handoff/next/vd-2b/run3/probe8.py`, a `--pairing` test host with
   SILL_TEST_VIRTUAL_DESKTOP and a 3 s grace): a paired device's "on" shown to it at once and made (said) at 1218×800 pt
   @2× at 60 Hz for its 1133×744 room, the Desktop on the third stop at 60 fps; an unpaired device's "on" refused ("only a
