@@ -211,8 +211,9 @@ def virtual(out):
         verdict(bool(h.all(r"^Test Virtual Desktop: this host can have it .* its grace 3 s\.")), "VD: the host says the hook and its 3 s grace")
         verdict(bool(h.all(r"^Virtual Desktop on for this run \(Resolution: Match the device, Refresh Rate: Match the device\): ")),
                 "VD: --virtual-desktop's line, the device's size and rate")
-        # A: two steps (DELL, then the Virtual Desktop), its turn held (a line after 1 s), back (a line), a turn and back
-        # within the settle (no line), a step away (its grace), back onto it (made again), a lock and unlock, off console.
+        # A: two steps (DELL, then the Virtual Desktop), its turn held (a line after 1 s), back (nothing: the display has
+        # that size), a turn and back within the settle (no line), a step away (its grace), back onto it (made again), a
+        # lock and unlock, off console.
         a, ra = client(h, out, "vd-a", 41, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",
                                             "--next-display@2", "--next-display@4", "--room-after=744x1133@7", "--room-after=1133x744@10",
                                             "--room-after=744x1133@13", "--room-after=1133x744@13.5", "--next-display@15",
@@ -242,10 +243,11 @@ def virtual(out):
     # Its size in points, as every test stop's test pattern (the capture scale's 1× on a test host; probe of 6329077e).
     verdict(bool(on_vd) and on_vd[0][:2] == (3, "Virtual Desktop") and on_vd[0][2] == "1218×800" and on_vd[0][3] == 60,
             f"VD: the Desktop on it, at its size, 60 fps: {on_vd}")
+    # The turn held 1 s: one line, its size for the next make (P2 not run). Turned back 3 s later: nothing, since the
+    # display still has that size (VirtualDesktopSize.followStep's `.nothing`: the next make takes the room as it is then).
     follows = h.all(r"^Virtual Desktop: iPad mini (turned|changed its room)", 5, 15.5)
-    verdict([round(t) for t, _ in follows] in ([9, 12], [8, 11], [9, 11], [8, 12]) and len(follows) == 2
-            and "the next one is made at 800×1218 pt" in follows[0][1] and "at 1218×800 pt" in follows[1][1],
-            f"VD: a turn held followed once after 1 s steady (by the next make, P2 not run), and back: {[(round(t, 1), l) for t, l in follows]}")
+    verdict(len(follows) == 1 and round(follows[0][0]) in (8, 9) and "the next one is made at 800×1218 pt" in follows[0][1],
+            f"VD: a turn held followed once after 1 s steady (by the next make, P2 not run); back to its size, nothing: {[(round(t, 1), l) for t, l in follows]}")
     verdict(not h.all(r"^Virtual Desktop: iPad mini", 13.2, 15.5), "VD: a turn and back within the settle: nothing")
     gone = vd_lines(h, 15, 20)
     verdict(len(gone) == 1 and gone[0][1] == "removed" and 17.5 <= gone[0][0] <= 19.8 and "no device has shown it for 3 s" in gone[0][2]
@@ -286,8 +288,10 @@ def virtual(out):
             pair = subprocess.run([sys.executable, "-I", CLIENT, h2.port, "2", "none", f"--pair-url={link}", f"--identity={idp}"],
                                   capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
             open(os.path.join(out, "vdp-pair.client.log"), "w").write(pair.stdout + pair.stderr)
-        u, ru = client(h2, out, "vdp-u", 5, ["none", "--tls", f"--identity={idu}", "--pin=none", "--device=Unpaired iPad",
-                                             "--set=virtualDesktop=1@2", "--expect=virtualDesktop=0,sessionPaired=0"], 4)
+        # U (from 3.2 s, after the pairing above, for 2 s) leaves before P turns it on (at 6 s): the switch is the Mac's, so
+        # U's last answer would be P's otherwise.
+        u, ru = client(h2, out, "vdp-u", 2, ["none", "--tls", f"--identity={idu}", "--pin=none", "--device=Unpaired iPad",
+                                             "--set=virtualDesktop=1@0.8", "--expect=virtualDesktop=0,sessionPaired=0"], 3.2)
         flips = [f"--set=virtualDesktop={1 if i % 2 else 0}@{6 + 0.25 * i:g}" for i in range(8)]
         pc, rp = client(h2, out, "vdp-p", 18, ["desktop", "--tls", f"--identity={idp}", "--fps=60", "--room=1133x744", "--device=Paired iPad",
                                                "--set=virtualDesktop=1@2", *flips, "--set=virtualDesktop=0@14",
