@@ -736,6 +736,7 @@ struct HostSettingsPanel: View {
                 Toggle(isOn: $hideThumbnailsWhileTyping) {
                     Text(PhoneKeyboardLift.Copy.title).foregroundStyle(Palette.text)
                 }
+                .padding(.vertical, 6)          // two lines on the Duo's cover and a narrow iPhone
                 .rowFrame()
             }
             .id(Self.hideThumbnailsRowID)
