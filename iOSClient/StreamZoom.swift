@@ -140,6 +140,13 @@ extension StreamZoom {
     /// their spacing now over their spacing at the last step, the midpoint theirs, and from the moment
     /// they pinch it catches up from where they landed, so the point of the picture that was under them
     /// stays under them.
+    ///
+    /// Under Pinch's Zoom on ‹Mac› (PinchRouting, PR #261) the same rule decides, and a pinch is the Mac's
+    /// own instead of the picture's (`Target.mac`, `Owner.macPinch`): its steps are the Mac's magnify and,
+    /// with Rotate on ‹Mac›, rotate gestures (`macSteps`), and nothing zooms. Then fingers that turn more
+    /// than their midpoint moves are a pinch too, as fingers that spread are. One rule for both, so a stroke
+    /// is the Mac's scroll or its pinch, never both. On a trackpad of Sill's own the same, at its pointer
+    /// (TrackpadSurface).
     struct Stroke: Equatable, Sendable {
         enum Owner: Equatable, Sendable {
             /// No finger down.
@@ -150,8 +157,33 @@ extension StreamZoom {
             case mac
             /// The picture's: two fingers pinch and move it. Nothing goes to the Mac.
             case picture
+            /// The Mac's own pinch (`Target.mac`): two fingers that pinch, or turn with Rotate on ‹Mac›, pinch
+            /// and turn what is under them on the Mac (`macSteps`). Nothing zooms here, and nothing scrolls.
+            case macPinch
             /// Three fingers: a gesture for the Mac (TrackpadGestures). The picture as the stroke found it.
             case gesture
+        }
+
+        /// What a stroke's pinch is for, taken as its first finger lands (PinchRouting): the picture's zoom
+        /// (Zoom Picture, the default, and on every Mac that cannot take a pinch), or the Mac's own pinch,
+        /// and its turn with Rotate on ‹Mac› (`turns`).
+        enum Target: Equatable, Sendable {
+            case picture
+            case mac(turns: Bool)
+            var turns: Bool { if case .mac(true) = self { return true } else { return false } }
+        }
+
+        /// One step of the Mac's pinch or turn, in order, for the caller to send at `macAt` (InputEvent.magnify,
+        /// .rotate): each opens once its own measure from where the pair landed passes `pinchTravel` (the
+        /// spacing's change; the turn's arc, each finger's travel about their midpoint), catching up from there,
+        /// then changes by what moved since its last step, and ends when the pair breaks or the stroke does.
+        enum MacStep: Equatable, Sendable {
+            enum Phase: Equatable, Sendable { case began, changed, ended }
+            /// `amount`: the spacing now over the spacing at the last step, less 1 (NSEvent.magnification's unit).
+            case magnify(Phase, amount: Double)
+            /// `degrees`: the turn since the last step, counterclockwise positive as the Mac's (the pane's y runs
+            /// down, so its own angle turns the other way).
+            case rotate(Phase, degrees: Double)
         }
 
         /// How far two fingers' spacing changes, more than their midpoint moves, before the finger pan
@@ -161,6 +193,18 @@ extension StreamZoom {
         static let minSpacing: CGFloat = 1
 
         private(set) var owner: Owner = .none
+        /// What the stroke's pinch is for, from its first finger on.
+        private(set) var target: Target = .picture
+        /// What the last call gave the Mac's pinch and turn, in order; empty when it gave nothing. Each call
+        /// starts it afresh, so the caller sends it after each.
+        private(set) var macSteps: [MacStep] = []
+        /// Where the Mac's pinch and turn are, in the pane's points: the pair's midpoint where it landed, as
+        /// the stroke's first gesture for the Mac opened. Kept for the stroke, as a trackpad keeps its pointer.
+        private(set) var macAt: CGPoint? = nil
+        /// The Mac's pinch, while open: the pair's spacing at its last step. Its turn, while open: the pair's
+        /// angle at its last step (radians, the pane's).
+        private var magnifyLast: CGFloat? = nil
+        private var rotateLast: CGFloat? = nil
         /// Every finger down, where it is now.
         private var at: [Int: CGPoint] = [:]
         /// The two fingers that drive the picture, in the order they landed.
@@ -180,15 +224,18 @@ extension StreamZoom {
 
         /// A finger lands at `point`. Two fingers down make the pair; on a zoomed picture they are the
         /// picture's at once, and so are two down again after one of a picture's pair lifted.
-        mutating func down(_ id: Int, at point: CGPoint, zoom: StreamZoom) {
+        /// `target`: what a pinch of the stroke is for, read at its first finger (PinchRouting).
+        mutating func down(_ id: Int, at point: CGPoint, zoom: StreamZoom, target: Target = .picture) {
+            macSteps = []
             if owner == .none {
                 owner = .undecided
                 before = zoom
+                self.target = target
             }
             at[id] = point
-            guard owner == .undecided || owner == .picture, pair.count < 2, at.count == 2 else { return }
+            guard owner == .undecided || owner == .picture || owner == .macPinch, pair.count < 2, at.count == 2 else { return }
             formPair()
-            if owner == .undecided, zoom.isZoomed { owner = .picture }
+            if owner == .undecided, self.target == .picture, zoom.isZoomed { owner = .picture }
         }
 
         /// Fingers move, one touch event's together (each id to where it is now): while the picture owns
@@ -196,6 +243,7 @@ extension StreamZoom {
         /// changed.
         @discardableResult
         mutating func moved(_ moves: [Int: CGPoint], zoom: inout StreamZoom, in size: CGSize) -> Bool {
+            macSteps = []
             var seen = false
             for (id, point) in moves where at[id] != nil {
                 at[id] = point
@@ -205,8 +253,13 @@ extension StreamZoom {
                   let a = at[pair[0]], let b = at[pair[1]] else { return false }
             if owner == .undecided {
                 let (spacing, travel) = Self.change(from: pairFrom, to: [a, b])
-                guard spacing >= Self.pinchTravel, spacing > travel else { return false }
-                owner = .picture   // a pinch: caught up from where the pair landed (pairLast == pairFrom)
+                let pinched = max(spacing, target.turns ? Self.turnTravel(from: pairFrom, to: [a, b]) : 0)
+                guard pinched >= Self.pinchTravel, pinched > travel else { return false }
+                owner = target == .picture ? .picture : .macPinch   // a pinch: caught up from where the pair landed (pairLast == pairFrom)
+            }
+            if owner == .macPinch {
+                macStep(to: [a, b])
+                return false
             }
             guard owner == .picture else { return false }
             let last = pairLast
@@ -224,11 +277,14 @@ extension StreamZoom {
         /// fingers' spacing has changed more than their midpoint moved (a pinch whose midpoint moved
         /// too). A tie is the Mac's, as before the zoom.
         mutating func panBegan() {
+            macSteps = []
             guard owner == .undecided else { return }
             if pair.count == 2, let a = at[pair[0]], let b = at[pair[1]] {
                 let (spacing, travel) = Self.change(from: pairFrom, to: [a, b])
-                if spacing > travel {
-                    owner = .picture
+                let pinched = max(spacing, target.turns ? Self.turnTravel(from: pairFrom, to: [a, b]) : 0)
+                if pinched > travel {
+                    owner = target == .picture ? .picture : .macPinch
+                    if owner == .macPinch { macStep(to: [a, b]) }
                     return
                 }
             }
@@ -241,16 +297,22 @@ extension StreamZoom {
         /// when the zoom changed.
         @discardableResult
         mutating func up(_ id: Int, zoom: inout StreamZoom) -> Bool {
+            macSteps = []
             guard at.removeValue(forKey: id) != nil else { return false }
             if pair.contains(id) {
                 pair = []
                 pairFrom = []
                 pairLast = []
                 if owner == .picture, at.count == 2 { formPair() }
+                // The Mac's pinch and turn end with their pair, as a trackpad's do when a finger lifts; two
+                // fingers down again open them afresh from where those landed, at the stroke's place.
+                if owner == .macPinch { closeMac(); if at.count == 2 { formPair() } }
             }
             guard at.isEmpty else { return false }
+            let steps = macSteps
             let ended = owner
             self = Stroke()
+            macSteps = steps
             guard ended == .picture else { return false }
             let before = zoom
             zoom.settle()
@@ -261,16 +323,60 @@ extension StreamZoom {
         /// it, and the stroke's fingers do nothing more here. True when the zoom changed.
         @discardableResult
         mutating func silenced(zoom: inout StreamZoom) -> Bool {
+            macSteps = []
             let was = owner
             owner = .gesture
             pair = []
             pairFrom = []
             pairLast = []
+            // The Mac's pinch and turn end where they are: what the Mac did with them is its own.
+            if was == .macPinch { closeMac() }
             // Only a zoom this stroke made: one changed meanwhile by something else (another source, a
             // new session) stays as it is.
             guard was == .picture, let before, let made, zoom == made, before != zoom else { return false }
             zoom = before
             return true
+        }
+
+        /// One step of the Mac's pinch and turn, the pair now at `now` (`macSteps`): each opens once its own
+        /// measure from where the pair landed passes `pinchTravel`, with a began and then its catch-up, and
+        /// from then on changes by what moved since its last step.
+        private mutating func macStep(to now: [CGPoint]) {
+            guard pairFrom.count == 2, now.count == 2 else { return }
+            let spacing = Self.distance(now[0], now[1])
+            guard spacing >= Self.minSpacing else { return }
+            let angle = Self.angle(now[0], now[1])
+            let landed = Self.distance(pairFrom[0], pairFrom[1])
+            if let last = magnifyLast {
+                if spacing != last {
+                    macSteps.append(.magnify(.changed, amount: Double(spacing / last - 1)))
+                    magnifyLast = spacing
+                }
+            } else if landed >= Self.minSpacing, abs(spacing - landed) >= Self.pinchTravel {
+                if macAt == nil { macAt = Self.midpoint(pairFrom[0], pairFrom[1]) }
+                macSteps.append(.magnify(.began, amount: 0))
+                macSteps.append(.magnify(.changed, amount: Double(spacing / landed - 1)))
+                magnifyLast = spacing
+            }
+            guard target.turns else { return }
+            if let last = rotateLast {
+                let turn = Self.turned(from: last, to: angle)
+                if turn != 0 {
+                    macSteps.append(.rotate(.changed, degrees: Self.macDegrees(turn)))
+                    rotateLast = angle
+                }
+            } else if Self.turnTravel(from: pairFrom, to: now) >= Self.pinchTravel {
+                if macAt == nil { macAt = Self.midpoint(pairFrom[0], pairFrom[1]) }
+                macSteps.append(.rotate(.began, degrees: 0))
+                macSteps.append(.rotate(.changed, degrees: Self.macDegrees(Self.turned(from: Self.angle(pairFrom[0], pairFrom[1]), to: angle))))
+                rotateLast = angle
+            }
+        }
+
+        /// The Mac's pinch and turn end, each that is open, the pinch first.
+        private mutating func closeMac() {
+            if magnifyLast != nil { macSteps.append(.magnify(.ended, amount: 0)); magnifyLast = nil }
+            if rotateLast != nil { macSteps.append(.rotate(.ended, degrees: 0)); rotateLast = nil }
         }
 
         /// The two fingers down, in the order they landed.
@@ -289,6 +395,23 @@ extension StreamZoom {
         }
 
         static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
+        /// The pair's angle in the pane (radians; the pane's y runs down, so it grows clockwise on screen).
+        static func angle(_ a: CGPoint, _ b: CGPoint) -> CGFloat { atan2(b.y - a.y, b.x - a.x) }
+        /// The turn from one angle to another, the shorter way round (-π to π).
+        static func turned(from: CGFloat, to: CGFloat) -> CGFloat {
+            var d = to - from
+            while d > .pi { d -= 2 * .pi }
+            while d <= -.pi { d += 2 * .pi }
+            return d
+        }
+        /// How far two fingers' turn moved each of them about their midpoint (the arc at half their spacing
+        /// now), to weigh against their spacing's change and their midpoint's travel.
+        static func turnTravel(from: [CGPoint], to: [CGPoint]) -> CGFloat {
+            guard from.count == 2, to.count == 2 else { return 0 }
+            return abs(turned(from: angle(from[0], from[1]), to: angle(to[0], to[1]))) * distance(to[0], to[1]) / 2
+        }
+        /// A turn in the pane as the Mac's degrees: counterclockwise positive (NSEvent.rotation).
+        static func macDegrees(_ turn: CGFloat) -> Double { -Double(turn) * 180 / .pi }
         static func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
     }
 }

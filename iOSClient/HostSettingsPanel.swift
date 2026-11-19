@@ -71,7 +71,7 @@ struct HostSettingsPanel: View {
     /// This device's choice of what a two-finger pinch on the picture does, Zoom Stream (false, the
     /// picture) or Zoom App (true, the Mac's own pinch): Zoom Stream unless chosen, read by the input
     /// view at each touch, never sent.
-    @AppStorage(InputOverlayView.pinchZoomsMacKey) private var pinchZoomsMac = false
+    @AppStorage(PinchRouting.zoomOnMacKey) private var pinchZoomsMac = PinchRouting.zoomOnMacDefault
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn

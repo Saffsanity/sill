@@ -317,6 +317,9 @@ struct StreamScreen: View {
     @AppStorage(StreamScreen.fullScreenHintsKey) private var hintsShown = 0
     /// Shake to Show Controls (Settings › This iPad): on unless turned off (FullScreenPolicy.shakeShows).
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
+    /// Pinch (Settings › This iPad, PinchRouting, PR #261): Zoom Picture unless Zoom on ‹Mac› is chosen. Watched
+    /// only to undo the picture's zoom as fingers' pinch changes hands (`fingersPinch`).
+    @AppStorage(PinchRouting.zoomOnMacKey) private var pinchZoomsMac = PinchRouting.zoomOnMacDefault
     /// This screen turned iOS's Shake to Undo off for the app (FullScreenPolicy.shakeToUndoOff), so it is the
     /// one to turn it back on.
     @State private var shakeToUndoTurnedOff = false
@@ -555,6 +558,10 @@ struct StreamScreen: View {
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
         }
+        // Who two fingers' pinch on the picture belongs to (PinchRouting): under Zoom on ‹Mac› the picture never
+        // zooms, so nothing could undo a zoom made before; it is the whole picture again as the choice changes,
+        // or as a Mac that takes the pinch comes or goes (the review of #261: a picture left stuck zoomed).
+        .onChange(of: fingersPinch) { _, _ in zoom.reset() }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
         .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
@@ -1007,6 +1014,12 @@ struct StreamScreen: View {
 
     /// Pair This iPad…, or an outside link waiting for its confirmation.
     private var overlayShown: Bool { pairingOverlay || client.pendingLink != nil }
+
+    /// Who two fingers' pinch on the picture belongs to now: the picture's zoom, or the Mac's own pinch under
+    /// Zoom on ‹Mac› for a Mac that takes it (PinchRouting).
+    private var fingersPinch: PinchRouting.Owner {
+        PinchRouting.owner(.fingers, zoomOnMac: pinchZoomsMac, macTakesPinch: PinchRouting.macTakes(client.hostPinch))
+    }
 
     /// What is open over the stream that takes the keyboard for itself or must keep keys from the Mac
     /// (HardwareKeyboardPolicy.Taker): while any is, a hardware keyboard's hold lets go, and it comes
@@ -1817,9 +1830,9 @@ struct StreamScreen: View {
                              onModifiersConsumed: { latched = [] },
                              sendGesture: { client.sendGesture($0, fingers: $1) },
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                             macTakesPinch: { PinchRouting.macTakes(client.hostPinch) },
                              readZoom: { [zoom] in zoom.zoom },
-                             writeZoom: { [zoom] in zoom.set($0) },
-                             magnifyAvailable: { client.hostPinch != nil })
+                             writeZoom: { [zoom] in zoom.set($0) })
             }
             // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
             .background(hidden ? Color.black : Palette.panel)

@@ -3999,6 +3999,12 @@ final class StreamClient: ObservableObject {
     /// `byPerson` false: the device's own input (its pointer's move to a new frame's middle), which
     /// the device's auto-lock hold does not count as the person's use.
     private func sendInput(_ event: InputEvent, byPerson: Bool) {
+        // A two-finger pinch or turn for the Mac goes only to a Mac whose window list says it takes it
+        // (`pinch`, PinchRouting): an older Mac could not decode it. The surfaces ask first; this is the last word.
+        switch event {
+        case .magnify, .rotate: guard PinchRouting.macTakes(hostPinch) else { return }
+        default: break
+        }
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
