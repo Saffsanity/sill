@@ -56,6 +56,69 @@ check(combos == 2 * 8 * 64 * 5 && captured == 4, "every combination judged (\(co
 check(Set(CameraFormat.pauses).isSuperset(of: ["denied", "unavailable", "thermal", "background", "multitasking", "scanner", "busy", "waiting"]),
       "every pause said is one of the wire's")
 
+// MARK: - The session's run, the offer on the wire
+
+// The capture session runs through iOS's own interruptions and the worst pressure (iOS gives the camera back and says so),
+// never otherwise; its pictures go only while `captures`.
+var runsSwept = 0
+for offering in [false, true] { for state in states { for bits in 0..<(1 << 6) { for pressure in P.Pressure.allCases {
+    let d = P.Device(denied: bits & 1 != 0, hasCamera: bits & 2 == 0, front: bits & 4 == 0, multitasking: bits & 8 != 0,
+                     busy: bits & 16 != 0, scanner: bits & 32 != 0, pressure: pressure)
+    var calm = d; calm.busy = false; calm.multitasking = false; calm.pressure = min(pressure, .critical)
+    let want = P.captures(offering: offering, state: state, device: calm)
+    if P.sessionRuns(offering: offering, state: state, device: d) != want {
+        check(false, "sessionRuns(offering \(offering), \(String(describing: state?.state)), \(d)) is \(want)")
+    }
+    if P.captures(offering: offering, state: state, device: d), !P.sessionRuns(offering: offering, state: state, device: d) {
+        check(false, "a capture without its session: \(d)")
+    }
+    runsSwept += 1
+} } } }
+check(runsSwept == 5_120, "the session's run judged over every combination (\(runsSwept))")
+let clear = P.Device()
+check(P.sessionRuns(offering: true, state: inUse, device: P.Device(busy: true)) && !P.captures(offering: true, state: inUse, device: P.Device(busy: true)),
+      "another app has the camera: the session stays (iOS says when it is back), no picture goes")
+check(P.sessionRuns(offering: true, state: inUse, device: P.Device(multitasking: true)), "the iPad's multitasking: the session stays")
+check(P.sessionRuns(offering: true, state: inUse, device: P.Device(pressure: .shutdown)) && !P.captures(offering: true, state: inUse, device: P.Device(pressure: .shutdown)),
+      "the worst pressure: the session stays, no picture goes")
+check(!P.sessionRuns(offering: true, state: inUse, device: P.Device(denied: true)) && !P.sessionRuns(offering: true, state: inUse, device: P.Device(front: false))
+      && !P.sessionRuns(offering: true, state: inUse, device: P.Device(scanner: true)) && !P.sessionRuns(offering: true, state: st("idle"), device: clear)
+      && !P.sessionRuns(offering: false, state: inUse, device: clear), "refused, in the background, the scanner, not wanted, not offering: no session")
+
+check(!P.refuses(nil) && P.refuses(st("off")) && P.refuses(st("notReady")) && P.refuses(st("unpaired")) && !P.refuses(st("idle"))
+      && !P.refuses(st("another")) && !P.refuses(inUse) && P.refuses(st("later")),
+      "kind 16 refuses: off, not ready, unpaired, and a state this build does not know (read as off); nothing said refuses nothing")
+check(P.offersAgain(from: st("off"), to: st("idle")) && P.offersAgain(from: st("notReady"), to: inUse) && P.offersAgain(from: st("unpaired"), to: st("another")),
+      "back from a refusal to a word that takes the camera: the offer said again")
+check(!P.offersAgain(from: nil, to: st("idle")) && !P.offersAgain(from: st("idle"), to: inUse) && !P.offersAgain(from: st("off"), to: nil)
+      && !P.offersAgain(from: st("off"), to: st("notReady")), "a first word, a word that still takes it, none, or still a refusal: nothing said again")
+
+var o = P.Offer()
+var said = P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: "waiting", position: "front")
+check(said == CameraFormat(position: "front", pause: "waiting") && o.offered, "the first offer on a connection, with its pause, no claim")
+check(P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: "waiting", position: "front") == nil, "never said twice unchanged")
+check(P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "front") == CameraFormat(position: "front"),
+      "the pause ended: said again")
+check(P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "back") == CameraFormat(position: "back"),
+      "the other camera chosen: said again")
+o.claimOwed = true; o.offered = false
+check(P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "back") == CameraFormat(position: "back", claim: true),
+      "the switch just turned on: the offer claims the camera")
+o.offered = false
+check(P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "back") == CameraFormat(position: "back"),
+      "said again later (a move, a reconnect): no claim")
+said = P.offerStep(&o, offering: false, switchOn: false, hostTakes: true, pause: nil, position: "back")
+check(said == CameraFormat(stop: true) && !o.offered && o.pause == nil, "the switch off while the Mac takes the camera: stop")
+check(P.offerStep(&o, offering: false, switchOn: false, hostTakes: true, pause: nil, position: "back") == nil, "stop said once")
+_ = P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "front")
+check(P.offerStep(&o, offering: false, switchOn: true, hostTakes: false, pause: nil, position: "front") == nil && !o.offered,
+      "the Mac's list stopped saying camera (locked, its switch off): nothing sent, the offer said again when it comes back")
+_ = P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "front")
+check(P.offerStep(&o, offering: false, switchOn: false, hostTakes: false, pause: nil, position: "front") == nil,
+      "the switch off with a Mac that no longer takes the camera: no kind 46 to it")
+var never = P.Offer()
+check(P.offerStep(&never, offering: false, switchOn: false, hostTakes: true, pause: nil, position: "front") == nil, "nothing offered: no stop")
+
 // MARK: - The format
 
 func fmt(_ d: CameraDemand?, upright: Bool = false, away: Bool = false, p: P.Pressure = .nominal,

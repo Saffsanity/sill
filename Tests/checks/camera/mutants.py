@@ -5,6 +5,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "iOSClient/CameraPolicy.swift"
 M = [
+    # The session's run and the offer on the wire (the second run, 2026-11-18).
+    ("the session stops while another app has the camera", F, "        calm.busy = false\n", ""),
+    ("the session stops in the iPad's multitasking", F, "        calm.multitasking = false\n", ""),
+    ("the session stops at the worst pressure", F, "        calm.pressure = min(device.pressure, .critical)\n", ""),
+    ("the session runs while refused", F, "        calm.pressure = min(device.pressure, .critical)\n", "        calm.pressure = min(device.pressure, .critical)\n        calm.denied = false\n"),
+    ("not ready no refusal", F, "return [CameraState.off, CameraState.notReady, CameraState.unpaired].contains(s.knownState)",
+     "return [CameraState.off, CameraState.unpaired].contains(s.knownState)"),
+    ("an unknown state no refusal", F, "return [CameraState.off, CameraState.notReady, CameraState.unpaired].contains(s.knownState)",
+     "return [CameraState.off, CameraState.notReady, CameraState.unpaired].contains(s.state)"),
+    ("offered again at a first word", F, "        refuses(old) && new != nil && !refuses(new)", "        (old == nil || refuses(old)) && new != nil && !refuses(new)"),
+    ("offered again into a refusal", F, "        refuses(old) && new != nil && !refuses(new)", "        refuses(old) && new != nil"),
+    ("the offer said twice unchanged", F, "            guard !o.offered || o.pause != pause || o.position != position else { return nil }\n", ""),
+    ("a pause's change not said", F, "guard !o.offered || o.pause != pause || o.position != position else", "guard !o.offered || o.position != position else"),
+    ("another camera not said", F, "guard !o.offered || o.pause != pause || o.position != position else", "guard !o.offered || o.pause != pause else"),
+    ("the claim never said", F, "claim: o.claimOwed ? true : nil", "claim: nil"),
+    ("the claim said every time", F, "o = Offer(offered: true, pause: pause, position: position, claimOwed: false)",
+     "o = Offer(offered: true, pause: pause, position: position, claimOwed: o.claimOwed)"),
+    ("stop whatever the switch", F, "return !switchOn && hostTakes ? CameraFormat(stop: true) : nil", "return hostTakes ? CameraFormat(stop: true) : nil"),
+    ("stop to a Mac that no longer takes the camera", F, "return !switchOn && hostTakes ? CameraFormat(stop: true) : nil", "return !switchOn ? CameraFormat(stop: true) : nil"),
+    ("stop with nothing offered", F, "        guard o.offered else { return nil }\n        o.offered = false\n", "        o.offered = false\n"),
     # The row.
     ("the row on a locked Mac", F, "        if locked { return .hidden }\n", ""),
     ("an older Sill.app hidden", F, "return hostVersion == nil ? .hidden : .updateMac", "return .hidden"),

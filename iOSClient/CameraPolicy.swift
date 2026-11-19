@@ -83,6 +83,62 @@ enum CameraPolicy {
     /// awake.
     static func countsAsUse(capturing: Bool) -> Bool { capturing }
 
+    /// The capture session runs: as `captures`, but through iOS's own interruptions (another app, the iPad's
+    /// multitasking) and the system's worst pressure, where iOS stops the camera itself and says when it gives it
+    /// back, which a session stopped by Sill would never hear; its pictures go to the Mac only while `captures`.
+    static func sessionRuns(offering: Bool, state: CameraState?, device: Device) -> Bool {
+        var calm = device
+        calm.busy = false
+        calm.multitasking = false
+        calm.pressure = min(device.pressure, .critical)
+        return captures(offering: offering, state: state, device: calm)
+    }
+
+    // MARK: The offer on the wire
+
+    /// Kind 16's word refuses this device's camera: the Mac's switch off, Sill Camera not ready, not paired. The
+    /// device offers nothing then (`offering` leaves it out), and its row says why.
+    static func refuses(_ s: CameraState?) -> Bool {
+        guard let s else { return false }
+        return [CameraState.off, CameraState.notReady, CameraState.unpaired].contains(s.knownState)
+    }
+
+    /// Kind 16 changed from a refusal to a word that takes the camera (the Mac's switch, Sill Camera's readiness,
+    /// pairing): the offer is said again, since the Mac lets an offer stand only `CameraHostPolicy.grace` after the
+    /// camera comes back.
+    static func offersAgain(from old: CameraState?, to new: CameraState?) -> Bool {
+        refuses(old) && new != nil && !refuses(new)
+    }
+
+    /// What this device last said of its offer on the session's connection.
+    struct Offer: Equatable {
+        var offered = false
+        var pause: String?
+        var position: String?
+        /// The person just turned Share Camera on: the next offer claims the camera from any other device.
+        var claimOwed = false
+    }
+
+    /// The type 1 that goes now, if any. While `offering` (`offers` and kind 16 not refusing): the offer, when it is
+    /// new on this connection or its pause or camera changed, with `claim` once after the switch went on. Once it no
+    /// longer offers: `stop` only when the person turned the switch off and the Mac's list still says it takes the
+    /// camera (a Mac whose list stopped saying `camera`, locked or its switch off, is sent no kind 46; it lets the
+    /// offer go by itself), else nothing. The offer is never said twice unchanged.
+    static func offerStep(_ o: inout Offer, offering: Bool, switchOn: Bool, hostTakes: Bool, pause: String?,
+                          position: String) -> CameraFormat? {
+        if offering {
+            guard !o.offered || o.pause != pause || o.position != position else { return nil }
+            let said = CameraFormat(position: position, claim: o.claimOwed ? true : nil, pause: pause)
+            o = Offer(offered: true, pause: pause, position: position, claimOwed: false)
+            return said
+        }
+        guard o.offered else { return nil }
+        o.offered = false
+        o.pause = nil
+        o.position = nil
+        return !switchOn && hostTakes ? CameraFormat(stop: true) : nil
+    }
+
     // MARK: The format, the heat, the bitrate
 
     /// What the device sends: the demand's size if its camera has a format at that size and rate (`supports`),

@@ -14,12 +14,8 @@ struct CameraLook: Equatable {
 
 /// The camera's state for this session, main thread (StreamClient's `cameraSession`).
 struct CameraSessionState {
-    /// The offer went on this connection, with this pause and camera.
-    var offered = false
-    var saidPause: String?
-    var saidPosition: String?
-    /// The person just turned Share Camera on: the next offer claims the camera from any other device.
-    var claimOwed = false
+    /// What this device last said of its offer on this connection (CameraPolicy.offerStep).
+    var offer = CameraPolicy.Offer()
     /// The Mac's last type 3 (its size, rate and bitrate ceiling).
     var demand: CameraDemand?
     /// What iOS says of the camera besides the switch (CameraPolicy.Device).
@@ -103,15 +99,9 @@ extension StreamClient {
     func cameraStateChanged(_ state: CameraState?) {
         // The harness's mock answers a pick with its own state, which says nothing of the camera it set.
         guard cameraState != state, !cameraSession.mocked else { return }
-        if Self.cameraRefuses(cameraState), !Self.cameraRefuses(state), state != nil { cameraSession.offered = false }
+        if CameraPolicy.offersAgain(from: cameraState, to: state) { cameraSession.offer.offered = false }
         cameraState = state
         updateCamera(why: "the Mac says \(state.map { $0.state + ($0.app.map { " (\($0))" } ?? "") } ?? "nothing")")
-    }
-
-    /// A state in which the Mac refuses this device's camera.
-    static func cameraRefuses(_ s: CameraState?) -> Bool {
-        guard let s else { return false }
-        return [CameraState.off, CameraState.notReady, CameraState.unpaired].contains(s.knownState)
     }
 
     /// A type 3: the Mac's size, rate and bitrate ceiling, and its keyframe ask.
@@ -131,8 +121,8 @@ extension StreamClient {
     /// The Settings row's switch moved.
     func cameraSwitchChanged() {
         if Self.shareCameraOn {
-            cameraSession.claimOwed = true
-            cameraSession.offered = false
+            cameraSession.offer.claimOwed = true
+            cameraSession.offer.offered = false
         }
         updateCamera(why: "the switch \(Self.shareCameraOn ? "on" : "off")")
     }
@@ -149,7 +139,7 @@ extension StreamClient {
     /// A move handed the session to its new connection (`finishMove`): the Mac knows the new one afresh, so the offer
     /// goes again on it (no claim) and the camera waits for its kind 16; the capture stays warm meanwhile.
     func cameraMoved() {
-        cameraSession.offered = false
+        cameraSession.offer.offered = false
         cameraSession.demand = nil
         cameraState = nil
         updateCamera(why: "a move")
@@ -185,48 +175,27 @@ extension StreamClient {
         s.device.scanner = CodeScanner.live > 0
         s.device.pressure = s.pressure
         if !s.device.front { s.device.busy = false; s.device.multitasking = false }   // iOS says again once Sill is back
-        // The offer.
-        let offering = CameraPolicy.offers(switchOn: switchOn, hostCamera: hostCamera, connected: connected) && !Self.cameraRefuses(cameraState)
+        // The offer (CameraPolicy.offerStep): said when new on this connection or changed, `claim` once after the switch
+        // went on, `stop` when the person turned the switch off while the Mac takes the camera.
+        let offering = CameraPolicy.offers(switchOn: switchOn, hostCamera: hostCamera, connected: connected) && !CameraPolicy.refuses(cameraState)
         let pause = CameraPolicy.pause(state: cameraState, device: s.device)
-        if offering {
-            if switchOn, status == .notDetermined, !s.askedAccess {
-                s.askedAccess = true
-                AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                    DispatchQueue.main.async { self?.updateCamera(why: "camera access \(granted ? "allowed" : "refused")") }
-                }
+        if offering, switchOn, status == .notDetermined, !s.askedAccess {
+            s.askedAccess = true
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async { self?.updateCamera(why: "camera access \(granted ? "allowed" : "refused")") }
             }
-            if !s.offered || s.saidPause != pause || s.saidPosition != position {
-                let offer = CameraFormat(position: position, claim: s.claimOwed ? true : nil, pause: pause)
-                if let m = CameraMessage.message(.format(offer), now: Date().timeIntervalSince1970) { sendCameraControl(m.serialized()) }
-                #if DEBUG
-                print("camera: \(s.offered ? "offer said again" : "offered") (\(position)\(s.claimOwed ? ", claiming it" : "")\(pause.map { ", paused: \($0)" } ?? ""))")
-                #endif
-                s.offered = true
-                s.claimOwed = false
-                s.saidPause = pause
-                s.saidPosition = position
-            }
-        } else if s.offered {
-            // The person turned the switch off while the Mac takes the camera: it hears so. A Mac whose list stopped
-            // saying `camera` (locked, its switch off) is sent no kind 46; it lets the offer go by itself.
-            if !switchOn, (hostCamera ?? 0) >= CameraCodec.generation, connected {
-                if let m = CameraMessage.message(.format(CameraFormat(stop: true)), now: Date().timeIntervalSince1970) { sendCameraControl(m.serialized()) }
-                #if DEBUG
-                print("camera: stopped sharing")
-                #endif
-            }
-            s.offered = false
-            s.saidPause = nil
-            s.saidPosition = nil
         }
-        // The capture: running while CameraPolicy says so but for iOS's own interruptions and the system's pressure at
-        // its worst, where iOS stops the camera itself: the session stays, so iOS says when they end (the camera's
-        // pressure is read from the session's device); its pictures go to the Mac exactly while nothing pauses it.
-        var calm = s.device
-        calm.busy = false
-        calm.multitasking = false
-        calm.pressure = min(calm.pressure, .critical)
-        let runs = CameraPolicy.captures(offering: offering, state: cameraState, device: calm)
+        let hostTakes = connected && (hostCamera ?? 0) >= CameraCodec.generation
+        if let said = CameraPolicy.offerStep(&s.offer, offering: offering, switchOn: switchOn, hostTakes: hostTakes, pause: pause, position: position) {
+            if let m = CameraMessage.message(.format(said), now: Date().timeIntervalSince1970) { sendCameraControl(m.serialized()) }
+            #if DEBUG
+            print(said.stop == true ? "camera: stopped sharing"
+                  : "camera: offered (\(position)\(said.claim == true ? ", claiming it" : "")\(pause.map { ", paused: \($0)" } ?? ""))")
+            #endif
+        }
+        // The capture runs through iOS's own interruptions and the worst pressure (CameraPolicy.sessionRuns), so iOS
+        // says when they end; its pictures go to the Mac exactly while nothing pauses it (`captures`).
+        let runs = CameraPolicy.sessionRuns(offering: offering, state: cameraState, device: s.device)
         let capturing = CameraPolicy.captures(offering: offering, state: cameraState, device: s.device)
         if runs {
             s.stopWork?.cancel()
