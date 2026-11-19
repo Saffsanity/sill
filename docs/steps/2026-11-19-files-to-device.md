@@ -102,3 +102,16 @@ a transfer; H8's pacing cases for the Mac's sending.
 - The iOS app, Release for a device, not signed: built in 60 s; its one warning is main's own (StreamClient's window
   drop-off, line 4583), as in the second run.
 - CI on #417 green at dfff57b3 (run 44507553550): release build, run-all, the iOS app for the simulator, the CLI.
+- Harness photos on the agents' Duo (iOS 27.1), 17 cases against `files` (f1e264e6), in a hold of their own: the
+  first try (07:32) hung in its first `simctl launch` for 7.5 minutes with nothing photographed and was stopped as the
+  agents' rule says (the Duo shut down, the slot freed); the second (07:59, after 10 minutes outside the lock) took
+  them all in 269 s. The four that must not change are identical (Settings' Files rows at `files` 1, the chip sending,
+  the stream, Settings' end); the 13 new ones differ as they should and were looked at: Settings with Get Files from
+  ‹Mac›…, Ask Before Receiving Files (on), Save Photos and Videos to Photos (off) and their footnote, also with a
+  transfer's line and upright; the chip's question ("Mac mini wants to send you “IMG_1204.heic” (48 MB).", Decline,
+  Accept), Get Files waiting ("Choose files on Mac mini", Cancel), receiving (42%, its bar, Cancel), received ("3
+  files from Mac mini are in Files › Sill.", Show, Save 2 to Photos), saved to Photos, a full iPhone. One defect: on
+  the cover the question cut the file's name away ("…c” (48 MB)."); fixed (a0ed8e82: the words above the buttons
+  where one row does not fit), and photographed again (08:09, 6 cases against 7bd9ddc0): the cover's question now
+  whole above Decline and Accept, the five others (the question on the inner display and upright, received, sending,
+  sending on the cover) identical.
