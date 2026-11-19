@@ -381,11 +381,16 @@ check_app() {
     plist_value NSCameraUsageDescription "$plist" >/dev/null || fail "$app has no NSCameraUsageDescription: Add a Mac…'s scanner would crash it."
     [ -f "$app/PrivacyInfo.xcprivacy" ] || fail "$app has no PrivacyInfo.xcprivacy: App Store Connect refuses an upload whose required-reason APIs aren't declared (ITMS-91053)."
     plutil -lint -s "$app/PrivacyInfo.xcprivacy" || fail "$app/PrivacyInfo.xcprivacy is not a valid property list."
+    # Recording the stream (#284): its movies go to Documents/Sill Recordings, which Files shows only with both keys.
+    for key in UIFileSharingEnabled LSSupportsOpeningDocumentsInPlace; do
+        value="$(plist_value "$key" "$plist")" || value="missing"
+        [ "$value" = true ] || fail "$app's $key is $value, not YES: Files would not show Sill's recordings (Files › On My iPad › Sill)."
+    done
     value="$(plist_value DTPlatformVersion "$plist")" || value=""
     [ -n "$value" ] && version_at_least "$value" "$xcode_minimum" \
         || fail "$app was built with the iOS ${value:-(unknown)} SDK, and the iPhone Duo's layouts need the iOS $xcode_minimum SDK (Xcode $xcode_minimum; docs/iphone-duo-plan.md)."
     if [ "$quiet" = 0 ]; then
-        say "Checked its Sill.app: $version ($build), $bundle_id, the iOS $value SDK, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, PrivacyInfo.xcprivacy"
+        say "Checked its Sill.app: $version ($build), $bundle_id, the iOS $value SDK, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, the Files keys, PrivacyInfo.xcprivacy"
     fi
 }
 
