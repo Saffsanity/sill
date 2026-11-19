@@ -761,5 +761,17 @@ app as CI builds it; docs/steps/2026-11-18-camera.md has the numbers.
   that does not decode), H9 (the CLI's stdout against main's build) and H10 (a move within the grace); and
   `Scripts/camera-check/encoder.sh`, the device's stream on the Mac's software encoder and decoder.
 
-Not yet: H6 (a removal mid-stream: Sill.app's own receiver, step 8) and H11 (the pacing on a 2 Mbit/s relay); Share
-Camera on a device in the hand; steps 7 and 8 (Sill Camera and Sill.app's side), 9 and 10.
+- The third building run (its notes in docs/steps/2026-11-18-camera.md): the second run's head
+  verified in a heavy hold of its own (every loopback gate, every check, the mutants of the checks it touched, the iOS
+  builds; one survivor's case added), the photos in another; then step 7 up to what needs the developer portal:
+  `CameraFeedPolicy` with the `camera-feed` check, in a library target of its own, `CameraFeed` (not the extension's
+  folder: Sill.app's sink shares its encodings, and an executable target cannot be imported); Sill Camera's sources
+  (`Sources/SillCameraExtension`: the provider, the device with its source and sink streams, the custom properties
+  `state` and `demand`, the placeholder); `Packaging/CameraExtension-Info.plist` and
+  `Packaging/SillCameraExtension.entitlements`; make-app.sh's `SILL_CAMERA_EXTENSION` (off by default) and
+  `SILL_APP_OUT`; release.sh's check of Sill Camera's slices; P1, `Scripts/camera-check/package.sh`.
+
+Not yet: step 8 (Sill.app: `CameraExtensionState`, `CameraExtensionManager`, `CameraSink` with the fit into the app's
+size, the "Camera and Microphone (beta)" section with "Use iPhone and iPad cameras", the card's line, the previews;
+then H6 and H11); Sill Camera running anywhere (it needs the portal steps of §15 step 10 and Noah's Mac: N1); Share
+Camera on a device in the hand; steps 9 and 10.
