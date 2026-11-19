@@ -46,6 +46,8 @@ final class MicrophoneReceiver: @unchecked Sendable {
     /// before they are queued (latency beats quality): about 30 s of sound at 64 kbps.
     private let backlog = OSAllocatedUnfairLock(initialState: 0)
     static let maxBacklog = 256 << 10
+    /// How far a packet's stamp may be from this Mac's wall clock.
+    static let maxClockSkew: Double = 86_400
 
     /// Each connection's kind 16 microphone when it changes (nil: none), the window list's `microphone` (1 or
     /// 0) when it changes, and the device whose sound is Sill Microphone's (nil: none). Called on `sill.mic`; the
@@ -192,7 +194,13 @@ final class MicrophoneReceiver: @unchecked Sendable {
         let fpp = source?.session == id ? source!.framesPerPacket : MicrophoneCodec.framesPerPacket
         let r = policy.takesPackets(id, epoch: p.epoch, packets: p.packets.count, framesPerPacket: fpp, at: now)
         apply(r.effects)
-        guard r.take, let src = source, src.session == id, src.epoch == p.epoch, let decoder, stamp.isFinite else { return }
+        guard r.take, let src = source, src.session == id, src.epoch == p.epoch, let decoder else { return }
+        // A stamp more than a day from this Mac's clock is no capture time (a device's clock is seconds or minutes off at
+        // most): dropped, so no placement the playout makes of it can leave the timeline's range.
+        guard stamp.isFinite, abs(stamp - Date().timeIntervalSince1970) < Self.maxClockSkew else {
+            Stats.shared.bump("mic.dropped.stamp")
+            return
+        }
         let t = now
         feedReading(t)
         // The message's ten packets came together: they count for the floor and the cover before the first is

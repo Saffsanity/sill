@@ -139,7 +139,11 @@ final class MicrophoneTestOutput: MicrophoneOutput {
 
     func schedule(_ samples: [Float], at: Double?) {
         guard t0 != nil, !samples.isEmpty else { return }
+        // A place on the timeline the playout could only make of a broken stamp: dropped, never a trap.
+        if let at, !(at.isFinite && abs(at) < 1e12) { return }
         let start = at.map { Int($0.rounded()) } ?? lastEnd ?? rendered
+        // More than a minute ahead of what has gone out: nothing a real output would hold.
+        guard start - rendered < 48_000 * 60 else { return }
         lastEnd = start + samples.count
         Stats.shared.bump("mic.dry", by: samples.count)
         var from = 0
