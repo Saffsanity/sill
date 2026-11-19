@@ -1,0 +1,14 @@
+# Follow the Pointer (PR #327, StreamZoom.FollowPointer; docs/steps/2026-11-18-ready-327.md) on the agents' Duo (iOS
+# 27.1): the Settings panel at its switch, after Reverse Scrolling, off and on, on a phone (402x874), upright on the
+# Duo's inner display and drawn as an iPad's; and a zoomed picture with the trackpad's pointer near the pane's edge,
+# at rest, which the switch leaves as it is (following needs the pad's pointer to move: Noah's try on a device).
+# Main ignores -Sill.followPointer and -SillSettingsScroll follow, so the zoomed stream screens must be main's pixel
+# for pixel, and the Settings photos show the new row where main's start at the panel's top.
+#   Scripts/harness-photos.sh Scripts/harness-photos/follow-pointer.cases --baseline origin/main
+settings-follow-off     -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillSettings 1 -SillSettingsScroll follow --wait=5
+settings-follow-on      -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillSettings 1 -SillSettingsScroll follow -Sill.followPointer 1 --wait=5
+duo-upright-follow      -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll follow -Sill.followPointer 1 --wait=5
+pad-follow              -SillLayout 669x951 -SillHinge flat -SillIdiom pad -SillSettings 1 -SillSettingsScroll follow --wait=5
+zoomed-402-off          -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillZoom 2.5@0.8,0.3 -SillPointer device@0.9,0.2
+zoomed-402-on           -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillZoom 2.5@0.8,0.3 -SillPointer device@0.9,0.2 -Sill.followPointer 1
+laptop-zoomed-on        -SillLayout 669x951 -SillHinge half -SillZoom 2@0.5,0.5 -SillPointer device@0.95,0.1 -Sill.followPointer 1

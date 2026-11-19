@@ -354,7 +354,10 @@ This iPad group; the mock Mac takes gestures in every case but `legacy`; `revers
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
-run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
+run, in the normal app too), `-Sill.followPointer 1` (its Follow the Pointer on for one
+run, in the normal app too: with the picture zoomed, the portrait trackpad's pointer moves it near
+the pane's edges and the pad's travel is divided by the zoom; StreamZoom.FollowPointer, PR #327;
+`-SillSettingsScroll follow` the panel at its switch), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
 for one run, in the normal app too; the console's `thumbnails: hold 0.3 s` when a bar
 first reads it and at each change), `-Sill.largerPicture 1` (its Larger Picture on for one run,
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
