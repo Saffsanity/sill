@@ -140,6 +140,8 @@ check(note(row: .updateMac) == "Update Sill on Mac mini to share this iPad’s c
 check(note(nil, row: .disabled) == "Turn on Use iPhone and iPad cameras in Sill’s Settings on Mac mini to share this iPad’s camera with it." && note(st("off")) == note(nil, row: .disabled),
       "the Mac's switch off, from the list's 0 or kind 16")
 check(note(st("notReady")) == "Sill Camera isn’t ready on Mac mini. In Sill’s Settings there, Streaming shows what it needs.", "not ready")
+check(note(st("notReady"), row: .disabled) == note(st("notReady")),
+      "not ready with the list's 0, which disables the row: kind 16's words, never the switch's")
 check(note(st("unpaired")) == "Pair this iPad with Mac mini to share its camera.", "unpaired")
 check(note(on: false) == "Lets apps on Mac mini, such as FaceTime or Zoom, use this iPad’s camera as “Sill Camera”. The camera turns on only while one of them uses it, and Sill shows when it’s on.",
       "the switch off: what it does")

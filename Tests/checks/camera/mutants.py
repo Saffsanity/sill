@@ -41,6 +41,8 @@ M = [
     ("the chip while only offering", F, "        guard offering, state?.wanted == true else { return .none }", "        guard offering else { return .none }"),
     ("the chip on while paused", F, "        return capturing ? .on(app: state?.app) : .paused", "        return .on(app: state?.app)"),
     # The words.
+    ("not ready said as the switch off while the list says 0", F, "            if state?.state == CameraState.notReady {",
+     "            if state?.state == CameraState.notReady, row != .disabled {"),
     ("an unknown state read as off in the words", F, "            if row == .disabled || state?.state == CameraState.off {", "            if row == .disabled || state?.knownState == CameraState.off {"),
     ("another unnamed as itself", F, "let holder = state?.holder.flatMap { $0.isEmpty ? nil : $0 } ?? \"Another device\"", "let holder = state?.holder ?? \"Another device\""),
     ("Devices instead of Streaming", F, "In Sill’s Settings there, Streaming shows what it needs.", "In Sill’s Settings there, Devices shows what it needs."),

@@ -208,12 +208,13 @@ enum CameraPolicy {
             case .disabled, .enabled: break
             }
             // The Mac's words by its literal state: a state this build does not know never captures (`wanted`), and
-            // its words are the switch's own below.
-            if row == .disabled || state?.state == CameraState.off {
-                return "Turn on Use iPhone and iPad cameras in Sill’s Settings on \(mac) to share this \(device)’s camera with it."
-            }
+            // its words are the switch's own below. Not ready first: the list says 0 for it too, which disables the row,
+            // and kind 16 says which of the two it is.
             if state?.state == CameraState.notReady {
                 return "Sill Camera isn’t ready on \(mac). In Sill’s Settings there, Streaming shows what it needs."
+            }
+            if row == .disabled || state?.state == CameraState.off {
+                return "Turn on Use iPhone and iPad cameras in Sill’s Settings on \(mac) to share this \(device)’s camera with it."
             }
             if state?.state == CameraState.unpaired { return "Pair this \(device) with \(mac) to share its camera." }
             guard switchOn else {
