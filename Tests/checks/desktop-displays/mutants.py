@@ -32,6 +32,10 @@ VALUE = "        return name.isEmpty ? \"Display \\(n) of \\(count)\" : \"Displa
 NAME = "        let name = names.flatMap { $0.count == count && (1...count).contains(n) ? $0[n - 1] : nil }?\n"
 SHOWN = "        guard let displays, displays > 1, let current, (1...displays).contains(current) else { return nil }\n"
 ON = "        if let pointer, frame.contains(pointer) { return nil }\n"
+VD_LAST = "        return virtualDesktop ? screens + [virtualStop(displays)] : screens\n"
+VD_MADE = "        var stop = displays.first { $0.role == .sillDesktop && $0.online }\n"
+VD_SYMBOL = "        return Button(symbol: onVirtual ? virtualSymbol : desktopSymbol,\n"
+VD_VALUE = "                      accessibilityValue: onVirtual ? \"\\(virtualDesktopName), \\(n) of \\(count)\" : value(n, of: count, names: names),\n"
 MUTANTS = [
     # The stops
     ("D1 the stage's display a stop", SHOWN_FILTER, "        let shown = displays.filter { ($0.role == .screen || $0.role == .stage) && $0.online }\n"),
@@ -120,6 +124,24 @@ MUTANTS = [
     ("D70 an ID the stage once had the stage's whatever it reads now", ROLE_MADE, "        if madeByStage { return .stage }\n"),
     ("D71 a removed display's 0xFFFFFFFF not taken for no monitor", ROLE_MADE, "        if madeByStage && vendor == 0 { return .stage }\n"),
     ("D72 no monitor read as vendor 0 alone", "    public static let noMonitor: UInt32 = 0xFFFF_FFFF\n", "    public static let noMonitor: UInt32 = 0\n"),
+    # The Virtual Desktop's stop and its button (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18, §3).
+    ("V1 the Virtual Desktop never a stop", VD_LAST, "        return screens\n"),
+    ("V2 the Virtual Desktop the first stop", VD_LAST, "        return virtualDesktop ? [virtualStop(displays)] + screens : screens\n"),
+    ("V3 the Virtual Desktop a stop with its switch off", VD_LAST, "        return screens + [virtualStop(displays)]\n"),
+    ("V4 its display taken while offline", VD_MADE, "        var stop = displays.first { $0.role == .sillDesktop }\n"),
+    ("V5 the stage's display taken for it", VD_MADE, "        var stop = displays.first { ($0.role == .sillDesktop || $0.role == .stage) && $0.online }\n"),
+    ("V6 its choice its display's UUID", "        stop.uuid = virtualDesktopChoice\n", ""),
+    ("V7 its name macOS's", "        stop.name = virtualDesktopName\n", ""),
+    ("V8 its number with one stop", "        guard candidates.count >= 2 else { return nil }\n", ""),
+    ("V9 its number counted from 0", "        return candidates.firstIndex { $0.role == .sillDesktop }.map { $0 + 1 }\n",
+     "        return candidates.firstIndex { $0.role == .sillDesktop }\n"),
+    ("V10 the dashed screen on every stop", VD_SYMBOL, "        return Button(symbol: virtualSymbol,\n"),
+    ("V11 a plain screen on its stop", VD_SYMBOL, "        return Button(symbol: desktopSymbol,\n"),
+    ("V12 VoiceOver's value for it as a display's", VD_VALUE, "                      accessibilityValue: value(n, of: count, names: names),\n"),
+    ("V13 its label a number", "        return n == virtual ? virtualLabel : \"Desktop \\(n)\"\n", "        return \"Desktop \\(n)\"\n"),
+    ("V14 on it judged by the count", "        let onVirtual = virtual == n\n", "        let onVirtual = virtual == count\n"),
+    ("V15 the dashed symbol misnamed", "    public static let virtualSymbol = \"rectangle.dashed\"\n", "    public static let virtualSymbol = \"rectangle.dashed.badge.record\"\n"),
+    ("V16 its choice's key a display's", "    public static let virtualDesktopChoice = \"sill-virtual-desktop\"\n", "    public static let virtualDesktopChoice = \"BUILTIN\"\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
