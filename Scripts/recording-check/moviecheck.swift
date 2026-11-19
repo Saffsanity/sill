@@ -74,10 +74,10 @@ func run() async -> [String: Any] {
             let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
             reader.add(output)
             reader.startReading()
-            // The clicks: a stretch of 0.1 s under 0.1 (the tone is at −30 dBFS, 0.03), then a frame over 0.2
-            // (the click peaks at −6 dBFS, 0.5); its onset is about 1 ms into the click (its window's rise).
+            // The clicks: a frame over 0.2 (the click peaks at −6 dBFS, 0.5; the tone at −30 dBFS, 0.03, never
+            // reaches it) after at least 0.1 s with none; its onset is about 1 ms into the click (its window's rise).
             var clicks: [Double] = []
-            var quiet = 0, frames = 0, loud = 0.0
+            var quiet = 4800, frames = 0, loud = 0.0
             var first: Double?
             while let s = output.copyNextSampleBuffer() {
                 let pts = CMSampleBufferGetPresentationTimeStamp(s).seconds
@@ -92,8 +92,12 @@ func run() async -> [String: Any] {
                     for i in 0..<n {
                         let v = max(abs(x[2 * i]), abs(x[2 * i + 1]))
                         loud = max(loud, Double(v))
-                        if v > 0.2, quiet >= 4800 { clicks.append(pts + Double(i) / 48_000 - 0.001) }
-                        quiet = v < 0.1 ? quiet + 1 : 0
+                        if v > 0.2 {
+                            if quiet >= 4800 { clicks.append(pts + Double(i) / 48_000 - 0.001) }
+                            quiet = 0
+                        } else {
+                            quiet += 1
+                        }
                     }
                 }
                 frames += n

@@ -186,7 +186,9 @@ def gates(name, summary, reports, code, movies):
         offs = a.get("clickOffsetsMs") or []
         expect(len(offs) >= 10 and max(abs(x) for x in offs) <= 5, f"still-sound: the clicks in place ({len(offs)}, worst {max([abs(x) for x in offs] or [0]):.1f} ms)")
     if name == "parts":
-        expect(len(movies) == 2 and movies[1].endswith(" (2).mov"), f"parts: two movies, the second (2): {movies}")
+        named = sorted(movies, key=lambda m: (" (2)" in m, m))
+        expect(len(movies) == 2 and named[1].endswith(" (2).mov") and named[0] == named[1].replace(" (2).mov", ".mov"),
+               f"parts: two movies, the second (2): {named}")
     if name == "oldmac-still":
         expect(summary["start"] == "lastKeyframe", f"oldmac-still: from the last keyframe ({summary['start']})")
     if name == "oldmac-gaveup":

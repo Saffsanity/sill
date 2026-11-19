@@ -20,7 +20,9 @@ import StreamProtocol
 ///   owner needs to know goes to the main queue (`onEvent`).
 /// - Each part is a movie of its own ("Sill 2026-11-18 at 14.03.12.mov", " (2)" and so on), written in fragments
 ///   every `fragmentInterval`, so an interruption loses at most its last seconds; its session ends at the stop's
-///   time, so a still window's last picture lasts until Stop. A failed writer keeps what it wrote (never
+///   time. The newest picture is held back until the next one, or the part's end, gives its duration, so a still
+///   window's last picture lasts until Stop: AVAssetWriter gives a last sample without a duration one frame's
+///   time, not the session's end (the rig's `still` case, 2026-11-19). A failed writer keeps what it wrote (never
 ///   `cancelWriting`, which deletes the file).
 ///
 /// AVFoundation, CoreMedia and AudioToolbox only, never UIKit: the folder, the protection and the free space come
@@ -256,6 +258,8 @@ final class StreamRecorder: @unchecked Sendable {
         let audio: AVAssetWriterInput?
         let format: CMVideoFormatDescription
         var lastTicks: Int64?
+        /// The newest picture, held back until the next one or the part's end gives its duration; its size.
+        var held: (sample: CMSampleBuffer, ticks: Int64, bytes: Int)?
         var heldLeft: [Float] = []
         var heldRight: [Float] = []
         /// The sound track's frames so far.
@@ -336,20 +340,40 @@ final class StreamRecorder: @unchecked Sendable {
         }
     }
 
-    /// A frame at part time `at`: its own sample (never the display's), a delta marked as one. False when it was
-    /// not written.
+    /// A frame at part time `at`: its own sample (never the display's), a delta marked as one, held back until the
+    /// next frame gives it its duration (`release`). False when it cannot be written: its sample could not be made,
+    /// or the picture held before it was not written and it is a delta that depends on it.
     private func write(_ data: Data, isKeyframe: Bool, at: Double) -> Bool {
         guard let part, failure == nil else { return false }
         var ticks = RecordingClock.ticks(at + RecordingTimeline<Data>.sourceBase)
         if let last = part.lastTicks, ticks <= last { ticks = last + 1 }
+        guard let sample = Self.sample(data, format: part.format, ticks: ticks, isKeyframe: isKeyframe) else { return false }
+        let before = release(part, until: ticks)
+        part.lastTicks = ticks
+        guard before || isKeyframe else { return false }
+        part.held = (sample, ticks, data.count)
+        return true
+    }
+
+    /// Appends the held picture, lasting until `ticks` (the next picture's time, or the part's end). False when it
+    /// could not be written (the writer not ready, or failed); true with nothing held.
+    @discardableResult
+    private func release(_ part: Part, until ticks: Int64) -> Bool {
+        guard let held = part.held else { return true }
+        part.held = nil
+        var timing = CMSampleTimingInfo(duration: CMTime(value: max(1, ticks - held.ticks), timescale: RecordingClock.videoTimescale),
+                                        presentationTimeStamp: CMTime(value: held.ticks, timescale: RecordingClock.videoTimescale),
+                                        decodeTimeStamp: .invalid)
+        var timed: CMSampleBuffer?
         guard part.video.isReadyForMoreMediaData,
-              let sample = Self.sample(data, format: part.format, ticks: ticks, isKeyframe: isKeyframe) else { return false }
-        guard part.video.append(sample) else {
+              CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: held.sample, sampleTimingEntryCount: 1,
+                                                   sampleTimingArray: &timing, sampleBufferOut: &timed) == noErr,
+              let timed else { return false }
+        guard part.video.append(timed) else {
             if part.writer.status == .failed { fail(reason(part.writer.error)) }
             return false
         }
-        part.lastTicks = ticks
-        frameBytes += Int64(data.count)
+        frameBytes += Int64(held.bytes)
         return true
     }
 
@@ -361,9 +385,12 @@ final class StreamRecorder: @unchecked Sendable {
             if writer.status == .failed { fail(reason(writer.error)) }
             return
         }
+        // The held picture lasts until the part's end: a still window's last picture until Stop.
+        let end = Self.videoTime(at)
+        release(part, until: max(end.value, (part.held?.ticks ?? 0) + 1))
         part.video.markAsFinished()
         part.audio?.markAsFinished()
-        writer.endSession(atSourceTime: Self.videoTime(at))
+        writer.endSession(atSourceTime: end)
         closing += 1
         writer.finishWriting { [self] in
             queue.async { [self] in

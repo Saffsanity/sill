@@ -22,6 +22,15 @@ struct RecordingNote: Equatable {
     var warning: Bool
 }
 
+/// A notification observer that removes itself after its first word. Main thread.
+final class RecordingObserver: @unchecked Sendable {
+    var token: NSObjectProtocol?
+    func remove() {
+        if let token { NotificationCenter.default.removeObserver(token) }
+        token = nil
+    }
+}
+
 /// What "Starting…" keeps between its asks (rule 3). Main thread.
 struct RecordingStart {
     /// When the light came (systemUptime).
@@ -308,9 +317,11 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in self?.recordingNote = nil }
         recordingNoteExpiry = work
         if UIApplication.shared.applicationState == .background {
-            var token: NSObjectProtocol?
-            token = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-                if let token { NotificationCenter.default.removeObserver(token) }
+            // Its time runs once Sill is back: the observer goes after its first word.
+            let observer = RecordingObserver()
+            observer.token = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
+                                                                    queue: .main) { [observer] _ in
+                observer.remove()
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.recordingNoteLifetime, execute: work)
             }
         } else {
