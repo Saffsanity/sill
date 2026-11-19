@@ -151,8 +151,10 @@ var lowSaid = false
 var lastBytes: Int64 = 0
 let bytesLock = NSLock()
 
-/// The recording's ask (rule 2): now, at its second, never two held at once. Main queue.
-func ask(forStart: Bool) {
+/// The recording's ask (rule 2): now, at its second (never two held at once; a start's held ask goes on with
+/// "Starting…" once it has gone), as StreamClient+Recording's. True when it went now. Main queue.
+@discardableResult
+func ask(forStart: Bool) -> Bool {
     let now = ProcessInfo.processInfo.systemUptime
     switch RecordingPolicy.keyframeAsk(now: now, lastAsk: lastAsk, recoveryDueUntil: nil) {
     case .now:
@@ -161,29 +163,38 @@ func ask(forStart: Bool) {
         asks.append(since())
         if forStart { startAsks += 1; lastStartAsk = now }
         say("asked for a keyframe\(forStart ? " (the start's \(startAsks))" : " (the chain broke)")")
+        return true
     case .at(let t):
-        guard !heldAsk else { return }
+        guard !heldAsk else { return false }
         heldAsk = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) { heldAsk = false; ask(forStart: forStart) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) {
+            heldAsk = false
+            if ask(forStart: forStart), forStart, phase == .starting { scheduleStarting() }
+        }
+        return false
     case .awaitRecovery:
-        break
+        return true
     }
 }
 
-/// While "Starting…": the next ask or the give-up.
+/// While "Starting…": the next ask or the give-up, one step pending at a time.
+var startingStep = 0
 func scheduleStarting() {
     guard phase == .starting, let lightAt else { return }
+    startingStep += 1
+    let step = startingStep
     let now = ProcessInfo.processInfo.systemUptime
-    let wait = KeyframeRecovery.answerWait(worstRttMs: worstRttMs)
+    let wait = KeyframeRecovery.answerWait(worstRttMs: net.sync { worstRttMs })
     switch RecordingPolicy.starting(now: now, lightAt: lightAt, asks: startAsks, lastAsk: lastStartAsk, wait: wait) {
     case .askAt(let t):
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) {
-            guard phase == .starting else { return }
-            ask(forStart: true)
-            scheduleStarting()
+            guard phase == .starting, startingStep == step else { return }
+            if ask(forStart: true) { scheduleStarting() }
         }
     case .giveUpAt(let t):
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) { if phase == .starting { stopRecording(.gaveUp) } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) {
+            if phase == .starting, startingStep == step { stopRecording(.gaveUp) }
+        }
     case .giveUp:
         stopRecording(.gaveUp)
     }
@@ -236,13 +247,11 @@ func one() {
 func light() {
     guard let rec = net.sync(execute: { recorder }) else { return }
     lightAt = ProcessInfo.processInfo.systemUptime
+    phase = .starting   // the light: the stats say `recording` from here ("Starting…" included)
     let decided = net.sync { rec.light(arrival: StreamRecorder.hostNow(), lastKeyframe: lastKeyframe, framesSinceKeyframe: framesSinceKeyframe) }
     start = decided
     say("the light: \(decided)")
-    if case .atNextKeyframe = decided, phase != .recording {
-        phase = .starting
-        scheduleStarting()
-    }
+    if case .atNextKeyframe = decided { scheduleStarting() }
 }
 
 func stopRecording(_ why: RecordingPolicy.Ending) {
