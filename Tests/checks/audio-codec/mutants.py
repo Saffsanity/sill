@@ -23,10 +23,10 @@ MUTANTS = [
     ("a frame short", "AudioDecoder.swift", "            let n = Int(frames)\n", "            let n = Int(frames) - 1\n"),
     ("the click 3 frames late", "TestTone.swift", "let wall = wallAtFrame0 + Double(k) / sampleRate", "let wall = wallAtFrame0 + Double(k - 3) / sampleRate"),
     ("stamps without the priming", "AudioPacketizer.swift", "hostTime: time(ofFrame: index * framesPerPacket - priming)", "hostTime: time(ofFrame: index * framesPerPacket)"),
-    # A device's microphone (docs/microphone-plan.md §3.4): mono through the same encoder and decoder.
+    # A device's microphone (docs/microphone-plan.md §3.4): mono through the same encoder and decoder. (The input
+    # format's channel count alone is no mutant: the decoder takes it from the cookie, as it takes the frame length.)
     ("a mono decoder's second buffer empty", "AudioDecoder.swift", "return (l, channels > 1 ? Array(UnsafeBufferPointer(start: right, count: n)) : l)",
      "return (l, channels > 1 ? Array(UnsafeBufferPointer(start: right, count: n)) : [])"),
-    ("the decoder told stereo whatever it plays", "AudioDecoder.swift", "input.mChannelsPerFrame = UInt32(channels)", "input.mChannelsPerFrame = UInt32(AudioDecoder.channels)"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

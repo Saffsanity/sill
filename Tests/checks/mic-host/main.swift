@@ -32,7 +32,7 @@ check(r.line == "TEST: this host takes devices' microphones (SILL_TEST_MIC_SINK)
       "file's line: \(r.line ?? "")")
 check(T.read(testHost: true, environment: ["SILL_TEST_MIC_SINK": "dry", "SILL_TEST_MIC_LOG": "yes"]).hook?.log == false, "the log only with 1")
 // Refused values.
-for bad in ["speaker", "file:", "FILE:/x", "dry ", "file:" + String(repeating: "a", count: 1025)] {
+for bad in ["speaker", "file:", "FILE:/x", "files:/x", "file/x", "dry ", "file:" + String(repeating: "a", count: 1025)] {
     let rb = T.read(testHost: true, environment: ["SILL_TEST_MIC_SINK": bad])
     check(rb.hook == nil && rb.line?.hasSuffix("ignored: it takes dry, or file:PATH.") == true, "\(bad.prefix(20)) refused")
 }
