@@ -127,6 +127,12 @@ checks run on each result):
   switch on the thumbnails tuck away and nothing lifts; Larger Picture on the cover (no hinge in the harness)
   covered the key row on main as well (its 233 pt estimate) and lifts over it here; the drawer follows row 1. The
   photos, the differences and a README: `~/Downloads/sill-handoff/next/keys-above-keyboard/photos/`.
+- The photos showed the switch's title in two lines against its row's foot on the cover; 64cf0cd2 gives the row
+  6 pt above and below it, as Paste on ‹Mac› Right Away has. A recheck (6cbe2e7b against 2e5af22c, 2 cases, 63 s):
+  the row with its room; the switch on with the cover's keyboard otherwise the same, but iOS put its own one-time
+  slide-to-type tip ("Continue") over the keyboard's keys in that photo: the agents' Duo has now shown its keyboard
+  often enough for it, so the next agent's keyboard photos may show it too until someone taps Continue (the harness
+  never taps). `photos-recheck/` beside the photos.
 
 **Untested, for Noah:** a real keyboard taller than Apple's on a device (a third-party one, Pinyin's or
 Japanese's candidates), the rows' animation beside the keyboard's, Larger Picture with a window Aa fitted to the
