@@ -24,8 +24,8 @@ import CoreGraphics
 ///   arrangement has no thumbnails' row, so the switch changes nothing there.
 /// While anything moved, the trackpad runs from `rowGap` under the key row to `bottom` off the screen's
 /// foot (under the keyboard but for what shows above it). The drawer follows row 1 (the standard one hangs
-/// from it, Larger Picture's stands above it) and the dim is everything but row 1. The Settings panel keeps
-/// the layout's place: opening it takes the keyboard down. Pure (CoreGraphics only), so
+/// from it, Larger Picture's stands above it) and the dim is everything but row 1. Settings takes the
+/// keyboard down as it opens, so nothing of it moves. Pure (CoreGraphics only), so
 /// `Tests/checks/phone-keyboard-lift` compiles it with PhonePortraitLayout.swift and checks it at every size
 /// and keyboard height.
 struct PhoneKeyboardLift: Equatable {
