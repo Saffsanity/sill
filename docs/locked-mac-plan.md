@@ -102,6 +102,7 @@ it through `onChange` and acts on the reading as it is when it runs.
 | Sound, clipboard, pointer (26), cursor shape (14), gestures | yes | no | no |
 | Sill's virtual display (the stage's, a picked window's) | yes | none made; a staged window goes home | none |
 | Sill's own Desktop display for a Mac with no working screen (PR #200, #298; `makesDesktopDisplay`; its switch, `headlessDisplay`, on) | as `HeadlessDesktopPolicy.Watch` says | made as unlocked: the one display Sill makes while locked, carrying the lock screen through a display filter, never a window, so the password typed on a device lands there; never resized while locked | never; one that exists goes |
+| The Virtual Desktop (phase 2b; `HostConfig.virtualDesktop`, off by default; `VirtualDesktopLife`) | made when a device shows its stop, kept while shown and 30 s after | never made; one that exists is kept, unseen (the Desktop shows the main display, `mainOnly`), past its 30 s until the unlock, then 30 s from the unlock; a switch, size or rate changed meanwhile waits for the unlock; its stop comes back after it | never made; one that exists goes at once (its windows left to macOS: the screen is another user's) |
 | Input (kind 8) | every session | a paired session's (the owner types the password); any other only the up of what it holds down | nobody's, but the up of a key or a button held down |
 | Display activity (DisplayWake) | as ever | a paired session's taken input only; never a session's start | never |
 
