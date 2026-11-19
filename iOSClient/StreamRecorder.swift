@@ -208,8 +208,10 @@ final class StreamRecorder: @unchecked Sendable {
     /// parameter sets count as one). On `sill.net`.
     func light(arrival: Double, lastKeyframe: Frame?, framesSinceKeyframe: Int) -> RecordingPolicy.StartPoint {
         let pre = preroll ?? RecordingPolicy.Preroll(limit: setup.prerollLimit)
-        let start = RecordingPolicy.start(keyframeSinceAsk: pre.holdsKeyframe, lastKeyframeKept: lastKeyframe != nil,
-                                          framesSinceKeyframe: framesSinceKeyframe)
+        // No parameter sets known (none came this session): no picture can be written yet, whatever was kept.
+        let start: RecordingPolicy.StartPoint = tapSets == nil ? .atNextKeyframe
+            : RecordingPolicy.start(keyframeSinceAsk: pre.holdsKeyframe, lastKeyframeKept: lastKeyframe != nil,
+                                    framesSinceKeyframe: framesSinceKeyframe)
         let kept = pre.holdsKeyframe ? pre.frames : [], seeds = self.seeds, sets = tapSets
         preroll = nil
         self.seeds = []
