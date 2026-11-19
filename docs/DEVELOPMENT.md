@@ -1430,9 +1430,9 @@ chip until then; the console's "clipboard: …" lines say what happened.
 
 ## Files and photos
 
-Files go from a paired iPhone or iPad to the Mac (kinds 34 and 49; the plan is docs/files-plan.md: the Mac's
-receiving, the protocol and the device's sending are in; the drop on the picture and the Mac's files to the device
-come next). On the device, Settings › This iPad has Send Files to ‹Mac›… (the system's Files picker) and Send Photos
+Files go between a paired iPhone or iPad and the Mac (kinds 34 and 49; the plan is docs/files-plan.md: the Mac's
+receiving, the protocol and the device's sending are in, and on the branch `files-to-device` the Mac's files to the
+device; the drop on the picture and the Mac's Open panel in the stream come next). On the device, Settings › This iPad has Send Files to ‹Mac›… (the system's Files picker) and Send Photos
 to ‹Mac›… (the Photos picker, originals, no library access), and Sill is in other apps' share sheets for any file;
 the chip over the stream follows the transfer, with Cancel. The device's sender (`DeviceFiles`) reads each file in
 place 64 KiB at a time, and SessionLink hands a file's parts to the connection only into what the person's input,
@@ -1449,13 +1449,26 @@ quarantined with Sill as the agent, given a Where from, made 0644 and moved into
 anything; nothing partial survives a cancel, a lock, a cut-off, the device leaving or a quit. Logs say counts and
 sizes ("Files: saved 2 files (12 MB) from iPad in Downloads/Sill in 4.1 s."), never a name.
 
+The other way: a device's hello says `files` 1, and the Mac offers it files its person chose (Sill's menu) or answers
+its Get Files from ‹Mac›… (a `pick`: the Mac's Open panel, so the window list says `files` 2 where the Mac answers
+picks). The device asks before taking files it did not ask for while Ask Before Receiving Files is on (its switch,
+on by default), takes the answer to its own pick at once, writes each 64 KiB part as it comes, acknowledges it (the
+Mac sends within that window, one part at a time on a send path of the server's own that waits while the picture
+needs the link: never ahead of a keyframe, never more than 64 KiB waiting), and keeps each file, checked, in
+Documents › From ‹Mac› (On My iPad › Sill in the Files app). The chip ends with Show and, for photos and videos,
+Save to Photos (add-only access); Save Photos and Videos to Photos (off by default) does it by itself.
+
 Headless (TEST ONLY, on a test host): a synthetic host keeps files in `$TMPDIR/sill-test-files-<pid>`, never
 ~/Downloads; `SILL_TEST_FILES_DIR=<dir>` another folder, `SILL_TEST_FILES_LOG=1` each decision with its sizes,
-`SILL_TEST_FILES_FREE=<bytes>` the free space the rule reads. `sillclient.py` sends files as a device does
-(`--send-file=PATH[,X,Y]@T`, a folder's files as one transfer; `--files-window`, `--files-pace`,
-`--cancel-files@T`, `--raw49`, `--raw34`, `--expect-files=OP[:REASON]`) and prints each kind 49 but the
-acknowledgements. `python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]` runs the gates
-(docs/files-plan.md §12.2, H3 to H5) against synthetic `--pairing` hosts on loopback, each under a minute;
+`SILL_TEST_FILES_FREE=<bytes>` the free space the rule reads, `SILL_TEST_FILES_PICK=<path>[:<path>…]` a device's
+pick answered with these files and no Open panel (the list then says `files` 2), `SILL_TEST_FILES_OFFER='<s>
+<path>[:<path>…]'` these files offered s seconds after a device that takes files connects, as Sill's menu would.
+`sillclient.py` sends files as a device does (`--send-file=PATH[,X,Y]@T`, a folder's files as one transfer;
+`--files-window`, `--files-pace`, `--cancel-files@T`, `--raw49`, `--raw34`, `--expect-files=OP[:REASON]`), takes them
+(`--accept-files=DIR`, `--decline-files`, `--ignore-files`, `--pick-files@T`, `--cancel-receive@T`,
+`--receive-pace=B`, `--expect-received=N`; any of them makes its hello say `files` 1) and prints each kind 49 but the
+acknowledgements. `python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|give|all]` runs the gates
+(docs/files-plan.md §12.2, H3 to H6) against synthetic `--pairing` hosts on loopback, each under a minute;
 `live.py OUT h2 --base=MAIN_SILLHOST` compares the CLI's stdout with main's (H2: every line masked, the per-second
 counters by name), and `h2 --logs=DIR` judges the logs a run saved again.
 `Tests/checks/device-files/run.sh` runs the device's sender against the Mac's own FileHub over loopback, with no host
