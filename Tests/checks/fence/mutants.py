@@ -8,7 +8,7 @@ OUT = os.path.join(WT, ".build", "checks", "fence")   # the mutants' sources and
 os.makedirs(OUT, exist_ok=True)
 SRC = WT + "/iOSClient/SessionLink.swift"
 orig = open(SRC).read()
-MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
+MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead", "camera"]
 ADOPT_END = "        holding = nil\n        return endedLocked(since: h.since)\n    }\n\n    /// Ends the hold on `c`"
 UNHOLD_END = "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n"
 MUTANTS = {
@@ -66,6 +66,27 @@ MUTANTS = {
     "C10 every message counted, not only inputs": ("private static func isInput(_ data: Data) -> Bool { data.first == 8 }",
                                                    "private static func isInput(_ data: Data) -> Bool { !data.isEmpty }"),
     "C11 dropHandOver keeps counting what it dropped": ("        inputs -= waitingInputs\n", ""),
+    # camera (2026-11-18, docs/camera-plan.md §6.2): the camera's frames never wait for a fence or a hold, and the uplink ledger
+    "K1 a camera frame goes through a fence": ("        guard fences.isEmpty, holding == nil, let c = current else { return false }\n        handLocked(data, .camera, to: c)",
+                                               "        guard holding == nil, let c = current else { return false }\n        handLocked(data, .camera, to: c)"),
+    "K2 a camera frame goes through a hold": ("        guard fences.isEmpty, holding == nil, let c = current else { return false }\n        handLocked(data, .camera, to: c)",
+                                              "        guard fences.isEmpty, let c = current else { return false }\n        handLocked(data, .camera, to: c)"),
+    "K3 a camera frame waits for a fence or a hold (the hazard)": (
+        "        guard fences.isEmpty, holding == nil, let c = current else { return false }\n        handLocked(data, .camera, to: c)",
+        "        if !fences.isEmpty || holding != nil { waiting.append(data); return true }\n        guard let c = current else { return false }\n        handLocked(data, .camera, to: c)"),
+    "K4 a camera frame said sent with no connection": ("        guard fences.isEmpty, holding == nil, let c = current else { return false }\n        handLocked(data, .camera, to: c)",
+                                                        "        guard fences.isEmpty, holding == nil else { return false }\n        guard let c = current else { return true }\n        handLocked(data, .camera, to: c)"),
+    "K5 the uplink never says a hold": ("Uplink(fenced: !fences.isEmpty || holding != nil,", "Uplink(fenced: !fences.isEmpty,"),
+    "K6 a completion of an earlier connection counts": ("        guard epoch == self.epoch else { return }\n        pending[lane.rawValue]", "        pending[lane.rawValue]"),
+    "K7 another connection keeps the old counts": ("            pending = [Int](repeating: 0, count: Lane.allCases.count)\n            recent = []\n", "            recent = []\n"),
+    "K8 another connection keeps the old second": ("            pending = [Int](repeating: 0, count: Lane.allCases.count)\n            recent = []\n",
+                                                   "            pending = [Int](repeating: 0, count: Lane.allCases.count)\n"),
+    "K9 the window never forgets": ("        recent.removeAll { now - $0.at >= Self.window }\n", ""),
+    "K10 the last second counts everything kept": ("(now - $1.at < Self.window ? $1.bytes : 0)", "$1.bytes"),
+    "K11 what waited goes out uncounted": ("        if let c = current { for data in out { handLocked(data, .first, to: c) } }",
+                                           "        for data in out { current?.send(content: data, completion: .contentProcessed { _ in }) }"),
+    "K12 a message sent at once goes uncounted": ("        if let c = current { handLocked(data, .first, to: c) }\n        if current != nil, Self.isInput(data)",
+                                                  "        current?.send(content: data, completion: .contentProcessed { _ in })\n        if current != nil, Self.isInput(data)"),
     "C12 unhold restarts the count": ("        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n",
                                       "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        inputs = 0\n        return endedLocked(since: h.since)\n"),
 }

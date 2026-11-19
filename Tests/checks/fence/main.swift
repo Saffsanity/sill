@@ -65,13 +65,21 @@
 // is under way, its home connection already made: the stand-in closes it, the client sees its end and only
 // then holds, as StreamClient.rescue does after the loss, and adopts the home connection without a fence).
 // The stand-in's one TLS listener stands for both doors: this check is about order, not trust or ports.
+// camera (2026-11-18, docs/camera-plan.md §6.2, the overview's uplink ledger): UplinkLedger on its own (lanes,
+// a connection's generation, completions of an earlier one counting nothing, the last second's window),
+// then SessionLink's camera frames (sendCamera) through a script on this one thread as `count` is: a frame
+// goes at once on the session's connection, and is refused, never kept, while a fence or a hold stands or
+// there is no connection; `uplink` says the fence and the hold; once the stand-in has taken everything,
+// nothing is left in any lane and the last second's bytes on the session's connection are exactly those it
+// was handed there (the inputs that waited, the frames and an input sent at once); then what each of the
+// three connections delivered, frames and inputs in order, read to its end.
 // The check compiles all of Sources/StreamProtocol for them.
 //   (the old SessionLink needs $SP/review/fencecheck/oldshim.swift, which gives Released its `waiting`)
 import Foundation
 import Network
 
 let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
-             "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
+             "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead", "camera"]
 /// The modes whose connections are TLS: the remote door's, then the home door's (the move home).
 let remoteModes: Set<String> = ["remotehome", "remotedead"]
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ok"
@@ -170,6 +178,7 @@ final class Stub {
     var finished: Set<Int> = []                   // read to their end, through their line
     var arrived: [UInt32] = []
     var inputsOn: [Int: Int] = [:]                // the inputs (kind 8) read on each connection
+    var readOn: [Int: [String]] = [:]             // what each connection carried, in order: "i7" an input, "c3" a camera frame
     var ready = DispatchSemaphore(value: 0)
     /// The remote door's stand-in (remotehome, remotedead): TLS 1.3 with the remote door's own
     /// parameters, a key of its own and any client key trusted. Its connections join the same list.
@@ -242,8 +251,12 @@ final class Stub {
         switch h.kind {
         case .ping: c.send(content: message(.pong, payload), completion: .contentProcessed { _ in })
         case .input:
-            arrived.append(payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) })
+            let n = payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) }
+            arrived.append(n)
             inputsOn[i, default: 0] += 1
+            readOn[i, default: []].append("i\(n)")
+        case .camera:
+            if case .frame(let f)? = CameraMessage.parse(payload) { readOn[i, default: []].append("c\(f.seq)") }
         default: break
         }
     }
@@ -453,9 +466,112 @@ func countMode(_ c0: NWConnection) -> Never {
     exit(bad == 0 ? 0 : 1)
 }
 
+/// Mode camera: UplinkLedger on its own, then SessionLink.sendCamera and `uplink` through a script on this one
+/// thread, as `count` runs its own.
+func cameraMode(_ c0: NWConnection) -> Never {
+    var bad = 0
+    func expect(_ ok: Bool, _ what: String) {
+        print("camera: \(what)\(ok ? "" : ": WRONG")")
+        if !ok { bad += 1 }
+    }
+    // The ledger on its own: two connections' identifiers, kept alive so neither is reused.
+    let ka = NSObject(), kb = NSObject()
+    let a = ObjectIdentifier(ka), b = ObjectIdentifier(kb)
+    var l = UplinkLedger()
+    expect(l.pending(for: a) == 0 && l.takenLastSecond(for: a, at: 0) == 0, "a ledger that counted nothing holds nothing")
+    let e1 = l.handed(100, .first, to: a)
+    _ = l.handed(50, .camera, to: a)
+    expect(l.pending(for: a) == 150 && l.pending(.first, for: a) == 100 && l.pending(.camera, for: a) == 50 && l.pending(for: b) == 0,
+           "handed 100 in the first lane and 50 in the camera's: each lane's and the total, nothing for another connection")
+    l.taken(100, .first, epoch: e1, at: 10.0)
+    expect(l.pending(for: a) == 50 && l.pending(.first, for: a) == 0, "the first lane's 100 taken: the camera's 50 left")
+    expect(l.takenLastSecond(for: a, at: 10.5) == 100 && l.takenLastSecond(for: a, at: 10.99) == 100 && l.takenLastSecond(for: a, at: 11.0) == 0,
+           "taken at 10 s: in the last second until 11 s, not at 11 s")
+    l.taken(50, .camera, epoch: e1, at: 10.2)
+    expect(l.pending(for: a) == 0 && l.takenLastSecond(for: a, at: 10.5) == 150, "the camera's 50 taken too: nothing held, 150 in the last second")
+    let e2 = l.handed(30, .first, to: b)
+    expect(e2 == e1 + 1 && l.pending(for: a) == 0 && l.pending(for: b) == 30 && l.takenLastSecond(for: b, at: 10.5) == 0
+           && l.takenLastSecond(for: a, at: 10.5) == 0, "another connection: a new generation, its own counts from nothing, the old one's gone")
+    l.taken(100, .first, epoch: e1, at: 10.3)
+    expect(l.pending(for: b) == 30 && l.takenLastSecond(for: b, at: 10.5) == 0, "a completion of what the earlier connection was handed counts nothing")
+    l.taken(30, .first, epoch: e2, at: 12.0)
+    _ = l.handed(5, .camera, to: b)
+    l.taken(5, .camera, epoch: e2, at: 13.5)
+    expect(l.takenLastSecond(for: b, at: 13.5) == 5 && l.recent.count == 1, "the window keeps the last second alone (12 s's 30 forgotten at 13.5 s)")
+    l.taken(7, .camera, epoch: e2, at: 13.6)
+    expect(l.pending(for: b) == 0 && l.pending(.camera, for: b) == 0, "more taken than handed: never below nothing")
+    var l2 = UplinkLedger()
+    _ = l2.handed(40, .camera, to: a)
+    _ = l2.handed(5, .first, to: b)
+    expect(l2.pending(for: b) == 5 && l2.pending(.camera, for: b) == 0,
+           "a connection handed to while another still held 40: its own 5 alone, nothing carried over")
+
+    // SessionLink, on the stand-in's connections.
+    var seq: UInt32 = 0
+    func input() -> Data { seq += 1; let d = message(.input, be32(seq)); link.send(d); return d }
+    func frame(_ n: UInt32) -> Data {
+        CameraMessage.frameMessage(CameraFrame(epoch: 0, seq: n, data: Data(count: 8_000)), captured: 0, keyframe: n == 1)!.serialized()
+    }
+    func fence(_ from: NWConnection, _ to: NWConnection) -> Data {
+        let nonce = randomNonce()
+        link.handOver(from: from, to: to, fencePing: message(.ping, nonce), nonce: nonce)
+        return nonce
+    }
+    expect(link.sendCamera(frame(1)), "a frame on the session's connection goes")
+    _ = input()
+    expect(link.sendCamera(frame(2)), "a second frame after an input goes, behind it")
+    expect(!link.uplink.fenced, "no fence, no hold: the uplink says neither")
+    let c1 = connect()
+    let n1 = fence(c0, c1)
+    expect(link.uplink.fenced, "a hand-over's fence: the uplink says so")
+    expect(!link.sendCamera(frame(3)), "a frame while the fence stands is refused, never kept")
+    _ = input()                                       // waits for the fence
+    _ = link.fenceReturned(n1, on: c0)
+    expect(!link.uplink.fenced, "the fence down")
+    expect(link.sendCamera(frame(4)), "a frame once the fence is down goes, behind what waited")
+    _ = link.hold(c1)
+    expect(link.uplink.fenced, "a hold: the uplink says so")
+    expect(!link.sendCamera(frame(5)), "a frame while the hold stands is refused")
+    let i3 = input()                                  // held
+    let c2 = connect()
+    let adoptStart = now()
+    _ = link.adopt(c2)
+    let f6 = frame(6)
+    expect(link.sendCamera(f6), "a frame on the adopted connection goes, behind what was held")
+    link.connection = nil
+    expect(!link.sendCamera(frame(7)) && link.uplink == SessionLink.Uplink(fenced: false, unsent: 0, takenLastSecond: 0),
+           "no connection: a frame is refused, and the uplink holds nothing")
+    link.connection = c2
+    let f8 = frame(8)
+    expect(link.sendCamera(f8), "the same connection back: a frame goes")
+    let i4 = input()
+    let onC2 = i3.count + f6.count + f8.count + i4.count
+    require("the session's connection taking everything it was handed") {
+        let p = link.pendingBytes
+        return p[.first] == 0 && p[.camera] == 0
+    }
+    let taken = link.uplink.takenLastSecond
+    if now() - adoptStart < 0.9 {
+        expect(taken == onC2, "the last second's bytes on the session's connection: \(taken), those it was handed there (\(onC2)), the input that waited for the hold included")
+    } else {
+        print("camera: the last second's bytes not judged: the script took \(Int((now() - adoptStart) * 1000)) ms since the adopt (a slow machine)")
+    }
+    let script = [c0, c1, c2]
+    clientQueue.sync {
+        for c in script { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
+    }
+    require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
+    let want = [["c1", "i1", "c2"], ["i2", "c4"], ["i3", "c6", "c8", "i4"]]
+    let got = script.map { c in stubIndex(of: c).map { i in stub.queue.sync { stub.readOn[i] ?? [] } } ?? [] }
+    expect(got == want, "the stand-in read \(got), want \(want)")
+    print(bad == 0 ? "PASS" : "FAIL")
+    exit(bad == 0 ? 0 : 1)
+}
+
 let old = connect(tls: remoteModes.contains(mode))
 link.connection = old
 if mode == "count" { countMode(old) }
+if mode == "camera" { cameraMode(old) }
 readLoop(old)
 let slowLine = stub.line(0)
 
