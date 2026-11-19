@@ -957,8 +957,20 @@ Each group of commits is built, checked with its mutants, pushed and noted here 
    SillAudio, where AudioDecoder lives since #394.
 2. Done: the wire, `ClientStats.recording` and `WindowList.recordings`, with `compatibility`'s cases and mutants.
 3. Done: the Mac, RecordingNotice and `Tests/checks/recording-notice`; HostStatus, StreamCoordinator, StatusText,
-   DebugHooks; `sillclient.py`. Gate G2, with a locked Mac's list keeping `recordings` (a case for `lock-policy`
-   waits for the next change to that check, whose 189 mutants take most of an hour). The menu says a device
+   DebugHooks; `sillclient.py`. Gate G2, with a locked Mac's list keeping `recordings` (`lock-policy`'s case for it
+   came in run 2, with its mutant). The menu says a device
    records whatever else its headline says (test pattern mode included), not only where the plan put it.
-4. to 10.: not started.
+4. Done (run 2): the device's rules, RecordingPolicy, RecordingClock (with RecordingTimeline, the recorder's order of
+   things as a pure type, so the random recordings run the recorder's own decisions) and RecordedSound, and
+   `Tests/checks/recording` (20,000 random recordings; 84 mutants); SillDocuments, the one owner of Documents
+   (overview §2.3); lock-policy's case that a locked list keeps `recordings`.
+5. to 7. Done (run 2): StreamRecorder rewritten on the timeline, #303's taps removed, the rig
+   (`Scripts/recording-check`, ten cases); StreamClient+Recording, the taps in `handle` and `receiveAudio`, every
+   ending, the asks, space, `ClientStats.recording`, DeviceIdlePolicy's `Uses.recording`; RecordingLight, the
+   Settings rows and the pinned Stop row, both stream screens, the connect screen's note, MockCatalog,
+   ContentView's contract, `recording.cases`.
+8. Done (run 2): the privacy manifest's DiskSpace (E174.1, 85F4.1); release-ios.sh checks the two Files keys.
+9. Partly: docs/LAYOUT.md, docs/BUILD-AND-RUN.md and the step file; the proposed words for README, the support and
+   privacy pages and the App Store are in the step file, not yet in their pages.
+10. Not started: an independent read-only review of the branch, then Noah's devices.
 

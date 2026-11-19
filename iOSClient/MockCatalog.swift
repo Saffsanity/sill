@@ -780,6 +780,8 @@ enum MockCatalog {
             client.macPreviews = ["HOMEPAIRING8": thumbnail(seed: 0, size: size), "HOMEPAIRING6": thumbnail(seed: 1, size: size),
                                   "A3C5HR4RBV67YR21": thumbnail(seed: 2, size: size)]
         }
+        // `-SillRecordingNote ended|left|…`: the note after a session ended while it recorded (#284), kept.
+        client.mockRecording(nil, note: UserDefaults.standard.string(forKey: "SillRecordingNote"))
         return client
     }
 

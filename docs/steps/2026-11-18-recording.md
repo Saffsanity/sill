@@ -107,3 +107,60 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
 - `lock-policy`: a locked list keeps `recordings` (both locked readings), and its one mutant, "list: a locked list
   drops `recordings`". Only that mutant was run of the check's 189: no other mutant's pattern is in what changed
   (main.swift alone), and each of their patterns was confirmed to match once, a text check.
+- **5 to 8, the recorder, the client, the views, the manifest** (the plan's commits 5 to 8): #303's recorder, taps
+  and rows replaced by the plan's own; #303's file name, Record Sound's key (`Sill.recordSound`, on), the two
+  Files keys, `Documents/Sill Recordings`, the count's shape, `stopRecording` in `tearDown`, the background task
+  and `-SillRecordFor` kept.
+  - StreamRecorder carries out RecordingTimeline's actions: its own samples (a delta marked not sync and
+    depending on others), the Mac's stamps through the clock, its own AudioDecoder per epoch and RecordedSound's
+    writes to AAC at 160 kbps (the tail held for its fade), a movie per picture size in fragments every 4 s, each
+    part's session ended at the stop's time, `startSession` 10 s before 0:00 so the pre-roll's times stay
+    positive, the writer's status and error read (never `cancelWriting`, which deletes the file). A picture
+    not written breaks the chain and skips the rest of its batch.
+  - Every kind 44 now goes through `sendKeyframeRequest`, which notes `lastKeyframeAskAt`: the recording keeps
+    a second from it, or awaits the picture recovery's ask while its keyframe is due (`recoveryAskDueUntil`).
+    One held ask at a time (a random recording found two asks in the same instant before this).
+  - The sound is decided at "1", not at the light: the recorder exists from "1" to tap the pre-roll, a second
+    before the light.
+  - Endings: Stop and Cancel (Settings), the session's end (`tearDown`), the app's background, this window's
+    scene's background (an iPad's other window going away ends nothing), `protectedDataWillBecomeUnavailable`,
+    space, the writer's failure, the give-up. Picture in Picture ends it (decision 4), as the app's background.
+  - The note is the recording's own (`recordingNote`, 4 s; a note made while Sill is away waits for its return):
+    over the stream in the clipboard chip's corner (the chip waits meanwhile), in Settings' top row, on the
+    connect screen. "Your recording was saved when the session ended." is one sentence more than the plan's list
+    (its P11 asks for words there); "Nothing was recorded." when a recording stopped during "Starting…".
+  - Settings: This iPad's first rows (Start Recording, Cancel, Stop; Record Sound shown, dimmed showing off, or
+    hidden; the footnote with the older-Mac sentence by `WindowList.recordings`, now kept as
+    `hostRecordings`), and Stop pinned under the header while it counts or records. When draft #393 (the
+    whole-screen Settings pane) lands, the rows go into its device part and the Stop row into its header.
+  - DeviceIdlePolicy: `Uses.recording` (decision 9), device-idle's cases and mutant M18.
+  - The privacy manifest declares DiskSpace (E174.1, 85F4.1), read once a second at most through
+    `SillDocuments.availableCapacity` (the one place, so the check's Documents rule holds). release-ios.sh's .ipa
+    check refuses a build without the two Files keys.
+  - Not built from the plan: `-SillRecordingFail` (a writer made to fail on the device: the rig's `full` case uses
+    the space rule instead, and a real full disk is left to Noah's P15), and the rig's `move` case (a second
+    connection only approximates a move's fenced hand-over; the random recordings deliver frames twice instead).
+  - The rig reads its sound's clicks against the Mac's whole seconds from each part's 0:00 on the Mac's clock,
+    which `StreamRecorder.Outcome.partStarts` gives it.
+- **Proposed words** (for the release that ships it; not in any page yet):
+  - README, in what Sill does: "Record what you stream: Settings › This iPad › Start Recording saves your Mac's
+    picture, and its sound, as a movie in the Files app."
+  - site/support.html, "Recording what you stream" (between `<!-- Recording` and `<!-- /Recording -->`): "In Sill's
+    Settings › This iPad, tap Start Recording. After a 3, 2, 1 count, a red light with the time and size shows over
+    the picture. Tap Stop Recording at the top of Settings to finish. The movie is in the Files app, in On My iPad ›
+    Sill › Sill Recordings. It is the picture your Mac sent, without Sill's controls or the pointer, with your
+    Mac's sound when Send Audio and Record Sound are on. A new picture size starts a new movie. The recording ends
+    when you leave Sill, disconnect, or the device is almost full. Sill on your Mac shows in its menu that a device
+    is recording. Deleting Sill deletes the folder: move what you keep to Photos or iCloud Drive."
+  - site/privacy.html: what travels to the Mac, "Whether the device is recording the stream, once a second with its
+    other numbers, so Sill for Mac can say so in its menu."; what stays on the device, "Your recordings, in Files ›
+    On My iPad › Sill › Sill Recordings: in the device's backups like your other files, readable only while it is
+    unlocked, and deleted with Sill; and whether Record Sound is on."; what the Mac's log keeps, "Which devices
+    recorded the stream, and when."; Deleting your data, "Delete the Sill Recordings folder in Files, or delete
+    Sill."
+  - What's New: "Record what you stream: Settings › This iPad › Start Recording saves your Mac's picture, and its
+    sound, as a movie in the Files app."
+  - The review notes' "NEW IN" paragraph, 271 bytes (the overview's 300 at most): "Settings › This iPad › Start
+    Recording saves the Mac's picture (and, with Send Audio on, its sound) as a movie in Files › On My iPad › Sill ›
+    Sill Recordings, after a 3-second count. A red light shows while it records; Sill for Mac's menu says a device
+    records."

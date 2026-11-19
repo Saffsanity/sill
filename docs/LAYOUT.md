@@ -644,7 +644,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/recording-check/` (docs/recording-plan.md, gate G3): the recording rig,
+  the device's recorder without a device. `build.sh` makes `recordcheck` (recordcheck.swift with
+  StreamProtocol, SillAudio's AudioDecoder, KeyframeRecovery, the three rules and StreamRecorder as one
+  module; refused if it links a VTCompressionSession symbol) and `moviecheck` (AVFoundation reading
+  only: the tracks, the edits, every picture's time and sync mark, the sound decoded to find the test
+  tone's clicks) into `.build/recording-check`; `run.sh [case …]` runs `run.py`'s ten cases on
+  synthetic test hosts on loopback (each under a minute: plain, still, still-sound, parts, oldmac-still,
+  oldmac-gaveup, oldmac-moving, kill, full, lock) and checks their gates. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -1015,12 +1022,31 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
-  `StreamRecorder` (#284, addhumal's #303, merged as it is on the `recording` branch and being
-  rewritten by docs/recording-plan.md): the stream recorded on the device as a movie in
-  Documents/Sill Recordings, which Files shows as On My iPad › Sill › Sill Recordings (both
-  Info.plists' `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`); the panel's Record
-  Sound (`Sill.recordSound`, on) and Start or Stop Recording after Send Audio, the 3, 2, 1 count and
-  the light (`RecordingBadge`) over both stream screens, DEBUG `-SillRecordFor S`; pbxproj AE90/FE90.
+  Recording the stream (#284, docs/recording-plan.md; addhumal's #303 began it): `StreamRecorder`
+  (pbxproj AE90/FE90, #303's) records the stream as it came, never re-encoded, into a movie per
+  picture size in Documents/Sill Recordings, which Files shows as On My iPad › Sill › Sill Recordings
+  (both Info.plists' `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`): taps on `sill.net`
+  before the display (the pre-roll from "1", then every frame, parameter set and sound message, at most
+  32 MB of frames queued), its own queue `sill.recorder` carrying out `RecordingTimeline`'s actions
+  (AVAssetWriter, its own samples with deltas marked not sync, the Mac's sound through its own
+  AudioDecoder to AAC at 160 kbps, fragments every 4 s, each part's end at the stop's time, the
+  writer's status, the light's numbers and space once a second); AVFoundation, CoreMedia and
+  AudioToolbox only, its folder, protection and free space from its caller, so the rig compiles it on
+  the Mac. `StreamClient+Recording` (A287/F287): Start (space first), the count, the keyframe ask at
+  "1" kept a second from every other kind 44 on the connection (`sendKeyframeRequest`,
+  `lastKeyframeAskAt`) or the picture recovery's awaited, the light, "Starting…"'s asks and give-up,
+  every ending (Stop, Cancel, the session's end in `tearDown`, the app or this window's scene to the
+  background, the device's lock, space, the writer), the finish in a background task, the note
+  (`recordingNote`, its own), `RecordingStatus` for the views, `recordingHoldsAwake` for
+  DeviceIdleTimer; StreamClient's `handle` and `receiveAudio` hand each message to `recordingTap`, the
+  kept keyframe carries its stamp and arrival, and `hostRecordings` is the Mac's
+  `WindowList.recordings`; ClientStatsReporter sends `recording` from the light until the movie is
+  closed. `RecordingLight` (A288/F288): the count and the light over both stream screens (Full Screen
+  too), `RecordingNoteView` in the clipboard chip's corner and on the connect screen. The Settings
+  panel: Start Recording (Cancel, Stop), Record Sound (`Sill.recordSound`, #303's key, on) and the
+  footnote as This iPad's first rows, and Stop pinned under the header while it records (into the
+  whole-screen pane's device part and header when draft #393 lands). DEBUG: `-SillRecording`,
+  `-SillRecordingNote`, `-SillRecordingSpace`, `-SillRecordFor S`, `-SillSettingsScroll recording`.
   The recording's rules, pure (Foundation only) and checked together by `Tests/checks/recording`
   with mutants: `RecordingPolicy` (what is offered, the count and the keyframe ask, where the movie
   starts and the pre-roll, the picture's chain, parts and names, what ends it, space, the light, what
@@ -1039,7 +1065,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it declares UserDefaults (CA92.1), `systemUptime` (35F9.1) and the active
   keyboards (54BD.1: `UITextInputMode.activeInputModes`, which decides whether ⌃Space is
   iPadOS's keyboard switch or the Mac's, #138; found by release-ios.sh's check on 2026-10-29,
-  which refuses an export App Store Connect would refuse, ITMS-91053), and any new use of a
+  which refuses an export App Store Connect would refuse, ITMS-91053) and the disk space (E174.1 and
+  85F4.1: the recording's space rule, `SillDocuments.availableCapacity`, #284), and any new use of a
   required-reason API (file dates, disk space, `mach_absolute_time`) must add its category
   and reason there before the next upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
@@ -1194,7 +1221,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Scripts/harness-photos.sh CASES [--commit REV] [--baseline REV] [--device duo|ipad] [--repo DIR]`
   builds each commit's committed tree once (cached by commit and Xcode build in
   `~/Library/Caches/SillAgents`, one shared DerivedData), boots one of them inside the heavy lock,
-  takes a photo per case (a name and launch arguments a line, `example.cases`), compares a baseline's
+  takes a photo per case (a name and launch arguments a line, `example.cases`; `recording.cases` the recording's), compares a baseline's
   pixel for pixel (`pixeldiff.swift`: how many pixels, by how much, where; a picture of the
   differences) and shuts it down. It refuses another name than "Sill agents …", any other booted
   simulator, a case without `-SillLayout` or with `-SillLive` or anything that dials or sends input,
