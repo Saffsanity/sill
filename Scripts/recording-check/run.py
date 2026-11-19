@@ -188,7 +188,11 @@ def gates(name, summary, reports, code, movies):
         expect(len(asks) == 3 and all(b - a >= 3.9 for a, b in zip(asks, asks[1:])),
                f"oldmac-gaveup: three asks at the recovery's wait: {asks}")
     if name == "oldmac-moving":
-        expect(summary["start"] == "nextKeyframe", f"oldmac-moving: from the next keyframe ({summary['start']})")
+        # The Mac's own keyframe every 4 s may fall in the second before the light (the pre-roll), or come after it.
+        light = 2 + 3
+        waited = (summary.get("startedAt") or 99) - light
+        expect(summary["start"] in ("nextKeyframe", "sinceAsk") and waited <= 4.6,
+               f"oldmac-moving: from the Mac's own next keyframe, within its 4 s ({summary['start']}, 0:00 {waited:.2f} s after the light)")
     if name == "kill":
         expect(code == -9 or code == 137, f"kill: the rig was killed ({code})")
         d = reports[0].get("duration") if reports else None

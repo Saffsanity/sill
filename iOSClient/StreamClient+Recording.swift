@@ -31,6 +31,8 @@ struct RecordingStart {
     var lastAsk: TimeInterval?
     /// An ask the Mac's second holds back is due: one at a time.
     var heldAsk: DispatchWorkItem?
+    /// "Starting…"'s next step, an ask or the give-up: one at a time.
+    var next: DispatchWorkItem?
 }
 
 extension StreamClient {
@@ -140,32 +142,40 @@ extension StreamClient {
         }
     }
 
-    /// While "Starting…": the next ask at the recovery's wait, or the give-up (rule 3). Something is always due.
+    /// While "Starting…": the next ask at the recovery's wait, or the give-up (rule 3), one step pending at a time.
+    /// Something is always due: an ask the Mac's second holds back schedules the next step once it has gone.
     private func scheduleRecordingStart(_ generation: Int) {
+        recordingStart.next?.cancel()
+        recordingStart.next = nil
         guard recording.phase == .starting, let lightAt = recordingStart.lightAt else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let next = RecordingPolicy.starting(now: now, lightAt: lightAt, asks: recordingStart.asks,
+        let step = RecordingPolicy.starting(now: now, lightAt: lightAt, asks: recordingStart.asks,
                                             lastAsk: recordingStart.lastAsk, wait: keyframeAnswerWait)
-        switch next {
-        case .askAt(let t):
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) { [weak self] in
-                guard let self, self.recordingGeneration == generation, self.recording.phase == .starting else { return }
-                self.recordingAsk(forStart: true)
+        let at: TimeInterval
+        let ask: Bool
+        switch step {
+        case .askAt(let t): at = t; ask = true
+        case .giveUpAt(let t): at = t; ask = false
+        case .giveUp: stopRecording(.gaveUp); return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.recordingGeneration == generation, self.recording.phase == .starting else { return }
+            self.recordingStart.next = nil
+            if !ask {
+                self.stopRecording(.gaveUp)
+            } else if self.recordingAsk(forStart: true) {
                 self.scheduleRecordingStart(generation)
             }
-        case .giveUpAt(let t):
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now)) { [weak self] in
-                guard let self, self.recordingGeneration == generation, self.recording.phase == .starting else { return }
-                self.stopRecording(.gaveUp)
-            }
-        case .giveUp:
-            stopRecording(.gaveUp)
         }
+        recordingStart.next = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at - now), execute: work)
     }
 
     /// The recording's ask (rule 2): now, at the Mac's second after the last ask on this connection (one held
-    /// at a time), or the picture recovery's awaited while its keyframe is due.
-    func recordingAsk(forStart: Bool) {
+    /// at a time; a start's held ask goes on with "Starting…" once it has gone), or the picture recovery's
+    /// awaited while its keyframe is due. True when it went now or the recovery's is awaited.
+    @discardableResult
+    func recordingAsk(forStart: Bool) -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
         switch RecordingPolicy.keyframeAsk(now: now, lastAsk: lastKeyframeAskAt, recoveryDueUntil: recoveryAskDueUntil) {
         case .now:
@@ -174,18 +184,23 @@ extension StreamClient {
             #if DEBUG
             print("recording: asked the Mac for a keyframe (\(forStart ? "the start's \(recordingStart.asks)" : "the chain broke"))")
             #endif
+            return true
         case .at(let t):
-            guard recordingStart.heldAsk == nil else { return }
+            guard recordingStart.heldAsk == nil else { return false }
             let generation = recordingGeneration
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.recordingGeneration == generation else { return }
                 self.recordingStart.heldAsk = nil
-                self.recordingAsk(forStart: forStart)
+                if self.recordingAsk(forStart: forStart), forStart, self.recording.phase == .starting {
+                    self.scheduleRecordingStart(generation)
+                }
             }
             recordingStart.heldAsk = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0, t - now), execute: work)
+            return false
         case .awaitRecovery:
             if forStart { recordingStart.asks += 1; recordingStart.lastAsk = recoveryLastAsk ?? now }
+            return true
         }
     }
 
@@ -230,6 +245,7 @@ extension StreamClient {
         recordingGeneration += 1
         removeRecordingObservers()
         recordingStart.heldAsk?.cancel()
+        recordingStart.next?.cancel()
         recordingStart = RecordingStart()
         recordingEndedAt = ProcessInfo.processInfo.systemUptime
         defer { DeviceIdleTimer.shared.update() }

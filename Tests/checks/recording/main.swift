@@ -642,20 +642,25 @@ final class Sim {
         while j < queue.count, queue[j].at < at { queue[j].at = at; j += 1 }
     }
 
-    /// The recording's ask (rule 2): now, at its second, or the recovery's awaited.
-    func recordingAsk(_ now: Double, forStart: Bool) {
+    /// The recording's ask (rule 2): now, at its second (one held at a time), or the recovery's awaited; true when
+    /// it went now or is awaited, as StreamClient+Recording's.
+    @discardableResult
+    func recordingAsk(_ now: Double, forStart: Bool) -> Bool {
         let due = recoveryOpen ? recoveryAskedAt.map { $0 + 4 } : nil
         switch P.keyframeAsk(now: now, lastAsk: asks.last, recoveryDueUntil: due) {
         case .now:
             ask(now, recording: true)
             if forStart { startAsks += 1; lastStartAsk = now }
+            return true
         case .at(let t):
-            guard !heldAsk else { return }
+            guard !heldAsk else { return false }
             heldAsk = true
             timers.append((t, forStart ? "startask-held" : "ask-held"))
+            return false
         case .awaitRecovery:
             if forStart { startAsks += 1; lastStartAsk = recoveryAskedAt }
             seen.awaited += 1
+            return true
         }
     }
 
@@ -755,8 +760,9 @@ final class Sim {
         apply(actions, now)
     }
 
-    /// While "Starting…": the next ask or the give-up; something is always due.
+    /// While "Starting…": the next ask or the give-up, one step pending at a time; something is always due.
     func schedule(_ now: Double) {
+        timers.removeAll { $0.what == "startask" || $0.what == "giveup" }
         switch P.starting(now: now, lightAt: dev(tLight), asks: startAsks, lastAsk: lastStartAsk, wait: 4) {
         case .askAt(let at):
             if at < now - 1e-9 { broke("run \(run): an ask due before now") }
@@ -782,13 +788,14 @@ final class Sim {
             if phase == "recording" { recordingAsk(now, forStart: false) }
         case "startask-held":
             heldAsk = false
-            if phase == "count" || (phase == "starting" && tl?.waitingForStart == true) { recordingAsk(now, forStart: true) }
+            if phase == "count" || (phase == "starting" && tl?.waitingForStart == true) {
+                if recordingAsk(now, forStart: true), phase == "starting" { schedule(now) }
+            }
         case "light":
             light(now)
         case "startask":
             guard phase == "starting", tl?.waitingForStart == true else { return }
-            recordingAsk(now, forStart: true)
-            schedule(now + 1e-6)
+            if recordingAsk(now, forStart: true) { schedule(now) }
         case "giveup":
             guard phase == "starting", tl?.waitingForStart == true else { return }
             if now < dev(tLight) + P.startGiveUp - 1e-6 { broke("run \(run): gave up \(now - dev(tLight)) s after the light") }
