@@ -3,7 +3,7 @@ import Network
 import CryptoKit
 
 // FileHub with FileStore, LockPolicy and the ledgers, fed a device's kinds 34 and 49 as StreamServer hands them on
-// (with the lock's reading as they arrived), on a scratch folder of its own (.build/checks/file-hub/scratch-<pid>),
+// (with the lock's reading as they arrived), on a scratch folder of its own (under .build/checks/file-hub: `scratch` below),
 // never ~/Downloads; no network (the connections are never started), no host, no encoder.
 var failures = 0
 var checks = 0
@@ -12,10 +12,14 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     if !ok { failures += 1; print("FAIL (line \(line)): \(what())") }
 }
 let fm = FileManager.default
-let scratch = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/checks/file-hub/scratch-\(getpid())", isDirectory: true)
+/// The run's scratch folder: the one module.py gives it (SILL_CHECK_SCRATCH), which it removes however the run ends (a
+/// crash or its time limit too), else .build/checks/file-hub/scratch-<pid> for a binary run by hand. Removed here at
+/// every exit (`exit` skips a `defer` at the top level, which left one of them behind each run until 2026-11-19).
+let scratch = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SILL_CHECK_SCRATCH"]
+                  ?? fm.currentDirectoryPath + "/.build/checks/file-hub/scratch-\(getpid())", isDirectory: true)
 try? fm.removeItem(at: scratch)
 try! fm.createDirectory(at: scratch, withIntermediateDirectories: true)
-defer { try? fm.removeItem(at: scratch) }
+atexit { try? FileManager.default.removeItem(at: scratch) }
 func sha(_ d: Data) -> String { Base64URL.encode(Data(SHA256.hash(data: d))) }
 func listing(_ url: URL) -> [String] { ((try? fm.contentsOfDirectory(atPath: url.path)) ?? []).filter { $0 != FileStore.stagingName }.sorted() }
 func staged(_ url: URL) -> [String] { ((try? fm.contentsOfDirectory(atPath: url.appendingPathComponent(FileStore.stagingName).path)) ?? []).sorted() }

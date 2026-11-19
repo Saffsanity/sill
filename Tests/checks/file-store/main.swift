@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-// FileStore on a scratch folder of its own (.build/checks/file-store/scratch-<pid>), never ~/Downloads: the
+// FileStore on a scratch folder of its own (under .build/checks/file-store: `scratch` below), never ~/Downloads: the
 // destination and its hidden staging folder, parts written and hashed, a wrong hash and a short file refused, a
 // collision with a file and with a link, the quarantine and Where from read back, mode 0644, links refused,
 // leftovers cleaned, the free space, errno's meaning.
@@ -12,10 +12,14 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     if !ok { failures += 1; print("FAIL (line \(line)): \(what())") }
 }
 let fm = FileManager.default
-let scratch = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/checks/file-store/scratch-\(getpid())", isDirectory: true)
+/// The run's scratch folder: the one module.py gives it (SILL_CHECK_SCRATCH), which it removes however the run ends (a
+/// crash or its time limit too), else .build/checks/file-store/scratch-<pid> for a binary run by hand. Removed here at
+/// every exit (`exit` skips a `defer` at the top level, which left one of them behind each run until 2026-11-19).
+let scratch = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SILL_CHECK_SCRATCH"]
+                  ?? fm.currentDirectoryPath + "/.build/checks/file-store/scratch-\(getpid())", isDirectory: true)
 try? fm.removeItem(at: scratch)
 try! fm.createDirectory(at: scratch, withIntermediateDirectories: true)
-defer { try? fm.removeItem(at: scratch) }
+atexit { try? FileManager.default.removeItem(at: scratch) }
 func sha(_ d: Data) -> String { Base64URL.encode(Data(SHA256.hash(data: d))) }
 func mode(_ url: URL) -> mode_t { var st = stat(); return lstat(url.path, &st) == 0 ? st.st_mode & 0o7777 : 0 }
 func xattr(_ url: URL, _ name: String) -> Data? {

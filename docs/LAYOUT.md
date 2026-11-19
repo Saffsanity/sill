@@ -1133,7 +1133,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `.build/checks/<name>/` and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's sources with `import
   StreamProtocol` stripped), or a `module.txt` naming the files `module.py` compiles as one module.
-  `list.sh` prints every check with what it checks (no table is kept by hand); `run-all.sh
+  `module.py` gives each run of such a check a scratch folder (`SILL_CHECK_SCRATCH`,
+  `.build/checks/<name>/scratch-<pid>`) and removes it however the run ends (a crash, its 300 s limit, a
+  signal), and at the next run any such folder whose process is gone; a check that writes files writes
+  only there (file-store, file-hub, device-files). `list.sh` prints every check with what it checks (no table is kept by hand); `run-all.sh
   [--mutants] [-v] [name…]` runs them and exits with the number that failed (a folder whose `run.sh`
   is not executable fails); `common.sh` is sourced by each `run.sh`; `mutant-checks.py` gives CI the
   checks with mutants, read from the folders; `repo-rules` fails a check folder without its

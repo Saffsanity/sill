@@ -7,7 +7,7 @@ import CryptoKit
 // payload), hands kinds 34 and 49 to a real FileHub as `onFileMessage` does and writes the hub's kind 49s back, and
 // records every message it read, in order. The device dials it, reads the Mac's messages with its own MessageReader
 // and hands kind 49 to DeviceFiles, as StreamClient does. Files go into a scratch folder of the check's own
-// (.build/checks/device-files/scratch-<pid>), never ~/Downloads; nothing else of the host runs. Every wait waits for
+// (under .build/checks/device-files: `scratch` below), never ~/Downloads; nothing else of the host runs. Every wait waits for
 // what it needs, with a generous limit, never a fixed sleep that a slow machine could overrun, but where a check
 // is that nothing happens (a hold, a cancel), which it watches for a while.
 var failures = 0
@@ -17,10 +17,14 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     if !ok { failures += 1; print("FAIL (line \(line)): \(what())") }
 }
 let fm = FileManager.default
-let scratch = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/checks/device-files/scratch-\(getpid())", isDirectory: true)
+/// The run's scratch folder: the one module.py gives it (SILL_CHECK_SCRATCH), which it removes however the run ends (a
+/// crash or its time limit too), else .build/checks/device-files/scratch-<pid> for a binary run by hand. Removed here at
+/// every exit (`exit` skips a `defer` at the top level, which left one of them behind each run until 2026-11-19).
+let scratch = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SILL_CHECK_SCRATCH"]
+                  ?? fm.currentDirectoryPath + "/.build/checks/device-files/scratch-\(getpid())", isDirectory: true)
 try? fm.removeItem(at: scratch)
 try! fm.createDirectory(at: scratch, withIntermediateDirectories: true)
-defer { try? fm.removeItem(at: scratch) }
+atexit { try? FileManager.default.removeItem(at: scratch) }
 func now() -> Double { ProcessInfo.processInfo.systemUptime }
 // A whole run takes seconds; one that stalls everywhere (a mutant) fails here, well before module.py's 300 s limit.
 Thread.detachNewThread {

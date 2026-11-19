@@ -11,10 +11,23 @@ From a check's mutants.py: `module.mutate(CHECK, MUTANTS, ROOT)`, where each mut
 from ROOT, old, new), or with `old` and `new` lists of the same length for several replacements at
 once. Each must be found exactly once, compile, and make the check fail; the last line printed counts
 them ("N of M mutants caught"), which is what run_mutants in common.sh reads. The repository is never
-changed: sources and mutants are copied to a temporary directory."""
-import glob, os, subprocess, sys, tempfile
+changed: sources and mutants are copied to a temporary directory.
+
+A check that writes files (file-store, file-hub, device-files) does so in the scratch folder each run
+is given, SILL_CHECK_SCRATCH: ROOT/.build/checks/CHECK/scratch-<this process's id>, removed before the
+run and after it however it ends (passed, failed, crashed, past its time limit, this script stopped by
+a signal), and any scratch-<id> folder there whose process is gone (one SIGKILL left) at the next run.
+A device-files run made 375 MB of them, and 11 GB had to be removed by hand on 2026-11-18."""
+import glob, os, shutil, signal, stat, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# How long one run of a check may take: past it the run is stopped and counts as failed (exit -9).
+LIMIT = 300
+
+# A signal that stops this script (a heavy job stopped, a terminal closed) unwinds it, so `run`'s
+# `finally` removes the scratch folder and subprocess.run stops the check it was running.
+for _sig in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(_sig, lambda n, _f: sys.exit(128 + n))
 
 
 def module(check):
@@ -59,9 +72,56 @@ def build(check, root, exe, overrides=None):
         return r.returncode == 0, r.stdout + r.stderr
 
 
-def run(exe):
-    r = subprocess.run([exe], capture_output=True, text=True, timeout=300)
-    return r.returncode, r.stdout + r.stderr
+def remove_tree(path):
+    """`path` and everything in it, whatever a check left read-only; never follows a link out of it."""
+    def retry(func, p, _exc):
+        try:
+            os.chmod(os.path.dirname(p), stat.S_IRWXU)
+            if not os.path.islink(p) and os.path.isdir(p):
+                os.chmod(p, stat.S_IRWXU)
+            func(p)
+        except OSError:
+            pass
+    if os.path.lexists(path):
+        shutil.rmtree(path, onerror=retry)
+
+
+def sweep(base):
+    """Every scratch-<id> folder in `base` whose process is gone (a run stopped by SIGKILL, or a check run
+    by hand that crashed): removed. A live process's is left alone."""
+    for entry in glob.glob(os.path.join(base, "scratch-*")):
+        pid = os.path.basename(entry)[len("scratch-"):].split("-")[0]
+        if not pid.isdigit():
+            continue
+        try:
+            os.kill(int(pid), 0)
+            continue                  # alive: its own run removes it
+        except ProcessLookupError:
+            remove_tree(entry)
+        except PermissionError:
+            continue                  # alive, another user's
+
+
+def run(exe, check=None, root=None):
+    """Runs a check's binary: (its exit status, its output). With `check` and `root`, in a scratch folder of
+    its own (SILL_CHECK_SCRATCH), removed however the run ends; past LIMIT the run is stopped (-9)."""
+    env, scratch = None, None
+    if check and root:
+        base = os.path.join(root, ".build", "checks", check)
+        os.makedirs(base, exist_ok=True)
+        sweep(base)
+        scratch = os.path.join(base, f"scratch-{os.getpid()}")
+        remove_tree(scratch)
+        env = dict(os.environ, SILL_CHECK_SCRATCH=scratch)
+    try:
+        r = subprocess.run([exe], capture_output=True, text=True, timeout=LIMIT, env=env)
+        return r.returncode, r.stdout + r.stderr
+    except subprocess.TimeoutExpired as e:
+        out = "".join(x.decode(errors="replace") if isinstance(x, bytes) else (x or "") for x in (e.stdout, e.stderr))
+        return -9, out + f"\nFAIL: stopped after {LIMIT} s\n"
+    finally:
+        if scratch:
+            remove_tree(scratch)
 
 
 def mutate(check, mutants, root):
@@ -82,7 +142,7 @@ def mutate(check, mutants, root):
             if not ok:
                 print(f"DOES NOT COMPILE {name}: {log[:400]}", flush=True)
                 continue
-            code, out = run(exe)
+            code, out = run(exe, check, root)
             failed = [l[5:] for l in out.splitlines() if l.startswith("FAIL")]
             hit = code != 0
             caught += hit
@@ -101,6 +161,6 @@ if __name__ == "__main__":
     if not ok:
         print(log)
         sys.exit(2)
-    code, out = run(exe)
+    code, out = run(exe, check, root)
     print(out, end="")
     sys.exit(code)
