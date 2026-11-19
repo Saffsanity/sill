@@ -51,6 +51,8 @@ final class HostSettings {
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
+        /// Set at the first launch of a build that asks `HostConfig.sendAudioToSave` (issue #419).
+        static let sendAudioSettled = "sendAudioSettled"
         static let offConsoleView = "offConsoleView"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
@@ -118,6 +120,19 @@ final class HostSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = HostConfig.app
+        // An update must not turn the Mac's sound on by itself (issue #419): an install that ran an
+        // earlier Sill.app keeps Send Audio off until its user turns it on. Before `register`, so the
+        // keys read here are only what was saved (and launch arguments).
+        let ranBefore = [Key.settingsTab, Key.askedScreenRecording, Key.permissionsOnboardingDismissed,
+                         Key.maxFPS, Key.virtualDisplay, UpdatePolicy.Stored.lastCheckKey]
+            .contains { defaults.object(forKey: $0) != nil }
+        if let v = HostConfig.sendAudioToSave(saved: defaults.object(forKey: Key.sendAudio) as? Bool,
+                                              settled: defaults.bool(forKey: Key.sendAudioSettled),
+                                              ranBefore: ranBefore) {
+            defaults.set(v, forKey: Key.sendAudio)
+            print("Send Audio: off after the update; turn it on in the menu to hear the Mac on your devices.")
+        }
+        defaults.set(true, forKey: Key.sendAudioSettled)
         defaults.register(defaults: [
             Key.maxFPS: base.maxFPS,
             Key.captureScale: Double(base.captureScale),
