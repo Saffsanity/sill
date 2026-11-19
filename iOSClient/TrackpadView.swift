@@ -77,9 +77,9 @@ private struct DotGrid: View {
 /// Follow the Pointer's link from a trackpad to the picture it moves the pointer over (StreamZoom.FollowPointer, PR
 /// #327): the picture's zoom, read at each move of the pointer (the picture can zoom without the trackpad being made
 /// again), and the picture's follow, handed the pointer (a fraction of the frame) after a move with the switch on
-/// while the picture is zoomed. The stream screen gives it to what is under it (`.environment(\.trackpadFollow, …)`):
-/// every `TrackpadView` there takes it, the upright pad and any laid over the picture alike (`moveCursor`). Without
-/// one, the whole picture and nothing to follow.
+/// while the picture is zoomed. The portrait stream screen gives it to everything on it (`.environment(\.trackpadFollow,
+/// …)` on its body), so every `TrackpadView` there takes it, the upright pad and one laid over the picture alike
+/// (`moveCursor`); the landscape screen has no trackpad. Without one, the whole picture and nothing to follow.
 struct TrackpadFollow {
     var zoom: () -> StreamZoom = { StreamZoom() }
     var follow: (CGPoint) -> Void = { _ in }

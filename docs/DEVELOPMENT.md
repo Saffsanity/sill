@@ -982,7 +982,7 @@ two-finger scroll is the same either way). Off, both are as before: the picture
 moves only under two fingers, and the pad moves the pointer as far across the
 frame at any zoom. Nothing else moves the picture by itself: a finger on it, the
 Pencil, the iPad's own pointer and the Mac's pointer (kind 26) never do. The
-stream screen gives every trackpad under it the picture's zoom and follow
+portrait stream screen gives every trackpad on it the picture's zoom and follow
 (`TrackpadFollow`, in the environment), which `TrackpadSurface.moveCursor` reads
 at each move and follows only with the switch on: the upright pad today, and a
 pad laid over the picture the same way once that one can zoom.

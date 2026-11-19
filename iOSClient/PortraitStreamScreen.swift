@@ -215,6 +215,12 @@ struct PortraitStreamScreen: View {
                 halves(geo.size, origin: geo.frame(in: .global).origin)
             }
         }
+        // Follow the Pointer (StreamZoom.FollowPointer, PR #327; off unless turned on), for every trackpad on
+        // this screen (TrackpadFollow): each reads the picture's zoom at each move of its pointer and, with the
+        // switch on, the zoomed picture follows that pointer near the pane's edges.
+        .environment(\.trackpadFollow, TrackpadFollow(
+            zoom: { [zoom] in zoom.zoom },
+            follow: { [zoom, client] point in zoom.followTrackpadPointer(point, videoSize: client.videoSize) }))
     }
 
     // MARK: Two halves: the inner display, an iPad window
@@ -728,12 +734,6 @@ struct PortraitStreamScreen: View {
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
-            // Follow the Pointer (StreamZoom.FollowPointer, PR #327; off unless turned on): the pad reads the
-            // picture's zoom at each move and, with the switch on, the zoomed picture follows its pointer near
-            // the pane's edges (TrackpadFollow).
-            .environment(\.trackpadFollow, TrackpadFollow(
-                zoom: { [zoom] in zoom.zoom },
-                follow: { [zoom, client] point in zoom.followTrackpadPointer(point, videoSize: client.videoSize) }))
     }
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }

@@ -846,9 +846,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   this device's switch in the Settings panel's This iPad or This iPhone, after Reverse Scrolling, off unless
   turned on, `Sill.followPointer`, never sent, over the trackpad's pointer moving a
   zoomed picture near the pane's edges, `followTrackpadPointer`, and its step undone by the zoom, `padStep`; the
-  stream screen gives every trackpad under it the picture's zoom and follow, `TrackpadFollow` in TrackpadView.swift,
-  through the environment, which `TrackpadSurface.moveCursor` reads at each move and follows only with the switch
-  on), `ThumbnailHold` (how long a window's thumbnail is
+  portrait stream screen gives every trackpad on it the picture's zoom and follow, `TrackpadFollow` in
+  TrackpadView.swift, through the environment, which `TrackpadSurface.moveCursor` reads at each move and follows
+  only with the switch on), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
   in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
