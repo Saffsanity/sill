@@ -970,6 +970,11 @@ Each group of commits is built, checked with its mutants, pushed and noted here 
    Settings rows and the pinned Stop row, both stream screens, the connect screen's note, MockCatalog,
    ContentView's contract, `recording.cases`.
 8. Done (run 2): the privacy manifest's DiskSpace (E174.1, 85F4.1); release-ios.sh checks the two Files keys.
+   Gates in run 2: G1 (`recording` 83 of 83 mutants, `device-idle` 18 of 18, lock-policy's new one), G3 (the rig's
+   ten cases, every gate, after its first run found the still window's 0.067 s movie: AVAssetWriter does not give a
+   last sample the session's end, so each picture is held until the next gives its duration, as Risks foresaw), G4
+   (the iOS app Debug and Release for the simulator and Debug for a device), G6 (76 of 76). G5's photos: see the
+   step file.
 9. Partly: docs/LAYOUT.md, docs/BUILD-AND-RUN.md and the step file; the proposed words for README, the support and
    privacy pages and the App Store are in the step file, not yet in their pages.
 10. Not started: an independent read-only review of the branch, then Noah's devices.

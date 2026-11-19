@@ -1029,7 +1029,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   before the display (the pre-roll from "1", then every frame, parameter set and sound message, at most
   32 MB of frames queued), its own queue `sill.recorder` carrying out `RecordingTimeline`'s actions
   (AVAssetWriter, its own samples with deltas marked not sync, the Mac's sound through its own
-  AudioDecoder to AAC at 160 kbps, fragments every 4 s, each part's end at the stop's time, the
+  AudioDecoder to AAC at 160 kbps, fragments every 4 s, each picture held until the next gives its duration and the
+  last until the part's end at the stop's time, the
   writer's status, the light's numbers and space once a second); AVFoundation, CoreMedia and
   AudioToolbox only, its folder, protection and free space from its caller, so the rig compiles it on
   the Mac. `StreamClient+Recording` (A287/F287): Start (space first), the count, the keyframe ask at

@@ -176,3 +176,22 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
     keyframe and lasted the 9 s; Starting… against an older Mac asked at 5.0, 9.2 and 13.3 s and gave up with no
     movie; the space rule stopped a recording 10 s in, its movie whole; a locked Mac's placeholder made a movie of
     its own between the Desktop's two; the Desktop stepping to another size made "(2)".
+- **Verified** (run 2):
+  - CI: run 44510170041 on 2596f194 and run 44517315333 on 25a89d99 (the recorder's last code change and this
+    step file) passed: `swift build -c release`, every pure check, the iOS app for the simulator, the CLI.
+  - The first hold of the heavy lock (06:00 to 06:30; HEAD 4b36e876, its iOS builds of d6ec05f9's tree): the
+    release build (the known CaptureProbe warning alone); `recording` 400 checks, `device-idle` 53, `lock-policy`
+    1,413, `compatibility` 177, `recording-notice` 23; mutants: `recording` 81 of 84 (two gaps, now cases, and one
+    equivalent mutant, now out), `device-idle` 18 of 18, and of `lock-policy` its one new mutant, caught (its other
+    188 not run: only main.swift changed, and each of their patterns still matches once, a text check); the iOS app
+    Debug and Release for the simulator and Debug for a device, `** BUILD SUCCEEDED **` each, with the known
+    StreamClient capture warning and one new (the note's observer, fixed); the built Info.plist carries both Files
+    keys, the built privacy manifest DiskSpace, the binary one DiskSpace symbol; `Tests/checks/run-all.sh` 76 of 76.
+  - The second hold (06:57 to 07:02; HEAD 25a89d99): `recording` 403 checks and its two re-run mutants caught, so
+    83 of 83; the rig, every gate of its ten cases (plain: 20 s, 1,183 pictures of which the 5 keyframes are the
+    sync samples, all 20 clicks within 0.1 ms of their second; still: 13 s from one picture; still-sound: 13 s,
+    13 clicks within 0.1 ms; parts: two movies; oldmac-still: from the kept keyframe, 9 s; oldmac-gaveup: asks at
+    5.0, 9.2 and 13.3 s, the give-up, no movie; oldmac-moving: from the Mac's own keyframe; kill: 7.96 s kept of 9;
+    full: stopped for space at 10 s, the movie whole; lock: three movies); the iOS app Debug for the simulator, `**
+    BUILD SUCCEEDED **` with the known warning alone.
+  - Not run here: `release-ios.sh` (it archives and signs); nothing on a device.
