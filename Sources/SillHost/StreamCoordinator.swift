@@ -4141,8 +4141,11 @@ package final class StreamCoordinator {
         let target = CGMainDisplayID() != d.displayID ? CGMainDisplayID()
             : (catalog.desktopCandidates.first { $0.role == .screen && $0.id != d.displayID }?.id ?? CGMainDisplayID())
         let name = SafeText.label(VirtualStage.screen(for: target)?.localizedName ?? "the main display", limit: 64)
-        guard AXIsProcessTrusted(), let area = WindowSizer.visibleArea(around: bounds),
-              let mainArea = WindowSizer.visibleArea(around: CGDisplayBounds(target)), mainArea != area else { return (0, 0, name) }
+        let targetBounds = CGDisplayBounds(target)
+        // Each display's visible area as AppKit has it, or its bounds where NSScreen does not list it: never another's.
+        let area = WindowSizer.visibleArea(around: bounds).flatMap { $0.intersects(bounds) ? $0 : nil } ?? bounds
+        guard AXIsProcessTrusted(), !targetBounds.isEmpty, !targetBounds.intersects(bounds) else { return (0, 0, name) }
+        let mainArea = WindowSizer.visibleArea(around: targetBounds).flatMap { $0.intersects(targetBounds) ? $0 : nil } ?? targetBounds
         let screens = WindowSizer.displayFrames()
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return (0, 0, name)
