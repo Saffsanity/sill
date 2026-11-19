@@ -496,6 +496,8 @@ struct StreamScreen: View {
             .duoStatusBar(posture, size: geo.size)
             .modifier(FullScreenSystem(hidden: hidden))
             .environment(\.largerPictureOffered, offersLarger)
+            // Whether the Mac takes a pinch, for every trackpad on this screen (TrackpadView: Pinch's Zoom on ‹Mac›).
+            .environment(\.macTakesPinch, PinchRouting.macTakes(client.hostPinch))
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
             // what streams, on a phone held upright, each time one of them or the outcome changes.

@@ -437,35 +437,20 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     /// One event of the Mac's pinch or turn, from a stroke of fingers or a connected trackpad, through
-    /// `macPinch`: a began only with a place on the picture (the stroke's, or the pointer's), a change or an end
-    /// only while its began is out, every event of one gesture at its began's place.
+    /// `macPinch` (MacPinchSent.event): a began only with a place on the picture (the stroke's, or the pointer's
+    /// `point`), a change or an end only while its began is out, every event of one gesture at its began's place.
+    /// The first to begin stops a coasting flick and hands this device the pointer, as a scroll does.
     private func sendMac(_ kind: MacPinchSent.Kind, _ phase: StreamZoom.Stroke.MacStep.Phase, _ value: Double,
                          from source: MacPinchSent.Source, at point: CGPoint? = nil) {
         // Only to a Mac that takes the pinch (the window list's `pinch`): one that stopped taking it (another
         // session) is sent nothing more of what was open.
         guard macTakesPinch() else { macPinch.forget(); return }
-        let place: (x: Double, y: Double)?
-        switch phase {
-        case .began:
-            let at = point ?? zoomStroke.macAt
-            place = macPinch.place(source) ?? at.flatMap { normalized($0, clamped: true) }
-            guard let place else { return }
-            if !macPinch.isOpen { momentum.stop(); setOwnPointer(nil, .none) }
-            macPinch.began(kind, source, at: place)
-        case .changed:
-            guard let p = macPinch.at(kind, source) else { return }
-            place = p
-        case .ended:
-            guard let p = macPinch.at(kind, source) else { return }
-            place = p
-            macPinch.ended(kind)
-        }
-        guard let place else { return }
-        let wirePhase: PinchPhase = phase == .began ? .began : phase == .changed ? .changed : .ended
-        switch kind {
-        case .magnify: send(.magnify(wirePhase, x: place.x, y: place.y, amount: value))
-        case .rotate: send(.rotate(wirePhase, x: place.x, y: place.y, degrees: value))
-        }
+        let wasOpen = macPinch.isOpen
+        guard let event = macPinch.event(kind, phase, value, from: source, at: { [self] in
+            (point ?? zoomStroke.macAt).flatMap { normalized($0, clamped: true) }
+        }) else { return }
+        if phase == .began, !wasOpen { momentum.stop(); setOwnPointer(nil, .none) }
+        send(event)
     }
 
     /// The iPad's trackpad (two fingers) or a Magic Mouse over the picture: the finger pan's path, at
@@ -2249,6 +2234,38 @@ struct InputOverlay: UIViewRepresentable {
             // (a teardown, say), and writing the binding there is a "modifying state during
             // view update" warning waiting to happen.
             DispatchQueue.main.async { isKeyboardShown = shown }
+        }
+    }
+}
+
+// MARK: - The Mac's pinch and turn, as they go out
+
+extension MacPinchSent {
+    /// One step of the Mac's pinch or turn from `source` (PinchRouting's MacPinchSent, which keeps what is open), as
+    /// the wire's event (`InputEvent.magnify`, `.rotate`), or nil when nothing goes: a began needs a place (a frame
+    /// fraction, from `place`: nil when there is nowhere, and then nothing goes) unless `source` has a gesture open,
+    /// whose place it joins; a change or an end goes only while its began is out, at its place. For the picture's
+    /// input view and for a trackpad of Sill's own alike.
+    mutating func event(_ kind: Kind, _ phase: StreamZoom.Stroke.MacStep.Phase, _ value: Double, from source: Source,
+                        at place: () -> (x: Double, y: Double)?) -> InputEvent? {
+        let at: (x: Double, y: Double)
+        switch phase {
+        case .began:
+            guard let p = self.place(source) ?? place() else { return nil }
+            at = p
+            began(kind, source, at: p)
+        case .changed:
+            guard let p = self.at(kind, source) else { return nil }
+            at = p
+        case .ended:
+            guard let p = self.at(kind, source) else { return nil }
+            at = p
+            ended(kind)
+        }
+        let wire: PinchPhase = phase == .began ? .began : phase == .changed ? .changed : .ended
+        switch kind {
+        case .magnify: return .magnify(wire, x: at.x, y: at.y, amount: value)
+        case .rotate: return .rotate(wire, x: at.x, y: at.y, degrees: value)
         }
     }
 }
