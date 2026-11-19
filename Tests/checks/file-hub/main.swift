@@ -358,6 +358,12 @@ do {
     check(rig.sent.isEmpty, "a folder: nothing offered")
     rig.hub.send([src.appendingPathComponent("gone.bin")], to: ipad); rig.flush()
     check(rig.sent.isEmpty, "a file that is not there: nothing offered")
+    // Not a regular file: a named pipe would block the hub's queue on its first read, so it is never offered.
+    let fifo = src.appendingPathComponent("pipe")
+    check(mkfifo(fifo.path, 0o600) == 0, "a named pipe made")
+    rig.hub.send([fifo], to: ipad); rig.flush()
+    check(rig.sent.isEmpty, "a named pipe: nothing offered")
+    unlink(fifo.path)
     rig.hub.send([macFiles[2]], to: ipad); rig.flush()
     rig.hub.send([macFiles[0]], to: ipad); rig.flush()
     check(rig.sent.filter { $0.knownOp == .offer }.count == 1, "a second transfer to a device while one runs: not offered")
@@ -419,8 +425,14 @@ do {
     c = fresh()
     o = started(c, shrinking)
     let h = try! FileHandle(forWritingTo: shrinking); try! h.truncate(atOffset: 100_000); try! h.close()
+    let before = rig.parts.all.count
     drain(rig, c)
     check(rig.last(.cancel).map { $0.transfer == o.transfer && $0.reason == "cantRead" } == true, "a file that shrank: cantRead, the device told")
+    // Never a short part: each one the offer's 64 KiB, or the rest of the file it offered (a short read stops it).
+    let size = o.files![0].size
+    let shrunk = rig.parts.unpacked.suffix(rig.parts.all.count - before + 1)
+    check(shrunk.allSatisfy { UInt64($0.bytes.count) == min(65_536, size - $0.offset) && $0.total == size },
+          "no short part of a file that shrank: \(shrunk.map { $0.bytes.count })")
 }
 
 do {
