@@ -394,6 +394,14 @@ _ = partly.packet(epoch: 1, seq: 5, index: 0, segmentStart: false, time: 2)
 r = partly.packet(epoch: 1, seq: 6, index: 0, segmentStart: false, time: Double(48_480 - 100) / 48_000)
 check(r.1 == [.tail(fadeOut: true), .packet(index: 0, from: 100, count: 380, fadeIn: true, hold: 240)],
       "100 frames behind the end: those trimmed, faded in: \(r.1)")
+// A packet that follows its seq but lands behind the track's end (the picture moved the sound on with silence):
+// its overlapping frames trimmed, and faded in where it now starts.
+var trimmed = Sound(); trimmed.format(epoch: 1, F)
+_ = trimmed.packet(epoch: 1, seq: 0, index: 0, segmentStart: true, time: 1.0)
+check(trimmed.follow(picture: Double(48_480 + 100) / 48_000 + 0.5) == [.tail(fadeOut: true), .silence(100)], "silence 100 frames past the packet")
+check(trimmed.packet(epoch: 1, seq: 1, index: 0, segmentStart: false, time: 1.01)
+      == (.decode(reset: false), [.packet(index: 0, from: 100, count: 380, fadeIn: true, hold: 240)]),
+      "the next seq trimmed by those 100 frames, faded in")
 let stopW = partly.stop(at: Double(partly.end + 960) / 48_000)
 check(stopW == [.tail(fadeOut: true), .silence(960)] && partly.held == 0, "the stop: the tail out, silence to it: \(stopW)")
 check(partly.stop(at: 0).isEmpty, "a second stop: nothing")
@@ -452,6 +460,7 @@ var waits = TL(withSound: false)
 check(waits.begin(.atNextKeyframe, sets: 1, preroll: [], lastKeyframe: nil, seeds: [], light: 5).isEmpty && waits.waitingForStart, "Starting…")
 check(waits.frame(id: 1, stamp: 10, isKeyframe: false, arrival: 6).isEmpty, "a delta while Starting…: a seed")
 check(waits.frame(id: 2, stamp: 10.5, isKeyframe: true, arrival: 6.5) == [.open(part: 1, sets: 1), .picture(id: 2, at: 0)], "the keyframe is 0:00")
+check(near(waits.elapsed(arrival: 6.5), Clock.tick, 1e-9), "the light's time starts at that keyframe (a tick after it), not at a delta before it: \(waits.elapsed(arrival: 6.5) ?? -1)")
 var nothing = TL(withSound: false)
 _ = nothing.begin(.atNextKeyframe, sets: 1, preroll: [], lastKeyframe: nil, seeds: [], light: 5)
 check(nothing.stop(arrival: 10).isEmpty && nothing.parts == 0, "stopped while Starting…: no movie")

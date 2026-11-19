@@ -94,8 +94,9 @@ M = [
     ("no ask after a picture not written", C, "        chain.lost() ? [.askKeyframe] : []", "        chain.lost() ? [] : []"),
     ("a later part's 0:00 at the first's", C, "            actions += openPart(at: t)\n", "            actions += openPart(at: 0)\n"),
     ("the sound left behind the picture", C, "            let writes = sound!.follow(picture: t - partStart)\n", "            let writes: [RecordedSound.Write] = []\n"),
-    ("a delta starts the movie", C, "            guard isKeyframe, sets != nil else {\n                clock.seed(", "            guard sets != nil else {\n                clock.seed("),
-    ("no keyframe waited for after a close", C, "        chain.restart()\n", ""),
+    ("a delta sets the movie's 0:00", C, "            guard isKeyframe, sets != nil else {\n                clock.seed(", "            guard sets != nil else {\n                clock.seed("),
+    # Not a mutant: `chain.restart()` at a part's close is unobservable, since only a keyframe opens a part (take's
+    # guard), so a delta between parts is dropped either way.
     ("the last keyframe at its stamp's time", C, "            actions.append(.picture(id: k.id, at: 0))", "            actions.append(.picture(id: k.id, at: clock.place(clock.seed(stamp: k.stamp, arrival: k.arrival), arrival: k.arrival)))"),
     # Rule 7: the sound.
     ("the drift limit 40 ms", S, "    static let driftLimit = 0.020\n", "    static let driftLimit = 0.040\n"),
