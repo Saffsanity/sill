@@ -562,6 +562,11 @@ struct ContentView: View {
 ///   plays (how far it trails the picture, the need, late packets, the error, frames added and
 ///   dropped, jumps, duplicates), and in manual rendering where each click of a synthetic host's test
 ///   tone was heard, against where it was placed and when it was due.
+/// * The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md): `-SillSettingsCase
+///   vdesk|vdeskon|vdeskunpaired|vdeskunavailable` its switch off, on and shown at 1218 × 800, 60 Hz, on a
+///   session the Mac does not say is paired (disabled), or where the Mac cannot make it (disabled, the
+///   Mac's note), with `-SillSettingsScroll vdesk` at its row; `-SillDesktopDisplays 3,3,v` the last
+///   stop the Virtual Desktop (the button's dashed screen over "Virtual").
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -744,16 +749,23 @@ struct LayoutHarness: View {
 
     /// `-SillDesktopDisplays 3,2`: the mock's Mac has three stops and the Desktop is on the second
     /// (DesktopDisplays: the Desktop button reads "Desktop 2"); `2` alone, the first. Named as a MacBook's
-    /// screens would be, or by `-SillDesktopDisplayNames 'A|B|C'`.
+    /// screens would be, or by `-SillDesktopDisplayNames 'A|B|C'`. A last part `v`: the last stop is the
+    /// Virtual Desktop (`WindowList.desktopVirtual`, phase 2b), named so: `3,3,v` shows the button on it.
     private static func withDisplays(_ client: StreamClient) -> StreamClient {
-        let parts = (UserDefaults.standard.string(forKey: "SillDesktopDisplays") ?? "").split(separator: ",").compactMap { Int($0) }
+        let raw = (UserDefaults.standard.string(forKey: "SillDesktopDisplays") ?? "").split(separator: ",").map(String.init)
+        let parts = raw.compactMap { Int($0) }
         if let count = parts.first {
             client.hostDesktopDisplays = count
             client.hostDesktopDisplay = parts.count > 1 ? parts[1] : 1
             let given = (UserDefaults.standard.string(forKey: "SillDesktopDisplayNames") ?? "").split(separator: "|").map(String.init)
             let mock = ["Built-in Retina Display", "DELL U2723QE", "LG HDR 4K", "Studio Display", "Sidecar Display (iPad)",
                         "BenQ PD2705U", "SAMSUNG", "PHL 346B1C", "ASUS PA279CV"]
-            client.hostDesktopDisplayNames = given.count == count ? given : (0..<max(0, count)).map { mock[$0 % mock.count] }
+            var names = given.count == count ? given : (0..<max(0, count)).map { mock[$0 % mock.count] }
+            if raw.last == "v", count > 1 {
+                client.hostDesktopVirtual = count
+                if given.count != count { names[count - 1] = DesktopDisplays.virtualDesktopName }
+            }
+            client.hostDesktopDisplayNames = names
         }
         return client
     }

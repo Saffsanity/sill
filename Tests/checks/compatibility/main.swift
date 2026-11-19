@@ -217,11 +217,11 @@ check(Wire.decode(AudioFormat.self, from: Data(#"{"cookie":"not base64!"}"#.utf8
 check([AudioFormat.sourceApp, AudioFormat.sourceDesktop, AudioFormat.sourceTest] == ["app", "desktop", "test"], "the source's words")
 // Send Audio (kind 16's settings, kind 17's change) and the audio note.
 let withSound = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                               directWireless: false, sendAudio: true)
+                               directWireless: false, sendAudio: true, virtualDesktop: nil)
 check(json(withSound).contains(#""sendAudio":true"#) && Wire.decode(StreamSettings.self, from: Wire.encode(withSound)) == withSound,
       "StreamSettings carries sendAudio and round-trips")
 let noSound = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                             directWireless: false, sendAudio: nil)
+                             directWireless: false, sendAudio: nil, virtualDesktop: nil)
 check(!json(noSound).contains("sendAudio"), "a host without sound leaves sendAudio out")
 check(Wire.decode(OldStreamSettings.self, from: Wire.encode(withSound))
       == OldStreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false, directWireless: false),
@@ -349,6 +349,87 @@ check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) 
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")
+
+// Phase 2b of docs/virtual-desktop-plan.md (as revised 2026-11-18): the Virtual Desktop's fields, each optional and
+// additive. The window list's `desktopVirtual` (its stop's number); kind 16's `settings.virtualDesktop` (the switch)
+// and `virtualDesktopState` (the connection's view: available, note, shown, size, hz); kind 17's `virtualDesktop`;
+// kind 9's `room`. Each left out when nil, nil from a peer before 2b, and skipped by 0.6.2's readers (the `…Of062`
+// types: the fields as v0.6.2 shipped them).
+var virtualStop = named
+virtualStop.desktopDisplays = 3
+virtualStop.desktopDisplay = 3
+virtualStop.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE", "Sill Desktop"]
+virtualStop.desktopVirtual = 3
+check(json(virtualStop).contains(#""desktopVirtual":3"#), "a list with the Virtual Desktop's stop says which: \(json(virtualStop))")
+check(!json(named).contains("desktopVirtual") && named.desktopVirtual == nil, "a list without it (the initializer's) leaves the key out")
+check(decodedOld != nil && decodedOld?.desktopVirtual == nil, "an older host's list decodes, desktopVirtual nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(virtualStop)).map { $0.desktopVirtual == 3 && $0.desktopDisplays == 3 && $0.desktopDisplay == 3 } == true,
+      "desktopVirtual round-trips beside the stops")
+struct ListOf062: Decodable { var macName: String; var desktopDisplays: Int?; var desktopDisplay: Int?; var desktopDisplayNames: [String]? }
+check(Wire.decode(ListOf062.self, from: Wire.encode(virtualStop)).map {
+          $0.desktopDisplays == 3 && $0.desktopDisplay == 3 && $0.desktopDisplayNames?.last == "Sill Desktop"
+      } == true, "a 0.6.2 device skips desktopVirtual and reads the stop as Desktop 3, with its name")
+let withVD = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: true,
+                            directWireless: false, sendAudio: true, virtualDesktop: true)
+check(json(withVD).contains(#""virtualDesktop":true"#) && Wire.decode(StreamSettings.self, from: Wire.encode(withVD)) == withVD,
+      "kind 16's settings carry virtualDesktop and round-trip")
+check(!json(withSound).contains("virtualDesktop") && Wire.decode(StreamSettings.self, from: Wire.encode(withSound))?.virtualDesktop == nil,
+      "a host without it leaves the key out, and a device reads nil (no row)")
+check(Wire.decode(StreamSettings.self, from: Wire.encode(StreamSettings(maxFPS: 60, bitrate: 1, captureScale: 1, prioritizeSpeed: true,
+                                                                          virtualDisplay: false, directWireless: nil, sendAudio: nil,
+                                                                          virtualDesktop: false)))?.virtualDesktop == false,
+      "off is said, not left out")
+struct SettingsOf062: Decodable, Equatable {
+    var maxFPS: Int; var bitrate: Int; var captureScale: Double; var prioritizeSpeed: Bool; var virtualDisplay: Bool
+    var directWireless: Bool?; var sendAudio: Bool?
+}
+check(Wire.decode(SettingsOf062.self, from: Wire.encode(withVD))
+      == SettingsOf062(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: true, directWireless: false, sendAudio: true),
+      "a 0.6.2 device reads the settings and skips virtualDesktop")
+var vdState = HostSettingsState(settings: withVD, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false, sessionPaired: true)
+vdState.virtualDesktopState = VirtualDesktopState(available: true, shown: true, size: VirtualDesktopState.size(widthPt: 1218, heightPt: 800, scale: 2), hz: 60)
+check(json(vdState).contains(#""virtualDesktopState":{"available":true,"hz":60,"shown":true,"size":"1218x800@2"}"#),
+      "kind 16 carries the connection's Virtual Desktop: \(json(vdState))")
+check(Wire.decode(HostSettingsState.self, from: Wire.encode(vdState)) == vdState, "…and round-trips")
+check(Wire.decode(OldState.self, from: Wire.encode(vdState))
+      == OldState(settings: OldStreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: true,
+                                              directWireless: false),
+                  persistent: true, virtualDisplayAvailable: true, softwareEncoder: false),
+      "an older device reads it and skips the Virtual Desktop's state and switch")
+check(!json(HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)).contains("virtualDesktop"),
+      "a host without it: neither key")
+let unavailable = VirtualDesktopState(available: false, note: "Needs Screen Recording", shown: false)
+check(json(unavailable) == #"{"available":false,"note":"Needs Screen Recording","shown":false}"#, "a state with a note, nothing else: \(json(unavailable))")
+check(Wire.decode(VirtualDesktopState.self, from: Data(#"{"available":true,"shown":false,"sizes":["device"],"rates":[60],"later":1}"#.utf8))
+      == VirtualDesktopState(available: true, shown: false), "a later host's state decodes, phase 3's sizes and rates skipped")
+check(Wire.decode(VirtualDesktopState.self, from: Data(#"{"available":true}"#.utf8)) == nil
+      && Wire.decode(VirtualDesktopState.self, from: Data(#"{"shown":true}"#.utf8)) == nil, "available and shown are said by every host that sends it")
+check(VirtualDesktopState.size(widthPt: 1218, heightPt: 800, scale: 2) == "1218x800@2" && VirtualDesktopState.size(widthPt: 800, heightPt: 1218, scale: 1) == "800x1218@1",
+      "a size's words: points, then the scale")
+check(VirtualDesktopState.parse("1218x800@2").map { $0.widthPt == 1218 && $0.heightPt == 800 && $0.scale == 2 } == true
+      && VirtualDesktopState.parse(VirtualDesktopState.size(widthPt: 3840, heightPt: 2160, scale: 1)).map { $0.widthPt == 3840 && $0.scale == 1 } == true,
+      "a size read back")
+check(["", "device", "main", "1218x800", "x800@2", "1218x@2", "1218x800@0", "1218x-800@2", "0x800@2", "1218×800@2", "1218x800@2@2", "1x2x3@2",
+       "1218x800@", " 1218x800@2"].allSatisfy { VirtualDesktopState.parse($0) == nil }, "anything else is no size")
+check(HostSettingsChange(virtualDesktop: true).isEmpty == false && HostSettingsChange(virtualDesktop: false).isEmpty == false,
+      "a change with only virtualDesktop is not empty")
+check(HostSettingsChange(virtualDesktop: true).applied(to: withSound).virtualDesktop == true
+      && HostSettingsChange(virtualDesktop: false).applied(to: withVD).virtualDesktop == false
+      && HostSettingsChange(maxFPS: 60).applied(to: withVD).virtualDesktop == true,
+      "applied(to:) lays virtualDesktop over the settings and keeps it when the change has none")
+check(json(HostSettingsChange(token: 5, virtualDesktop: true)) == #"{"token":5,"virtualDesktop":true}"#,
+      "kind 17 with the Virtual Desktop: \(json(HostSettingsChange(token: 5, virtualDesktop: true)))")
+check(Wire.decode(OldChange.self, from: Wire.encode(HostSettingsChange(token: 5, virtualDesktop: true))) == OldChange(token: 5),
+      "an older host reads it as an empty change: a device sends it only to a host that reported the switch")
+let roomy = Viewport(width: 1376, height: 950, scale: nil, fps: 120, room: ViewportRoom(width: 1376, height: 1032))
+check(json(roomy) == #"{"fps":120,"height":950,"room":{"height":1032,"width":1376},"width":1376}"#, "kind 9 with the room: \(json(roomy))")
+check(Wire.decode(Viewport.self, from: Wire.encode(roomy)) == roomy, "…round-trips")
+check(!json(Viewport(width: 1376, height: 950, scale: nil, fps: 120)).contains("room"), "no room, no key (every device before 2b)")
+struct ViewportOf062: Decodable, Equatable { var width: Double; var height: Double; var scale: Double?; var localCursor: Bool?; var fps: Int? }
+check(Wire.decode(ViewportOf062.self, from: Wire.encode(roomy)) == ViewportOf062(width: 1376, height: 950, scale: nil, localCursor: nil, fps: 120),
+      "a 0.6.2 host reads the viewport and skips the room")
+check(Wire.decode(Viewport.self, from: Data(#"{"width":1133,"height":744,"fps":60}"#.utf8)).map { $0.room == nil && $0.width == 1133 } == true,
+      "a 0.6.2 device's viewport: no room")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil

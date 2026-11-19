@@ -767,7 +767,7 @@ struct PortraitStreamScreen: View {
     /// (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams, in each bar's bottom margin.
     private func desktopButton(width: CGFloat? = nil) -> some View {
         let desktop = client.desktopButton
-        return barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label, width: width,
+        return barButton(open: client.active == .desktop, symbol: desktop.symbol, label: desktop.label, width: width,
                          accessibilityLabel: desktop.accessibilityLabel,
                          action: { client.tapDesktop() })
             .desktopStops(desktop, inset: metrics.phone ? 1.5 : metrics.buttonHeight >= 58 ? 3.5 : 2.5,

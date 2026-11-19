@@ -21,13 +21,22 @@ import CoreGraphics
 /// 1920 × 1080. The rate: the device's (the viewport's `fps`: 120 on ProMotion, 60 otherwise and in Low Power Mode),
 /// held to 24…the Mac's Frame Rate limit; 60 with no viewport.
 ///
+/// Following the device (phase 2b, plan §5; `Follow`, `followStep`): the matched device's room, turned, folded or resized,
+/// is taken after 1 s steady and at most once every 3 s, in the way probe P2's verdict allows (`followWay`, one line: by
+/// default not at all until the display is made again, the one way that rests on nothing unmeasured).
+///
 /// Pure (CoreGraphics); checked by Tests/checks/virtual-desktop.
-enum VirtualDesktopSize {
+package enum VirtualDesktopSize {
     /// A display's size in points and its scale (pixels a point).
-    struct Size: Equatable {
-        var widthPt: Int
-        var heightPt: Int
-        var scale: Int
+    package struct Size: Equatable {
+        package var widthPt: Int
+        package var heightPt: Int
+        package var scale: Int
+
+        package init(widthPt: Int, heightPt: Int, scale: Int) { self.widthPt = widthPt; self.heightPt = heightPt; self.scale = scale }
+
+        /// The same size a quarter turned: the device held the other way.
+        package var turned: Size { Size(widthPt: heightPt, heightPt: widthPt, scale: scale) }
     }
 
     static let minSide = 800
@@ -93,5 +102,215 @@ enum VirtualDesktopSize {
         let what = id.map { "id \($0)" } ?? "TEST ONLY: none made, SILL_TEST_HEADLESS"
         let whose = device.map { "for \($0), its screen" } ?? "at \(fallback.widthPt)×\(fallback.heightPt): no device's screen known yet"
         return "Headless display: created \(mode)\(askedWords) (\(what)) \(whose)."
+    }
+
+    // MARK: The person's choice (Noah, 2026-11-18: "allow the user to select resolution"; the plan's §4 choices)
+
+    /// The Virtual Desktop's size as the person chooses it (HostConfig.virtualDesktopSize: Sill for Mac's Settings ›
+    /// Displays, the CLI's --virtual-desktop=…; a device's pickers are phase 3's): This device (`deviceChoice`, the
+    /// default: `device(room:panel:)`, and it follows the device), the main display's mode (`mainChoice`: `main`), or one
+    /// of `offered` by its id ("1920x1080@2"). None but This device follows a device.
+    package enum Choice: Equatable {
+        case device
+        case main
+        case fixed(Size)
+    }
+
+    package static let deviceChoice = "device"
+    package static let mainChoice = "main"
+
+    /// The sizes offered after This device and Same as main display, from the plan's list (§4, the 11-12 plan's §3) held
+    /// to Sill's own bounds: at Retina, 1440 × 900 to 2560 × 1440 ("5K"), no side under 800 points; at 1x, 1920 × 1080,
+    /// 2560 × 1440 and 3440 × 1440. The 6K and 8K entries and 1280 × 720 wait for phase 3's self test of each size.
+    package static let offered: [Size] = [
+        Size(widthPt: 1440, heightPt: 900, scale: 2), Size(widthPt: 1512, heightPt: 982, scale: 2),
+        Size(widthPt: 1728, heightPt: 1117, scale: 2), Size(widthPt: 1920, heightPt: 1080, scale: 2),
+        Size(widthPt: 1920, heightPt: 1200, scale: 2), Size(widthPt: 2560, heightPt: 1440, scale: 2),
+        Size(widthPt: 1920, heightPt: 1080, scale: 1), Size(widthPt: 2560, heightPt: 1440, scale: 1),
+        Size(widthPt: 3440, heightPt: 1440, scale: 1),
+    ]
+
+    /// A size's id: "1920x1080@2" (VirtualDesktopState.size's form).
+    package static func id(_ s: Size) -> String { "\(s.widthPt)x\(s.heightPt)@\(s.scale)" }
+
+    /// Every id the person may choose, in the pickers' order.
+    package static var choiceIDs: [String] { [deviceChoice, mainChoice] + offered.map(id) }
+
+    /// The choice an id names; nil for anything not offered (HostConfig.validated takes This device then).
+    package static func choice(_ id: String) -> Choice? {
+        if id == deviceChoice { return .device }
+        if id == mainChoice { return .main }
+        return offered.first { Self.id($0) == id }.map { .fixed($0) }
+    }
+
+    /// The refresh rates offered: 0, the device's (the default), then 30, 60 and 120 Hz.
+    package static let rateChoices = [0, 30, 60, 120]
+
+    /// The display's rate for the person's choice `choice` (0: the device's, `rate(viewportFPS:limit:)`), held to 24 and
+    /// to the Mac's Frame Rate limit (`limit`); an unknown choice is the device's.
+    static func rate(choice: Int, viewportFPS: Int?, limit: Int) -> Int {
+        guard choice != 0, rateChoices.contains(choice) else { return rate(viewportFPS: viewportFPS, limit: limit) }
+        return min(max(24, limit), choice)
+    }
+
+    /// "Same as main display": the main display's mode as the person set it (`points`, its "looks like" size; `scale`, its
+    /// pixels a point, 1 or 2), the 11-12 plan's §2: its scale kept, its pixels held inside 3840 × 2160 turned to its
+    /// shape (its points shrinking evenly at its scale, whole points), then, at 2x, as Sill's displays are held (no side
+    /// under 800 points, none over 4096). Nil with no size. Its rate is the person's rate choice, as for any size.
+    package static func main(points: CGSize, scale: Int) -> Size? {
+        guard usable(points) else { return nil }
+        let s = scale >= 2 ? 2 : 1
+        var w = Double(points.width).rounded(), h = Double(points.height).rounded()
+        let box = w >= h ? (wide: 3840.0, high: 2160.0) : (wide: 2160.0, high: 3840.0)
+        let fit = min(1, box.wide / (w * Double(s)), box.high / (h * Double(s)))
+        if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }   // the box's own edge kept whole
+        if s == 2 { return device(room: CGSize(width: w, height: h), panel: nil) }
+        return Size(widthPt: max(1, Int(w)), heightPt: max(1, Int(h)), scale: 1)
+    }
+
+    /// The CLI's `--virtual-desktop=VALUE`: a size choice (`device`, `main` or one of `offered` as "WxH@S"), and a rate
+    /// after a colon (`:30`, `:60`, `:120`; none: the device's). Nil for anything else.
+    package static func flag(_ value: String) -> (size: String, hz: Int)? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard (1...2).contains(parts.count), choice(parts[0]) != nil else { return nil }
+        guard parts.count == 2 else { return (parts[0], 0) }
+        guard let hz = Int(parts[1]), hz != 0, rateChoices.contains(hz) else { return nil }
+        return (parts[0], hz)
+    }
+
+    /// The person's choice in words, for Sill for Mac's pickers and the log: "Match the device", "Same as main display",
+    /// "1920 × 1080 (Retina)", "3440 × 1440"; an id not offered reads as This device.
+    package static func words(_ id: String) -> String {
+        switch choice(id) ?? .device {
+        case .device: return "Match the device"
+        case .main: return "Same as main display"
+        case .fixed(let s): return "\(s.widthPt) × \(s.heightPt)" + (s.scale == 2 ? " (Retina)" : "")
+        }
+    }
+
+    /// A rate choice in words: "Match the device", "30 Hz", "60 Hz", "120 Hz".
+    package static func rateWords(_ hz: Int) -> String { hz == 0 || !rateChoices.contains(hz) ? "Match the device" : "\(hz) Hz" }
+
+    // MARK: Following the device (phase 2b, docs/virtual-desktop-plan.md §5 as revised 2026-11-18)
+
+    /// How the Virtual Desktop follows its matched device's room (a turn, the Duo's fold, a Stage Manager window resized,
+    /// Full Screen's Room choice changed): the verdict of probe P2 (`Scripts/display-modes-probe/run.sh --make`, on a Mac
+    /// at rest; PR #408), which only Noah can run, since it makes a display.
+    enum FollowWay: Equatable, CaseIterable {
+        /// Not at all: the size waits for the next time the display is made (the plan's "else, in 2b"). It makes the
+        /// display with one mode, as every display Sill has made, so it rests on nothing P2 has not measured.
+        case nextMake
+        /// In place, among the modes it was made with: the room both ways (`otherModes`), switched with public
+        /// CoreGraphics (VirtualDisplay.switchMode). P2's "in place by the modes listed at creation: yes".
+        case listedModes
+        /// In place, the live display given the new mode (VirtualDisplay.applyModes, then switchMode), made with the room
+        /// both ways so its backing holds a turn. P2's "new modes on the live display: yes".
+        case newModes
+        /// Removed and made again at the new size, its windows kept by DesktopWindowLedger (phase 3's way); never the
+        /// headless display, the Mac's only screen (plan §2: no display to fall back to).
+        case remake
+    }
+
+    /// P2's verdict, the one line that chooses (plan §5): `.nextMake` until Noah has run the probe, the way that is safe
+    /// without it. P2 "yes" by the listed modes is `.listedModes`, by new modes `.newModes`.
+    static let followWay: FollowWay = .nextMake
+
+    /// The modes the Desktop's display is made with besides `size` (VirtualDisplay's `otherModes`): its turn for a way in
+    /// place, so a device turning needs no new mode and the backing holds both (VirtualDisplay.maxPixels); none for the
+    /// others: one mode, as every display Sill has made.
+    static func otherModes(_ size: Size, way: FollowWay) -> [Size] {
+        switch way {
+        case .listedModes, .newModes: return size.turned == size ? [] : [size.turned]
+        case .nextMake, .remake: return []
+        }
+    }
+
+    /// What one follow does.
+    enum FollowStep: Equatable {
+        /// The display is that size already.
+        case nothing
+        /// The Mac is locked: nothing changes the displays at a locked screen (plan §2 and §10); asked again at the unlock.
+        case later
+        /// The live display switched to a mode it was made with (VirtualDisplay.switchMode).
+        case switchMode
+        /// The live display given the new mode, then switched to it (VirtualDisplay.applyModes).
+        case newModes
+        /// Removed and made again at the new size, its windows kept (DesktopWindowLedger).
+        case remake
+        /// Left as it is: the next one made has the new size.
+        case nextMake
+    }
+
+    /// How the display at `display`, made with the modes `listed`, follows the room's new size `to` in the way `way`:
+    /// nothing locked; the headless display (the Mac's only screen) only in place, never removed and made again.
+    static func followStep(to: Size, display: Size, listed: [Size], way: FollowWay, headless: Bool, locked: Bool) -> FollowStep {
+        if to == display { return .nothing }
+        if locked { return .later }
+        switch way {
+        case .nextMake: return .nextMake
+        case .listedModes: return listed.contains(to) ? .switchMode : .nextMake
+        case .newModes: return .newModes
+        case .remake: return headless ? .nextMake : .remake
+        }
+    }
+
+    /// The matched device's room over time, and when the display takes it (plan §5): once the room has kept a new size for
+    /// `settle` (1 s), and at most once every `spacing` (3 s) from the display's make or its last follow; a room that comes
+    /// back to the size taken within the settle changes nothing, and the newest size wins. A size here is `device`'s for
+    /// the room, so a change too small to change the display is none. The room is Full Screen's, so Sill's controls, its
+    /// drawer, Settings or the keyboard coming and going never change it. Times are seconds on one clock.
+    struct Follow: Equatable {
+        static let settle: Double = 1
+        static let spacing: Double = 3
+
+        /// The size the display was made at, or last took (or left for its next make).
+        private(set) var taken: Size
+        /// A size the room has had since `since`, not yet taken.
+        private(set) var pending: Size?
+        private(set) var since: Double = 0
+        /// The display's make or its last follow.
+        private(set) var lastChange: Double
+
+        init(made size: Size, at now: Double) {
+            taken = size
+            lastChange = now
+        }
+
+        /// The matched device's room at `now`, as a display size (each of its viewports).
+        mutating func saw(_ size: Size, at now: Double) {
+            if size == taken { pending = nil; return }
+            if size != pending { pending = size; since = now }
+        }
+
+        enum Due: Equatable { case nothing, wait(until: Double), follow(Size) }
+
+        /// Whether a follow is due at `now`: the size to follow to, or when to look again.
+        func due(now: Double) -> Due {
+            guard let pending else { return .nothing }
+            let ready = max(since + Self.settle, lastChange + Self.spacing)
+            return now >= ready ? .follow(pending) : .wait(until: ready)
+        }
+
+        /// The follow to `size` was done at `now` (or left for the next make: `FollowStep.nextMake`); a newer size the room
+        /// has meanwhile stays pending.
+        mutating func took(_ size: Size, at now: Double) {
+            taken = size
+            if pending == size { pending = nil }
+            lastChange = now
+        }
+    }
+
+    /// The follow's line: "Virtual Desktop: iPad mini turned; 800×1218 pt in place.", "…; the next one is made at 800×1218
+    /// pt." (no way in place), "…; made again at …" (`.remake`); nil when nothing is done. `display` names whose (the
+    /// headless display's: "Headless display").
+    static func followLine(_ display: String = "Virtual Desktop", device: String, from: Size, to: Size, step: FollowStep) -> String? {
+        let what = to == from.turned ? "turned" : "changed its room"
+        let size = "\(to.widthPt)×\(to.heightPt) pt"
+        switch step {
+        case .nothing, .later: return nil
+        case .switchMode, .newModes: return "\(display): \(device) \(what); \(size) in place."
+        case .remake: return "\(display): \(device) \(what); made again at \(size)."
+        case .nextMake: return "\(display): \(device) \(what); the next one is made at \(size)."
+        }
     }
 }

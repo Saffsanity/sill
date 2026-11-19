@@ -84,6 +84,33 @@ final class WindowSizer {
         func name(_ p: Placement) -> String { WindowRestore.name(app: p.appName, title: p.title) }
     }
 
+    /// The Virtual Desktop's window moves (DesktopWindowLedger.Access, phase 2b): AXWindows' reads and writes, and a window
+    /// taken out of full screen first, waiting at most `fullScreenWait` for it to be a normal window again (2 s, as the
+    /// stage's `leaveFullScreenIfNeeded`), on the main actor; with none (Quit and the signals, which cannot wait), a window
+    /// in full screen is left to macOS. The waits block the main actor, so they happen only as the Virtual Desktop goes.
+    @MainActor struct DesktopWindows: @MainActor DesktopWindowLedger.Access {
+        let ax: AXWindows
+        var fullScreenWait: TimeInterval = 2
+        func frame(_ p: Placement) -> CGRect? { ax.frame(p) }
+        func isFullScreen(_ p: Placement) -> Bool { ax.isFullScreen(p) }
+        func isListed(_ p: Placement) -> Bool { ax.isListed(p) }
+        func visibleArea(around r: CGRect) -> CGRect? { ax.visibleArea(around: r) }
+        func setPosition(_ p: Placement, _ origin: CGPoint) -> WindowRestore.Write { ax.setPosition(p, origin) }
+        func setSize(_ p: Placement, _ size: CGSize) -> WindowRestore.Write { ax.setSize(p, size) }
+        func put(_ p: Placement, at frame: CGRect) -> Bool { ax.put(p, at: frame) }
+        func name(_ p: Placement) -> String { ax.name(p) }
+        func leaveFullScreen(_ p: Placement) -> Bool {
+            guard fullScreenWait > 0 else { return false }
+            _ = WindowSizer.perform(.fullScreen, element: p.element)
+            let deadline = Date().addingTimeInterval(fullScreenWait)
+            while Date() < deadline {
+                if !WindowSizer.isFullScreen(p.element), WindowSizer.liveBounds(of: p.windowID) != nil { return true }
+                usleep(100_000)
+            }
+            return !WindowSizer.isFullScreen(p.element)
+        }
+    }
+
     /// An Accessibility write's answer as WindowRestore takes it: cannotComplete is what a messaging
     /// timeout returns (a busy app, which may still apply the write).
     private static func write(_ e: AXError) -> WindowRestore.Write {

@@ -59,8 +59,9 @@ import Foundation
 // `sessionPaired` tells the device's panel, which disables its switch on a session that may not.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
-/// stream, one (Direct Wireless) for how devices reach the Mac, and one (Send Audio) for what they
-/// hear of it. Plain values, never enums: an unknown case would fail an older reader's whole decode.
+/// stream, one (Direct Wireless) for how devices reach the Mac, one (Send Audio) for what they
+/// hear of it, and one (the Virtual Desktop) for a display of Sill's own. Plain values, never enums: an
+/// unknown case would fail an older reader's whole decode.
 public struct StreamSettings: Codable, Hashable, Sendable {
     /// Frame rate limit: a ceiling; each device still gets its own panel's rate below it.
     public var maxFPS: Int
@@ -84,13 +85,21 @@ public struct StreamSettings: Codable, Hashable, Sendable {
     /// host without sound (the device's switch shows off and disabled, says to update the Mac, and
     /// never sends it).
     public var sendAudio: Bool?
+    /// The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18): a display of Sill's own, the
+    /// last of the Desktop's stops after the Mac's screens, by default the size and refresh rate of the device that shows
+    /// it (Noah, 2026-11-18), there only while a device shows it and 30 s after. Off by default. A paired device sets it
+    /// for every device, home or away (`HostSettingsChange.virtualDesktop`), as the Mac's Settings and menu do; the
+    /// connection's view of it is `HostSettingsState.virtualDesktopState`. Optional because it came eighth: nil is a host
+    /// without it (the device shows no row and never sends it).
+    public var virtualDesktop: Bool?
 
-    /// `directWireless` and `sendAudio` have no default: every host must say, so the compiler finds
-    /// one that forgets.
+    /// `directWireless`, `sendAudio` and `virtualDesktop` have no default: every host must say, so the
+    /// compiler finds one that forgets.
     public init(maxFPS: Int, bitrate: Int, captureScale: Double, prioritizeSpeed: Bool, virtualDisplay: Bool,
-                directWireless: Bool?, sendAudio: Bool?) {
+                directWireless: Bool?, sendAudio: Bool?, virtualDesktop: Bool?) {
         self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
+        self.virtualDesktop = virtualDesktop
         self.directWireless = directWireless
         self.sendAudio = sendAudio
     }
@@ -222,6 +231,11 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     /// device that pairs during its session hears true. Nil from hosts before 2026-10-29, which took
     /// Direct Wireless from any session at home. The connection's own, like `away` and `link`.
     public var sessionPaired: Bool?
+    /// The Virtual Desktop as this connection sees it (`VirtualDesktopState`): nil from a host without it, which sends
+    /// `settings.virtualDesktop` nil too. Named so beside the settings' Bool `virtualDesktop` (the overview of
+    /// 2026-11-18, clash 7). The connection's own, like `sessionPaired`. Set after the initializer, as the window list's
+    /// `keyRepeat`.
+    public var virtualDesktopState: VirtualDesktopState?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,
@@ -233,6 +247,41 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
         self.away = away; self.link = link
         self.audioNote = audioNote
         self.sessionPaired = sessionPaired
+    }
+}
+
+/// The Virtual Desktop as one connection sees it (`HostSettingsState.virtualDesktopState`; phase 2b of
+/// docs/virtual-desktop-plan.md as revised 2026-11-18): whether this Mac can make it now and why not, whether the stream
+/// shows it, and the size and rate it has, or would have for this device. Plain values: a device reads a note it does
+/// not know as words to show. Phase 3 adds the sizes and rates offered, optional.
+public struct VirtualDesktopState: Codable, Hashable, Sendable {
+    /// This Mac can make it now: the private API, the AppKit loop, Screen Recording, this session on the console, the
+    /// guard for #380 clear.
+    public var available: Bool
+    /// Why it cannot, in the Mac's words ("Needs Screen Recording"), or what it is doing; nil while all is well.
+    public var note: String?
+    /// The stream shows it now.
+    public var shown: Bool
+    /// Its size in points and scale (`size(widthPt:heightPt:scale:)`, "1218x800@2"): the one it has while it exists, else
+    /// the one it would have for this device; nil before this device has sent its size.
+    public var size: String?
+    /// Its refresh rate in Hz, the same way.
+    public var hz: Int?
+
+    public init(available: Bool, note: String? = nil, shown: Bool, size: String? = nil, hz: Int? = nil) {
+        self.available = available; self.note = note; self.shown = shown; self.size = size; self.hz = hz
+    }
+
+    /// "1218x800@2": a size in points and its scale, as `size` gives it and phase 3's sizes will.
+    public static func size(widthPt: Int, heightPt: Int, scale: Int) -> String { "\(widthPt)x\(heightPt)@\(scale)" }
+
+    /// `size`'s parts, for a device's words ("1218 × 800"); nil for anything else.
+    public static func parse(_ size: String) -> (widthPt: Int, heightPt: Int, scale: Int)? {
+        let at = size.split(separator: "@", omittingEmptySubsequences: false)
+        guard at.count == 2, let scale = Int(at[1]), scale > 0 else { return nil }
+        let wh = at[0].split(separator: "x", omittingEmptySubsequences: false)
+        guard wh.count == 2, let w = Int(wh[0]), let h = Int(wh[1]), w > 0, h > 0 else { return nil }
+        return (w, h, scale)
     }
 }
 
@@ -258,12 +307,18 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     /// revised). The beta's hosts (2026-10-20 to 27) refused it, on or off, and named it in their log
     /// ("send audio (set on this Mac only)"), so a device's switch went back to the Mac's value.
     public var sendAudio: Bool?
+    /// The Virtual Desktop from a device's Settings panel (phase 2b): taken only from a paired session, home or away
+    /// (`HostSettingsState.sessionPaired`), on or off, for every device; refused with a line from any other, its answer
+    /// keeping the Mac's value. A device sends it only to a host that reported it (`StreamSettings.virtualDesktop`
+    /// non-nil); a host before 2b would drop it.
+    public var virtualDesktop: Bool?
 
     public init(token: Int? = nil, maxFPS: Int? = nil, bitrate: Int? = nil, captureScale: Double? = nil,
                 prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil, directWireless: Bool? = nil,
-                sendAudio: Bool? = nil) {
+                sendAudio: Bool? = nil, virtualDesktop: Bool? = nil) {
         self.token = token; self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
+        self.virtualDesktop = virtualDesktop
         self.directWireless = directWireless
         self.sendAudio = sendAudio
     }
@@ -271,7 +326,7 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     /// All setting fields nil (the token does not count).
     public var isEmpty: Bool {
         maxFPS == nil && bitrate == nil && captureScale == nil && prioritizeSpeed == nil && virtualDisplay == nil
-            && directWireless == nil && sendAudio == nil
+            && directWireless == nil && sendAudio == nil && virtualDesktop == nil
     }
 
     /// `s` with this change laid over it: the device's merge (its ledger, and the DEBUG mock's
@@ -287,6 +342,7 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
         if let v = virtualDisplay { r.virtualDisplay = v }
         if let v = directWireless { r.directWireless = v }
         if let v = sendAudio { r.sendAudio = v }
+        if let v = virtualDesktop { r.virtualDesktop = v }
         return r
     }
 }

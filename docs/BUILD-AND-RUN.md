@@ -11,6 +11,7 @@ swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no 
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default in the CLI; on in Sill.app)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it ([Hz] [WxH] after it: `60 800x830`)
+Scripts/display-modes-probe/run.sh [--make] [WxH] [HZ]   # TEST ONLY, P2 (phase 2b): the dry run (nothing made) by default; --make is Noah's, on a Mac at rest: a display with the room both ways as its modes, switched in place and given new modes, each change's ID, mode, callback flags and its window's place
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
 swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device's Settings panel turns it on or off too)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
@@ -37,9 +38,11 @@ SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 swift run -c release SillHost --virtual-display --no-headless-display   # no display of Sill's own when this Mac has no working screen (on by default, as in Sill.app's Settings › Virtual Display; PR #200)
+swift run -c release SillHost --virtual-desktop[=device|main|WxH@S[:HZ]]   # the Virtual Desktop for this run (off by default, as in Sill.app's Settings › Displays): the Desktop's last stop, by default the device's size and rate, else the main display's mode or a size of Sill for Mac's list (1920x1080@2…) and :30, :60 or :120; the AppKit loop as --virtual-display; it makes a display: never while Noah streams, never by an agent on this Mac
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
 python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
+Scripts/harness-photos.sh CASES   # with a case's `-SillDesktopDisplays 3,2` (stop 2 of 3; `-SillActive desktop` for the dots) or `3,3,v` (the last stop the Virtual Desktop: the dashed screen over "Virtual"), `-SillDesktopDisplayNames 'A|B|C'` names them
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
@@ -53,7 +56,10 @@ Scripts/agent-simulators.sh create      # once: the agents' simulators "Sill age
 Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main   # harness photos of HEAD (committed) on the agents' Duo, pixel for pixel against main's, in the heavy lock
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
 Scripts/headless-check/live.py OUT all  # Sill's own display for a Mac with no screen (PR #200) on loopback test hosts, SILL_TEST_HEADLESS, nothing made (~8 min)
+Scripts/desktop-check/live.py OUT       # the Desktop's stops and (phase 2b) the Virtual Desktop on loopback test hosts, SILL_TEST_DISPLAYS and SILL_TEST_VIRTUAL_DESKTOP, nothing made (~3 min)
+python3 Scripts/sillclient.py PORT 12 desktop --room=1133x744 --next-display@2 --next-display@4 --room-after=744x1133@7 --expect=desktopVirtual=3   # a device's room (Viewport.room) and its turn; lists print desktopVirtual=, states vdesk=…; --set=virtualDesktop=1 (a paired session), --expect=virtualDesktop=1,virtualDesktopShown=1,virtualDesktopSize=1218x800@2
 SILL_TEST_HEADLESS=$T/displays SILL_TEST_MAKE_GUARD=$T/guard SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 .build/release/SillHost --synthetic   # TEST ONLY: the host's displays are the file's lines (real, real asleep, standin, standin asleep, lid closed, screens asleep), read at each change, Sill's display only said to be made and removed; the guard for #380 (DisplayMakeGuard) in a folder of its own, never Sill.app's
+SILL_TEST_VIRTUAL_DESKTOP=1 SILL_TEST_VD_GRACE=3 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Virtual Desktop (phase 2b) available on a test host and only said to be made, one more stop after SILL_TEST_DISPLAYS' (whose stops are its screens; without them the hook is ignored), its grace 3 s in place of 30 (1 to 120); its rules, lines, stop and kind 16 state as on a Mac, nothing made
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
@@ -80,7 +86,8 @@ Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
 virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck,
-showPairingWindowToScreenSharing; the update check keeps
+showPairingWindowToScreenSharing, virtualDesktop, virtualDesktopSize (device, main or WxH@S),
+virtualDesktopHz (0, 30, 60, 120); the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
@@ -324,7 +331,11 @@ the Mac's sound's `-SillSound on|muted` (the mock Mac sends it, Send Audio on:
 Mute off or on; the mock plays nothing) and settings cases
 `sound|soundoff|soundnote|nosound` (the Send Audio switch on, off, on with the
 Mac's note, or a Mac without sound: the switch off and disabled, "Update
-Sill…", no Mute; `default` is Send Audio off with Mute), `-SillSettingsScroll
+Sill…", no Mute; `default` is Send Audio off with Mute), the Virtual Desktop's
+`vdesk|vdeskon|vdeskunpaired|vdeskunavailable` (its switch after Virtual Display's:
+off; on and shown, 1218 × 800 at 60 Hz; on a session the Mac does not say is paired,
+disabled; off where the Mac cannot make it, disabled with its note; `default` is a Mac
+before it, no row) with `-SillSettingsScroll vdesk` (the panel at its row), `-SillSettingsScroll
 sound|mute` (the panel at the Send Audio row, or at the Mute row under it), and in
 the normal app and under `-SillLive 1` `-SillSoundSink manual|device` (manual
 rendering, no output device: the simulator's default in every build; `device`

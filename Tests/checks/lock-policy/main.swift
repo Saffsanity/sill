@@ -430,6 +430,7 @@ full.keyRepeat = 1
 full.desktopDisplays = 2
 full.desktopDisplay = 1
 full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
+full.desktopVirtual = 2          // phase 2b: the second stop the Virtual Desktop
 let unlockedList = P.list(full, reading: .unlocked)
 check(sortedJSON(unlockedList) == sortedJSON(full) && Wire.encode(unlockedList).count == Wire.encode(full).count,
       "unlocked: the list as it is, byte for byte: \(sortedJSON(unlockedList))")
@@ -439,6 +440,7 @@ for rd in [Reading.screenLocked, .offConsole] {
     check(l.windows.isEmpty && l.clipboard == nil && !json(l).contains("clipboard"), "\(rd): no windows, no clipboard")
     check(l.desktopDisplays == nil && l.desktopDisplay == nil && l.desktopDisplayNames == nil && !json(l).contains("desktopDisplay")
           && !json(l).contains("DELL"), "\(rd): no displays or their names either (one stop: a device sends no kind 47, and learns nothing of the Mac's screens)")
+    check(l.desktopVirtual == nil && !json(l).contains("desktopVirtual"), "\(rd): no Virtual Desktop's stop either (phase 2b)")
     check(l.locked == true && json(l).contains(#""locked":true"#), "\(rd): `locked` true")
     check(rd == .offConsole ? (l.offConsole == true && json(l).contains(#""offConsole":true"#)) : (l.offConsole == nil && !json(l).contains("offConsole")),
           "\(rd): `offConsole` \(rd == .offConsole ? "true" : "left out")")
@@ -728,8 +730,9 @@ check(P.stricter(.take, .letGo) == .letGo && P.stricter(.letGo, .refuse(.input))
 let viewList = P.list(full, reading: .offConsole, offConsoleView: true)
 check(viewList.windows == full.windows && viewList.locked == true && viewList.offConsole == true && viewList.offConsoleView == true
       && viewList.clipboard == nil && json(viewList).contains(#""offConsoleView":true"#), "the view's list: the windows, `locked`, `offConsole` and `offConsoleView`, no clipboard")
-check(viewList.desktopDisplays == nil && viewList.desktopDisplay == nil && viewList.desktopDisplayNames == nil && !json(viewList).contains("desktopDisplay"),
-      "the view's list: no displays (one stop, this session's main display: no kind 47)")
+check(viewList.desktopDisplays == nil && viewList.desktopDisplay == nil && viewList.desktopDisplayNames == nil && !json(viewList).contains("desktopDisplay")
+      && viewList.desktopVirtual == nil && !json(viewList).contains("desktopVirtual"),
+      "the view's list: no displays, nor the Virtual Desktop's stop (one stop, this session's main display: no kind 47)")
 check(sortedJSON(P.list(full, reading: .offConsole)) == sortedJSON(P.list(full, reading: .offConsole, offConsoleView: false))
       && !json(P.list(full, reading: .offConsole)).contains("offConsoleView"), "the plain list off console: 0.6.0's, no `offConsoleView`")
 check(sortedJSON(P.list(full, reading: .screenLocked, offConsoleView: true)) == sortedJSON(P.list(full, reading: .screenLocked))

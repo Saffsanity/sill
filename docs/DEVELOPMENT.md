@@ -472,7 +472,8 @@ pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
 log shows input landing in each stop's own space. On the device,
 `-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
 harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
-them.
+them; `-SillDesktopDisplays 3,3,v` makes the last stop the Virtual Desktop
+(phase 2b), so the button shows its dashed screen over "Virtual".
 
 A Mac with no working screen (a MacBook with its lid closed and nothing
 attached, a Mac mini with no monitor; issues #61 and #298, addhumal's PR #200,
@@ -533,6 +534,41 @@ at each change, with Sill's display only said to be made and removed; and
 `Tests/checks/virtual-display-api` and `virtual-desktop` check the rules. No agent
 or test makes a real display on a Mac someone uses: the steps that need one are
 Noah's, in the step file of 2026-11-18 (`docs/steps/2026-11-18-virtual-desktop-2a.md`).
+
+The Virtual Desktop (phase 2b of `docs/virtual-desktop-plan.md` as revised
+2026-11-18; #281, #91): a desktop of Sill's own after this Mac's screens, the
+Desktop button's last stop. Off by default; turned on in Settings › Displays'
+"Add a desktop for your devices", the menu's Virtual Desktop item, a paired
+device's Settings panel (home or away; an unpaired one's switch is disabled), or
+the CLI's `--virtual-desktop[=device|main|WxH@S[:HZ]]` (`virtualDesktop`,
+`virtualDesktopSize`, `virtualDesktopHz` in `me.saffer.sill.mac`). A device steps
+onto it with its Desktop button (its dashed screen over "Virtual"); a device that
+turns it on is shown it at once. It is made then, at the device's size by default
+(its room with Sill's controls hidden, `Viewport.room`, at Retina, grown to 800
+points and held to 4096, as for a Mac with no screen) and rate, or the main
+display's mode or a size chosen in Settings › Displays (taken the next time it
+is made); kept while a device shows it and 30 s after, while locked until the
+unlock; removed at once off console or when turned off; at most one make or
+removal every 3 s and ten a minute; never the main display beside a real
+screen. The windows on it move to the main display as it goes and come back as
+it returns (Accessibility; memory only), and Quit moves them first. A turn of
+the device it was made for is taken by its next make until probe P2 says a way
+in place (`VirtualDesktopSize.followWay`, one line). It is the same display as a
+Mac with no screen's (one display in two roles): with no real screen it is that
+display. Sill.log: "Desktop: display 3 of 3 (Virtual Desktop), asked by iPad
+mini.", "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad
+mini (its screen).", "Virtual Desktop: iPad mini turned; the next one is made at
+800×1218 pt.", "Virtual Desktop: no device has shown it for 30 s; moved 3
+windows to Built-in Retina Display and removed it.", "Virtual Desktop: 2 of 3
+windows back in their places (1 was moved on the Mac).", "Virtual Desktop: kept
+while this Mac is locked; …", "Virtual Desktop: waited 2.1 s before making it (3
+s since the last change).", "Settings from iPad mini: virtual desktop off → on".
+On test hosts only: `SILL_TEST_VIRTUAL_DESKTOP=1` with `SILL_TEST_DISPLAYS` (its
+screens) says it makes it, as one more stop, and makes none;
+`SILL_TEST_VD_GRACE=<s>` shortens its 30 s; `Scripts/desktop-check/live.py OUT`
+runs its scenarios; `Tests/checks/virtual-desktop` checks its rules. The real
+trials (it makes a display) are Noah's, in the step file of 2026-11-18
+(`docs/steps/2026-11-18-virtual-desktop-2b.md`).
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
@@ -2132,7 +2168,7 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
   takes these too.
 - The Settings window on a short screen (issue #59):
   `-SillSettingsAfter '<s> <tab>[; <s> <tab> …]'` opens Settings on that tab
-  (its name or the start of one: `remote`, `general`, `virtual`) s seconds
+  (its name or the start of one: `remote`, `general`, `displays`, `virtual`) s seconds
   after launch, as the menu does, and 0.6 s later prints the window's frame,
   the pane's whole height and how much of it shows ("shows 596 of 909,
   scrolls"), the visible frame it fits in and the cap. A step can also be

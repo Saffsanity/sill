@@ -1,6 +1,7 @@
 """Mutants of the device's settings ledger (iOSClient/HostSettingsLedger.swift) and of the merge it
-uses in Sources/StreamProtocol/HostSettings.swift, the sound's seventh field and Direct Wireless's
-rule 10 among them: each must compile and fail the ledger check (main.swift). usage: mutants.py"""
+uses in Sources/StreamProtocol/HostSettings.swift, the sound's seventh field, Direct Wireless's rule 10 and the
+Virtual Desktop's eighth field and rule 11 among them: each must compile and fail the ledger check (main.swift).
+usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))
@@ -16,7 +17,7 @@ MUTANTS = {
     "L3 a change's fields without Send Audio": (LEDGER, "        if sendAudio != nil { f.append(.sendAudio) }\n", ""),
     "L4 Send Audio's single field as Direct Wireless": (LEDGER,
         "case .sendAudio: HostSettingsChange(sendAudio: sendAudio)", "case .sendAudio: HostSettingsChange(directWireless: sendAudio)"),
-    "L5 adding drops another pick's Send Audio": (LEDGER, "sendAudio: other.sendAudio ?? sendAudio)", "sendAudio: sendAudio)"),
+    "L5 adding drops another pick's Send Audio": (LEDGER, "sendAudio: other.sendAudio ?? sendAudio,", "sendAudio: sendAudio,"),
     "L6 rule 2: what is shown sent again": (LEDGER, "            guard single.applied(to: shown) != shown else { continue }\n", ""),
     "L7 rule 4: an answer clears every pick": (LEDGER, "for (field, entry) in pending where entry.token == token {",
                                                "for (field, entry) in pending {"),
@@ -35,6 +36,21 @@ MUTANTS = {
         "            if field == .directWireless, host?.takesDirectWireless == false { continue }\n",
         "            if host?.takesDirectWireless == false { continue }\n"),
     "L16 sessionPaired never kept": (WIRE, "        self.sessionPaired = sessionPaired\n", "        self.sessionPaired = nil\n"),
+    # The Virtual Desktop (phase 2b): the eighth field, rule 9 and rule 11 (only a paired session).
+    "L17 rule 9: the Virtual Desktop sent to a host without it": (LEDGER,
+        "            if field == .virtualDesktop, shown.virtualDesktop == nil { continue }\n", ""),
+    "L18 rule 11 dropped: the Virtual Desktop sent on an unpaired session": (LEDGER,
+        "            if field == .virtualDesktop, host?.takesVirtualDesktop != true { continue }\n", ""),
+    "L19 rule 11 lets a Mac that does not say through": (LEDGER,
+        "var takesVirtualDesktop: Bool { sessionPaired == true }", "var takesVirtualDesktop: Bool { sessionPaired != false }"),
+    "L20 a change's fields without the Virtual Desktop": (LEDGER, "        if virtualDesktop != nil { f.append(.virtualDesktop) }\n", ""),
+    "L21 the Virtual Desktop's single field as Send Audio": (LEDGER,
+        "case .virtualDesktop: HostSettingsChange(virtualDesktop: virtualDesktop)", "case .virtualDesktop: HostSettingsChange(sendAudio: virtualDesktop)"),
+    "L22 adding drops another pick's Virtual Desktop": (LEDGER, "virtualDesktop: other.virtualDesktop ?? virtualDesktop)", "virtualDesktop: virtualDesktop)"),
+    "L23 applied(to:) without the Virtual Desktop": (WIRE, "        if let v = virtualDesktop { r.virtualDesktop = v }\n", ""),
+    "L24 rule 11 holds back every field": (LEDGER,
+        "            if field == .virtualDesktop, host?.takesVirtualDesktop != true { continue }\n",
+        "            if host?.takesVirtualDesktop != true { continue }\n"),
 }
 caught = 0
 for name, (rel, old, new) in MUTANTS.items():

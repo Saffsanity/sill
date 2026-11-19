@@ -238,6 +238,9 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// The room the picture has with the controls hidden (Full Screen's, FullScreenPolicy.hiddenRoom), in points, measured
+    /// whether they show now or not: the viewport's `room`, which sizes the Mac's Virtual Desktop by default (phase 2b).
+    @State private var hiddenRoomSize: CGSize = .zero
     /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
     /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
     /// would redraw this whole screen at every step of a pinch): only the picture's own view watches it
@@ -389,6 +392,10 @@ struct StreamScreen: View {
             let room = FullScreenPolicy.room(size: geo.size, insets: insets, choice: Self.roomChoice,
                                              topIsStatusBar: !DuoLayout.phoneArrangement,
                                              foldTop: posture.info(in: geo.size).horizontalBand?.minY)
+            // The same room measured whether the controls show or not, for the Mac's Virtual Desktop (`Viewport.room`).
+            let hiddenRoom = FullScreenPolicy.hiddenRoom(reader: geo.size, readerInsets: Self.insets(geo.safeAreaInsets), insets: insets,
+                                                         choice: Self.roomChoice, topIsStatusBar: !DuoLayout.phoneArrangement,
+                                                         foldTop: posture.info(in: geo.size).horizontalBand?.minY)
             ZStack {
                 Group {
                     layouts(duo, size: geo.size, posture: posture, largerKeyboard: largerKeyboard, hidden: hidden, room: room)
@@ -471,6 +478,7 @@ struct StreamScreen: View {
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
             .onPreferenceChange(KeyboardToggleFrameKey.self) { keyboardToggleFrame = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
+            .onChange(of: hiddenRoom.size, initial: true) { _, size in hiddenRoomSize = size }
             // A thumbnail's lights hang from the strip, which Larger Picture's arrangement has none
             // of: when the arrangement changes under them (what streams changed, or a turn), they
             // close rather than wait, unseen, to come back with the strip.
@@ -561,6 +569,8 @@ struct StreamScreen: View {
         .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
+        // The room with the controls hidden (a turn, a fold, a resized window): the Mac's Virtual Desktop follows it.
+        .onChange(of: hiddenRoomSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
         // Full screen: the interface comes back by itself whenever something needs it (FullScreenPolicy.mustShow).
@@ -676,14 +686,19 @@ struct StreamScreen: View {
             }
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
+            // The room with the controls hidden (phase 2b): none before the screen has measured one.
+            let room = hiddenRoomSize.width > 0 && hiddenRoomSize.height > 0
+                ? ViewportRoom(width: Double(hiddenRoomSize.width), height: Double(hiddenRoomSize.height)) : nil
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps")
+                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps"
+                  + (room.map { ", room \(Self.points(CGFloat($0.width)))×\(Self.points(CGFloat($0.height))) pt" } ?? ""))
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: fps))
+                                         fps: fps,
+                                         room: room))
         }
     }
 
@@ -2086,7 +2101,7 @@ private struct TopBar: View {
             // The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
             // (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams.
             let desktop = client.desktopButton
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label,
+            button(open: client.active == .desktop, symbol: desktop.symbol, label: desktop.label,
                    accessibilityLabel: desktop.accessibilityLabel,
                    action: { client.tapDesktop() })
                 .desktopStops(desktop, inset: metrics.buttonHeight >= 60 ? 5 : 3.5)

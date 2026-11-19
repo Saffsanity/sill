@@ -286,6 +286,79 @@ check(!D.tapSendsNext(desktopStreams: true, displays: nil, current: nil), "a Mac
 check(!D.tapSendsNext(desktopStreams: false, displays: 3, current: 1), "a window streaming: a tap picks the Desktop")
 check(!D.tapSendsNext(desktopStreams: true, displays: 0, current: nil), "no stop: a tap picks the Desktop")
 
+// MARK: The Virtual Desktop's stop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18, §3)
+
+let vd = display(66, "SILL-DESKTOP-UUID", x: 1512, y: 0, w: 1218, h: 800, role: .sillDesktop, hz: 60, name: "Sill Desktop")
+eq(D.candidates(listed + [vd], main: 1).map(\.id), [1, 4, 2], "its switch off: Sill's Desktop display no stop, as before")
+let withVD = D.candidates(listed, main: 1, virtualDesktop: true)
+eq(withVD.map(\.id), [1, 4, 2, 0], "its switch on, none made yet: the last stop, with no display (ID 0)")
+check(withVD.last.map { $0.role == .sillDesktop && $0.uuid == D.virtualDesktopChoice && $0.name == "Virtual Desktop" && $0.frame == .zero } == true,
+      "…its role, its choice's key and its name")
+let madeVD = D.candidates(listed + [vd], main: 1, virtualDesktop: true)
+eq(madeVD.map(\.id), [1, 4, 2, 66], "made: the last stop is its display")
+check(madeVD.last.map { $0.uuid == D.virtualDesktopChoice && $0.name == "Virtual Desktop" && $0.frame == vd.frame && $0.refreshHz == 60 } == true,
+      "…kept by its choice's key, not the display's UUID, named Virtual Desktop, with its display's frame and rate")
+var goneVD = vd
+goneVD.online = false
+eq(D.candidates(listed + [goneVD], main: 1, virtualDesktop: true).map(\.id), [1, 4, 2, 0], "its display gone (offline): a stop with no display again")
+var stageToo = vd
+stageToo.role = .stage
+eq(D.candidates(listed + [stageToo], main: 1, virtualDesktop: true).map(\.id), [1, 4, 2, 0], "the stage's display is never taken for it")
+eq(D.candidates([sills], main: 1, virtualDesktop: true).map(\.id), [0], "no screen: the Virtual Desktop alone, one stop")
+eq(D.candidates([vd], main: 66, virtualDesktop: true).map(\.id), [66], "no screen and Sill's display made: it alone, one stop")
+eq(D.resolve(chosen: D.virtualDesktopChoice, among: withVD)?.id, 0, "chosen: the Virtual Desktop's stop, before its display exists")
+eq(D.resolve(chosen: D.virtualDesktopChoice, among: madeVD)?.id, 66, "chosen: its display, once made")
+eq(D.resolve(chosen: D.virtualDesktopChoice, among: madeVD, mainOnly: true)?.id, 1, "locked or off console: the main display")
+eq(D.resolve(chosen: D.virtualDesktopChoice, among: D.candidates(listed, main: 1))?.id, 1, "its switch turned off: the main display")
+// The stop the Desktop streams (`streamed`): the Virtual Desktop's before its display exists shows the main display meanwhile.
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: withVD)?.id, 1, "streamed: the Virtual Desktop chosen before it exists: the main display meanwhile")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: madeVD)?.id, 66, "streamed: once made, its display")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: madeVD, mainOnly: true)?.id, 1, "streamed: locked, the main display")
+eq(D.streamed(chosen: "BENQ-R", among: withVD)?.id, 2, "streamed: a screen chosen, that screen")
+eq(D.streamed(chosen: nil, among: withVD)?.id, 1, "streamed: nothing chosen, the main display")
+let vdFirst = [D.virtualStop([])] + c
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: vdFirst)?.id, 1, "streamed: the first stop that has a display, not the stop before it")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: D.candidates([sills], main: 1, virtualDesktop: true))?.id, nil,
+   "streamed: the Virtual Desktop alone, not made: none (the host's own display then)")
+for chosen in [nil, "BENQ-R", "GONE", D.virtualDesktopChoice] {
+    for among in [c, withVD, madeVD, [D.Display]()] {
+        for locked in [false, true] {
+            let r = D.resolve(chosen: chosen, among: among, mainOnly: locked), st = D.streamed(chosen: chosen, among: among, mainOnly: locked)
+            check(r?.id == 0 ? st?.id == among.first(where: { $0.id != 0 })?.id : st?.id == r?.id,
+                  "streamed is resolve's but a stop with no display: \(String(describing: chosen)) among \(among.map(\.id)) locked \(locked)")
+        }
+    }
+}
+eq(D.next(after: 2, in: withVD)?.id, 0, "from the last screen: the Virtual Desktop's stop (a step onto it makes it)")
+eq(D.next(after: 66, in: madeVD)?.id, 1, "from the Virtual Desktop: back to the main display")
+eq(D.number(of: 66, in: madeVD), 4, "its number: the last")
+eq(D.virtualNumber(in: madeVD), 4, "the list's desktopVirtual: 4 of 4")
+eq(D.virtualNumber(in: withVD), 4, "…before its display exists too")
+check(D.virtualNumber(in: c) == nil, "no Virtual Desktop among the stops: none")
+check(D.virtualNumber(in: D.candidates([vd], main: 66, virtualDesktop: true)) == nil, "one stop: none, as the list sends no stops then")
+let onVD = D.button(displays: 3, current: 3, names: ["Built-in Retina Display", "DELL U2723QE", "Virtual Desktop"], desktopStreams: true, virtual: 3)
+eq(onVD.symbol, "rectangle.dashed", "on the Virtual Desktop: a dashed screen")
+eq(onVD.label, "Virtual", "…over Virtual")
+check(onVD.dots == 3 && onVD.lit == 3 && onVD.steps, "…with its dots, and a tap steps")
+eq(onVD.accessibilityValue, "Virtual Desktop, 3 of 3", "VoiceOver: Virtual Desktop, 3 of 3")
+check(onVD.accessibilityLabel == "Desktop" && onVD.accessibilityHint == "Shows the next display.", "VoiceOver's label and hint as on any stop")
+let offVD = D.button(displays: 3, current: 2, names: ["A", "DELL U2723QE", "Virtual Desktop"], desktopStreams: true, virtual: 3)
+check(offVD.symbol == "desktopcomputer" && offVD.label == "Desktop 2" && offVD.accessibilityValue == "Display 2 of 3, DELL U2723QE",
+      "another stop: a screen, as before")
+let backToVD = D.button(displays: 3, current: 3, names: nil, desktopStreams: false, virtual: 3)
+check(backToVD.symbol == "rectangle.dashed" && backToVD.label == "Virtual" && backToVD.dots == 0 && !backToVD.steps
+      && backToVD.accessibilityHint == "Shows the Mac’s desktop.",
+      "a window streaming, the Virtual Desktop the stop a tap brings back: its look, no dots, a tap picks the Desktop")
+let older = D.button(displays: 3, current: 3, names: ["Built-in Retina Display", "DELL U2723QE", "Virtual Desktop"], desktopStreams: true)
+check(older.symbol == "desktopcomputer" && older.label == "Desktop 3" && older.accessibilityValue == "Display 3 of 3, Virtual Desktop",
+      "a 0.6.2 device, which knows no desktopVirtual: Desktop 3, its name read out")
+eq(D.button(displays: 1, current: 1, names: nil, desktopStreams: true, virtual: 1), today, "one stop, the Virtual Desktop alone (a Mac with no screen): today's button")
+eq(D.label(displays: 3, current: 3, virtual: 3), "Virtual", "the label alone: Virtual")
+eq(D.label(displays: 3, current: 2, virtual: 3), "Desktop 2", "…on another stop: Desktop 2")
+check(today.symbol == "desktopcomputer", "today's button: a screen")
+check(D.virtualSymbol == "rectangle.dashed" && D.desktopSymbol == "desktopcomputer" && D.virtualLabel == "Virtual"
+      && D.virtualDesktopName == "Virtual Desktop" && D.virtualDesktopChoice == "sill-virtual-desktop", "the words and the symbols")
+
 // MARK: The pointer after a step
 
 eq(D.pointerTarget(pointer: CGPoint(x: 100, y: 100), on: right.frame), CGPoint(x: 1920, y: -1080),
@@ -455,6 +528,26 @@ for _ in 0..<20_000 {
     }
 }
 check(failures == buttonsBefore, "20,000 random buttons and rates: P6 and P7 held")
+
+// The Virtual Desktop among random arrangements: the screens' stops as without it, then it, last; its number the count.
+let vdBefore = failures
+for i in 0..<2_000 {
+    var ds: [D.Display] = []
+    for j in 0..<Int.random(in: 0...5) {
+        ds.append(display(UInt32(10 + j), "U\(j)", x: Double(Int.random(in: -4...4)) * 1600, y: Double(Int.random(in: -1...1)) * 1000,
+                          role: [D.Role.screen, .screen, .screen, .stage, .standIn][Int.random(in: 0...4)], online: Int.random(in: 0...6) > 0))
+    }
+    if i % 2 == 0 { ds.append(display(66, "VD", x: 9000, role: .sillDesktop, online: i % 4 == 0)) }
+    let main = ds.randomElement()?.id
+    let plain = D.candidates(ds, main: main), with = D.candidates(ds, main: main, virtualDesktop: true)
+    let last = with.last
+    let madeOnline = ds.contains { $0.role == .sillDesktop && $0.online }
+    if Array(with.dropLast()) != plain || last?.role != .sillDesktop || last?.uuid != D.virtualDesktopChoice || last?.id != (madeOnline ? 66 : 0)
+        || D.virtualNumber(in: with) != (with.count > 1 ? with.count : nil) || D.virtualNumber(in: plain) != nil {
+        check(false, "random arrangement \(i): \(plain.map(\.id)) then \(with.map(\.id))")
+    }
+}
+check(failures == vdBefore, "2,000 random arrangements: the Virtual Desktop the last stop, after the same screens, its number the count")
 
 print("\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

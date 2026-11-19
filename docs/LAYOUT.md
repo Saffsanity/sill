@@ -15,11 +15,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LockedMac` (the device's words for a locked Mac: why, the drawer's and the
   panel's line, the cover over the stream and its "Unlocking…", checked with the
   host's LockPolicy) and image blob framing. `Viewport.swift` —
-  `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
+  `Viewport` (kind 9: the device's panel, Aa's scale and its rate, and from phase 2b its
+  `room`, `ViewportRoom`: the picture's room with Sill's controls hidden, which sizes the
+  Virtual Desktop),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
-  none, any other refused; what a device sends, `held`; and `whole`, a number
+  none, a room's sides as the panel's, any other refused; what a device sends, `held`; and `whole`, a number
   for a log line as Int() printed it, without its trap; pure,
   `Tests/checks/viewport-bounds`).
   (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
@@ -27,7 +29,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
-  `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
+  `HostSettingsChange`, `VirtualDesktopState` (phase 2b: the Virtual Desktop as one
+  connection sees it, `HostSettingsState.virtualDesktopState`, beside the settings'
+  `virtualDesktop` switch; its size's words "1218x800@2"), `SettingsChoices` (the Mac menu's values) and
   `QualityPreset` (Low, Efficient, Balanced, High, Pro, Ultra, Extreme). Remote access:
   `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
   `SignedMacInfo`, `PairRequest` (with pairing at home's methods `ask` and
@@ -59,7 +63,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   shown (the main display while locked; the choice by UUID for the session and
   30 s after), the next, the rate held to a stop's refresh rate, where input
   lands, the pointer's target, and the device's button (its label, dots or
-  "3/7", VoiceOver's words); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  "3/7", VoiceOver's words); from phase 2b the Virtual Desktop's stop, the last
+  (`candidates`' `virtualDesktop`, `virtualStop`, its choice by a fixed key,
+  `virtualNumber` for `WindowList.desktopVirtual`), the stop streamed while its display is not made yet
+  (`streamed`: the main display meanwhile) and its button (`rectangle.dashed`,
+  "Virtual"); pure, `Tests/checks/desktop-displays`. `VirtualDesktopWords.swift` — every sentence that names the
+  Virtual Desktop to a person, for both apps (phase 2b; a rename is one edit there), and `note`, why a Mac
+  cannot make it now (kind 16's `virtualDesktopState.note`, Sill for Mac's Settings); pure,
+  `Tests/checks/virtual-desktop`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
   `image` reserved for a later generation, a device's `stop`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
@@ -243,13 +254,30 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
   `Tests/checks/virtual-display-api`, which also runs `Runtime.method`'s decision
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
-  on classes it makes at run time),
-  `VirtualStage` (`--virtual-display`: owns the display and the moved window,
-  geometry, prepare/release, emergency restore), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
+  on classes it makes at run time; `ModeSize`, `modeList` and `maxPixels`: the modes a display is made
+  with and its backing, `switchMode` and `applyModes` for phase 2b's probe P2, checked there too),
+  `VirtualStage` (`--virtual-display`: owns the moved window and what its display is for,
+  geometry, prepare/release, emergency restore), `SillDisplays` (phase 2b: every display Sill makes, in
+  one place: made with its role's identity, the guard's marker around it, online, listed by
+  ScreenCaptureKit, its lost callback, removed, the stage's IDs given to the catalog, macOS's one
+  reconfiguration callback, the teardown at Quit, a test host's display only said to be made; the
+  stage's display and the Desktop's, one display in two roles: a Mac with no screen's and the Virtual
+  Desktop; main actor) and
+  `SillDisplayRole` (the stage's and the Desktop's identities; pure, `Tests/checks/sill-displays`, which
+  also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
-  size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  size and rate, the device's, and (phase 2b) following the device, `Follow`, `followStep` and probe
+  P2's one-line seam `followWay`; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
+  the roles changing hands with the headless display, never the main display beside a real screen;
+  pure; its make's line, a test host's grace and the TEST ONLY hook SILL_TEST_VIRTUAL_DESKTOP) and
+  `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
+  and back as it returns, over WindowRestore's `Access`; on the Mac `WindowSizer.DesktopWindows`; pure; both
+  `Tests/checks/virtual-desktop`); the coordinator drives them (StreamCoordinator.swift's "The Virtual
+  Desktop": its stop, its make and removal through SillDisplays, its windows, following its device, the
+  roles changing hands, kind 16's `virtualDesktopState`, Quit),
   `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
@@ -402,8 +430,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/test-host`),
   `HostSettings` (UserDefaults; the presets are StreamProtocol's
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
-  (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` (its
-  height capped to the screen, issue #59) + `SettingsPanes`,
+  (all status copy; the Virtual Desktop's card row and menu subtitle from VirtualDesktopWords), `StatusCard`,
+  `StatusGlyph`, `SettingsWindow` (its height capped to the screen, issue #59; the fourth tab "Displays", raw
+  value `virtualDisplay`) + `SettingsPanes` (Displays' `VirtualDesktopSection`: the switch, Resolution and
+  Refresh Rate from VirtualDesktopSize's choices, its status, Try Again for the guard),
   `SettingsWindowFit` (how tall Settings may be on its screen and where it
   goes; pure, `Tests/checks/settings-window`), `Permissions`, `LoginItem`,
   `LogWindow`, `MainMenu` (key
@@ -611,6 +641,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
+  `Scripts/display-modes-probe/run.sh` (TEST ONLY; P2 of docs/virtual-desktop-plan.md as revised
+  2026-11-18, phase 2b): `probe.swift` with VirtualDisplay.swift alone; without `--make` the dry run (the
+  private API looked up, the modes, their backing and the steps printed; nothing made), with `--make`
+  Noah's run on a Mac at rest (refused while a Sill runs): a display with the room both ways as its modes,
+  switched in place, given new modes by `applySettings:` again, a window of its own on it, each change's
+  ID, mode, callback flags and the window's place, and one verdict line for each way.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own
@@ -626,7 +662,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/desktop-check/live.py OUT` (TEST ONLY; docs/virtual-desktop-plan.md): the Desktop's
+  stops on a test host (SILL_TEST_DISPLAYS: steps, taps, rates, the lock, the span), and from phase 2b the Virtual
+  Desktop on two more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's room, its
+  turn, its grace, locked and off console, the span; a paired device's switch shown at once, an unpaired one's refused,
+  the switch flipped four times a second against the spacing), a verdict per rule. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -822,7 +862,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   after 12, back at 200), the preview's cut, `RevealCut` (each layout's picture's place, from its own
   geometry with DuoPosture's split and PhonePortraitLayout), the pointer's dwell at the edge, when it is
   offered, when the controls come back by themselves, the shake (`Sill.shakeToShowControls`), the Settings
-  rows' place, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
+  rows' place, the hint, the room (and `hiddenRoom`, the same room measured while the controls show: the
+  viewport's `room` for the Mac's Virtual Desktop, phase 2b), the words; pure, `Tests/checks/full-screen`;
+  pbxproj A279/F279),
   `RevealEdgePan` (the swipe in's recognizer, a UIPanGestureRecognizer of Sill's on its window, only while
   hidden, which other recognizers wait for it, `EdgeRecognizers.waits` (never one that only watches,
   `WatchesTouchesOnly`), where a held stroke landed, `heldLanding`, for the picture's scroll, and a stroke
@@ -888,12 +930,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
   and the App Store address for a Mac's update notice, the App Store Connect
   record's since PR #27),
-  `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
-  (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
-  from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs; its last line this app's
-  version, `VersionLine`), `AwayCopy` (every
+  `MockCatalog` (harness data and the settings cases; the Virtual Desktop's `vdesk…`), `HostSettingsLedger`
+  (the Mac's settings with this device's unanswered picks, eight fields, the Virtual Desktop's only on a
+  session the Mac says is paired, rule 11; pure logic, checked with swiftc), `HostSettingsPanel` (the
+  Settings panel; the route line, Away from home, the away line in the header, the link's callout and its
+  button, the footnote, the slow-link callout for older Macs, the Virtual Desktop's switch after Virtual
+  Display's, from VirtualDesktopWords; its last line this app's version, `VersionLine`), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`

@@ -27,6 +27,11 @@ import Foundation
 /// - The device's button (`button`): today's with one stop or a Mac from before this; with two or more,
 ///   the stop's label ("Desktop 2"), a dot per stop with the shown one filled while the Desktop streams
 ///   ("3/7" from seven stops), and VoiceOver's label, value and hint.
+/// - The Virtual Desktop (phase 2b, plan §3 as revised 2026-11-18): the last stop, after the screens, while its switch
+///   is on and Sill can make it (`candidates`' `virtualDesktop`), listed before its display exists (ID 0 until it is
+///   made), its choice kept by a fixed key (`virtualDesktopChoice`), not a display's UUID; the window list's
+///   `desktopVirtual` says which stop it is (`virtualNumber`), and the button shows `rectangle.dashed` and "Virtual"
+///   on it, VoiceOver "Virtual Desktop, 3 of 3".
 ///
 /// Pure (CoreGraphics and Foundation); checked by Tests/checks/desktop-displays.
 public enum DesktopDisplays {
@@ -67,7 +72,8 @@ public enum DesktopDisplays {
         /// is never a stop and never counted, today or later (Noah, 2026-11-12).
         case stage
         /// Sill's own Desktop display (product 0x0002: #200's for a Mac with no working screen, the Virtual Desktop of
-        /// docs/virtual-desktop-plan.md §7): no screen of the Mac's. Phase 2 makes it a stop by its role, in `candidates`.
+        /// docs/virtual-desktop-plan.md §7): no screen of the Mac's. It is a stop only as the Virtual Desktop, by its role
+        /// (`candidates`' `virtualDesktop`).
         case sillDesktop
         /// macOS's own 1x stand-in for a Mac with no screen (vendor 'unkn', model 'virt', seen on macOS 27, PR #200): no
         /// screen shows it.
@@ -104,9 +110,9 @@ public enum DesktopDisplays {
     /// each other are both kept, so no display is ever lost), left to right and then top to bottom (ties
     /// by ID, so the order never flips between looks), turned to start at `main`'s stop: the main display
     /// itself, or the display it mirrors. Without it among them, the arrangement as it is.
-    public static func candidates(_ displays: [Display], main: UInt32?) -> [Display] {
-        // PHASE 2 (docs/virtual-desktop-plan.md §1): the Virtual Desktop, Sill's Desktop display (`.sillDesktop`), joins the
-        // cycle as its last stop, by its role, while its setting is on and Sill can make it. It is never a screen here.
+    /// `virtualDesktop` (phase 2b: its switch on and Sill able to make it): the Virtual Desktop after them, the last stop
+    /// (`virtualStop`); with no screen it is the only one, as Sill's display for a Mac with no screen.
+    public static func candidates(_ displays: [Display], main: UInt32?, virtualDesktop: Bool = false) -> [Display] {
         let shown = displays.filter { $0.role == .screen && $0.online }
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let stops = shown.filter { d in
@@ -116,8 +122,33 @@ public enum DesktopDisplays {
         let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY, $0.id) < ($1.frame.minX, $1.frame.minY, $1.id) }
         let mainStop = sorted.firstIndex { $0.id == main }
             ?? displays.first { $0.id == main }?.mirrors.flatMap { m in sorted.firstIndex { $0.id == m } }
-        guard let i = mainStop else { return sorted }
-        return Array(sorted[i...] + sorted[..<i])
+        let screens = mainStop.map { Array(sorted[$0...] + sorted[..<$0]) } ?? sorted
+        return virtualDesktop ? screens + [virtualStop(displays)] : screens
+    }
+
+    /// The Virtual Desktop's choice, kept in place of a display's UUID (`resolve`'s `chosen`): its display is made again
+    /// each time it is shown and may not exist yet, so the Desktop comes back to it by this, its role's, within the
+    /// session span (after a reconnect, a window, a lock).
+    public static let virtualDesktopChoice = "sill-virtual-desktop"
+    /// Its name among the stops' names: VoiceOver's, the log's, and a 0.6.2 device's "Display 3 of 3, Virtual Desktop".
+    public static let virtualDesktopName = "Virtual Desktop"
+
+    /// The Virtual Desktop as a stop: Sill's Desktop display while it is on now (its ID and frame), else a stop with no
+    /// display yet (ID 0, no frame), which a step onto it makes; its choice `virtualDesktopChoice` and its name
+    /// `virtualDesktopName` either way.
+    public static func virtualStop(_ displays: [Display]) -> Display {
+        var stop = displays.first { $0.role == .sillDesktop && $0.online }
+            ?? Display(id: 0, uuid: virtualDesktopChoice, frame: .zero, role: .sillDesktop)
+        stop.uuid = virtualDesktopChoice
+        stop.name = virtualDesktopName
+        return stop
+    }
+
+    /// The Virtual Desktop's place among the stops, counting from 1, for the window list's `desktopVirtual`: only with
+    /// two stops or more, as `desktopDisplays`; nil without it.
+    public static func virtualNumber(in candidates: [Display]) -> Int? {
+        guard candidates.count >= 2 else { return nil }
+        return candidates.firstIndex { $0.role == .sillDesktop }.map { $0 + 1 }
     }
 
     /// The stop the Desktop shows: the first (the main display) while `mainOnly` (this Mac locked, or
@@ -125,6 +156,14 @@ public enum DesktopDisplays {
     public static func resolve(chosen: String?, among candidates: [Display], mainOnly: Bool = false) -> Display? {
         if !mainOnly, let chosen, let d = candidates.first(where: { $0.uuid == chosen }) { return d }
         return candidates.first
+    }
+
+    /// The stop whose display the Desktop streams now: `resolve`'s, but while that is the Virtual Desktop before its
+    /// display exists (a stop with ID 0: listed, not made yet), the first stop that has a display (the main display)
+    /// meanwhile; the host makes it, and the Desktop moves onto it once a look lists it (phase 2b). Nil with none.
+    public static func streamed(chosen: String?, among candidates: [Display], mainOnly: Bool = false) -> Display? {
+        guard let d = resolve(chosen: chosen, among: candidates, mainOnly: mainOnly) else { return nil }
+        return d.id != 0 ? d : candidates.first { $0.id != 0 }
     }
 
     /// How long the Mac keeps the stop a device stepped to after the last device left, in seconds: a
@@ -192,9 +231,17 @@ public enum DesktopDisplays {
     /// VoiceOver's label for today's button: with one stop, and from a Mac before this.
     public static let todaysLabel = "Show the full Mac desktop"
 
+    /// The button's symbols: a screen's, and the Virtual Desktop's (a dashed screen).
+    public static let desktopSymbol = "desktopcomputer"
+    public static let virtualSymbol = "rectangle.dashed"
+    /// The Virtual Desktop's label under its symbol.
+    public static let virtualLabel = "Virtual"
+
     /// The Desktop button as a device draws it and VoiceOver reads it.
     public struct Button: Equatable {
-        /// Under the symbol: "Desktop", or the stop's "Desktop 2".
+        /// The SF Symbol: `desktopSymbol`, or `virtualSymbol` on the Virtual Desktop's stop.
+        public var symbol: String
+        /// Under the symbol: "Desktop", or the stop's "Desktop 2", or "Virtual".
         public var label: String
         /// One dot per stop, `lit` the shown one (counting from 1), while the Desktop streams on two to
         /// `maxDots` stops; none (0) otherwise.
@@ -215,25 +262,29 @@ public enum DesktopDisplays {
     /// Desktop comes back to (`WindowList.desktopDisplays`, `desktopDisplay`, `desktopDisplayNames`), and
     /// whether the Desktop streams now. One stop, which one unknown, or a Mac from before this: today's.
     /// While a window streams the label names the stop a tap brings back, and no dots show: that tap picks
-    /// the Desktop, it does not step.
-    public static func button(displays: Int?, current: Int?, names: [String]?, desktopStreams: Bool) -> Button {
+    /// the Desktop, it does not step. `virtual`: the Virtual Desktop's stop (`WindowList.desktopVirtual`,
+    /// phase 2b); on it, `virtualSymbol` over "Virtual", and VoiceOver's "Virtual Desktop, 3 of 3".
+    public static func button(displays: Int?, current: Int?, names: [String]?, desktopStreams: Bool, virtual: Int? = nil) -> Button {
         guard let n = shown(displays: displays, current: current), let count = displays else {
-            return Button(label: "Desktop", dots: 0, lit: 0, counter: nil, accessibilityLabel: todaysLabel,
+            return Button(symbol: desktopSymbol, label: "Desktop", dots: 0, lit: 0, counter: nil, accessibilityLabel: todaysLabel,
                           accessibilityValue: nil, accessibilityHint: nil, steps: false)
         }
+        let onVirtual = virtual == n
         let dots = desktopStreams && count <= maxDots ? count : 0
-        return Button(label: label(displays: count, current: n), dots: dots, lit: dots > 0 ? n : 0,
+        return Button(symbol: onVirtual ? virtualSymbol : desktopSymbol,
+                      label: label(displays: count, current: n, virtual: virtual), dots: dots, lit: dots > 0 ? n : 0,
                       counter: desktopStreams && count > maxDots ? "\(n)/\(count)" : nil,
-                      accessibilityLabel: "Desktop", accessibilityValue: value(n, of: count, names: names),
+                      accessibilityLabel: "Desktop",
+                      accessibilityValue: onVirtual ? "\(virtualDesktopName), \(n) of \(count)" : value(n, of: count, names: names),
                       accessibilityHint: desktopStreams ? "Shows the next display." : "Shows the Mac’s desktop.",
                       steps: desktopStreams)
     }
 
     /// The button's words under its symbol: "Desktop" with one stop, from a Mac before this, or when which
-    /// one is not known; else "Desktop 2".
-    public static func label(displays: Int?, current: Int?) -> String {
+    /// one is not known; "Virtual" on the Virtual Desktop's stop (`virtual`); else "Desktop 2".
+    public static func label(displays: Int?, current: Int?, virtual: Int? = nil) -> String {
         guard let n = shown(displays: displays, current: current) else { return "Desktop" }
-        return "Desktop \(n)"
+        return n == virtual ? virtualLabel : "Desktop \(n)"
     }
 
     /// Whether the Desktop button's tap asks for the next stop (kind 47) rather than picking the Desktop:
