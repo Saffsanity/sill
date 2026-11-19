@@ -195,3 +195,11 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
     full: stopped for space at 10 s, the movie whole; lock: three movies); the iOS app Debug for the simulator, `**
     BUILD SUCCEEDED **` with the known warning alone.
   - Not run here: `release-ios.sh` (it archives and signs); nothing on a device.
+  - Photos (G5, `Scripts/harness-photos/recording.cases` on the agents' Duo, iOS 27.1, of c5c5af13): the first try's
+    first `simctl launch` hung (stopped at 301 s, the simulator shut down, the slot freed); after 10 minutes the
+    second took all 28 in 188 s, none blank. Looked at: the This iPhone rows (Start Recording, Record Sound dimmed
+    and off with Send Audio off, the footnote whole), an older Mac's (no Record Sound, the older-Sill sentence), the
+    pinned Stop row ("Recording · 0:42 · 126 MB") with the light over the picture, the light moved to the bottom
+    corner under the link's line, the iPhone upright's light, "Saved to Files › Sill Recordings." in the chip's
+    corner, the connect screen's "Your recording was saved when the session ended.". No baseline: main has none of
+    these states.
