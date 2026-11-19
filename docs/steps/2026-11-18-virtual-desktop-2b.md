@@ -274,7 +274,10 @@ Sill for Mac has its Settings, menu item and card row; the CLI has its flag; the
   `--room`, `--room-after`, the switch's `--set` and `--expect` keys, `desktopVirtual=` and `vdesk=…`; desktop-check's two
   more hosts (the stop, a step onto it, its turn, its grace, made again, locked, off console, the span; a paired device's
   switch shown at once, an unpaired one's refused, the switch flipped four times a second against the spacing, off).
-  818bbe86: its test pattern at its size in points, as every test stop's (the verdict had wanted Retina pixels).
+  818bbe86: its test pattern at its size in points, as every test stop's (the verdict had wanted Retina pixels);
+  b83f5ed8: the CLI's start line names its two choices as Settings › Displays does ("Virtual Desktop on for this run
+  (Resolution: Match the device, Refresh Rate: Match the device): …"); e84a1601: a turn back after its follow asks
+  nothing, and the unpaired client leaves before the paired one turns the Mac's switch on.
 - Docs (commit 12, 92f52478 and this note): docs/DEVELOPMENT.md (how to try it, its lines), docs/locked-mac-plan.md's
   table, docs/LAYOUT.md, docs/BUILD-AND-RUN.md with each commit.
 
@@ -345,6 +348,16 @@ every live run a synthetic test host on 127.0.0.1 with the software encoder, its
   since the display still has that size; the unpaired client still connected when the paired one turned the Mac's switch
   on), fixed in e84a1601. `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26;
   `Scripts/headless-check/live.py OUT all` 66 of 66.
+- The harness's photos (`Scripts/harness-photos.sh`, the agents' Duo on iOS 27.1, the heavy lock's slot A 10:35–10:41) of
+  0d8f4305 (commit 9; the app's own code at the head differs from it only in ContentView's comments, and StreamProtocol
+  only by Sill for Mac's words), looked at: the Virtual
+  Desktop's 25 cases, the Desktop button on its stop (the dashed screen over "Virtual", its third dot lit) on the Duo flat
+  both ways and as a laptop, its cover screen both ways, an iPad both ways and in half, phones both ways and the SE, and
+  while a window streams (the stop's face, no dots, Aa back); the panel's switch off, on with "Its size: 1218 × 800 at 60
+  Hz.", on an unpaired session (disabled, "Only a device paired with Mac mini can change this.") and where the Mac cannot
+  make it (disabled, "Needs Screen Recording."), on the Duo, its cover, an iPad and phones. Four unchanged cases (an
+  ordinary stop's button on the Duo and a phone; the panel of a Mac without the Virtual Desktop on the Duo, and at its end
+  on a phone) identical pixel for pixel to #395's head, 84d60f30.
 - GitHub's CI on 92f52478 (run 44540470678), b83f5ed8 (run 44544695482, the head's code) and e84a1601 (run 44548679666):
   every step of Build and check passed each time (the release build, every pure check, the iOS app, the CLI's two paths);
   its mutant jobs are skipped on pull requests.
