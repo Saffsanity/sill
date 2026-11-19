@@ -181,7 +181,7 @@ Mac to device:
    Receiving Files on (60 s, else the Mac cancels `noAnswer`), at once with it off.
 4. Then as above, the Mac sending and the device acknowledging, with the Mac's sends on their own path (§7.2).
 
-### 5.5 For the compatibility floor (CLAUDE.md, once a public build ships it)
+### 5.5 For the compatibility floor (docs/COMPATIBILITY.md, once a public build ships it)
 
 Kind 34 as #66's `FileChunk`; kind 49 and `FileTransfer`'s fields and known ops and reasons; `files` and its
 values; `Hello.files`; a device sends kinds 34 and 49 only to a host that says `files` 1 or more (and `pick` only
@@ -675,8 +675,9 @@ Xcode's console's `files:` lines and `tail -F ~/Library/Logs/Sill/Sill.log`.
 ## 13. Docs, site and App Store words (for the release that ships it: 0.7.0 unless Noah names another)
 
 - `docs/files-plan.md` (this plan, with Results and Progress as the work goes); `docs/steps/2026-11-18-files.md`;
-  CLAUDE.md's Layout (the new files) and floor (§5.5); `docs/DEVELOPMENT.md`'s "Files" section (the hooks, the
-  client's flags, the gates).
+  docs/LAYOUT.md (the new files), docs/BUILD-AND-RUN.md (the hooks and harness arguments) and docs/COMPATIBILITY.md
+  (the floor, §5.5; until #388 of 2026-11-18 these were CLAUDE.md's Layout, Build and run and floor);
+  `docs/DEVELOPMENT.md`'s "Files" section (the hooks, the client's flags, the gates).
 - `site/support.html` "Files and photos" (how to send, drop, share, get; where they land on each; the Mac's switch
   and folder; quarantine; why a locked Mac refuses), `site/privacy.html` (files go directly between your device and
   your Mac, encrypted, never through a server; Sill reads only what you pick, drop or share; add-only Photos access;
@@ -698,7 +699,7 @@ Xcode's console's `files:` lines and `tail -F ~/Library/Logs/Sill/Sill.log`.
 6. The drop: FileDropPolicy, FileDrop, InputInjector's hold; PictureDrop; H7, S2.
 7. The Mac's sending: the send path, the pick (FilePick, the catalog's exception), the menu, the icon; the device's
    receiving and Photos; H6, S3.
-8. H8 and the windows tuned by it; docs, site and CLAUDE.md.
+8. H8 and the windows tuned by it; docs (LAYOUT, BUILD-AND-RUN, COMPATIBILITY) and the site.
 9. An adversarial review and a security review, each finding reproduced, then fixed one commit a theme; Noah's P
    list; the merge on his word.
 
