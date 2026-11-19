@@ -255,8 +255,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
-  size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  size and rate, the device's, and (phase 2b) following the device, `Follow`, `followStep` and probe
+  P2's one-line seam `followWay`; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
+  the roles changing hands with the headless display, never the main display beside a real screen;
+  pure) and `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
+  and back as it returns, over WindowRestore's `Access`; pure; both `Tests/checks/virtual-desktop`),
   `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
