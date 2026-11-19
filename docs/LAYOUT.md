@@ -845,12 +845,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
-  in StreamScreen.swift take it, issue #113), `TouchHold` (the picture's touch and hold in Direct Touch, issue
-  #178, PR #292: a right click at once, as before, or with this device's Hold, Then Drag on, `Sill.holdThenDrag`,
-  off unless turned on, never sent, a right click at the lift, or a drag with the left button from where it was
-  pressed once it moves past 8 pt; a cancel lets the button up; the switch's words; pure,
-  `Tests/checks/touch-hold`; InputOverlay's long press feeds it, `StreamClient.holdThenDragOn` as each hold
-  begins; the Settings panel's row before Reverse Scrolling; pbxproj A178/F178), `VersionLabel` (this app's version and build as its bundle says
+  in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
@@ -935,7 +930,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301),
   `TrackpadGestures` (which stroke on the glass goes silent and which arms,
   the gesture decided as one of its three fingers lifts, and whether it goes
-  to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701) and, in
+  to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701), `TouchHold` (the
+  picture's touch and hold in Direct Touch, issue #178, PR #292: a right click at
+  once, as before, or with this device's Hold, Then Drag on, `Sill.holdThenDrag`,
+  off unless turned on, never sent, a right click at the lift, or a drag with the
+  left button from where it was pressed once it moves past 8 pt, a cancel letting
+  the button up; the switch's words; pure, `Tests/checks/touch-hold`;
+  InputOverlay's long press feeds it, `StreamClient.holdThenDragOn` as each hold
+  begins; the Settings panel's row before Reverse Scrolling; pbxproj A178/F178) and, in
   InputOverlay.swift, `StrokeObserver` (the recognizer on both surfaces that
   feeds it every direct touch and takes none). The clipboard:
   `StreamClient+Clipboard` (the subscription at the first window list that
