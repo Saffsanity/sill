@@ -514,7 +514,8 @@ do {
     dev.send([DeviceFiles.Source(url: copy, name: "IMG_0001.heic", ownCopy: true, type: "public.heic")])
     let end = dev.end(20)
     if case .done? = end?.phase {} else { check(false, "done: \(String(describing: end?.phase))") }
-    check(!fm.fileExists(atPath: copy.path) && !fm.fileExists(atPath: pick.path), "the copy and its folder deleted after the transfer")
+    // The end's snapshot is published just before the copies go (on DeviceFiles' queue): wait for them, as for anything.
+    check(waitFor(10) { !fm.fileExists(atPath: copy.path) && !fm.fileExists(atPath: pick.path) }, "the copy and its folder deleted after the transfer")
     // A second send while one runs: dropped, the running one's chip untouched, its own copy deleted.
     let src = scratch.appendingPathComponent("src-copies")
     let big = make(src, "big.bin", 20_000_000)
@@ -525,7 +526,7 @@ do {
     let copy2 = make(pick2, "IMG_0002.heic", 1_000)
     dev.send([DeviceFiles.Source(url: copy2, name: "IMG_0002.heic", ownCopy: true)])
     usleep(300_000)
-    check(dev.snapshots.allSatisfy { $0.names != ["IMG_0002.heic"] } && !fm.fileExists(atPath: copy2.path),
+    check(waitFor(10) { !fm.fileExists(atPath: copy2.path) } && dev.snapshots.allSatisfy { $0.names != ["IMG_0002.heic"] },
           "a second send while one runs: dropped, its copy deleted")
     let end2 = dev.end(60)
     if case .done? = end2?.phase {} else { check(false, "the running one finishes: \(String(describing: end2?.phase))") }
