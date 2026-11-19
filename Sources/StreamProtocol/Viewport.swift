@@ -20,15 +20,35 @@ public struct Viewport: Codable, Hashable {
     /// The host runs the stream at the highest rate among its connected clients and restarts the
     /// pipeline when that changes.
     public var fps: Int?
+    /// The room the picture has on this device with Sill's controls hidden (`ViewportRoom`; phase 2b of
+    /// docs/virtual-desktop-plan.md as revised 2026-11-18), which sizes the Virtual Desktop and Sill's display for a Mac
+    /// with no screen by default (the device's resolution, Noah's rule). Nil from every device before 2b: a host takes the
+    /// panel (`width`, `height`) then. An older host skips the key. A host from 2b refuses a viewport whose room is out of
+    /// bounds whole, as it refuses a side (`ViewportBounds.refusal`), and a device from 2b holds it to them (`held`).
+    public var room: ViewportRoom?
 
-    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil) {
+    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil,
+                room: ViewportRoom? = nil) {
         self.width = width; self.height = height; self.scale = scale; self.localCursor = localCursor; self.fps = fps
+        self.room = room
     }
 }
 
+/// The room Sill's picture has on a device with its controls hidden: Full Screen's (the device's FullScreenPolicy.room
+/// for the person's Room choice), in the window's current orientation, in device points. The whole screen on an iPad;
+/// clear of the Dynamic Island on an iPhone held sideways; the part above the fold in the Duo's laptop pose; the window
+/// in Stage Manager or Split View. Sill's controls, its drawer, Settings or the keyboard coming and going never change
+/// it, so they never change the Mac's display (#312's rule); a turn, a fold or a resized window does.
+public struct ViewportRoom: Codable, Hashable {
+    public var width: Double
+    public var height: Double
+
+    public init(width: Double, height: Double) { self.width = width; self.height = height }
+}
+
 /// What a host takes from a device's viewport (kind 9): each side from 1 to 16384 points, and a text
-/// scale, when there is one, from 0.25 to 4 (the Aa slider's 0.5 to 1.5, with room either way). Any
-/// other viewport is refused whole: the host keeps the one before, takes nothing of the message (its
+/// scale, when there is one, from 0.25 to 4 (the Aa slider's 0.5 to 1.5, with room either way), and a
+/// room's sides, when there is one (phase 2b), as the panel's. Any other viewport is refused whole: the host keeps the one before, takes nothing of the message (its
 /// rate neither) and says so in a line that names the device (StreamCoordinator). Until 2026-10-29 a
 /// host took any number greater than 0: a side of 1e300 points, or a scale of 1e-300 that made a
 /// side infinite, reached the Mac window's fit (`fitToViewport`) and the virtual display's window
@@ -59,18 +79,29 @@ public enum ViewportBounds {
         if let s = v.scale, !scales.contains(s) {
             why.append("scale \(number(s)) (\(number(scales.lowerBound)) to \(number(scales.upperBound)))")
         }
+        if let r = v.room {
+            if !sides.contains(r.width) { why.append("room width \(number(r.width)) \(points)") }
+            if !sides.contains(r.height) { why.append("room height \(number(r.height)) \(points)") }
+        }
         return why.isEmpty ? nil : why.joined(separator: ", ")
     }
 
     /// What a device sends for `v`: each side held to `sides` and a scale to `scales`, so no host
-    /// refuses it; a scale that is not a positive number becomes none, the Mac window left alone. Nil,
-    /// nothing to send, while a side is not a positive number (a panel not measured yet).
+    /// refuses it; a scale that is not a positive number becomes none, the Mac window left alone; the
+    /// room's sides held to `sides` too, and a room with a side that is not a positive number none (the
+    /// host takes the panel). Nil, nothing to send, while a side is not a positive number (a panel not
+    /// measured yet).
     public static func held(_ v: Viewport) -> Viewport? {
         guard v.width.isFinite, v.height.isFinite, v.width > 0, v.height > 0 else { return nil }
         var held = v
         held.width = min(max(v.width, sides.lowerBound), sides.upperBound)
         held.height = min(max(v.height, sides.lowerBound), sides.upperBound)
         held.scale = v.scale.flatMap { $0.isFinite && $0 > 0 ? min(max($0, scales.lowerBound), scales.upperBound) : nil }
+        held.room = v.room.flatMap { r in
+            guard r.width.isFinite, r.height.isFinite, r.width > 0, r.height > 0 else { return nil }
+            return ViewportRoom(width: min(max(r.width, sides.lowerBound), sides.upperBound),
+                                height: min(max(r.height, sides.lowerBound), sides.upperBound))
+        }
         return held
     }
 

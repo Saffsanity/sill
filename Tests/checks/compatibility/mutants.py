@@ -45,6 +45,23 @@ MUTANTS = [
     ("sessionPaired false by default", "HostSettings.swift", "                sessionPaired: Bool? = nil) {", "                sessionPaired: Bool? = false) {"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    # The Virtual Desktop's fields (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18).
+    ("the settings' Virtual Desktop never kept", "HostSettings.swift",
+     "        self.virtualDesktop = virtualDesktop\n        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n}\n\n/// The pipeline",
+     "        self.virtualDesktop = nil\n        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n}\n\n/// The pipeline"),
+    ("a change's Virtual Desktop never kept", "HostSettings.swift",
+     "        self.virtualDesktop = virtualDesktop\n        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n\n    /// All setting",
+     "        self.virtualDesktop = nil\n        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n\n    /// All setting"),
+    ("the Virtual Desktop left out of isEmpty", "HostSettings.swift", "&& sendAudio == nil && virtualDesktop == nil", "&& sendAudio == nil"),
+    ("the Virtual Desktop left out of applied(to:)", "HostSettings.swift", "        if let v = virtualDesktop { r.virtualDesktop = v }\n", ""),
+    ("the state's note never kept", "HostSettings.swift", "self.available = available; self.note = note;", "self.available = available; self.note = nil;"),
+    ("the state's size never kept", "HostSettings.swift", "self.shown = shown; self.size = size; self.hz = hz", "self.shown = shown; self.size = nil; self.hz = hz"),
+    ("a size's words with a times sign", "HostSettings.swift", "\"\\(widthPt)x\\(heightPt)@\\(scale)\"", "\"\\(widthPt)×\\(heightPt)@\\(scale)\""),
+    ("a size of scale 0 read", "HostSettings.swift", "let scale = Int(at[1]), scale > 0 else { return nil }", "let scale = Int(at[1]) else { return nil }"),
+    ("a size of three sides read", "HostSettings.swift", "guard wh.count == 2, let w", "guard wh.count >= 2, let w"),
+    ("a side of 0 or less read", "HostSettings.swift", ", w > 0, h > 0 else { return nil }", " else { return nil }"),
+    ("a size with two scales read", "HostSettings.swift", "guard at.count == 2, let scale", "guard at.count >= 2, let scale"),
+    ("the room never kept", "Viewport.swift", "        self.room = room\n", "        self.room = nil\n"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

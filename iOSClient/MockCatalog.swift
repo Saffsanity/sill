@@ -448,7 +448,7 @@ enum MockCatalog {
             // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs. A
             // paired session (`sessionPaired`, 2026-10-29), whose Direct Wireless switch works.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false, sendAudio: false),
+                                     directWireless: false, sendAudio: false, virtualDesktop: nil),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false),
             sessionPaired: true)

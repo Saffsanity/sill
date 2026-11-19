@@ -82,6 +82,13 @@ public struct WindowList: Codable {
     /// VoiceOver's value ("Display 2 of 3, DELL U2723QE") and, later, a list to choose from (PR #296's).
     /// With `desktopDisplays` only.
     public var desktopDisplayNames: [String]?
+    /// The Virtual Desktop's stop number among `desktopDisplays` while it is in the cycle (phase 2b of
+    /// docs/virtual-desktop-plan.md as revised 2026-11-18): the last stop, after the Mac's screens, while its switch is on
+    /// and this Mac can make it, listed before its display exists. A device's Desktop button shows `rectangle.dashed` and
+    /// "Virtual" on it, and VoiceOver "Virtual Desktop, 3 of 3". With `desktopDisplays` only, so never while the Mac is
+    /// locked or another user is on its screen; left out by every host before 2b, and an older device skips it (it shows
+    /// "Desktop 3", with its name from `desktopDisplayNames`). Set after the initializer, as `keyRepeat`.
+    public var desktopVirtual: Int?
     /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
     /// screen is locked, or another user, the login window or nobody is on its console. True, with no
     /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and

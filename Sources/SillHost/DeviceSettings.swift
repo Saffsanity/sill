@@ -15,7 +15,8 @@ extension HostConfig {
         let pair = effective(away: away)
         return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
                               prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                              directWireless: directWireless, sendAudio: sendAudio)
+                              directWireless: directWireless, sendAudio: sendAudio,
+                              virtualDesktop: nil)   // phase 2b's switch comes with HostConfig.virtualDesktop
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:

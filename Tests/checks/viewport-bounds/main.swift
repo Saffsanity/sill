@@ -12,7 +12,7 @@
 //       Tests/checks/viewport-bounds/main.swift
 // The rule case by case (the devices' own panels among them), the bug before it in a copy of the
 // host's arithmetic, what JSON can carry, then 200,000 random viewports, real and hostile, against the
-// rule's properties, then the late count. The virtual display's window size is VirtualDisplaySize's, in
+// rule's properties, the room (phase 2b) case by case and 100,000 random ones, then the late count. The virtual display's window size is VirtualDisplaySize's, in
 // the capture-scale check.
 import CoreGraphics
 import Foundation
@@ -219,6 +219,47 @@ check(heldNilWrong == 0, "a device sends nothing only for a side that is not a p
 check(heldRefused == 0, "whatever a device sends is taken (\(heldRefused) refused)")
 check(heldNotIdentity == 0, "a viewport already taken goes as it is (\(heldNotIdentity) changed)")
 check(wholeWrong == 0, "whole prints what Int() printed wherever Int() did not trap (\(wholeWrong) not)")
+
+// MARK: - The room (phase 2b of docs/virtual-desktop-plan.md: the picture's room with Sill's controls hidden)
+
+func roomy(_ rw: Double, _ rh: Double, w: Double = 1376, h: Double = 950) -> Viewport {
+    Viewport(width: w, height: h, scale: nil, fps: 120, room: ViewportRoom(width: rw, height: rh))
+}
+check(B.refusal(roomy(1376, 1032)) == nil && B.refusal(roomy(1, 16384)) == nil, "a room within bounds, and at them: taken")
+check(B.refusal(roomy(0, 1032)) == "room width 0 (1 to 16384 points)", "a room's width of 0 refused, named as the room's")
+check(B.refusal(roomy(1376, 1e300)) == "room height 1e+300 (1 to 16384 points)", "a room's height of 1e300 refused")
+check(B.refusal(roomy(.nan, 16385)) == "room width nan (1 to 16384 points), room height 16385 (1 to 16384 points)", "both of a room's sides, each named")
+check(B.refusal(roomy(0, 900, w: 0)) == "width 0 (1 to 16384 points), room width 0 (1 to 16384 points)", "the panel's first, then the room's")
+check(B.refusal(roomy(-.infinity, 900)) == "room width -inf (1 to 16384 points)", "a room's negative infinity refused")
+check(B.held(roomy(1376, 1032))?.room == ViewportRoom(width: 1376, height: 1032), "a device sends a room within bounds as it is")
+check(B.held(roomy(20000, 0.5))?.room == ViewportRoom(width: 16384, height: 1), "…and holds one beyond them to them")
+check([roomy(0, 900), roomy(-3, 900), roomy(900, .nan), roomy(.infinity, 900), roomy(900, -.infinity)].allSatisfy {
+          B.held($0).map { $0.room == nil && $0.width == 1376 } == true
+      }, "a room with a side that is not a positive number: none sent, the panel still sent (the host takes the panel)")
+check(B.held(vp(1376, 950, nil))?.room == nil, "no room, none")
+// 100,000 random rooms beside random panels: taken exactly when the panel and both of the room's sides are within bounds;
+// each of the room's sides out of range named as the room's, and only those; a device's room sent exactly when its sides
+// are positive numbers, as it is within the bounds, and always taken.
+var roomDisagree = 0, roomWords = 0, roomHeldRefused = 0, roomHeldWrong = 0
+for _ in 0..<100_000 {
+    let v = Viewport(width: side(), height: side(), scale: scale(), fps: 60,
+                     room: next() % 5 == 0 ? nil : ViewportRoom(width: side(), height: side()))
+    let why = B.refusal(v)
+    let inside = { (x: Double) in x >= 1 && x <= 16384 }
+    let roomTaken = v.room.map { inside($0.width) && inside($0.height) } ?? true
+    if (why == nil) != (oracleTakes(v) && roomTaken) { roomDisagree += 1 }
+    if let why, let r = v.room, why.contains("room width ") == inside(r.width) || why.contains("room height ") == inside(r.height) { roomWords += 1 }
+    if let held = B.held(v) {
+        if B.refusal(held) != nil { roomHeldRefused += 1 }
+        let sendable = v.room.map { $0.width.isFinite && $0.height.isFinite && $0.width > 0 && $0.height > 0 } ?? false
+        if (held.room != nil) != sendable { roomHeldWrong += 1 }
+        if roomTaken, v.room != nil, held.room != v.room { roomHeldWrong += 1 }
+    }
+}
+check(roomDisagree == 0, "100,000 random rooms: taken exactly when the panel and the room are within bounds (\(roomDisagree) not)")
+check(roomWords == 0, "each of a room's sides out of range named as the room's, and only those (\(roomWords) not)")
+check(roomHeldRefused == 0 && roomHeldWrong == 0,
+      "a device's room sent when its sides are positive numbers, as it is within the bounds, always taken (\(roomHeldRefused), \(roomHeldWrong))")
 
 // MARK: - A device's late-sound count (ClientStats.lateSince)
 
