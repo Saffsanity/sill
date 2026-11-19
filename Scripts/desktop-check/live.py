@@ -238,8 +238,9 @@ def virtual(out):
     verdict(len(made) == 1 and made[0][1] == "made" and "1218×800 pt @2× at 60 Hz" in made[0][2] and "for iPad mini (its screen)" in made[0][2],
             f"VD: made (said) at the device's room grown to 800 points, 60 Hz: {made}")
     on_vd = streams(h, 4.5, 7)
-    verdict(bool(on_vd) and on_vd[0][:2] == (3, "Virtual Desktop") and on_vd[0][2] == "2436×1600" and on_vd[0][3] == 60,
-            f"VD: the Desktop on it, its size at Retina, 60 fps: {on_vd}")
+    # Its size in points, as every test stop's test pattern (the capture scale's 1× on a test host; probe of 6329077e).
+    verdict(bool(on_vd) and on_vd[0][:2] == (3, "Virtual Desktop") and on_vd[0][2] == "1218×800" and on_vd[0][3] == 60,
+            f"VD: the Desktop on it, at its size, 60 fps: {on_vd}")
     follows = h.all(r"^Virtual Desktop: iPad mini (turned|changed its room)", 5, 15.5)
     verdict([round(t) for t, _ in follows] in ([9, 12], [8, 11], [9, 11], [8, 12]) and len(follows) == 2
             and "the next one is made at 800×1218 pt" in follows[0][1] and "at 1218×800 pt" in follows[1][1],
