@@ -20,8 +20,7 @@ M = [
     ("names of 64 characters", F, "    package static let nameCap = 40", "    package static let nameCap = 64"),
     ("line breaks kept in a name", F, "                CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)\n                    || $0.properties.generalCategory == .format",
      "                $0.properties.generalCategory == .format"),
-    ("format characters kept in a name", F, "                CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)\n                    || $0.properties.generalCategory == .format",
-     "                CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)"),
+    # No mutant drops cleanName's format clause: CharacterSet.controlCharacters already holds Cf, so nothing changes.
     ("an empty name taken", F, "            return name.isEmpty ? nil : .device(name: name, paused: j.paused ?? false)",
      "            return .device(name: name, paused: j.paused ?? false)"),
     ("an unknown word read as waiting", F, "        default: return nil", "        default: return .waiting"),

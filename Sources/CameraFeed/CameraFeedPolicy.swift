@@ -115,6 +115,8 @@ package struct CameraFeedPolicy {
         var out = ""
         var lastSpace = true
         for ch in raw {
+            // CharacterSet.controlCharacters is Unicode's Cc and Cf, so it already holds the format characters (a
+            // right-to-left override, a zero width space): the last clause says so for the reader, and is no mutant.
             let isControl = ch.unicodeScalars.contains {
                 CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)
                     || $0.properties.generalCategory == .format
