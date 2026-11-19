@@ -123,6 +123,26 @@ public struct StreamMessage {
     public static let maxFramePayload = 32 << 20
     /// Any other host → device message (window lists, icons, thumbnails, the app list).
     public static let maxOtherHostPayload = 4 << 20
+    /// Kind 32 either way: an 8 MiB image (Clipboard.maxImageBytes) as base64 JSON, with room.
+    public static let maxClipboardPayload = 12 << 20
+
+    /// What a host takes from a device in one message of `kind`: a kind 32 up to `maxClipboardPayload`
+    /// only from a connection whose clipboard subscription takes images while this Mac's Include images is
+    /// on (`clipboardImages`, HostClipboard's word to the server); every other, and every other kind,
+    /// `maxClientPayload` (#300's D10: 12 MiB was allowed to every connection, one that never subscribed
+    /// and a locked Mac's too).
+    public static func maxClientPayload(for kind: StreamMessageKind, clipboardImages: Bool) -> Int {
+        kind == .clipboard && clipboardImages ? maxClipboardPayload : maxClientPayload
+    }
+
+    /// What a device takes from a host in one message of `kind`.
+    public static func maxHostPayload(for kind: StreamMessageKind) -> Int {
+        switch kind {
+        case .frame: return maxFramePayload
+        case .clipboard: return maxClipboardPayload
+        default: return maxOtherHostPayload
+        }
+    }
 
     public var kind: StreamMessageKind
     public var timestamp: Double

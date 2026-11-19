@@ -1,5 +1,6 @@
 import SwiftUI
 import StreamProtocol
+import UniformTypeIdentifiers
 
 /// The clipboard's chip over the stream (docs/clipboard-plan.md): "Paste on ‹Mac›", where the text goes
 /// with Paste on ‹Mac› Right Away on ("Where the cursor is.": the Paste presses ⌘V there too),
@@ -10,6 +11,8 @@ struct ClipboardChip: View {
     @ObservedObject var client: StreamClient
     /// Paste on ‹Mac› Right Away (StreamClient.pasteRightAwayOn), for the words.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// Include Images (StreamClient.clipboardImagesOn), for the words.
+    @AppStorage(StreamClient.clipboardImagesKey) private var imagesOn = false
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
 
@@ -48,7 +51,8 @@ struct ClipboardChip: View {
             .layoutPriority(-1)
             // One element for the words; the Paste button and Dismiss are their own.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(ClipboardPolicy.Copy.chipSpoken(mac: mac, device: StreamClient.deviceWord, rightAway: pasteRightAway))
+            .accessibilityLabel(ClipboardPolicy.Copy.chipSpoken(mac: mac, device: StreamClient.deviceWord, rightAway: pasteRightAway,
+                                                                images: ClipboardPolicy.deviceOffersImages(imagesOn: imagesOn, hostClipboard: client.hostClipboard)))
             .accessibilityAddTraits(.isStaticText)
             ClipboardPasteButton(client: client)
             Button(action: { client.dismissClipboardChip() }) {
@@ -95,20 +99,58 @@ struct ClipboardChip: View {
 /// The system's Paste button (SwiftUI's PasteButton, UIPasteControl): the person's tap reads this
 /// device's clipboard without iOS asking, and what it read goes to the Mac (`sendClipboard`), pasted
 /// there once the Mac has it while Paste on ‹Mac› Right Away is on. Disabled by the system while the
-/// clipboard has no text. Its label is the system's ("Paste").
+/// clipboard has none of what it takes: text, and an image too while this device offers images
+/// (ClipboardPolicy.deviceOffersImages: Include Images on, a Mac that takes them). Its label is the
+/// system's ("Paste").
 struct ClipboardPasteButton: View {
     @ObservedObject var client: StreamClient
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    @AppStorage(StreamClient.clipboardImagesKey) private var imagesOn = false
 
     var body: some View {
-        PasteButton(payloadType: String.self) { strings in
-            // On the main thread whatever queue the system hands it on.
-            DispatchQueue.main.async { client.sendClipboard(strings) }
+        let images = ClipboardPolicy.deviceOffersImages(imagesOn: imagesOn, hostClipboard: client.hostClipboard)
+        // The session's route as the button was drawn (read here, on the main thread; the Mac's settings
+        // state, which says it, redraws it): an image away from home is fitted to 2 MB.
+        let away = client.clipboardAway
+        PasteButton(supportedContentTypes: images ? [.plainText, .image] : [.plainText]) { providers in
+            Self.read(providers, images: images, cap: ClipboardPolicy.imageCap(away: away)) { strings, image in
+                // On the main thread whatever queue the system hands it on.
+                DispatchQueue.main.async {
+                    if let strings { client.sendClipboard(strings) } else { client.sendClipboardImage(image, away: away) }
+                }
+            }
         }
         .buttonBorderShape(.capsule)
         .labelStyle(.titleAndIcon)
         .tint(Palette.accent)
         .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
-                                                          device: StreamClient.deviceWord, rightAway: pasteRightAway))
+                                                          device: StreamClient.deviceWord, rightAway: pasteRightAway, images: images))
+    }
+
+    /// What the Paste control gave: its text when any item has some (as before), else its first image,
+    /// fitted to `cap` off the main thread, upright (ClipboardImage.fitted; nil: it could not be read).
+    private static func read(_ providers: [NSItemProvider], images: Bool, cap: Int, done: @escaping @Sendable ([String]?, Data?) -> Void) {
+        let texts = providers.filter { $0.canLoadObject(ofClass: String.self) }
+        if !texts.isEmpty || !images {
+            let group = DispatchGroup(), lock = NSLock()
+            var strings = [String?](repeating: nil, count: texts.count)
+            for (i, p) in texts.enumerated() {
+                group.enter()
+                _ = p.loadObject(ofClass: String.self) { s, _ in
+                    lock.lock(); strings[i] = s; lock.unlock()
+                    group.leave()
+                }
+            }
+            group.notify(queue: .global()) { done(strings.compactMap { $0 }, nil) }
+            return
+        }
+        guard let p = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }),
+              let type = p.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
+            done([], nil)
+            return
+        }
+        _ = p.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+            done(nil, data.flatMap { ClipboardImage.fitted($0, max: cap) })
+        }
     }
 }

@@ -60,13 +60,19 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   30 s after), the next, the rate held to a stop's refresh rate, where input
   lands, the pointer's target, and the device's button (its label, dots or
   "3/7", VoiceOver's words); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
-  `image` reserved for a later generation, a device's `stop`) and its 256 KB
-  cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
+  `image` (generation 2: PNG or JPEG, 8 MiB), a device's `stop` and `accepts`) and its caps;
+  `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
   which change of the Mac's pasteboard the host sends and to whom, and only
-  while macOS allows every read (`MacAccess`); the device's subscription,
-  which text from the Mac it writes, a Paste's receipt, the chip and its time,
-  every word; pure, `Tests/checks/clipboard`). `Audio.swift` — the Mac's sound
+  while macOS allows every read (`MacAccess`); the generation a host says
+  (`hostGeneration`), what each subscriber takes (`subscriberTakesImages`), the
+  caps at home and away (`imageCap`), the image path's start and backstops; the
+  device's subscription, which text and image from the Mac it writes, a Paste's
+  receipt and its wait, the chip and its time, every word; pure,
+  `Tests/checks/clipboard`). `ClipboardImage.swift` — an image as the clipboard
+  sends it (`fitted`: as it is within the cap, else upright, photographs as JPEG,
+  others as PNG while that fits, on white, scaled down; ImageIO; both ends; pure,
+  `Tests/checks/clipboard`). `Audio.swift` — the Mac's sound
   (kind 43, host → device; 29 to 31 and 33 to 42 are PR #66's):
   `AudioMessage`, type 1 a JSON `AudioFormat` (codec, rate, channels, packet
   size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
@@ -101,12 +107,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
-  sendAudio, shareClipboard; `standard` is the CLI's values, `app` Sill.app's
+  sendAudio, shareClipboard, shareClipboardImages; `standard` is the CLI's values, `app` Sill.app's
   defaults, the same with the virtual display and Send Audio on (2026-10-27); `effective(away:)`), `HostClipboard` (the clipboard's host side: who
   subscribed, the look at the pasteboard's change count four times a second
-  while one has and macOS allows every read, a device's text written
+  while one has and macOS allows every read, a device's text or image written
   `.currentHostOnly` with this launch's marker and passed to the others, one
-  line a subscription and none per copy; a synthetic host's own pasteboard,
+  line a subscription and none per copy; images read only for a subscriber that
+  takes them and fitted on a queue of their own, then sent on the server's image
+  path (`StreamServer.sendClipboardImage`); a synthetic host's own pasteboard,
   the TEST ONLY SILL_TEST_PASTEBOARD, SILL_TEST_CLIPBOARD_LOG and
   SILL_TEST_CLIPBOARD_ACCESS; `MacClipboard`, macOS's paste privacy for the
   look and for Settings › General's `ClipboardSection`),
@@ -388,7 +396,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable` and `--no-clipboard`.
+  on its own stdout), `--print-cable`, `--no-clipboard` and `--no-clipboard-images`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -934,13 +942,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   InputOverlay.swift, `StrokeObserver` (the recognizer on both surfaces that
   feeds it every direct touch and takes none). The clipboard:
   `StreamClient+Clipboard` (the subscription at the first window list that
-  says `clipboard` and on a move's new connection, `stop` when the switch goes
-  off, the Mac's text written `.localOnly` for 10 minutes, the chip's look when
-  Sill becomes active and its time while it shows, Paste's send and its
+  says `clipboard` and on a move's new connection, saying `accepts` 2 with
+  Include Images on, `stop` when the switch goes off, the Mac's text or image
+  (decoded off the main thread) written `.localOnly` for 10 minutes, the chip's
+  look when Sill becomes active and its time while it shows, Paste's send and its
   receipt, a ping whose pong says the Mac read it; pbxproj AC64/FC64) and `ClipboardChip`
-  (the chip and `ClipboardPasteButton`, the system's Paste control;
-  AD64/FD64); StreamScreen places the chip, the Settings panel's This iPad
-  group has Share Clipboard and Paste on ‹Mac›. The
+  (the chip and `ClipboardPasteButton`, the system's Paste control, an image
+  fitted to 8 MB, 2 MB away; AD64/FD64); StreamScreen places the chip, the
+  Settings panel's This iPad group has Share Clipboard, Paste on ‹Mac› Right
+  Away, Include Images (`Sill.clipboardImages`) and Paste on ‹Mac›. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers and
   the tour's version (`version`, 2 since 0.6; `upgraded`, an older memory
@@ -1156,7 +1166,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Scripts/harness-photos.sh CASES [--commit REV] [--baseline REV] [--device duo|ipad] [--repo DIR]`
   builds each commit's committed tree once (cached by commit and Xcode build in
   `~/Library/Caches/SillAgents`, one shared DerivedData), boots one of them inside the heavy lock,
-  takes a photo per case (a name and launch arguments a line, `example.cases`), compares a baseline's
+  takes a photo per case (a name and launch arguments a line, `example.cases`;
+  `clipboard-images-duo.cases` and `clipboard-images-ipad.cases`, the Share Clipboard group with
+  Include Images), compares a baseline's
   pixel for pixel (`pixeldiff.swift`: how many pixels, by how much, where; a picture of the
   differences) and shuts it down. It refuses another name than "Sill agents …", any other booted
   simulator, a case without `-SillLayout` or with `-SillLive` or anything that dials or sends input,

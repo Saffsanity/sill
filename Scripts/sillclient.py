@@ -98,12 +98,17 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
                      else exits 2
 The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printed on one line,
 "clipboard at 1.234s: 12 bytes 'text…'", and the window list's clipboard= when the host says it:
+  --clipboard-images the same subscription saying it takes images ({"accepts":2}); each image received is
+                     printed with its size and type, its first bytes checked
   --clipboard        a kind 32 {} right after the select: the subscription (the host sends this client
                      what is copied on its pasteboard from then on; a --synthetic host's is a pasteboard of
                      its own, SILL_TEST_PASTEBOARD's name, never this Mac's clipboard)
   --copy=TEXT@T      a kind 32 with this text T seconds in (\n, \t, \xHH and \uXXXX escapes decoded), as a
                      device's Paste sends it: the host's pasteboard is set to it, and the other subscribers get it
   --copy-bytes=N@T   the same with N bytes of "x" (the cap is 262,144)
+  --copy-image=FILE@T a kind 32 with this file's bytes as its image ({"image":…}), as a device's Paste sends
+                     a copied image to a host whose list says clipboard 2: a PNG or JPEG of at most 8 MiB is
+                     set on the host's pasteboard and goes to the other subscribers that take images
   --raw32=JSON@T     this literal kind 32 payload T seconds in (split on the last @), as written:
                      {"stop":true} ends the subscription
 A locked Mac (docs/locked-mac-plan.md): the window list's line ends in locked=1 while the host says it is
@@ -184,7 +189,7 @@ AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale
 LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "copy-image", "raw32", "raw7", "raw15", "next-display")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -531,6 +536,7 @@ try:
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
                           else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
+                          else open(text, "rb").read() if name == "copy-image"
                           else held_key(text) if name == "key" else text)
             at_t = number(t, f"--{name}'s @T", float)
             if name == "key" and parsed[1] is not None:
@@ -545,7 +551,7 @@ try:
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
                        "--off-console-view",
-                       "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
+                       "--clipboard", "--clipboard-images", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
@@ -719,6 +725,8 @@ try:
     if "--clipboard" in flags:
         # The clipboard's subscription (kind 32 {}), as a device whose Share Clipboard is on sends it.
         s.sendall(msg(32, b"{}")); print("  sent clipboard subscription")
+    if "--clipboard-images" in flags:
+        s.sendall(msg(32, b'{"accepts":2}')); print("  sent clipboard subscription, taking images")
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
 if big_payload:
@@ -856,6 +864,9 @@ def fire(e, now):
     elif name in ("copy", "copy-bytes"):
         body = json.dumps({"text": parsed}, ensure_ascii=False).encode()
         s.sendall(msg(32, body)); print(f"  sent clipboard text, {len(parsed.encode())} bytes ({len(body)} of JSON) at {at}")
+    elif name == "copy-image":
+        body = json.dumps({"image": base64.b64encode(parsed).decode()}).encode()
+        s.sendall(msg(32, body)); print(f"  sent clipboard image, {len(parsed)} bytes ({len(body)} of JSON) at {at}")
     elif name == "raw32":
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
     elif name in ("raw7", "raw15"):
@@ -941,6 +952,10 @@ while time.time() - t0 < dur:
             except ValueError:
                 print(f"  clipboard at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
             t = d.get("text")
+            if t is None and "image" in d:
+                img = base64.b64decode(d["image"])
+                kind_name = "PNG" if img[:8] == b"\x89PNG\r\n\x1a\n" else "JPEG" if img[:3] == b"\xff\xd8\xff" else "neither PNG nor JPEG"
+                print(f"  clipboard at {time.time()-t0:.3f}s: an image, {len(img)} bytes, {kind_name}"); continue
             clipboards.append(t)
             shown = "no text" if t is None else f"{len(t.encode())} bytes {t[:60]!r}" + ("…" if len(t) > 60 else "")
             print(f"  clipboard at {time.time()-t0:.3f}s: {shown}" + (f" keys={sorted(d)}" if set(d) - {"text"} else ""))

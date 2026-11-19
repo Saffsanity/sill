@@ -372,7 +372,7 @@ check(session.locked && session.withholds(.thumbnail) && session.withholds(.macP
 let everyRequest: [(R, String)] = [
     (.pick(.window(7)), "a window picked"), (.pick(.desktop), "the Desktop picked"), (.pick(.none), "nothing picked"),
     (.launch, "an app launched"), (.windowCommand, "a window's buttons"), (.menuSubscription, "the menus' subscription"),
-    (.menuRequest, "a menu fetched or chosen"), (.gesture, "a gesture"), (.clipboardText, "a device's clipboard text"),
+    (.menuRequest, "a menu fetched or chosen"), (.gesture, "a gesture"), (.clipboardSet, "a device's clipboard text or image"),
     (.clipboardSubscription, "the clipboard's subscription or stop"), (.input(letsGo: false), "input"),
     (.input(letsGo: true), "the up of what the device holds down"), (.other, "settings, the viewport, a keyframe, Pair This iPad…"),
     (.nextDisplay, "the Desktop's next display (kind 47)"),
@@ -388,7 +388,7 @@ func expectedDecision(_ r: R, _ rd: Reading, paired: Bool) -> P.Decision {
     case .menuSubscription, .clipboardSubscription, .other: return .take
     case .menuRequest: return .refuse(.menus)
     case .gesture: return .refuse(.gesture)
-    case .clipboardText: return .refuse(.clipboard)
+    case .clipboardSet: return .refuse(.clipboard)
     case .input(let letsGo):
         let types = rd == .screenLocked && paired
         return types ? .take : (letsGo ? .letGo : .refuse(.input))
@@ -404,6 +404,29 @@ check(P.decide(.input(letsGo: true), reading: .offConsole, paired: true) == .let
 check(P.decide(.input(letsGo: false), reading: .screenLocked, paired: true) == .take, "at a locked screen a paired session types (the owner's password)")
 check(P.Refusal.allCases.map(\.rawValue) == ["pick", "launch", "windowCommand", "menus", "gesture", "clipboard", "input"],
       "seven refusal kinds, each its own summary line")
+// A device's kind 32 as the lock weighs it (#300's D2: an image has no text, so it counted as a subscription,
+// taken at any reading, and one sent while the Mac read locked landed on its clipboard after the unlock).
+func kind32(_ json: String) -> Clipboard? { Wire.decode(Clipboard.self, from: Data(json.utf8)) }
+check(P.clipboardRequest(kind32(#"{"text":"pasted"}"#)) == .clipboardSet, "a device's text: a set")
+check(P.clipboardRequest(kind32(#"{"image":"iVBORw0KGgo="}"#)) == .clipboardSet, "a device's image: a set (the defect's case)")
+check(P.clipboardRequest(kind32(#"{"text":"t","image":"iVBORw0KGgo="}"#)) == .clipboardSet, "both: a set")
+check(P.clipboardRequest(kind32("{}")) == .clipboardSubscription && P.clipboardRequest(kind32(#"{"accepts":2}"#)) == .clipboardSubscription,
+      "{} and {\"accepts\":2}: subscriptions, taken at any reading")
+check(P.clipboardRequest(kind32(#"{"text":""}"#)) == .clipboardSubscription, "empty text sets nothing: a subscription, as HostClipboard takes it")
+check(P.clipboardRequest(kind32(#"{"stop":true}"#)) == .clipboardSubscription
+      && P.clipboardRequest(kind32(#"{"stop":true,"text":"t"}"#)) == .clipboardSubscription
+      && P.clipboardRequest(kind32(#"{"stop":true,"image":"iVBORw0KGgo="}"#)) == .clipboardSubscription,
+      "a stop wins over anything with it: taken, so a device's switch going off is heard at a locked Mac too")
+check(P.clipboardRequest(nil) == .clipboardSubscription, "what does not decode: taken, and HostClipboard ignores it")
+for rd in readings {
+    let image = P.decide(P.clipboardRequest(kind32(#"{"image":"iVBORw0KGgo="}"#)), reading: rd, paired: true)
+    check(image == (rd.locked ? .refuse(.clipboard) : .take), "\(rd): a device's image \(rd.locked ? "refused" : "taken"), even from a paired session (got \(image))")
+}
+for arrived in readings { for now in readings {
+    let took = P.decide(P.clipboardRequest(kind32(#"{"image":"iVBORw0KGgo="}"#)), arrived: arrived, now: now, paired: true) == .take
+    check(took == (arrived == .unlocked && now == .unlocked),
+          "an image that arrived \(arrived) and is handled \(now): written only if unlocked both times (the defect: it came locked, was handled after the unlock)")
+} }
 // Judged at the more restrictive of the reading at arrival and now: what came while locked never acts after.
 for arrived in readings { for now in readings {
     let rd = P.restrictive(arrived, now)
@@ -559,8 +582,8 @@ let words: [(P.Refusal, String, String)] = [
      "Locked: refused 3 menu requests; devices see none of this Mac until it is unlocked."),
     (.gesture, "Locked: refused a gesture; devices see none of this Mac until it is unlocked.",
      "Locked: refused 3 gestures; devices see none of this Mac until it is unlocked."),
-    (.clipboard, "Locked: dropped a device's clipboard text; the clipboard waits for this Mac to be unlocked.",
-     "Locked: dropped 3 clipboard texts from devices; the clipboard waits for this Mac to be unlocked."),
+    (.clipboard, "Locked: dropped a device's clipboard text or image; the clipboard waits for this Mac to be unlocked.",
+     "Locked: dropped 3 clipboard texts or images from devices; the clipboard waits for this Mac to be unlocked."),
     (.input, "Locked: dropped an input event; only a paired device types at a locked Mac, and no device at one switched to another user.",
      "Locked: dropped 3 input events; only a paired device types at a locked Mac, and no device at one switched to another user."),
 ]

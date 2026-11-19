@@ -281,10 +281,11 @@ check(StreamMessageKind(rawValue: 29) == nil && StreamMessageKind(rawValue: 42) 
 // ways. A host says it in its list, a device sends kind 32 only then, and an older peer skips the kind.
 let shares = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.6", protocol: 1,
                         gestures: TrackpadGesture.generation, clipboard: ClipboardPolicy.generation)
-check(json(shares).contains(#""clipboard":1"#) && json(shares).contains(#""gestures":1"#), "a list from a host that shares the clipboard says clipboard 1: \(json(shares))")
+check(json(shares).contains(#""clipboard":2"#) && json(shares).contains(#""gestures":1"#), "a list from a host that shares the clipboard says clipboard 2 (images too): \(json(shares))")
+check((shares.clipboard ?? 0) >= 1, "a device of generation 1 (its rule: clipboard 1 or more) still takes the text, and subscribes with {}, which the host answers with text alone")
 check(!json(takes).contains("clipboard") && !json(list).contains("clipboard"), "a list without it leaves the key out")
 check(decodedOld != nil && decodedOld?.clipboard == nil, "an older host's list decodes, clipboard nil")
-check(Wire.decode(WindowList.self, from: Wire.encode(shares)).map { $0.clipboard == 1 && $0.gestures == 1 } == true, "clipboard round-trips beside gestures")
+check(Wire.decode(WindowList.self, from: Wire.encode(shares)).map { $0.clipboard == 2 && $0.gestures == 1 } == true, "clipboard round-trips beside gestures")
 check(StreamMessageKind.clipboard.rawValue == 32 && StreamMessageKind(rawValue: 32) == .clipboard, "kind 32 is the clipboard")
 check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil }, "29, 30, 31 and 33 not this build's")
 let clip = Clipboard(text: "Hello")
@@ -305,10 +306,10 @@ check(json(repeats).contains(#""keyRepeat":1"#), "a list from a host that repeat
 check(!json(shares).contains("keyRepeat") && !json(list).contains("keyRepeat") && shares.keyRepeat == nil,
       "a list without it (the initializer's) leaves the key out")
 check(decodedOld != nil && decodedOld?.keyRepeat == nil, "an older host's list decodes, keyRepeat nil")
-check(Wire.decode(WindowList.self, from: Wire.encode(repeats)).map { $0.keyRepeat == 1 && $0.clipboard == 1 && $0.gestures == 1 } == true,
+check(Wire.decode(WindowList.self, from: Wire.encode(repeats)).map { $0.keyRepeat == 1 && $0.clipboard == 2 && $0.gestures == 1 } == true,
       "keyRepeat round-trips beside clipboard and gestures")
 struct ReaderBefore: Decodable { var macName: String; var gestures: Int?; var clipboard: Int? }
-check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 2 } == true,
       "a reader from before it skips keyRepeat")
 
 // The window list's `desktopDisplays` and `desktopDisplay` (#91's tapping method), and kind 47: a host with
@@ -325,7 +326,7 @@ check(!json(repeats).contains("desktopDisplay") && repeats.desktopDisplays == ni
 check(decodedOld != nil && decodedOld?.desktopDisplays == nil && decodedOld?.desktopDisplay == nil, "an older host's list decodes, both nil")
 check(Wire.decode(WindowList.self, from: Wire.encode(displays)).map { $0.desktopDisplays == 2 && $0.desktopDisplay == 1 && $0.keyRepeat == 1 } == true,
       "desktopDisplays and desktopDisplay round-trip beside keyRepeat")
-check(Wire.decode(ReaderBefore.self, from: Wire.encode(displays)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(displays)).map { $0.macName == "Mac mini" && $0.clipboard == 2 } == true,
       "a reader from before them skips desktopDisplays and desktopDisplay")
 // Their names (docs/virtual-desktop-plan.md phase 1, PR #296's field): VoiceOver's "Display 2 of 3, DELL
 // U2723QE". Additive as the two: left out when nil, nil from an older host, skipped by an older reader.
@@ -341,7 +342,7 @@ check(Wire.decode(WindowList.self, from: Wire.encode(named)).map {
 struct ReaderOf173: Decodable { var macName: String; var desktopDisplays: Int?; var desktopDisplay: Int? }
 check(Wire.decode(ReaderOf173.self, from: Wire.encode(named)).map { $0.desktopDisplays == 2 && $0.desktopDisplay == 1 } == true,
       "a reader of #173's two fields alone skips the names and reads the two")
-check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName == "Mac mini" && $0.clipboard == 2 } == true,
       "a reader from before them skips all three")
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
 check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,

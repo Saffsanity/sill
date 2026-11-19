@@ -160,6 +160,7 @@ private struct GeneralPane: View {
             // switch too. macOS's answer is read with the permissions (once a second while this pane
             // shows, and when Sill becomes active), never in a preview.
             ClipboardSection(shareClipboard: $settings.config.shareClipboard,
+                             images: $settings.config.shareClipboardImages,
                              access: previewClipboardAccess ?? model.permissions.clipboardAccess,
                              allow: { model.permissions.allowClipboard() })
             if let preview = previewUpdates {
@@ -262,17 +263,26 @@ struct FirewallSection: View {
 // MARK: Clipboard
 
 /// Share clipboard with devices (HostClipboard, docs/clipboard-plan.md): the switch and its footnote,
-/// and while the switch is on and macOS does not allow every read Sill makes on its own
-/// (ClipboardPolicy.MacAccess), why what is copied here stays on this Mac and the way to allow it.
-/// Drawn alone in the previews in each of macOS's answers (DebugHooks).
+/// Include images under it (`HostConfig.shareClipboardImages`, the Mac owner's say on images: indented,
+/// with its words, dimmed while the switch above is off), and while the switch is on and macOS does not
+/// allow every read Sill makes on its own (ClipboardPolicy.MacAccess), why what is copied here stays on
+/// this Mac and the way to allow it. Drawn alone in the previews in each of macOS's answers (DebugHooks).
 struct ClipboardSection: View {
     @Binding var shareClipboard: Bool
+    @Binding var images: Bool
     let access: ClipboardPolicy.MacAccess
     var allow: () -> Void = {}
 
     var body: some View {
         Section {
             Toggle("Share clipboard with devices", isOn: $shareClipboard)
+            // The form draws the second line as the switch's description, under its title.
+            Toggle(isOn: $images) {
+                Text(ClipboardPolicy.Copy.macImagesTitle)
+                Text(ClipboardPolicy.Copy.macImagesFootnote)
+            }
+            .padding(.leading, 18)
+            .disabled(!shareClipboard)
             if shareClipboard, let warning = ClipboardPolicy.Copy.macAccessWarning(access) {
                 VStack(alignment: .leading, spacing: 6) {
                     Warning(warning)

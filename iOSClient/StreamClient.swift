@@ -985,8 +985,10 @@ final class StreamClient: ObservableObject {
     @Published var clipboardChip = false
     /// "Sent to ‹Mac›’s clipboard…" or "Too long to send…", for a moment after a Paste.
     @Published var clipboardNote: ClipboardNote?
-    /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription).
+    /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription), and
+    /// what the last one said of images (Include Images, `{"accepts":2}` or `{}`).
     var clipboardSubscribed = false
+    var clipboardSubscribedImages = false
     /// When Sill last became active: a session that starts soon after gets the chip's look too.
     var clipboardActivatedAt: TimeInterval?
     /// What this device sent last, and its clipboard's change count right after: the Mac's echo of it
@@ -2570,7 +2572,7 @@ final class StreamClient: ObservableObject {
             // The session reader's caps (docs/remote-access-plan.md §3.7): nothing a Sill host sends
             // is bigger, and waiting for what such a header announces would hold whatever follows
             // until the move's 5 s run out.
-            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
+            let cap = StreamMessage.maxHostPayload(for: header.kind)
             guard header.payloadLength <= cap else {
                 print("move to the network: closing, the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
                 c.cancel()
@@ -4598,12 +4600,16 @@ final class StreamClient: ObservableObject {
                 self.goodbye = goodbye
             }
         case .clipboard:
-            // Text copied on the Mac (StreamClient+Clipboard): written to this device's clipboard while
-            // its switch is on. Only from the current connection.
+            // Text or an image copied on the Mac (StreamClient+Clipboard): written to this device's clipboard
+            // while its switch is on. Only from the current connection. Decoded once, off the main thread and
+            // off this connection's queue, in order (an image is up to 11 MB of JSON: #300's D7).
             let from = connection
-            DispatchQueue.main.async {
-                guard self.connection === from else { return }
-                self.receiveClipboard(data)
+            Self.clipboardDecoding.async {
+                let clip = Wire.decode(Clipboard.self, from: data)
+                DispatchQueue.main.async {
+                    guard self.connection === from else { return }
+                    self.receiveClipboard(clip)
+                }
             }
         case .macMenu:
             // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s

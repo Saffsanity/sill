@@ -1,0 +1,11 @@
+# The clipboard's images (#300 finished) on the agents' iPad (iPad Pro 13-inch (M5), iOS 27.0: the 27.1
+# runtimes take only the Duo): the Share Clipboard group with Include Images off, on, and for a Mac that
+# shares text alone, sideways and in a Slide Over's width.
+#   Scripts/harness-photos.sh Scripts/harness-photos/clipboard-images-ipad.cases --device ipad --baseline origin/main
+ipad-clip-images-off       -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboard --wait=5
+ipad-clip-images-on        -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboard -Sill.clipboardImages 1 --wait=5
+ipad-clip-older-mac        -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboard -SillMockClipboard 1 --wait=5
+ipad-clip-slide-over-on    -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboard -Sill.clipboardImages 1 --wait=5
+ipad-clip-group-off        -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboardgroup --wait=5
+ipad-clip-group-on         -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboardgroup -Sill.clipboardImages 1 --wait=5
+ipad-clip-group-upright-on -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll clipboardgroup -Sill.clipboardImages 1 --wait=5
