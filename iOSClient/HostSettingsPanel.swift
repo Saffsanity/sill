@@ -785,7 +785,7 @@ struct HostSettingsPanel: View {
         }
         Footnote(text: gesturesFooter)
         // Only for a Mac that takes the pinch (`WindowList.magnify`): for any other Zoom App would do nothing.
-        if client.hostMagnify != nil {
+        if client.hostPinch != nil {
             Rows {
                 AdaptiveRow(title: "Pinch Behavior", since: nil) {
                     Picker("Pinch Behavior", selection: $pinchZoomsMac) {

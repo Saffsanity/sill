@@ -675,7 +675,7 @@ struct PortraitStreamScreen: View {
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) },
-                         magnifyAvailable: { client.hostMagnify != nil })
+                         magnifyAvailable: { client.hostPinch != nil })
         }
         // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
         .background(hidden ? Color.black : Palette.panel)

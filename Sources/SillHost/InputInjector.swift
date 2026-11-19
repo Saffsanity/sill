@@ -116,7 +116,9 @@ final class InputInjector {
         case .key(let hidUsage, let down, let modifiers):
             key(hidUsage: hidUsage, down: down, modifiers: modifiers, from: device)
         case .magnify(let phase, let x, let y, let amount):
-            magnify(phase, at: point(x, y, in: rect), amount: amount)
+            pinch(.magnify, phase, at: point(x, y, in: rect), value: amount)
+        case .rotate(let phase, let x, let y, let degrees):
+            pinch(.rotate, phase, at: point(x, y, in: rect), value: degrees)
         }
     }
 
@@ -169,8 +171,12 @@ final class InputInjector {
         case .rightMouseDragged: what = "right mouse drag"
         case .scrollWheel: what = Self.scrollTestText(event)
         case Self.gestureEventType:
-            what = "magnify \(event.getDoubleValueField(Self.magnificationField))"
-            print("Test input: \(what) (phase \(event.getIntegerValueField(Self.gesturePhaseField)))")
+            // A pinch or a turn (`postGesture`): its value, its phase (1 began, 2 changed, 4 ended) and where.
+            let rotate = event.getIntegerValueField(Self.gestureSubtypeField) == Self.subtype(.rotate)
+            what = rotate ? "rotate \(event.getDoubleValueField(Self.rotationField))"
+                : "magnify \(event.getDoubleValueField(Self.magnificationField))"
+            print("Test input: \(what) (phase \(event.getIntegerValueField(Self.gesturePhaseField))) "
+                  + "at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))")
             return
         default: what = "event \(event.type.rawValue)"
         }
@@ -214,76 +220,60 @@ final class InputInjector {
         return (true, "Test input log: each event this host would post is printed; a --synthetic host posts none.")
     }
 
-    // MARK: Magnify (a two-finger pinch)
+    // MARK: A pinch and a turn (PinchGestures)
 
-    /// The trackpad's magnify gesture has no public CGEvent constructor. It is the window server's
-    /// gesture event (NSEventTypeGesture, 29) with the subtype field set to magnify (8), the amount in
-    /// the magnification field and a phase around it, the fields AppKit reads for
-    /// `NSEvent.magnification` (private numbers, as `SymbolicHotKeys` and the virtual display are
-    /// private API; stable since OS X 10.7, but unverified here on macOS 27 with a real app).
+    /// The trackpad's magnify and rotate gestures have no public CGEvent constructor. Each is the window
+    /// server's gesture event (NSEventTypeGesture, 29) with its subtype (8 magnify, 5 rotate), its value
+    /// (field 113, the magnification; field 114, the turn in degrees) and a phase around it (field 132:
+    /// 1 began, 2 changed, 4 ended), the fields AppKit reads for `NSEvent.magnification` and
+    /// `NSEvent.rotation`: private numbers, as `SymbolicHotKeys` and the virtual display are private API.
+    /// The magnify's were tried by the PR's author on macOS 27.2 (Maps, Safari, Figma); the rotate's are
+    /// the same table's and wait for a device test (docs/steps/2026-11-19-ready-261.md).
     private static let gestureEventType = CGEventType(rawValue: 29)!
     private static let gestureSubtypeField = CGEventField(rawValue: 110)!
     private static let magnificationField = CGEventField(rawValue: 113)!
+    private static let rotationField = CGEventField(rawValue: 114)!
     private static let gesturePhaseField = CGEventField(rawValue: 132)!
-    private static let magnifySubtype: Int64 = 8
-    /// The gesture phases NSEvent reports: began, changed, ended.
-    private static func phaseValue(_ phase: MagnifyPhase) -> Int64 {
+    private static func subtype(_ kind: PinchGestures.Kind) -> Int64 { kind == .magnify ? 8 : 5 }
+    private static func phaseValue(_ phase: PinchPhase) -> Int64 {
         switch phase { case .began: return 1; case .changed: return 2; case .ended: return 4 }
     }
-    /// A pinch whose closing message never comes (the device dropped off mid-pinch) would leave the
-    /// Mac's content held in a zoom gesture: it ends after this long without an event.
-    private static let magnifyIdleTimeout: Double = 1
-    private var magnifyOpen = false
-    private var magnifyAt = CGPoint.zero
-    private var magnifyWatchdog: Task<Void, Never>?
-    /// Bounds a single event: a device's amount is a fraction of the size, not more than a doubling.
-    private static let maxMagnification = 1.0
+    /// What a device's pinch and turn have open on the Mac, and where (PinchGestures, pure).
+    private var pinches = PinchGestures()
+    private var pinchWatchdog: Task<Void, Never>?
 
-    private func magnify(_ phase: MagnifyPhase, at location: CGPoint, amount rawAmount: Double) {
-        Stats.shared.bump("in.magnifyPhase")
-        guard rawAmount.isFinite else { return }
-        let amount = min(max(rawAmount, -Self.maxMagnification), Self.maxMagnification)
-        switch phase {
-        case .began:
-            if magnifyOpen { postMagnify(.ended, at: magnifyAt, amount: 0) }
-            // The pointer under the fingers first, as a hand on a trackpad has it: apps zoom about the
-            // cursor, and a finger sends no move before its pinch.
-            if hypot(pointerNow().x - location.x, pointerNow().y - location.y) > 1 { pointer(.move, at: location) }
-            magnifyOpen = true
-            postMagnify(.began, at: location, amount: amount)
-        case .changed:
-            guard magnifyOpen else { return }   // the begin was lost or the watchdog closed it
-            postMagnify(.changed, at: location, amount: amount)
-        case .ended:
-            guard magnifyOpen else { return }
-            magnifyOpen = false
-            postMagnify(.ended, at: location, amount: amount)
-        }
-        magnifyAt = location
-        rearmMagnifyWatchdog()
+    /// One event of a device's pinch or turn: the pointer under it first when it begins, then its gesture
+    /// event, every event of one gesture where it began (PinchGestures).
+    private func pinch(_ kind: PinchGestures.Kind, _ phase: PinchPhase, at location: CGPoint, value: Double) {
+        Stats.shared.bump("in.pinchPhase")
+        let step = pinches.apply(kind, phase, value: value, at: location, pointer: pointerNow())
+        if let to = step.movePointerTo { pointer(.move, at: to) }
+        for p in step.posts { postGesture(p) }
+        rearmPinchWatchdog()
     }
 
-    private func postMagnify(_ phase: MagnifyPhase, at location: CGPoint, amount: Double) {
+    private func postGesture(_ p: PinchGestures.Post) {
         guard let event = CGEvent(source: source) else { return }
         event.type = Self.gestureEventType
-        event.location = location
-        event.setIntegerValueField(Self.gestureSubtypeField, value: Self.magnifySubtype)
-        event.setIntegerValueField(Self.gesturePhaseField, value: Self.phaseValue(phase))
-        event.setDoubleValueField(Self.magnificationField, value: amount)
-        watch?.sillMoved(to: location)   // before the post, as every pointer and scroll event (`watch`)
-        lastPointerLocation = location
-        if post(event) { Stats.shared.bump("in.magnify") }
+        event.location = p.at
+        event.setIntegerValueField(Self.gestureSubtypeField, value: Self.subtype(p.kind))
+        event.setIntegerValueField(Self.gesturePhaseField, value: Self.phaseValue(p.phase))
+        event.setDoubleValueField(p.kind == .magnify ? Self.magnificationField : Self.rotationField, value: p.value)
+        watch?.sillMoved(to: p.at)   // before the post, as every pointer and scroll event (`watch`)
+        lastPointerLocation = p.at
+        if post(event) { Stats.shared.bump(p.kind == .magnify ? "in.magnify" : "in.rotate") }
     }
 
-    private func rearmMagnifyWatchdog() {
-        magnifyWatchdog?.cancel()
-        guard magnifyOpen else { magnifyWatchdog = nil; return }
-        magnifyWatchdog = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.magnifyIdleTimeout * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.magnifyOpen else { return }
-            self.magnifyOpen = false
-            self.postMagnify(.ended, at: self.magnifyAt, amount: 0)
-            Stats.shared.bump("in.magnifyTimeout")
+    /// `PinchGestures.idleTimeout` with no event while a gesture is open: it ends there (a device that
+    /// dropped off mid-pinch). Main actor, inherited from this method, as the scroll watchdog's.
+    private func rearmPinchWatchdog() {
+        pinchWatchdog?.cancel()
+        guard pinches.isOpen else { pinchWatchdog = nil; return }
+        pinchWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(PinchGestures.idleTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.pinches.isOpen else { return }
+            for p in self.pinches.idle() { self.postGesture(p) }
+            Stats.shared.bump("in.pinchTimeout")
         }
     }
 
@@ -636,10 +626,12 @@ final class InputInjector {
         }
     }
 
-    /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
-    /// button still down, where the pointer is, so nothing a device pressed outlives Sill on the Mac.
+    /// The host is going: a pinch or a turn a device left open ends (PinchGestures.releaseAll), every key
+    /// any device holds down goes up (KeyStrokes.releaseAll), then a button still down, where the pointer
+    /// is, so nothing a device pressed outlives Sill on the Mac.
     func releaseAll() {
-        if magnifyOpen { magnifyOpen = false; postMagnify(.ended, at: magnifyAt, amount: 0) }
+        for p in pinches.releaseAll() { postGesture(p) }
+        pinchWatchdog?.cancel()
         post(keys.releaseAll(), letGo: true)
         stopRepeating()
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
