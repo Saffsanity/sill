@@ -100,9 +100,14 @@
   mutants (9 new); `lock-policy` 1,411 of 1,411. CI on the pull request (run 44313954856, at c3b5b96b): `swift build -c
   release`, `Tests/checks/run-all.sh`, the iOS app for the simulator and the CLI's paths, all green. The review's own
   heavy turn (08:35) built c3b5b96b (49 s) and passed live.py's off, wait and back before its session stopped; the
-  close-out's turn (`swift build -c release`, `Scripts/privacy-check/live.py OUT all` with the nosleep and away cases,
-  H2 again against main's recorded lines, the previews from the bare binary, run-all) waits in heavy.sh's queue, with
-  four other agents' jobs in it at 15:45: its results go in the pull request and here.
+  close-out's turn ran at 22:37 at 34c899ed: `swift build -c release` passed; `Scripts/privacy-check/live.py OUT all`,
+  48 of 48 verdicts hold, the nosleep and away cases among them; the previews drawn from the bare binary (326, the
+  eight lock panes among them, SillMenuBar's lock keys in this Mac's defaults as they were); run-all, every check
+  passed. H2 again (the CLI's stdout without the flag): idle, identical to main's recorded lines; with a Desktop
+  client, five runs differ from the lines recorded in the first round only in the statistics line of the second the
+  client leaves (which counters it holds, and whether it still counts the client), and main's own CLI (eb48ac9f), run
+  twice the same night, differs from its own recorded lines in the same way, line for line as the branch's last two
+  runs: the branch's stdout is main's.
 - **Defaults taken for Noah to confirm** (the plan's recommendations): the switch in Settings › Devices (open decision
   1); a 30 s wait (4); after any session, home or away (5, now the switch Only after a device away from home, off: so
   an iPad used as a second screen at the desk locks the Mac 30 s after it disconnects unless it is turned on); the
