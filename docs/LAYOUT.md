@@ -619,10 +619,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   number in blocks along its top, on VideoToolbox's software HEVC encoder,
   refusing a hardware session) and `check-fixture.swift` decodes it on the
   software decoder, each frame reading its own number; `Scripts/camera-check/live.py
-  OUT [live|two|lock|unpaired|hostile|nohook|all]` runs the camera's loopback
+  OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|all]` runs the camera's loopback
   gates against synthetic `--pairing` test hosts with SILL_TEST_CAMERA and
   paired sillclient.py clients sending the fixture (`--camera`), each host
-  under a minute. `Scripts/audio/` is the
+  under a minute; `Scripts/camera-check/encoder.sh [OUT.bin]` compiles the app's
+  own CameraEncoder, CameraPattern, CameraStream and CameraPolicy for macOS with
+  `encoder-main.swift` and runs the device's stream end to end on VideoToolbox's
+  software encoder and decoder (never the hardware encoder; not in CI, whose
+  runners may lack the software HEVC encoder), writing epoch 0 as a fixture. `Scripts/audio/` is the
   encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
@@ -735,7 +739,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
   off a lost path: `handOver`, `hold`, `adopt`, `unhold`; the input messages
   counted for the session's connection, `inputsOnSession`, which a kind 26's
-  `seen` is judged against; Foundation and Network only, checked with swiftc),
+  `seen` is judged against; the uplink ledger, `UplinkLedger`: what the session's
+  connection was handed and has not taken yet, by lane, and what it took in the last
+  second, which the camera's pacing reads (`uplink`), and `sendCamera`, a camera frame
+  refused, never kept, at a fence or a hold; Foundation and Network only, checked with
+  swiftc: `Tests/checks/fence`, its `camera` mode),
   `MessageReader` (the session's reader: each header, then the payload in
   pieces of at most 256 KB, every piece a sign of life for the liveness check;
   Network and StreamProtocol only, checked with swiftc),
@@ -836,10 +844,31 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
   `CameraPolicy` (Share Camera, docs/camera-plan.md §6.1: the row and its words, when the device offers and
-  when it captures, the pause and its order, the format inside the Mac's demand, the bitrate and its steps,
+  when it captures, the capture session's run, the offer on the wire (its claim, its stop, said again after a
+  refusal), the pause and its order, the format inside the Mac's demand, the heat's steps (`Heat`: a rise at once, a fall a step every 30 s), the
+  bitrate and its steps,
   the keyframes, the chip) and `CameraPacing` (§6.2: the camera's share of the uplink, a picture skipped
   before the encoder while the bytes the connection has not taken pass the budget or a move's fence
-  stands); pure, `Tests/checks/camera`; pbxproj A462/F462; the device's camera glue, a later step, reads them),
+  stands); pure, `Tests/checks/camera`; pbxproj A462/F462), `CameraStream` (§6.1 points 4 to 8: what becomes of
+  each picture and each encoded frame, one reducer: encoders and epochs, an epoch's format right before its first
+  frame, keyframes, the budget's skips and drops, nothing but a keyframe after a drop, the frame's cap, the
+  bitrate's steps; pure, `Tests/checks/camera-stream`; A468/F468), `CameraEncoder` (VideoToolbox's HEVC session
+  for one encoder: real time, no B-frames, no frame held back, keyframes only when asked, the bitrate and its data-rate limit, a
+  keyframe's parameter sets; `software` refuses a hardware session: the simulator, and the Mac's
+  `Scripts/camera-check/encoder.sh`; builds for macOS too; A464/F464), `CameraPattern` (a moving pattern with the
+  frame's number in blocks along its top, and the reader of that number; DEBUG `-SillCameraSource pattern` and
+  the Mac's encoder check; A465/F465), `CameraCapture` (the seam, `CameraSource`, and the camera behind it: one
+  AVCaptureSession on `sill.camera.session`, the front or back wide camera, the active format for the size and
+  rate, NV12, upright by AVCaptureDevice.RotationCoordinator, never mirrored, never the app's audio session,
+  iOS's interruptions and the system pressure as `Event`s; and `PatternSource`, DEBUG's pattern instead;
+  A463/F463), `StreamClient+Camera` (Share Camera's glue, docs/camera-plan.md §8, §9: the switch, off at every
+  launch, `Sill.shareCamera`, and `Sill.cameraPosition`; the offer, its `claim`, pause and `stop`; kind 16's
+  camera and type 3's demand; `updateCamera`, the one decision, with CameraPolicy; the capture's short stop
+  delay; `DeviceCamera`, the stream on `sill.camera.media` from the source through CameraStream and the
+  encoder to SessionLink; ClientStats' camera fields and DeviceIdlePolicy's camera; A466/F466) and
+  `CameraChip` (the indicator in the chip corner: "Camera" over "‹app› on ‹Mac›" with Stop, "Camera Paused",
+  the symbol alone in Full Screen; A467/F467); StreamScreen places the chip, the Settings panel's This iPad
+  group has Share Camera (a beta) and Camera: Front | Back,
   `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
   Screen, the picture in the screen's room; the swipe in from the left edge, `EdgeSwipe` (a finger landing
   within max(24 pt, the left safe-area inset), judged after 8 pt: right and no steeper than 45°, let go by

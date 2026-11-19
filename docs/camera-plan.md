@@ -743,6 +743,23 @@ docs/steps/2026-11-18-camera.md). Built, on the overview's settlement of §0:
   software encoder), sillclient.py's `--camera` flags and `Scripts/camera-check/live.py` (H1, H3 to H5, H7, H8).
   The pixel transfer into the app's size (`VTPixelTransferSession`) belongs to the sink, step 8.
 
-Not yet: the loopback gates have not run (no release build was possible in this run: the disk was under the 25 GB a
-build needs, and the shared build lock held a long queue); steps 5 and 6 (the device: `CameraPolicy`,
-`CameraPacing`, capture, encoder, chip, rows), 7 and 8 (Sill Camera and Sill.app's side), 9 and 10.
+- Step 5, its first part: `CameraPolicy` and `CameraPacing` (`iOSClient/CameraPolicy.swift`) with the `camera` check
+  (123 cases, 34 mutants, every one caught). `CameraPacing` skips a picture before the encoder while the uplink is
+  over the budget rather than dropping encoded frames (§6.2's first draft fell into a keyframe after every frame on a
+  slow link). `DeviceIdlePolicy`'s camera is not done.
+
+The closing run (after the first run's usage stop) built the release, ran the loopback gates for the first time
+(H1, H3 to H5, H7, H8: every verdict after fixing three of the gates' own), every pure check (77) and the mutants of
+camera-wire (45), camera (34), compatibility (42), display-wake (83) and protocol (61), every one caught, and the iOS
+app as CI builds it; docs/steps/2026-11-18-camera.md has the numbers.
+
+- The second building run (docs/steps/2026-11-18-camera.md has its numbers): step 5's rest
+  (`DeviceIdlePolicy.Uses.camera`, with `device-idle`); step 6 up to the camera itself: `CameraStream` (pure, the
+  `camera-stream` check), `CameraEncoder`, `CameraPattern` and `CameraCapture` behind its seam `CameraSource`,
+  `StreamClient+Camera` with `DeviceCamera`, the heat's steps (`CameraPolicy.Heat`), SessionLink's `UplinkLedger` and `sendCamera` (`fence`'s `camera` mode),
+  the Settings rows, the chip, the harness cases and both plists' words (pbxproj A463 to A468); the gates H2 (a frame
+  that does not decode), H9 (the CLI's stdout against main's build) and H10 (a move within the grace); and
+  `Scripts/camera-check/encoder.sh`, the device's stream on the Mac's software encoder and decoder.
+
+Not yet: H6 (a removal mid-stream: Sill.app's own receiver, step 8) and H11 (the pacing on a 2 Mbit/s relay); Share
+Camera on a device in the hand; steps 7 and 8 (Sill Camera and Sill.app's side), 9 and 10.

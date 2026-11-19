@@ -45,7 +45,8 @@ SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TE
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_REMOTE_DIR=$T/mac SILL_TEST_CAMERA=count SILL_TEST_CAMERA_DEMAND='4 on 640x360@30 FaceTime; 10 off' .build/release/SillHost --synthetic --pairing   # TEST ONLY: a test host's Sill Camera (docs/camera-plan.md): it takes paired devices' cameras, decodes on VideoToolbox's software decoder and counts (dump:DIR: every 30th frame a PNG), its apps scripted (S on WxH@F [NAME]; S off; S notready; S ready); SILL_TEST_CAMERA_LOG=1 a line a frame
 python3 Scripts/sillclient.py PORT 14 none --tls --identity=$T/a --camera=Scripts/camera/fixture-640x360.bin --camera-claim@3 --expect=cameraState=idle   # a paired device's camera: offers when the list says camera=1, sends the fixture while kind 16 says inUse; each demand and state printed; only to a --synthetic host on this Mac
-python3 Scripts/camera-check/live.py OUT all   # the camera's loopback gates (H1, H3–H5, H7, H8), each host under a minute; swift Scripts/camera/check-fixture.swift Scripts/camera/fixture-640x360.bin checks the fixture
+SILL_MAIN_HOST=$M/.build/release/SillHost python3 Scripts/camera-check/live.py OUT all   # the camera's loopback gates (H1, H2 as a frame that does not decode, H3–H5, H7, H8, H9 the CLI's stdout against main's build at $M, H10 a move within the grace), each host under a minute; swift Scripts/camera/check-fixture.swift Scripts/camera/fixture-640x360.bin checks the fixture; sillclient.py's --camera-corrupt=N sends the Nth frame as bytes no decoder reads; SILL_CAMERA_FIXTURE=FILE plays another fixture (encoder.sh's)
+Scripts/camera-check/encoder.sh $T/device.bin   # TEST ONLY, under heavy.sh: the device's camera stream (CameraStream, CameraEncoder, CameraPattern) on the Mac's VideoToolbox SOFTWARE encoder and decoder, judged frame by frame; epoch 0 written as a fixture sillclient.py's --camera takes (SILL_CAMERA_FIXTURE=$T/device.bin live.py OUT live: the real receiver decodes the device's own frames)
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Tests/checks/list.sh                    # every check and what it checks, from each folder's README.md (no table is kept by hand)
@@ -393,6 +394,13 @@ repeat's 4 s),
 `-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
 draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
+`-SillCameraCase off|update|notready|unpaired|idle|inuse|another|denied|multitasking|busy|thermal|nocamera`
+(what the mock Mac says of this device's camera and what the camera does, for Share Camera's rows; with
+`-Sill.shareCamera 1` the switch on, which otherwise starts off at every launch; `-SillSettingsScroll camera`
+scrolls the panel to the rows), `-SillCameraChip on|paused` (Share Camera's indicator over the mock's stream;
+with `-SillFullScreen 1` the symbol alone; nothing captures in the harness), `-SillCameraSource pattern` (a
+live session only, never a photo: CameraPattern's moving pattern instead of the camera, on VideoToolbox's
+software encoder in the simulator), `-Sill.cameraPosition back` (the back camera for one run),
 `-SillClipboardChip 1` and `-SillClipboardNote sent|long|notsent` (the clipboard's
 chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock Mac
 shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
