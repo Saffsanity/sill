@@ -4169,7 +4169,10 @@ package final class StreamCoordinator {
     /// The windows Sill moved off the Virtual Desktop, back now that it returned (DesktopWindowLedger.bringBack): each still
     /// where Sill put it goes back to its place, scaled into its new area when that changed; one line.
     private func bringVirtualDesktopWindowsBack(to bounds: CGRect) {
-        guard !desktopBook.isEmpty, AXIsProcessTrusted(), let area = WindowSizer.visibleArea(around: bounds) else { return }
+        guard !desktopBook.isEmpty, AXIsProcessTrusted() else { return }
+        // Its visible area as AppKit has it, or its bounds while NSScreen does not list it yet (just made): never another
+        // display's area, which would leave each window where it is and forget it.
+        let area = WindowSizer.visibleArea(around: bounds).flatMap { $0.intersects(bounds) ? $0 : nil } ?? bounds
         var access = WindowSizer.DesktopWindows(ax: WindowSizer.AXWindows(sizer: sizer))
         let n = DesktopWindowLedger.bringBack(&desktopBook, area: area, on: &access)
         if let line = DesktopWindowLedger.backLine(n) { print(line) }
