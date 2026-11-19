@@ -116,6 +116,9 @@ check(P.offerStep(&o, offering: false, switchOn: true, hostTakes: false, pause: 
 _ = P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "front")
 check(P.offerStep(&o, offering: false, switchOn: false, hostTakes: false, pause: nil, position: "front") == nil,
       "the switch off with a Mac that no longer takes the camera: no kind 46 to it")
+_ = P.offerStep(&o, offering: true, switchOn: true, hostTakes: true, pause: nil, position: "front")
+check(P.offerStep(&o, offering: false, switchOn: true, hostTakes: true, pause: nil, position: "front") == nil && !o.offered,
+      "the offer ends with the switch still on and the Mac still taking cameras (kind 16 refuses: unpaired, not ready): no stop, the offer said again when it may")
 var never = P.Offer()
 check(P.offerStep(&never, offering: false, switchOn: false, hostTakes: true, pause: nil, position: "front") == nil, "nothing offered: no stop")
 
