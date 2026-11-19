@@ -379,12 +379,6 @@ public enum MicrophonePolicy {
             return nil
         }
 
-        /// The offer stands: its session is here, or left less than `grace` ago.
-        public func stands(_ o: Offer, at now: Double) -> Bool {
-            guard let left = o.leftAt else { return o.session != nil }
-            return now - left < Self.grace
-        }
-
         /// Session `id` records now: it may, it is the holder's offering session, an app uses Sill Microphone.
         public func wanted(_ id: Int, at now: Double) -> Bool {
             guard unlocked, refusal(id, at: now) == nil, appUses, let key = sessions[id]?.key, key == holder,
@@ -581,11 +575,12 @@ public enum MicrophonePolicy {
             return out
         }
 
-        /// The standing offer most recently begun or claimed whose session may use the microphone; nil: none.
+        /// The offer most recently begun or claimed whose session is here and may use the microphone; nil: none. (An
+        /// offer whose session left waits out its grace for that device's next session, and is no successor meanwhile.)
         private func successor(at now: Double) -> String? {
             var best: (key: String, since: Double)?
-            for (key, o) in offers where stands(o, at: now) {
-                guard let id = o.session, refusal(id, at: now) == nil else { continue }
+            for (key, o) in offers {
+                guard let id = o.session, o.leftAt == nil, refusal(id, at: now) == nil else { continue }
                 if best == nil || o.since > best!.since || (o.since == best!.since && key < best!.key) { best = (key, o.since) }
             }
             return best?.key

@@ -9,7 +9,7 @@ M = [
     ("the epoch not advanced", S, "            epoch = (epoch + 1) & 0xFFFF\n", "            epoch = epoch & 0xFFFF\n"),
     ("the epoch never wraps", S, "            epoch = (epoch + 1) & 0xFFFF\n", "            epoch = epoch + 1\n"),
     ("the seq never counts", S, "            seq &+= 1\n", ""),
-    ("a segment's start mid-message", S, "            if b.segmentStart { encoder.reset(); flush() }", "            if b.segmentStart { encoder.reset() }"),
+    ("the encoder reset at every block", S, "            if b.segmentStart { encoder.reset() }", "            encoder.reset()"),
     ("stamps on the host clock", S, "if first == nil { first = (seq, b.hostTime + wallOffset, b.segmentStart) }",
      "if first == nil { first = (seq, b.hostTime, b.segmentStart) }"),
     ("five packets a message at most", S, "    static let maxPacketsPerMessage = 40", "    static let maxPacketsPerMessage = 5"),

@@ -61,7 +61,8 @@ check(MicrophoneCodec.choose(taken: ["aac-eld"]) == "aac-eld" && MicrophoneCodec
       "the first of the Mac's list the device makes")
 check(MicrophoneCodec.choose(taken: nil) == nil && MicrophoneCodec.choose(taken: []) == nil && MicrophoneCodec.choose(taken: ["opus"]) == nil,
       "no list, an empty one, nothing in common: no codec")
-check(MicrophoneCodec.choose(taken: ["opus", "aac-eld"], makes: ["opus", "aac-eld"]) == "opus", "the Mac's order wins")
+check(MicrophoneCodec.choose(taken: ["aac-eld", "opus"], makes: ["opus", "aac-eld"]) == "aac-eld"
+      && MicrophoneCodec.choose(taken: ["opus", "aac-eld"], makes: ["aac-eld", "opus"]) == "opus", "the Mac's order wins over the device's")
 
 // MARK: - Type 1: offers, claims, pauses and epochs
 

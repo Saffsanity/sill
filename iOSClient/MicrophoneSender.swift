@@ -82,9 +82,10 @@ final class MicrophoneSender {
             first = nil
         }
         for b in blocks {
-            // A segment's first block: a clean start for the encoder, and a message of its own from here, so the
-            // segment flag is its first packet's.
-            if b.segmentStart { encoder.reset(); flush() }
+            // A segment's first block: a clean start for the encoder. It is always a buffer's first block (the
+            // packetizer starts a segment at the buffer after a gap), and every buffer starts its own message, so
+            // the segment flag is its message's first packet's.
+            if b.segmentStart { encoder.reset() }
             guard let packet = encoder.encode(b.samples) else { continue }
             if first == nil { first = (seq, b.hostTime + wallOffset, b.segmentStart) }
             packets.append(packet)

@@ -45,7 +45,6 @@ MUTANTS = [
     ("an unpaired session's offer taken", MP, "if !s.paired || s.key == nil { return .unpaired }", "if s.key == nil { return .unpaired }"),
     ("an offer without a claim takes it", MP, "if holder == nil || (f.claim == true && holder != key) {", "if holder != key {"),
     ("a claim ignored", MP, "if holder == nil || (f.claim == true && holder != key) {", "if holder == nil {"),
-    ("no grace", MP, "            return now - left < Self.grace\n", "            return false\n"),
     ("the grace never over", MP, "guard let o = offers[key], let left = o.leftAt, now - left >= Self.grace else { continue }", "guard let o = offers[key], let left = o.leftAt, now - left >= Self.grace * 100 else { continue }"),
     ("wanted without an app", MP, "guard unlocked, refusal(id, at: now) == nil, appUses, let key", "guard unlocked, refusal(id, at: now) == nil, let key"),
     ("wanted while locked", MP, "guard unlocked, refusal(id, at: now) == nil, appUses, let key", "guard refusal(id, at: now) == nil, appUses, let key"),
