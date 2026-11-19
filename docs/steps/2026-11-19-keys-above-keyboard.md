@@ -117,7 +117,16 @@ checks run on each result):
   release`, run-all 75 of 75, the iOS app for the simulator with Xcode 27.1 `** BUILD SUCCEEDED **`, its only
   warning main's own (StreamClient.swift:4527).
 - The trial merges above.
-- Harness photos: to come (waiting for slot A).
+- Harness photos (`Scripts/harness-photos/keys-above-keyboard.cases`, 11 cases on the agents' iPhone Duo, iOS 27.1,
+  the cover upright, which draws an iPhone's arrangement; 2e5af22c against main eb48ac9f, 206 s with the
+  simulator): 3 of 11 pixel for pixel main's, as they should be (the cover with no keyboard, with the switch on
+  and no keyboard, and the inner display upright with its keyboard, #215's row); the 8 with a keyboard or the
+  switch's row differ as planned. The cover's own keyboard is about 265 pt tall there (its top at about 413 of
+  678 pt), so on main it covers the key row (398-442) but its top 15 pt; on this branch the rows lift 39 pt, the
+  key row 10 pt above it, the picture 303×189 at 16:10. With the 60 pt stand-in the rows lift 99 pt; with the
+  switch on the thumbnails tuck away and nothing lifts; Larger Picture on the cover (no hinge in the harness)
+  covered the key row on main as well (its 233 pt estimate) and lifts over it here; the drawer follows row 1. The
+  photos, the differences and a README: `~/Downloads/sill-handoff/next/keys-above-keyboard/photos/`.
 
 **Untested, for Noah:** a real keyboard taller than Apple's on a device (a third-party one, Pinyin's or
 Japanese's candidates), the rows' animation beside the keyboard's, Larger Picture with a window Aa fitted to the
