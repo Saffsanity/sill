@@ -80,7 +80,7 @@ MUTANTS = [
     ("R5 a room with a side not a positive number sent", ROOM_GUARD, "            guard r.width.isFinite, r.height.isFinite else { return nil }\n"),
     ("R6 an infinite room sent, held", ROOM_GUARD, "            guard r.width > 0, r.height > 0 else { return nil }\n"),
     ("R7 a room's width sent as it is", ROOM_HELD_W, "            return ViewportRoom(width: r.width,\n"),
-    ("R8 no room ever sent", ROOM_HELD, "        held.room = nil; _ = v.room.flatMap { r in\n"),
+    ("R8 no room ever sent", ROOM_HELD, "        held.room = v.room.flatMap { (r: ViewportRoom) -> ViewportRoom? in if true { return nil }\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
