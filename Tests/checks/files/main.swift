@@ -742,6 +742,17 @@ eq(C.refusedLine(["notPaired": 2, "locked": 1, "off": 0]), "Files: refused 3 off
 eq(C.refusedLine(["rate": 1]), "Files: refused 1 offer from devices: too many offers (1).", "one refusal")
 eq(C.refusedLine(["quota": 2, "busy": 1]), "Files: refused 3 offers from devices: busy (1), other (2).", "a category not known")
 eq(C.defaultPlace, "Downloads › Sill", "the place")
+// The Mac's files to a device, in the log: counts and sizes, never a name.
+eq(C.offeringLine(files: 2, bytes: 12_300_000, device: "iPad"), "Files: offering 2 files (12 MB) to iPad.", "the offering line")
+eq(C.sentLine(files: 1, bytes: 2_000_000, device: "iPad", seconds: 0.44), "Files: sent 1 file (2.0 MB) to iPad in 0.4 s.", "the sent line")
+eq(C.notOfferedLine("locked", device: "iPad"), "Files: nothing offered to iPad (locked).", "the not-offered line")
+eq(C.pickLine(device: "iPad"), "Files: iPad asked for files from this Mac.", "a device's pick in the log")
+eq(C.stoppedLine("lost", device: "iPad", byPeer: false, toDevice: true), "Files: the transfer to iPad stopped (the connection ended).", "a stop of the Mac's own")
+eq(C.stoppedLine("declined", device: "iPad", byPeer: true, toDevice: true), "Files: iPad cancelled (declined).", "the device's no, in the log")
+for line in [C.offeringLine(files: 1, bytes: 1, device: "iPad"), C.sentLine(files: 1, bytes: 1, device: "iPad", seconds: 1),
+             C.notOfferedLine("busy", device: "iPad"), C.pickLine(device: "iPad")] {
+    check(line.hasPrefix("Files: ") && !line.contains("\n"), "a log line begins with the feature: \(line)")
+}
 for line in [C.savedLine(files: 1, bytes: 1, device: "iPad", folder: "Downloads/Sill", seconds: 1), C.offeredLine(files: 1, bytes: 1, device: "iPad"),
              C.stoppedLine("damaged", device: "iPad", byPeer: false)] {
     check(line.hasPrefix("Files: ") && !line.contains("\n"), "a log line begins with the feature: \(line)")

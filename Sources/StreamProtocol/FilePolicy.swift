@@ -718,11 +718,30 @@ public enum FilesCopy {
         "Files: \(device) offers \(count(files)) (\(size(bytes)))."
     }
 
-    /// "Files: the transfer from iPad stopped (the connection ended)." `byPeer`: "iPad cancelled …".
-    public static func stoppedLine(_ reason: String, device: String, byPeer: Bool) -> String {
+    /// "Files: the transfer from iPad stopped (the connection ended)." `byPeer`: "iPad cancelled …". `toDevice`:
+    /// the Mac's own transfer to it, "Files: the transfer to iPad stopped (…)."
+    public static func stoppedLine(_ reason: String, device: String, byPeer: Bool, toDevice: Bool = false) -> String {
         let why = logReason(reason)
-        return byPeer ? "Files: \(device) cancelled (\(why))." : "Files: the transfer from \(device) stopped (\(why))."
+        return byPeer ? "Files: \(device) cancelled (\(why))." : "Files: the transfer \(toDevice ? "to" : "from") \(device) stopped (\(why))."
     }
+
+    /// "Files: offering 2 files (12 MB) to iPad."
+    public static func offeringLine(files: Int, bytes: UInt64, device: String) -> String {
+        "Files: offering \(count(files)) (\(size(bytes))) to \(device)."
+    }
+
+    /// "Files: sent 1 file (2.0 MB) to iPad in 0.4 s."
+    public static func sentLine(files: Int, bytes: UInt64, device: String, seconds: Double) -> String {
+        "Files: sent \(count(files)) (\(size(bytes))) to \(device) in \(String(format: "%.1f", seconds)) s."
+    }
+
+    /// "Files: nothing offered to iPad (locked)." The Mac's files not offered: the rules, or the files chosen.
+    public static func notOfferedLine(_ reason: String, device: String) -> String {
+        "Files: nothing offered to \(device) (\(logReason(reason)))."
+    }
+
+    /// "Files: iPad asked for files from this Mac." A device's Get Files, which shows the Open panel.
+    public static func pickLine(device: String) -> String { "Files: \(device) asked for files from this Mac." }
 
     /// "Files: refused 3 offers from devices: not paired (2), locked (1)." (RefusalSummary's line).
     public static func refusedLine(_ counts: [String: Int]) -> String {

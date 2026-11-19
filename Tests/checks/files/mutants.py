@@ -29,7 +29,8 @@ M = [
      "guard let files = hostFiles else { return .older }"),
     ("a locked Mac's rows shown", P, "guard connected, !locked else { return .hidden }", "guard connected else { return .hidden }"),
     ("files 0 offered", P, "guard files >= takes else { return .off }", "guard files >= 0 else { return .off }"),
-    ("no kind 16 counts as paired", P, "guard sessionPaired == true else { return .notPaired }", "guard sessionPaired != false else { return .notPaired }"),
+    ("no kind 16 counts as paired", P, "        guard sessionPaired == true else { return .notPaired }\n        return sending ? .busy : .yes",
+     "        guard sessionPaired != false else { return .notPaired }\n        return sending ? .busy : .yes"),
     # The Mac answers.
     ("the switch never asked", P, "        guard shareFiles else { return .off }\n        guard paired else { return .notPaired }\n        guard !locked",
      "        guard paired else { return .notPaired }\n        guard !locked"),
@@ -143,12 +144,15 @@ M = [
     ("the rows shown for the CLI", DW, "case .hidden: return Rows(shown: false, enabled: false)", "case .hidden: return Rows(shown: true, enabled: false)"),
     ("100% before the Mac wrote every byte", DW, "return \"\\(Int((f * 100).rounded(.down)))%\"", "return \"\\(Int((f * 100).rounded()))%\""),
     ("the Mac's place shown uncleaned", DW, 'let place = SafeText.label(t.place ?? "", limit: 120)', 'let place = t.place ?? ""'),
-    ("the person's own Cancel as a warning", DW, "return !(reason == FileReason.cancelled.rawValue && !byPeer)", "return true"),
+    ("the person's own Cancel as a warning", DW, "            return !(reason == FileReason.cancelled.rawValue && !byPeer)\n", "            return true\n"),
     ("a folder said as a read failure", DW, "        if reason == folderReason {", "        if reason == folderReason && false {"),
     ("no announcement at the start", DW, 'case .offering: return "Sending \\(what(s.names)) to \\(mac)."', "case .offering: return nil"),
     ("moves never wait for a transfer", DW, "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { out.map { !$0.isOver } ?? false }",
      "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { false }"),
     ("a fraction past 1", DW, "return total == 0 ? 0 : min(1, Double(acked) / Double(total))", "return total == 0 ? 0 : Double(acked) / Double(total) * 1.01"),
+    # The Mac's own transfers in the log.
+    ("the Mac's own stop said as a device's", P, 'return byPeer ? "Files: \\(device) cancelled (\\(why))." : "Files: the transfer \\(toDevice ? "to" : "from") \\(device) stopped (\\(why))."',
+     'return byPeer ? "Files: \\(device) cancelled (\\(why))." : "Files: the transfer from \\(device) stopped (\\(why))."'),
     # Files from the Mac: the device's words and state.
     ("photos and videos by the sender's word", DW, "return type.conforms(to: .image) || type.conforms(to: .movie)", "return type.conforms(to: .data)"),
     ("videos not taken to Photos", DW, "return type.conforms(to: .image) || type.conforms(to: .movie)", "return type.conforms(to: .image)"),
