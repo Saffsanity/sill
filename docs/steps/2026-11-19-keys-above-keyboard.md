@@ -71,6 +71,26 @@ window picker tucked away while a keyboard is up part of the same change (the pr
   bringing it into row 1 instead would move the Keyboard button under the finger as the keyboard comes up.
 - Its place: This iPhone, after Larger Picture, on the Duo too.
 
+**Known, for Noah to decide (none changed here)**
+- Where the rows lift, row 1 moves up with them, so the Keyboard button that brought the keyboard up is no
+  longer under the finger (34 pt on an SE, 7 to 135 pt on the Duo's cover by keyboard). With Hide Thumbnails
+  While Typing on, the SE needs no lift and the cover's own keyboard about 3 pt: a reason to consider the
+  switch on by default on the smallest screens.
+- The picture's frame is smaller while a lifting keyboard is up: on the Duo's cover under a 301 pt keyboard,
+  245×153 against 366×228 (with the switch on, 361×225).
+
+**Proposed words** (not in any published page)
+- What's New: "iPhone held upright: the row of keys (esc, tab, ctrl, opt, cmd and shift) now stays above the
+  on-screen keyboard, whatever its height: a keyboard from another app, one with characters to pick from, an
+  iPhone SE’s own, and every keyboard on iPhone Duo’s cover. While a taller keyboard is up, the buttons and keys
+  move up above it and the picture gets a little smaller; nothing changes on your Mac. New in Settings › This
+  iPhone: Hide Thumbnails While Typing puts the window thumbnails away while the keyboard is up, so the keys sit
+  right under the buttons."
+- Support page (the phone's layout): "The keys stay above the on-screen keyboard, whatever keyboard you use. To
+  keep the picture larger while you type, turn on Settings › This iPhone › Hide Thumbnails While Typing: the
+  window thumbnails step aside until you put the keyboard away."
+- Review notes: nothing new to review (a layout fix and a switch, no permission, no background mode).
+
 **Merges with the other drafts** (trial merges of this branch at 61a22f42, by `git merge` in a throwaway worktree; the pure
 checks run on each result):
 - **#397 (`ready-276`, Hold to Lock Modifiers), #410 (`ready-315`, Arrow Keys), #393 (`settings-pane`):** each merges
