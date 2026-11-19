@@ -681,7 +681,7 @@ struct PortraitStreamScreen: View {
         // A locked Mac: its cover over the picture (LockedMac), under the link's line.
         .overlay { LockedMacShade(client: client) }
         // A recording's count and light (#284), over the cover too: it records what the Mac sends.
-        .overlay { RecordingLight(client: client) }
+        .overlay { RecordingLight(client: client, linkLineShown: linkLine != nil) }
         .overlay(alignment: .top) { LinkLineView(text: linkLine, lines: linkLineLines) }
         // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
         .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName, show: showChrome) }

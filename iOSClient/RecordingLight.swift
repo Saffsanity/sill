@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// Over the picture while this window records the stream (#284, docs/recording-plan.md; #303's RecordingBadge):
-/// the count (3, 2, 1, large, spoken), then the light in the picture's top-leading corner: a red dot with the
-/// movie's time and size ("0:42 · 126 MB", "· 4 min left" while space is low), "Starting…" until its first
+/// the count (3, 2, 1, large, spoken), then the light in the picture's top-leading corner, or its bottom-leading
+/// one while the link's line shows across the top (the plan's "its corner by the link's line"): a red dot with
+/// the movie's time and size ("0:42 · 126 MB", "· 4 min left" while space is low), "Starting…" until its first
 /// picture. On screen whenever a recording runs, Full Screen included (App Review 2.5.14: a clear indication
 /// while it records); never in the movie, which is the Mac's picture alone. Takes no touches.
 struct RecordingLight: View {
     @ObservedObject var client: StreamClient
+    var linkLineShown = false
 
     var body: some View {
         let r = client.recording
@@ -36,7 +38,7 @@ struct RecordingLight: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(RecordingPolicy.Copy.lightSpoken(seconds: seconds, bytes: r.bytes, minutesLeft: r.minutesLeft))
             .padding(10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: linkLineShown ? .bottomLeading : .topLeading)
             .allowsHitTesting(false)
         case .idle, .finishing:
             EmptyView()

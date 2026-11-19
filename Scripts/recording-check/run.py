@@ -135,6 +135,14 @@ def light_to_stop(summary):
 
 
 def gates(name, summary, reports, code, movies):
+    if name == "kill":
+        # Killed mid-recording: no summary, only what its movie's fragments kept.
+        print(f"     kill: movies {movies}, reports {[{k: r.get(k) for k in ('movie', 'duration', 'error')} for r in reports]}", flush=True)
+        expect(code in (-9, 137), f"kill: the rig was killed ({code})")
+        d = reports[0].get("duration") if reports else None
+        expect(len(movies) == 1 and d is not None and d >= 3.5, f"kill: the movie opens with what its fragments kept ({d} s)")
+        expect(len(reports) == 1 and video_ok(reports[0]), "kill: its picture is hvc1, from a sync sample, its times increasing")
+        return
     expect(summary is not None, f"{name}: recordcheck wrote its summary (exit {code})")
     if summary is None:
         return
@@ -193,10 +201,6 @@ def gates(name, summary, reports, code, movies):
         waited = (summary.get("startedAt") or 99) - light
         expect(summary["start"] in ("nextKeyframe", "sinceAsk") and waited <= 4.6,
                f"oldmac-moving: from the Mac's own next keyframe, within its 4 s ({summary['start']}, 0:00 {waited:.2f} s after the light)")
-    if name == "kill":
-        expect(code == -9 or code == 137, f"kill: the rig was killed ({code})")
-        d = reports[0].get("duration") if reports else None
-        expect(len(movies) == 1 and d is not None and d >= 3.5, f"kill: the movie opens with what its fragments kept ({d} s)")
     if name == "full":
         expect(summary["ending"] == "space", f"full: the recording stopped itself for space ({summary['ending']})")
         lows = [p for p in summary.get("progress", []) if str(p.get("space", "")).startswith("low")]
