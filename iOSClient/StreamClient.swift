@@ -4141,7 +4141,7 @@ final class StreamClient: ObservableObject {
         let latestOnly = input.phase == PenInput.hover
         queue.async { [weak self] in
             guard let self else { return }
-            self.pointerNote(place.map { .pointer($0) } ?? .other)
+            self.pointerNote(place.map { .pointer($0) } ?? .other, "a Pencil's \(input.phase)")
             if latestOnly {
                 self.sendLatest(.pen, payload)
             } else {
@@ -4302,27 +4302,21 @@ final class StreamClient: ObservableObject {
     /// when the pointer came here with it.
     private func pointerNoteSent(_ event: InputEvent) {
         switch event {
-        case .pointer(_, let x, let y): pointerNote(.pointer(CGPoint(x: x, y: y)))
-        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): pointerNote(.scroll(CGPoint(x: x, y: y)))
-        case .text, .key: pointerNote(.other)
+        case .pointer(let action, let x, let y): pointerNote(.pointer(CGPoint(x: x, y: y)), "a pointer \(action)")
+        case .scroll(let x, let y, _, _): pointerNote(.scroll(CGPoint(x: x, y: y)), "a scroll")
+        case .scrollGesture(let phase, let x, let y): pointerNote(.scroll(CGPoint(x: x, y: y)), "a scroll's \(phase)")
+        case .text: pointerNote(.other, "text")
+        case .key(let usage, let down, _): pointerNote(.other, "key \(usage) \(down ? "down" : "up")")
         }
     }
 
     /// The same for what was sent, whichever kind carried it (a Pencil's message is a pointer event at
-    /// its last sample; its leave has no place).
-    private func pointerNote(_ sent: PointerFeedState.Sent) {
+    /// its last sample; its leave has no place). `what` names it for a debug build's console only.
+    private func pointerNote(_ sent: PointerFeedState.Sent, _ what: @autoclosure () -> String) {
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
         #if DEBUG
         // What took it, so a console says which input went (full screen's swipe in sends none).
-        let what: String
-        switch event {
-        case .pointer(let action, _, _): what = "a pointer \(action)"
-        case .scroll: what = "a scroll"
-        case .scrollGesture(let phase, _, _): what = "a scroll's \(phase)"
-        case .text: what = "text"
-        case .key(let usage, let down, _): what = "key \(usage) \(down ? "down" : "up")"
-        }
-        print("pointer: this device has it (\(what))")
+        print("pointer: this device has it (\(what()))")
         #endif
         DispatchQueue.main.async { self.renderPointer() }
     }
