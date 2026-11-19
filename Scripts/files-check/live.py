@@ -96,6 +96,18 @@ def paired(host, out):
     return ident
 
 
+def locked_lists(text):
+    """(ok, what) for a client that connected to a host whose lock file already said locked: from the first list that
+    says locked=1 on, no list says files= (and at least one does say it). A test host reads its SILL_TEST_LOCKED_FILE
+    only once a second while a device is connected (SessionLock's polls) and not at all without one, so the list sent
+    as the client connects may still be the unlocked one; the real Mac's witnesses are notifications, read at once."""
+    lists = re.findall(r"windowList: .*", text)
+    first = next((i for i, l in enumerate(lists) if "locked=1" in l), None)
+    after = lists[first:] if first is not None else []
+    ok = bool(after) and all("files=" not in l for l in after)
+    return ok, f"once the host reads the lock, its lists say locked=1 and no files ({len(after)} of {len(lists)} lists)"
+
+
 def make(folder, name, size, seed=0):
     path = os.path.join(folder, name)
     rnd = random.Random(seed)
@@ -210,7 +222,7 @@ def case_refuse(out):
         if ident:
             text, code = client(h, "locked", 8, "--tls", f"--send-file={one}@3", "--expect-files=answer:locked", identity=ident)
             verdict(code == 0, "a locked Mac: the offer refused locked")
-            verdict(re.search(r"windowList: .* files=", text) is None and "locked=1" in text, "its list says locked=1 and no files")
+            verdict(*locked_lists(text))
             verdict(h.kept() == [], "nothing written")
     finally:
         h.stop()
