@@ -217,6 +217,7 @@ struct ContentView: View {
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
+///   `-SillSettingsScroll clipboardgroup` at the clipboard group's first row (its switches, Include Images among them),
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture

@@ -396,7 +396,8 @@ draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
 chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock Mac
 shares its clipboard, text and images (`clipboard` 2), in every settings case but `legacy`, and text
 alone with `-SillMockClipboard 1`, its group then without Include Images; `-Sill.clipboardImages 1`
-the device's Include Images on for one run, in the normal app too; live, `-SillSettingsScript
+the device's Include Images on for one run, in the normal app too, and `-SillSettingsScroll clipboardgroup`
+the panel at the group's first row, its switches in view; live, `-SillSettingsScript
 '<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
 `-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened),
 `-SillMacLocked 1|2|unlocking` (the mock Mac's screen locked, switched to another

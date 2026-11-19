@@ -119,7 +119,8 @@ struct HostSettingsPanel: View {
     /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
-    /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// it (the review of #242: `gestures` shows only the two switches above them there); `clipboardgroup`,
+    /// to the group's first row, Share Clipboard, so a photo shows its switches, Include Images among them.
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
@@ -133,6 +134,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "clipboardgroup"?: return clipboardGroupID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
         default: return nil
@@ -147,6 +149,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let clipboardGroupID = "clipboardGroup"
     private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
@@ -756,6 +759,7 @@ struct HostSettingsPanel: View {
                         .id(Self.clipboardRowsID)
                 }
             }
+            .id(Self.clipboardGroupID)
             if clipboardOn, let note = client.clipboardNote {
                 Footnote(text: note.text, warning: note.warning, top: 6)
                     .padding(.bottom, -6)
