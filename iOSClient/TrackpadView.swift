@@ -26,13 +26,6 @@ struct Trackpad: View {
     var verticalSpan: CGFloat? = nil
     /// A three- or four-finger gesture, for the Mac (`StreamClient.sendGesture`). True when it went.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
-    /// Follow the Pointer (`StreamZoom.FollowPointer`, PR #327): the picture's zoom, read at each move of
-    /// the pointer (the picture can zoom without rebuilding the trackpad), and the picture's follow, given
-    /// where the pointer went (a fraction of the frame) after a move with the switch on while zoomed.
-    /// Every trackpad on the picture's screen passes the same two (`TrackpadSurface.moveCursor`); the
-    /// defaults, the whole picture and no follow, are a pad with no picture to follow.
-    var readZoom: () -> StreamZoom = { StreamZoom() }
-    var follow: (CGPoint) -> Void = { _ in }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
 
@@ -42,8 +35,7 @@ struct Trackpad: View {
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setPointer: setPointer, feed: feed, onFingers: onFingers,
                          latched: latched, onModifiersConsumed: onModifiersConsumed,
-                         verticalSpan: verticalSpan, sendGesture: sendGesture, readZoom: readZoom,
-                         follow: follow)
+                         verticalSpan: verticalSpan, sendGesture: sendGesture)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -82,6 +74,29 @@ private struct DotGrid: View {
     }
 }
 
+/// Follow the Pointer's link from a trackpad to the picture it moves the pointer over (StreamZoom.FollowPointer, PR
+/// #327): the picture's zoom, read at each move of the pointer (the picture can zoom without the trackpad being made
+/// again), and the picture's follow, handed the pointer (a fraction of the frame) after a move with the switch on
+/// while the picture is zoomed. The stream screen gives it to what is under it (`.environment(\.trackpadFollow, …)`):
+/// every `TrackpadView` there takes it, the upright pad and any laid over the picture alike (`moveCursor`). Without
+/// one, the whole picture and nothing to follow.
+struct TrackpadFollow {
+    var zoom: () -> StreamZoom = { StreamZoom() }
+    var follow: (CGPoint) -> Void = { _ in }
+}
+
+private struct TrackpadFollowKey: EnvironmentKey {
+    static let defaultValue = TrackpadFollow()
+}
+
+extension EnvironmentValues {
+    /// The picture's zoom and follow for the trackpads under a stream screen (TrackpadFollow).
+    var trackpadFollow: TrackpadFollow {
+        get { self[TrackpadFollowKey.self] }
+        set { self[TrackpadFollowKey.self] = newValue }
+    }
+}
+
 // MARK: - Surface
 
 struct TrackpadView: UIViewRepresentable {
@@ -93,9 +108,6 @@ struct TrackpadView: UIViewRepresentable {
     let onModifiersConsumed: () -> Void
     var verticalSpan: CGFloat? = nil
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
-    /// Follow the Pointer's two (`Trackpad.readZoom` and `follow`).
-    var readZoom: () -> StreamZoom = { StreamZoom() }
-    var follow: (CGPoint) -> Void = { _ in }
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -104,21 +116,18 @@ struct TrackpadView: UIViewRepresentable {
         view.setPointer = setPointer
         view.feed = feed
         view.onFingers = onFingers
-        view.readZoom = readZoom
-        view.follow = follow
         return view
     }
 
     func updateUIView(_ uiView: TrackpadSurface, context: Context) {
         uiView.send = send
+        uiView.follow = context.environment.trackpadFollow
         uiView.setPointer = setPointer
         uiView.feed = feed
         uiView.onFingers = onFingers
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
         uiView.sendGesture = sendGesture
-        uiView.readZoom = readZoom
-        uiView.follow = follow
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -127,10 +136,9 @@ struct TrackpadView: UIViewRepresentable {
 
 final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     var send: (InputEvent) -> Void = { _ in }
-    /// Follow the Pointer (`StreamZoom.FollowPointer`): the picture's zoom, read at each move, and the
-    /// picture's follow, handed the pointer after a move with the switch on while zoomed (`moveCursor`).
-    var readZoom: () -> StreamZoom = { StreamZoom() }
-    var follow: (CGPoint) -> Void = { _ in }
+    /// Follow the Pointer's link to the picture (TrackpadFollow: its zoom, and its follow), from the stream
+    /// screen's environment at each update; `moveCursor` reads it with the switch (StreamZoom.FollowPointer).
+    var follow = TrackpadFollow()
     /// Writes this device's own pointer (`StreamClient.setOwnPointer`, from the trackpad: a fraction
     /// of the frame). Called with the virtual cursor on every move, click, drag and scroll, so the
     /// sprite follows the finger at touch rate rather than a network round trip behind it. Never
@@ -298,7 +306,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         // as before: the step in frame fractions whatever the zoom, and the picture stays where two
         // fingers put it. Only pointer motion: the pad's two-finger scroll is the same either way.
         let following = followsPointer
-        let zoom = readZoom()
+        let zoom = follow.zoom()
         let step = StreamZoom.FollowPointer.padStep(CGPoint(x: dx / bounds.width * Self.travel,
                                                             y: dy / ySpan * Self.travel),
                                                     zoom: zoom, on: following)
@@ -307,7 +315,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         // follows the pointer; then the Mac, whose cursor still has to follow for clicks to land there.
         // No rate limit needed here: sendInput coalesces moves to one every 8 ms.
         setPointer(cursor)
-        if StreamZoom.FollowPointer.follows(zoom: zoom, on: following) { follow(cursor) }
+        if StreamZoom.FollowPointer.follows(zoom: zoom, on: following) { follow.follow(cursor) }
         send(.pointer(.move, x: cursor.x, y: cursor.y))
     }
 

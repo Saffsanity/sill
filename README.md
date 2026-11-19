@@ -89,16 +89,17 @@ Sill has layouts of its own.
   your Mac has for them.
   Pinch the picture to zoom it, up to 5×, around the point between your
   fingers; two fingers move a zoomed picture, and a pinch all the way out
-  shows the whole picture again. With Follow the Pointer on (in the settings
-  panel's This iPad, or This iPhone), moving the pointer with the on-screen
-  trackpad near an edge of a zoomed picture moves the picture to keep it in view,
-  and zooming in slows the trackpad’s pointer movement in proportion, for finer control.
+  shows the whole picture again.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes
   up; the Desktop keeps the usual layout. With the virtual display (on unless
   you turn it off in Sill for Mac), your Mac makes a window fill the taller
   picture; with it off, once you set the window's text size with Aa.
+  With Follow the Pointer on, in the settings panel, moving the pointer with
+  the trackpad near an edge of a zoomed picture moves the picture to keep it in
+  view, and zooming in slows the trackpad’s pointer movement in proportion, for
+  finer control.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill pastes what you copied on your device where your Mac's cursor is (with

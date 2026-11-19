@@ -478,7 +478,6 @@ The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
 (below; off unless turned on), Reverse Scrolling (below; off unless turned on),
-Follow the Pointer (below, Pinch zoom; off unless turned on),
 Hold to Show Window Controls (below, Holding a window's thumbnail; 0.5 s unless
 changed) and Three-Finger Gestures (below, Trackpad gestures; on unless turned
 off), none of them ever sent to the Mac, and last Take the Tour.
@@ -982,10 +981,11 @@ moves as far on screen at 5× as at 1× (a held button's drag too; the pad's
 two-finger scroll is the same either way). Off, both are as before: the picture
 moves only under two fingers, and the pad moves the pointer as far across the
 frame at any zoom. Nothing else moves the picture by itself: a finger on it, the
-Pencil, the iPad's own pointer and the Mac's pointer (kind 26) never do. Every
-trackpad on the stream screen reads the zoom and hands its pointer to the
-picture through the same two closures (`Trackpad`'s `readZoom` and `follow`),
-which `TrackpadSurface.moveCursor` calls only with the switch on.
+Pencil, the iPad's own pointer and the Mac's pointer (kind 26) never do. The
+stream screen gives every trackpad under it the picture's zoom and follow
+(`TrackpadFollow`, in the environment), which `TrackpadSurface.moveCursor` reads
+at each move and follows only with the switch on: the upright pad today, and a
+pad laid over the picture the same way once that one can zoom.
 
 ## Picture in Picture
 

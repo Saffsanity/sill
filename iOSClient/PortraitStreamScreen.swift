@@ -726,13 +726,14 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) },
-                 // Follow the Pointer (StreamZoom.FollowPointer, PR #327; off unless turned on): the pad reads
-                 // the picture's zoom at each move and, with the switch on, the zoomed picture follows its
-                 // pointer near the pane's edges.
-                 readZoom: { [zoom] in zoom.zoom },
-                 follow: { [zoom, client] point in zoom.followTrackpadPointer(point, videoSize: client.videoSize) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
+            // Follow the Pointer (StreamZoom.FollowPointer, PR #327; off unless turned on): the pad reads the
+            // picture's zoom at each move and, with the switch on, the zoomed picture follows its pointer near
+            // the pane's edges (TrackpadFollow).
+            .environment(\.trackpadFollow, TrackpadFollow(
+                zoom: { [zoom] in zoom.zoom },
+                follow: { [zoom, client] point in zoom.followTrackpadPointer(point, videoSize: client.videoSize) }))
     }
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }

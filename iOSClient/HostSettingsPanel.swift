@@ -25,8 +25,7 @@ import StreamProtocol
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
-/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Follow the Pointer,
-/// `StreamZoom.FollowPointer.key`, PR #327; Hold to Show Window Controls, a
+/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
 /// rows, as accessibility actions, do their gestures
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
@@ -69,9 +68,6 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
-    /// This device's switch for Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off
-    /// unless turned on, read by the on-screen trackpad at each move of its pointer, never sent.
-    @AppStorage(StreamZoom.FollowPointer.key) private var followPointer = StreamZoom.FollowPointer.defaultOn
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
@@ -94,6 +90,9 @@ struct HostSettingsPanel: View {
         _ = storedThumbnailHold
         return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
     }
+    /// This device's switch for Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off
+    /// unless turned on, read by the on-screen trackpad at each move of its pointer, never sent.
+    @AppStorage(StreamZoom.FollowPointer.key) private var followPointer = StreamZoom.FollowPointer.defaultOn
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
@@ -118,13 +117,13 @@ struct HostSettingsPanel: View {
     /// under it; `reverse`, to Reverse Scrolling's switch, so a photo of the panel in the lower half shows
     /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
+    /// `follow`, to Follow the Pointer's switch and its footnote (PR #327).
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
-    /// `follow`, to Follow the Pointer's switch and its footnote (PR #327).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -147,10 +146,10 @@ struct HostSettingsPanel: View {
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
+    private static let followPointerRowID = "followPointer"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
-    private static let followPointerRowID = "followPointer"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
