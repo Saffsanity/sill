@@ -55,8 +55,8 @@ window picker tucked away while a keyboard is up part of the same change (the pr
   which Larger Picture's estimate does not know, so it covers the key row itself; its latch lives in the
   input view and the stream screen resets it on every update, so the bar and the key row disagree; a locked
   modifier reaches only the bar's own keys, never typed text; its bottom bar sits under every layout with no
-  switch, which moves every approved phone rect; and it conflicts with #397 (`ready-276`) in StreamScreen,
-  PortraitStreamScreen and the checks' README. The review of 2026-11-18 (`next/feature-requests/
+  switch, which moves every approved phone rect; and it conflicts with #397 (`ready-276`) in StreamScreen.swift
+  (`git merge-tree`, today's heads). The review of 2026-11-18 (`next/feature-requests/
   pr-evaluations/keys.md`, "#383") reached the same verdict: redo its ideas, credited, in the per-app keys
   work, where an accessory bar for layouts without a key row (sideways, #371's need) belongs. #371 is not
   touched here: it asks for the key row sideways, a layout change of its own.
