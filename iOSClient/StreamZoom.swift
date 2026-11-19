@@ -3,11 +3,20 @@ import Foundation
 
 /// Pinch to zoom on the stream picture (issue #65; Noah's decisions of 2026-10-19 and 2026-10-20): two
 /// fingers on the picture zoom it from 1× to 5×, centred on the pinch (the midpoint between the
-/// fingers) as a photo in Photos is, and move it with that midpoint; no slider or zoom about the
-/// cursor. Only moving the pointer with the on-screen trackpad follows it near the pane's edges.
-/// A slight pinch out leaves the picture where it is; only a pinch all the way out gives back the
-/// whole picture. The zoom is this device's alone: nothing is sent, and the Mac's window and the
-/// viewport stay as they are.
+/// fingers) as a photo in Photos is, and move it with that midpoint; no slider, and no zoom about the
+/// Mac's pointer. A slight pinch out leaves the picture where it is; only a pinch all the way out gives
+/// back the whole picture. The zoom is this device's alone: nothing is sent, and the Mac's window and
+/// the viewport stay as they are.
+///
+/// Following the pointer is a switch, Follow the Pointer (`FollowPointer`; PR #327 by wedi-dev, for
+/// issue #311), off unless turned on. On #65 (2026-10-19) Noah kept the pointer out of the zoom ("no
+/// cursor-centred zoom and no view following the pointer"), and with the switch off that still holds;
+/// on #216 (2026-10-29) he invited "pointer following near the edges" as a smaller change; and on
+/// 2026-11-18 he asked for a switch on the new behaviour of every community pull request. On, while the
+/// picture is zoomed, the on-screen trackpad's pointer moves it near the pane's edges
+/// (`followTrackpadPointer`), and the trackpad's travel is undone by the zoom, so its pointer keeps its
+/// speed on screen. Nothing else moves the picture by itself: a direct touch, the Pencil, a scroll, a
+/// click or the Mac's own pointer (kind 26) never does.
 ///
 /// The picture is drawn scaled about the pane's middle, then moved by `offset` (`ZoomedStreamView`:
 /// `.scaleEffect(scale).offset(offset)` on the stream's view), so a point `u` of the pane as it is at
@@ -86,7 +95,8 @@ struct StreamZoom: Equatable, Sendable {
                         height: min(maxY, max(-maxY, offset.height * size.height / pane.height)))
     }
 
-    /// A move from the on-screen trackpad, in frame fractions. Keep the pointer 44 pt inside the
+    /// A move from the on-screen trackpad, in frame fractions, with Follow the Pointer on
+    /// (`FollowPointer.follows`). Keep the pointer 44 pt inside the
     /// pane when possible, moving only as far as needed and stopping at the same limits as a pinch.
     /// `videoRect` is the aspect-fitted picture at 1×, including its letterbox origin. A small pane
     /// keeps a middle half where nothing moves. Direct touches and the Mac's pointer reports never
@@ -142,6 +152,51 @@ struct StreamZoom: Equatable, Sendable {
     func unzoomedDelta(_ delta: CGPoint) -> CGPoint {
         let s = max(Self.minScale, scale)
         return CGPoint(x: delta.x / s, y: delta.y / s)
+    }
+}
+
+extension StreamZoom {
+    /// Follow the Pointer (PR #327 by wedi-dev, for issue #311; the review of 2026-11-18): this device's
+    /// switch, off unless turned on (`defaultOn`), in the Settings panel's This iPhone or This iPad group
+    /// after Reverse Scrolling; this device's own, never sent. The on-screen trackpad reads it at each move
+    /// of its pointer (`TrackpadSurface.moveCursor`), so one switch covers both halves of the pull request:
+    /// - On, while the picture is zoomed, the pad's step is undone by the zoom (`padStep`: at 5× a fifth
+    ///   of the frame's fractions), so the pointer crosses as much of the screen at any zoom and a small
+    ///   target zoomed into is easier to reach, a held button's drag too; and then the picture follows
+    ///   the pointer near the pane's edges (`follows`, `followTrackpadPointer`).
+    /// - Off, both as before #327: the pad's step the same in the frame at every zoom (faster on screen
+    ///   the further the picture is zoomed), and the picture left where two fingers put it.
+    /// The pad's two-finger scroll is neither: it scrolls as far either way.
+    enum FollowPointer {
+        /// UserDefaults' key (`-Sill.followPointer 1` turns it on for one run).
+        static let key = "Sill.followPointer"
+        static let defaultOn = false
+
+        /// The switch as UserDefaults holds it (`object(forKey: key)`): the panel's Bool, or a launch
+        /// argument's string ("1", "YES", "true"), read as UserDefaults reads a string as a Bool; anything
+        /// else, or nothing yet, `defaultOn`.
+        static func on(stored: Any?) -> Bool {
+            switch stored {
+            case let flag as Bool: return flag
+            case let text as String: return NSString(string: text).boolValue
+            default: return defaultOn
+            }
+        }
+
+        /// One move of the trackpad's pointer: `step`, the finger's travel as fractions of the frame (the
+        /// pad's own measure, `TrackpadSurface.travel`), as the pointer takes it. On, undone by the zoom
+        /// (`unzoomedDelta`); off, as it is.
+        static func padStep(_ step: CGPoint, zoom: StreamZoom, on: Bool) -> CGPoint {
+            on ? zoom.unzoomedDelta(step) : step
+        }
+
+        /// After a move of the trackpad's pointer, whether the picture follows it: with the switch on, while
+        /// the picture is zoomed (at 1× it shows the whole frame, and there is nothing to move).
+        static func follows(zoom: StreamZoom, on: Bool) -> Bool { on && zoom.isZoomed }
+
+        /// The switch's name, and the words under it (the review's).
+        static let title = "Follow the Pointer"
+        static let footnote = "While the picture is zoomed, it moves to keep the pointer in view as the pointer nears an edge, and the trackpad moves the pointer more slowly the further you zoom in."
     }
 }
 

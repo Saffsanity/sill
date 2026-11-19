@@ -10,6 +10,11 @@
 //     keeping its owner to its last finger (no scroll from a pinch's fingers when one lifts, no zoom from
 //     a scroll's when they spread); three fingers the gesture's, the picture back as the stroke found it.
 //   - 20,000 random strokes against the invariants.
+//   - The on-screen trackpad's follow (PR #327 by wedi-dev): a zoomed picture moved just enough to keep the
+//     pointer inside a 44 pt band (a quarter of a small pane), stopping at the picture's edges, letterboxed and
+//     pillarboxed frames, and the pad's travel the same on screen at every zoom; and Follow the Pointer, the
+//     switch over both (off unless turned on: off, the step and the picture as before #327), with 20,000
+//     random zooms, steps and pointers against the band's invariants.
 //   swiftc -O iOSClient/StreamZoom.swift Tests/checks/stream-zoom/main.swift -o .build/checks/stream-zoom/check && .build/checks/stream-zoom/check
 import CoreGraphics
 import Foundation
@@ -670,6 +675,103 @@ do {
     check("resizing after following retains the same frame point at the middle",
           near(centerBefore.x / 400, centerAfter.x / 300) && near(centerBefore.y / 300, centerAfter.y / 200)
           && covers(next, next.pane))
+}
+
+// MARK: - Follow the Pointer: the switch (PR #327; the review of 2026-11-18)
+
+typealias F = StreamZoom.FollowPointer
+
+do {
+    check("Follow the Pointer: off unless turned on", F.defaultOn == false && F.on(stored: nil) == false)
+    check("Follow the Pointer: stored under Sill.followPointer (-Sill.followPointer 1)", F.key == "Sill.followPointer")
+    check("the panel's switch: its Bool as it is", F.on(stored: true) && !F.on(stored: false))
+    check("a number UserDefaults holds: 1 on, 0 off",
+          F.on(stored: NSNumber(value: true)) && F.on(stored: NSNumber(value: 1)) && !F.on(stored: NSNumber(value: 0)))
+    check("a launch argument's string, as UserDefaults reads one: 1, YES, yes and true on",
+          ["1", "YES", "yes", "true"].allSatisfy { F.on(stored: $0) })
+    check("a launch argument's string: 0, NO, false, an empty one and a word off",
+          ["0", "NO", "false", "", "maybe"].allSatisfy { !F.on(stored: $0) })
+    check("anything else stored: the default", F.on(stored: Date()) == F.defaultOn && F.on(stored: Data([1])) == F.defaultOn)
+    check("its name and words (the review's)", F.title == "Follow the Pointer"
+          && F.footnote == "While the picture is zoomed, it moves to keep the pointer in view as the pointer nears an edge, and the trackpad moves the pointer more slowly the further you zoom in.")
+
+    // A pad's step, in frame fractions, at 1×, 2× and 5×.
+    let size = CGSize(width: 400, height: 300)
+    let step = CGPoint(x: 0.0125, y: -0.025)
+    for scale: CGFloat in [1, 2, 5] {
+        let z = zoomed(scale, at: CGPoint(x: 120, y: 200), in: size)
+        check("off at \(scale)×: the pad's step as before #327, the same in the frame at every zoom",
+              F.padStep(step, zoom: z, on: false) == step)
+        check("on at \(scale)×: the pad's step undone by the zoom (\(scale == 1 ? "the same" : "1/\(Int(scale))"))",
+              near(F.padStep(step, zoom: z, on: true), CGPoint(x: step.x / scale, y: step.y / scale), 0.000_001))
+        check("off at \(scale)×: the picture never follows", !F.follows(zoom: z, on: false))
+        check("on at \(scale)×: the picture follows \(scale > 1 ? "while zoomed" : "only when zoomed: not at 1×")",
+              F.follows(zoom: z, on: true) == (scale > 1))
+    }
+
+    // 20,000 random zooms, steps and pointers: off, nothing of #327 (the step as it was, so the pointer crosses
+    // the screen faster the further the picture is zoomed, and the picture stays); on, the pointer moves as far on
+    // screen as at 1× whatever the zoom, and following moves the picture only as far as it must: a pointer
+    // already inside the edge band moves nothing, one outside it ends inside it unless the picture's own edge
+    // stops it (the offset at its limit), the zoom stays and the pane stays covered, and following again moves
+    // nothing (no drift).
+    var rng = SystemRandomNumberGenerator()
+    var offSame = true, onScreen = true, onlyZoomed = true, scaleKept = true, covered = true
+    var minimal = true, inBand = true, stable = true
+    for _ in 0..<20_000 {
+        let w = CGFloat.random(in: 120...1400, using: &rng), h = CGFloat.random(in: 90...1000, using: &rng)
+        let pane = CGSize(width: w, height: h)
+        var z = Z()
+        z.resized(to: pane)
+        for _ in 0..<Int.random(in: 0...4, using: &rng) {
+            z.pinch(factor: CGFloat.random(in: 0.6...2.5, using: &rng),
+                    from: CGPoint(x: .random(in: 0...w, using: &rng), y: .random(in: 0...h, using: &rng)),
+                    to: CGPoint(x: .random(in: 0...w, using: &rng), y: .random(in: 0...h, using: &rng)), in: pane)
+        }
+        let s = CGPoint(x: .random(in: -0.05...0.05, using: &rng), y: .random(in: -0.05...0.05, using: &rng))
+        if F.padStep(s, zoom: z, on: false) != s || F.follows(zoom: z, on: false) { offSame = false }
+        let on = F.padStep(s, zoom: z, on: true)
+        // The pointer's travel on screen: the step's share of the frame, magnified by the zoom.
+        if !near(on.x * z.scale, s.x, 0.000_001) || !near(on.y * z.scale, s.y, 0.000_001) { onScreen = false }
+        if F.follows(zoom: z, on: true) != z.isZoomed { onlyZoomed = false }
+        guard z.isZoomed else { continue }
+        // The frame fitted into the pane (HEVCDisplayView.videoRect), letterboxed or pillarboxed.
+        let video = CGSize(width: .random(in: 300...3000, using: &rng), height: .random(in: 300...3000, using: &rng))
+        let fit = min(w / video.width, h / video.height)
+        let rect = CGRect(x: (w - video.width * fit) / 2, y: (h - video.height * fit) / 2,
+                          width: video.width * fit, height: video.height * fit)
+        let p = CGPoint(x: .random(in: 0...1, using: &rng), y: .random(in: 0...1, using: &rng))
+        let inPicture = CGPoint(x: rect.minX + p.x * rect.width, y: rect.minY + p.y * rect.height)
+        let before = z.zoomedPoint(inPicture, in: pane)
+        var followed = z
+        followed.followTrackpadPointer(p, videoRect: rect)
+        let after = followed.zoomedPoint(inPicture, in: pane)
+        if followed.scale != z.scale { scaleKept = false }
+        if !covers(followed, pane) { covered = false }
+        let maxX = w * (z.scale - 1) / 2, maxY = h * (z.scale - 1) / 2
+        for (b, a, span, offset, limit) in [(before.x, after.x, w, followed.offset.width, maxX),
+                                            (before.y, after.y, h, followed.offset.height, maxY)] {
+            let edge = min(44, span / 4)
+            if b >= edge - 0.001 && b <= span - edge + 0.001 {
+                if !near(a, b) { minimal = false }
+            } else if !(a >= edge - 0.001 && a <= span - edge + 0.001) && !near(abs(offset), limit) {
+                inBand = false
+            } else if abs(min(span - edge, max(edge, a)) - a) > abs(min(span - edge, max(edge, b)) - b) + 0.001 {
+                inBand = false   // moved away from the band
+            }
+        }
+        var again = followed
+        again.followTrackpadPointer(p, videoRect: rect)
+        if !near(again.offset.width, followed.offset.width) || !near(again.offset.height, followed.offset.height) { stable = false }
+    }
+    check("20,000 random zooms and steps: off, the pad's step and the picture as before #327", offSame)
+    check("20,000 random zooms and steps: on, the pointer moves as far on screen as at 1×", onScreen)
+    check("20,000 random zooms: on, the picture follows exactly while zoomed", onlyZoomed)
+    check("20,000 random follows: the zoom stays as it was", scaleKept)
+    check("20,000 random follows: the zoomed picture still covers its pane", covered)
+    check("20,000 random follows: a pointer inside the edge band moves nothing along that axis", minimal)
+    check("20,000 random follows: a pointer outside the band ends inside it, or the picture's edge stops it", inBand)
+    check("20,000 random follows: following again moves nothing (no drift)", stable)
 }
 
 print("\(passes) passed, \(fails) failed")

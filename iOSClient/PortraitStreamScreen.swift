@@ -719,12 +719,7 @@ struct PortraitStreamScreen: View {
     }
 
     private func liveTrackpad(verticalSpan: CGFloat?) -> some View {
-        Trackpad(send: { event in
-                     if case let .pointer(.move, x, y) = event {
-                         zoom.followTrackpadPointer(CGPoint(x: x, y: y), videoSize: client.videoSize)
-                     }
-                     client.sendInput(event)
-                 },
+        Trackpad(send: { client.sendInput($0) },
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
                  onFingers: { client.trackpadFingers($0) },
@@ -732,7 +727,11 @@ struct PortraitStreamScreen: View {
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) },
-                 readZoom: { [zoom] in zoom.zoom })
+                 // Follow the Pointer (StreamZoom.FollowPointer, PR #327; off unless turned on): the pad reads
+                 // the picture's zoom at each move and, with the switch on, the zoomed picture follows its
+                 // pointer near the pane's edges.
+                 readZoom: { [zoom] in zoom.zoom },
+                 follow: { [zoom, client] point in zoom.followTrackpadPointer(point, videoSize: client.videoSize) })
             .tourTarget(.trackpad)
     }
 

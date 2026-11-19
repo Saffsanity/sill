@@ -25,7 +25,8 @@ import StreamProtocol
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
-/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
+/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Follow the Pointer,
+/// `StreamZoom.FollowPointer.key`, PR #327; Hold to Show Window Controls, a
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
 /// rows, as accessibility actions, do their gestures
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
@@ -68,6 +69,9 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's switch for Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off
+    /// unless turned on, read by the on-screen trackpad at each move of its pointer, never sent.
+    @AppStorage(StreamZoom.FollowPointer.key) private var followPointer = StreamZoom.FollowPointer.defaultOn
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
@@ -120,6 +124,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `follow`, to Follow the Pointer's switch and its footnote (PR #327).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -127,6 +132,7 @@ struct HostSettingsPanel: View {
         case "sound"?: return sendAudioID
         case "mute"?: return muteID
         case "reverse"?: return reverseScrollRowID
+        case "follow"?: return followPointerRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
@@ -144,6 +150,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let followPointerRowID = "followPointer"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -682,7 +689,9 @@ struct HostSettingsPanel: View {
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
-    /// streams).
+    /// streams). Follow the Pointer (`StreamZoom.FollowPointer`, PR #327) comes right after Reverse
+    /// Scrolling, for every Mac too: it changes only how this device's trackpad moves its pointer, and the
+    /// zoomed picture with it.
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
@@ -758,6 +767,18 @@ struct HostSettingsPanel: View {
         }
         .id(Self.reverseScrollRowID)
         Footnote(text: Self.reverseScrollFooter(device: device))
+        // Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off unless turned on, on every
+        // device (the on-screen trackpad shows wherever a portrait layout does: a phone or the iPhone Duo
+        // upright, an iPad's narrow window). Beside Reverse Scrolling, the other row about the trackpad and
+        // the picture; the review of 2026-11-18 puts both in the whole-screen pane's Touch and Zoom group.
+        Rows {
+            Toggle(isOn: $followPointer) {
+                Text(StreamZoom.FollowPointer.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.followPointerRowID)
+        Footnote(text: StreamZoom.FollowPointer.footnote)
         // How long a thumbnail is held before its window's lights show and it can be dragged (issue #113;
         // Noah, 2026-10-29).
         Rows {

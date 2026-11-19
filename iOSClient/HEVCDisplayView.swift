@@ -584,7 +584,8 @@ final class StreamZoomModel: ObservableObject {
     }
 
     /// Only a pointer move sent by the on-screen trackpad follows the pointer, never a click,
-    /// scroll, direct touch or a pointer report from the Mac.
+    /// scroll, direct touch or a pointer report from the Mac; and only with Follow the Pointer on,
+    /// which the trackpad checks before it calls this (StreamZoom.FollowPointer, `TrackpadSurface.follow`).
     func followTrackpadPointer(_ point: CGPoint, videoSize: CGSize) {
         var z = zoom
         let videoRect = HEVCDisplayView.videoRect(in: CGRect(origin: .zero, size: z.pane),
