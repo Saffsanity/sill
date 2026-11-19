@@ -226,3 +226,172 @@ a host that reported the switch and a host takes only from a paired session."
   on these paths; against main's eb48ac9f (`files/run2/SillHost-main-eb48ac9f`), identical idle, with a client and with
   `--virtual-display`, and started locked the one difference #395's review round named: "Displays: N online, N active,
   N asleep, N Sill's, N macOS's stand-in." (11 lines and 10).
+
+**Third part (2026-11-19): the plan's commits 8 to 12, the Virtual Desktop working end to end.** The switch now does
+something: a device steps onto the Virtual Desktop's stop (or turns it on) and the Mac makes it; its windows go and come back;
+Sill for Mac has its Settings, menu item and card row; the CLI has its flag; the desktop gate has its scenarios.
+- The coordinator (commit 8, 6329077e; StreamCoordinator.swift's "The Virtual Desktop"): VirtualDesktopLife is asked at
+  every change that bears on it (each switch of source, display change, lock change, device come or gone, settings change,
+  and the time it said: one scheduled look). A make happens inside the Desktop's select, so the capture that follows is built
+  on it: the matched device's size and rate (the device that stepped onto it or turned it on; `VirtualDesktopSize.device`
+  of its room, else its panel; #200's 1920×1080 at 60 with no viewport), made through SillDisplays (`newDisplay = try
+  displays.make(.desktop, …)`), waited for online and listed, the catalog looked at again (WindowCatalog keeps Sill's display
+  beside the real screens while it is the Virtual Desktop: HeadlessDesktopPolicy.pool's `virtualDesktop`), the windows Sill
+  moved off it before back in their places. While the spacing holds a make, the Desktop shows the main display
+  (DesktopDisplays.streamed) and the look at the spacing's end makes it. A removal re-asks the rule on a fresh look once a
+  switch under way is over (a removal asked by an older look never acts on a newer state): the Desktop off it first, its
+  windows to the main display (DesktopWindowLedger.moveAllOut through WindowSizer.DesktopWindows: Accessibility, out of full
+  screen first, at most 2 s; none off console), the display, one line. A make that throws or never comes up turns it off for
+  the run (VirtualDesktopWords.failed) until its switch is turned off and on. Following: the matched device's viewports feed
+  `Follow`; with `followWay` `.nextMake` a turn is a line and the next make's size. One display in two roles: the headless
+  release and its switch leave the Virtual Desktop to its own rules; the roles change hands with a line. macOS removing the
+  Desktop's display is heard (`onLost[.desktop]`, either role). Quit moves its windows out synchronously, a full-screen one
+  left to macOS, before `removeAll`. A device that turns it on is shown it at once. Kind 16: the switch reported by every
+  host (`streamSettings`), `virtualDesktopState` per connection (available and the Mac's note, VirtualDesktopWords.note;
+  shown; the size and rate it has or would have for that device). HostStatus: `SillDisplay.virtualDesktop` and
+  `virtualDesktop` (available, note, shown). TEST ONLY: SILL_TEST_VIRTUAL_DESKTOP=1 with SILL_TEST_DISPLAYS (said, never
+  made, one more test stop) and SILL_TEST_VD_GRACE=<s> (VirtualDesktopLife.testHook). Co-authored by dr-apple (#156),
+  lepeos (#312) and addhumal (#225), whose device-sized display, kept while an overlay comes and goes, is this default.
+  3f377ccd and 19eb210c: the windows' moves take each display's visible area from AppKit only when it is that display's,
+  else its bounds (a display NSScreen does not list yet, just made, gave the main display's area: its windows would have
+  stayed where they were and been forgotten), and move none while the target is, or overlaps, the Virtual Desktop.
+- The device (commit 9, 0d8f4305): the stream screen measures Full Screen's room whether the controls show or not
+  (FullScreenPolicy.hiddenRoom) and sends it in every viewport (`Viewport.room`), again when it changes; the Desktop button
+  shows the dashed screen over "Virtual" on its stop (`hostDesktopVirtual`), VoiceOver "Virtual Desktop, 3 of 3", also after
+  its own step; the Settings panel's switch after Virtual Display's row, its footnotes from VirtualDesktopWords, disabled on
+  an unpaired session and where the Mac cannot make it; the ledger's eighth field and rule 11 (only on a session the Mac says
+  is paired); mock cases vdesk, vdeskon, vdeskunpaired, vdeskunavailable, `-SillSettingsScroll vdesk`,
+  `-SillDesktopDisplays 3,3,v`, noted in ContentView's harness notes (ef52d7e4; 70f04d13 put the sound's bullet back
+  together, which ef52d7e4 had split).
+- Sill for Mac (commit 10, 767fcad8 and 13ea556c): Settings › Displays (the Virtual Display tab renamed, its raw value kept):
+  the Virtual Desktop section ("Add a desktop for your devices", Resolution, Refresh Rate, its status with Try Again for the
+  guard, its footnotes); the status menu's "Virtual Desktop" with its subtitle; the card's "Virtual Desktop · 1218×800"; the
+  previews. Noah's "allow the user to select resolution", on the Mac in 2b: HostConfig.virtualDesktopSize ("device", "main",
+  or a size of `VirtualDesktopSize.offered`) and virtualDesktopHz (0: the device's; 30, 60, 120), saved by Sill.app, taken at
+  the next make; only Match the device (the plan's This device) follows a device. Settings › Permissions' Accessibility
+  row names the window moves (ef52d7e4).
+- The CLI and the gate (commit 11, 77de9514): `SillHost --virtual-desktop[=device|main|WxH@S[:HZ]]`; sillclient.py's
+  `--room`, `--room-after`, the switch's `--set` and `--expect` keys, `desktopVirtual=` and `vdesk=…`; desktop-check's two
+  more hosts (the stop, a step onto it, its turn, its grace, made again, locked, off console, the span; a paired device's
+  switch shown at once, an unpaired one's refused, the switch flipped four times a second against the spacing, off).
+  818bbe86: its test pattern at its size in points, as every test stop's (the verdict had wanted Retina pixels).
+- Docs (commit 12, 92f52478 and this note): docs/DEVELOPMENT.md (how to try it, its lines), docs/locked-mac-plan.md's
+  table, docs/LAYOUT.md, docs/BUILD-AND-RUN.md with each commit.
+
+**Defaults taken for Noah to confirm** (this part's; the first two parts' 1 to 15 stand):
+16. The Virtual Desktop is made inside the Desktop's select, so the Desktop moves onto it as it comes up; while the spacing
+    holds a make (3 s since the last change), the Desktop shows the main display and moves on once it is made, and the
+    button reads the main display's number meanwhile.
+17. A make that throws or never comes up turns it off for this run (its stop leaves the cycle; Settings and the device say
+    "Off for this session: …. Turn it off and on to try again."), as the stage's own failures do.
+18. Off console it goes at once and its windows go where macOS puts them (Sill moves no window in a session another user has
+    the screen of), so they do not come back.
+19. Its windows out: up to 2 s per full-screen window, which holds Sill's main actor that long; at Quit and the signals
+    none (a full-screen window is left to macOS).
+20. macOS removing the Desktop's display by itself is heard now in both roles (#395's included): forgotten at once, and a
+    Desktop on it starts again on what is left (before: found offline at the next Desktop).
+21. Every 2b host reports the switch, the CLI without its AppKit loop too (disabled with "Start SillHost with
+    --virtual-desktop to use it."); kind 16's size and rate only while the switch is on, a kind 16 per viewport then.
+22. The device's room is Full Screen's measured whatever shows (`hiddenRoom`), in every viewport, a new viewport when it
+    changes.
+23. The device's switch sits after Virtual Display's row, before the closing footer; it moves into #393's pane, its Mac part.
+24. The ledger's rule 11: a Virtual Desktop pick goes only on a session the Mac says is paired; a Mac that says nothing gets
+    none (every Mac with the switch says).
+25. The size and rate are the Mac's choice in 2b (Settings › Displays, the CLI's flag); a device's pickers and their wire
+    fields stay phase 3's. A new choice is taken at the next make (P2 not run); only Match the device follows a device.
+26. The sizes offered: Match the device (the plan's This device), Same as main display (the 11-12 rule: its mode, its
+    pixels held inside 3840 × 2160), then 1440 × 900, 1512 × 982, 1728 × 1117, 1920 × 1080, 1920 × 1200 and 2560 × 1440 at
+    Retina, and 1920 × 1080, 2560 × 1440 and 3440 × 1440 at 1x; no 1280 × 720 (under 800 points), 6K or 8K until phase 3's
+    self test of each. The rate is its own choice: Match the device (the device's rate, whatever the size), 30, 60 or 120 Hz.
+27. Settings' fourth tab is "Displays" (raw value `virtualDisplay` kept, so a saved tab opens it); the menu's item follows
+    Virtual Display's.
+28. A device that turns it on is shown it at once (open decision 12 (a)): the one stream moves to it for every device, a window
+    streaming included.
+29. Its test hooks need SILL_TEST_DISPLAYS (the screens) and a test host; a test host's said display is never the main one.
+
+**Verified in the third part** (on this Mac; nothing made a display, posted input, locked, slept or switched anything;
+every live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtual Desktop only said to be made):
+- Each module typechecked after each commit (`swiftc` of StreamProtocol, SillHostCore, SillHostCLI and SillMenuBar against
+  each other, and of the iOS app's sources for the simulator against StreamProtocol): clean, no warning.
+- Commit 8 live on its CLI (`~/Downloads/sill-handoff/next/vd-2b/run3/probe8.py`, a `--pairing` test host with
+  SILL_TEST_VIRTUAL_DESKTOP and a 3 s grace): a paired device's "on" shown to it at once and made (said) at 1218×800 pt
+  @2× at 60 Hz for its 1133×744 room, the Desktop on the third stop at 60 fps; an unpaired device's "on" refused ("only a
+  paired device"); stepped off, removed 3.0 s later; off.
+- The heavy lock's first turn (08:34–09:31, slot A), on 6329077e (commit 8): `swift build -c release` in 53 s with no
+  warning but CaptureProbe's known one; `SillHost --internet` exits 2, `--print-reachability` 0; on a `git archive`
+  snapshot, sill-displays 53 checks and 43 of 43 mutants caught, virtual-display-api 308 and 97 of 97, virtual-desktop
+  103,262 and 166 of 166 (32 minutes), desktop-displays 213 and 92 of 92, away-quality all passed and 59 of 59. No later
+  commit changed sill-displays', virtual-display-api's or desktop-displays' checks, nor the lines their mutants change
+  (every pattern found exactly once at the head); virtual-desktop and away-quality, which commits 9 to 11 grew, ran again
+  in the second turn.
+- The heavy lock's second turn (09:31–10:36, slot A, after 23 minutes queued), on b83f5ed8: `swift build -c release`
+  in the worktree in 59 s with no warning; `SillHost --internet` exits 2, `--print-reachability` 0,
+  `--virtual-desktop=999x999@2` exits 2 naming the sizes it takes. H2 (`run3/h2b.py`: each pair run one right after the
+  other there, every line but the statistics masked and sorted, the statistics compared by name): against b6ceb227 (run
+  2's head) identical in all four runs (idle 7 distinct lines and 3 statistics, a test client 14 and 11, started locked 11
+  and 3, `--virtual-display` with a test client 17 and 11), so the Virtual Desktop off (its default) changes nothing on
+  these paths; against main's eb48ac9f identical but the locked run's "Displays: N online, …" line, #395's, as before.
+  Sill for Mac's previews from the bare SillMenuBar (its own log file, defaults deleted after): 345 files, the Virtual
+  Desktop's looked at (Settings › Displays in eight states, light and dark; the card's row; the menu's item). On a `git
+  archive` snapshot: virtual-desktop 191 of 191 mutants caught (39 minutes), away-quality 67 of 67, ledger 24 of 24,
+  full-screen 72 of 72; then run-all, all 76 checks passed (virtual-desktop 105,424 checks, full-screen 101,607).
+- The live gates on b83f5ed8's CLI (the second turn's build), outside the lock at load 6 to 7: `Scripts/desktop-check/live.py`
+  51 of 51 (24 of its stops as before and 27 of the Virtual Desktop's: the stop after the screens, made (said) at the iPad
+  mini's 1133×744 room grown to 1218×800 pt @2× at 60 Hz, a turn held 1 s followed by one line, a turn and back within the
+  second nothing, removed 3.0 s after it was stepped off, made again, kept while locked past its grace and back after the
+  unlock, removed at once off console, the span, never two changes within 3 s; on a `--pairing` host an unpaired device's
+  "on" refused, a paired one's shown at once, the switch flipped four times a second making four changes 3 s or more apart,
+  off); its first run held 49 of 51, both misses the gate's own expectations (a turn back after its follow asks nothing,
+  since the display still has that size; the unpaired client still connected when the paired one turned the Mac's switch
+  on), fixed in e84a1601. `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26;
+  `Scripts/headless-check/live.py OUT all` 66 of 66.
+- GitHub's CI on 92f52478 (run 44540470678), b83f5ed8 (run 44544695482, the head's code) and e84a1601 (run 44548679666):
+  every step of Build and check passed each time (the release build, every pure check, the iOS app, the CLI's two paths);
+  its mutant jobs are skipped on pull requests.
+
+**For Noah** (all of 2b's, shortest first, as in the pull request; this list takes the first part's place, whose three
+are 1, 2 and 12. Each makes a display or needs this branch's Sill.app on your Mac. Watch `grep -E "Virtual
+Desktop|Headless|Displays:|Desktop:|Settings from" ~/Library/Logs/Sill/Sill.log | tail -40` meanwhile):
+1. P2, the modes probe, on a Mac at rest (Sill quit, nothing streaming, no device connected; it makes "Sill Probe" for
+   about ten seconds, with a window of its own on it): `cd ~/Downloads/wt-vd-2b && Scripts/display-modes-probe/run.sh
+   --make`, then upright at 120 Hz: `Scripts/display-modes-probe/run.sh --make 1032x1376 120`. Its last three lines decide
+   how a turned device is followed (default 8, one line); the output goes into PR #408.
+2. P1 (from #395), on the same Mac at rest: `swift build -c release && for a in "60 1218x800" "120 1376x1032" "120
+   1496x800" "60 1133x744"; do .build/release/SillHost --virtual-display-selftest $a; done`.
+3. Install this branch: Sill.app (`SILL_RELEASE_DRY_RUN=1 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
+   SILL_PROVISION_PROFILE=/Users/noah/Downloads/winstream/Packaging/embedded.provisionprofile Scripts/make-app.sh
+   --release --install --open`), and the iPad mini and the iPhone 15 Pro on a build of it. 4 to 14 use them.
+4. Turn it on in Settings › Displays and step past the screens from the iPad: "Virtual Desktop 1218×800 pt @2× at 60 Hz id
+   N: made in … ms for iPad mini (its screen).", listed in System Settings › Displays with a menu bar; with Full Screen on it
+   fills the iPad; the button's dashed screen over "Virtual".
+5. From the iPhone's Settings panel: switch it on (shown at once, about 1496 × 800 at 120 Hz if the encoder holds it:
+   Sill.log's "Streaming … fps"), then off (the main display, its windows moved).
+6. Quit Sill.app while it shows: its windows on the main display, no "Sill Desktop" left in System Settings › Displays.
+7. Settings › Displays' Resolution 1920 × 1080 (Retina) and Refresh Rate 60 Hz, then step onto it again after it went:
+   made at that size and rate.
+8. Turn the iPad while it shows: "iPad mini turned; the next one is made at 800×1218 pt." (P2 not run); step away 30 s
+   and back: made upright.
+9. Windows on it: move one there, step away and back within 30 s (it stays), wait 30 s on another stop (it moves to the
+   main display: "moved 1 window to …"), step back (it returns: "1 window back in its place").
+10. Locked: ⌃⌘Q while it shows (the main display's lock screen), the password, back on it; disconnect, gone 30 s later.
+11. From an unpaired session (Require pairing off) the panel's switch is disabled; from away (Tailscale) on and off work.
+12. The stage as before (its display now goes through SillDisplays): Virtual Display on, pick a window from the iPad
+    (`Virtual display … created …`, the window on Sill's display); pick another (the first home, the display kept); pick
+    the Desktop (`Removed virtual display N (… home after … ms)`); then Quit Sill with a window staged (the window home,
+    no "Sill" left in System Settings › Displays).
+13. Lid closed with both monitors, it showing, then both cables pulled: it stays as the Mac's only display ("no real
+    screen works now"); plug one back: it goes or stays as the Virtual Desktop (never the main display).
+14. #333's kind of monitor, if one is at hand: whether a step onto it switches the monitor off.
+
+**Words proposed for the site, What's New and the review notes** (not written there; 0.7.0, both apps):
+- support.html, "A desktop of its own for your iPhone or iPad": "Turn on Virtual Desktop in Sill's Settings on your iPhone
+  or iPad, or in Sill for Mac (Settings › Displays). After your Mac's screens, tap Desktop to step to a desktop that is your
+  device's own: its size and its refresh rate. Move windows onto it as onto any screen. It is there only while a device
+  shows it; thirty seconds after none does, its windows move to your main screen, and they go back when it returns. With
+  Full Screen on, it fills your device's screen exactly. In Sill for Mac you can choose another size or refresh rate."
+- privacy.html's Accessibility line gains: "… and to move windows off the Virtual Desktop and back."
+- App Store What's New: "Virtual Desktop: turn it on in Settings and tap Desktop to step to a desktop of your own on your
+  Mac, the size of this iPhone or iPad. Needs Sill for Mac 0.7."
+- The review notes' NEW IN 0.7: "Virtual Desktop (Settings, needs Sill for Mac 0.7): the Mac makes a desktop the size of
+  this device after its own screens; the Desktop button steps to it. Nothing leaves the user's own Mac." (under 300 bytes)
+- contribute.html's credits: addhumal (#200, #225), dr-apple (#156), lepeos (#312).
