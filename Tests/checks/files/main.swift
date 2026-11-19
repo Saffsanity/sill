@@ -204,13 +204,33 @@ for i in 0..<10_000 { arrivals = P.admits(arrivals: arrivals, now: Double(i) * 0
 check(arrivals.count <= P.offerRate, "a flood keeps at most two arrivals (\(arrivals.count))")
 
 // The device answers; the Mac offers; a pick.
-eq(P.deviceAnswers(offer2, receiving: false, askBefore: true), .ask, "Ask Before Receiving Files on: ask")
-eq(P.deviceAnswers(offer2, receiving: false, askBefore: false), .accept, "off: accept")
+eq(P.deviceAnswers(offer2, receiving: false, askBefore: true, askedFor: false), .ask, "Ask Before Receiving Files on: ask")
+eq(P.deviceAnswers(offer2, receiving: false, askBefore: false, askedFor: false), .accept, "off: accept")
 let asked = P.offer(FileTransfer.offer(transfer: 5, files: files, asked: true))!
-eq(P.deviceAnswers(asked, receiving: false, askBefore: true), .accept, "files it asked for: at once")
-eq(P.deviceAnswers(asked, receiving: true, askBefore: false), .refuse(.busy), "another running: busy")
-eq(P.deviceAnswers(many, receiving: false, askBefore: false), .refuse(.tooMany), "501 files")
-eq(P.deviceAnswers(tooBig, receiving: false, askBefore: false), .refuse(.tooBig), "past 100 GB")
+eq(P.deviceAnswers(asked, receiving: false, askBefore: true, askedFor: true), .accept, "files it asked for: at once")
+eq(P.deviceAnswers(asked, receiving: false, askBefore: true, askedFor: false), .ask, "an offer that says asked, not judged so: asked about")
+eq(P.deviceAnswers(asked, receiving: true, askBefore: false, askedFor: true), .refuse(.busy), "another running: busy")
+eq(P.deviceAnswers(many, receiving: false, askBefore: false, askedFor: false), .refuse(.tooMany), "501 files")
+eq(P.deviceAnswers(tooBig, receiving: false, askBefore: false, askedFor: false), .refuse(.tooBig), "past 100 GB")
+// Whether an offer answers this device's own pick (askedFor): it says asked, names the pick's transfer, and came in time.
+check(P.askedFor(asked, pick: 5, pickedAt: 100, now: 100 + P.panelLimit + P.pickSlack), "asked, its pick's transfer, in time: asked for")
+check(!P.askedFor(asked, pick: 5, pickedAt: 100, now: 100.001 + P.panelLimit + P.pickSlack), "past the panel's time and the crossing: asked about")
+check(!P.askedFor(asked, pick: 6, pickedAt: 100, now: 101), "another transfer than the pick's: asked about")
+check(!P.askedFor(asked, pick: nil, pickedAt: nil, now: 101), "no pick of this device's: asked about")
+check(!P.askedFor(asked, pick: 5, pickedAt: nil, now: 101), "a pick with no time: asked about")
+check(!P.askedFor(P.offer(FileTransfer.offer(transfer: 5, files: files))!, pick: 5, pickedAt: 100, now: 101), "the pick's transfer, not saying asked: asked about")
+eq(P.panelLimit + P.pickSlack, 210, "a pick's answer within 3 minutes and 30 s")
+// The device's Get Files row and the receiving switches (deviceGets): only where the Mac gives files.
+eq(P.deviceGets(connected: true, hostFiles: 2, locked: false, sessionPaired: true, receiving: false), .yes, "a Mac that gives files: yes")
+eq(P.deviceGets(connected: true, hostFiles: 3, locked: false, sessionPaired: true, receiving: false), .yes, "a later generation: yes")
+eq(P.deviceGets(connected: true, hostFiles: 1, locked: false, sessionPaired: true, receiving: false), .hidden, "a Mac that only takes files: no row")
+eq(P.deviceGets(connected: true, hostFiles: 0, locked: false, sessionPaired: true, receiving: false), .hidden, "its switch off: no row (the send rows say why)")
+eq(P.deviceGets(connected: true, hostFiles: nil, locked: false, sessionPaired: true, receiving: false), .hidden, "an older Mac or the CLI: no row")
+eq(P.deviceGets(connected: true, hostFiles: 2, locked: true, sessionPaired: true, receiving: false), .hidden, "a locked Mac: no row")
+eq(P.deviceGets(connected: false, hostFiles: 2, locked: false, sessionPaired: true, receiving: false), .hidden, "not connected")
+eq(P.deviceGets(connected: true, hostFiles: 2, locked: false, sessionPaired: false, receiving: false), .notPaired, "unpaired")
+eq(P.deviceGets(connected: true, hostFiles: 2, locked: false, sessionPaired: nil, receiving: false), .notPaired, "no kind 16 yet")
+eq(P.deviceGets(connected: true, hostFiles: 2, locked: false, sessionPaired: true, receiving: true), .busy, "a transfer from the Mac runs")
 eq(P.macOffers(helloFiles: 1, paired: true, locked: false, shareFiles: true, sendingToDevice: false), nil, "the Mac may offer")
 eq(P.macOffers(helloFiles: 1, paired: true, locked: false, shareFiles: false, sendingToDevice: false), .off, "its switch off")
 eq(P.macOffers(helloFiles: nil, paired: true, locked: false, shareFiles: true, sendingToDevice: false), .off, "a device from before")
@@ -316,10 +336,17 @@ eq(F.active(lastInput: 4, now: 5), false, "input 1 s ago: idle")
 check(F.maySend(inFlight: 0, count: 600_000, window: 64), "nothing in flight: one part goes whatever the window")
 check(F.maySend(inFlight: 448 * 1024, count: 64 * 1024, window: 512 * 1024), "to the window's edge")
 check(!F.maySend(inFlight: 448 * 1024 + 1, count: 64 * 1024, window: 512 * 1024), "a byte past it: wait")
-check(F.hostMaySend(pendingBytes: 64 * 1024, needsKeyframe: false, keyframesInFlight: 0), "64 KiB waiting: send")
-check(!F.hostMaySend(pendingBytes: 64 * 1024 + 1, needsKeyframe: false, keyframesInFlight: 0), "more waiting: hold")
-check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: true, keyframesInFlight: 0), "a device waiting for a keyframe: hold")
-check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: false, keyframesInFlight: 1), "a keyframe on its way: hold")
+check(F.hostMaySend(pendingBytes: 64 * 1024, needsKeyframe: false, keyframesInFlight: 0, sinceFrame: 0), "64 KiB waiting: send")
+check(!F.hostMaySend(pendingBytes: 64 * 1024 + 1, needsKeyframe: false, keyframesInFlight: 0, sinceFrame: 0), "more waiting: hold")
+check(!F.hostMaySend(pendingBytes: 64 * 1024 + 1, needsKeyframe: false, keyframesInFlight: 0, sinceFrame: nil), "more waiting, nothing streams: hold")
+check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: true, keyframesInFlight: 0, sinceFrame: 0.2), "a device waiting for a keyframe while frames go: hold")
+check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: true, keyframesInFlight: 0, sinceFrame: 0.999), "and 0.999 s after the last frame: hold")
+check(F.hostMaySend(pendingBytes: 0, needsKeyframe: true, keyframesInFlight: 0, sinceFrame: 1.0), "no frame for a second: the wait is not the picture's, send")
+check(F.hostMaySend(pendingBytes: 0, needsKeyframe: true, keyframesInFlight: 0, sinceFrame: nil), "no frame since the stream began (nothing picked): send")
+check(F.hostMaySend(pendingBytes: 0, needsKeyframe: false, keyframesInFlight: 0, sinceFrame: 30), "a still picture, its keyframe had: send")
+check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: false, keyframesInFlight: 1, sinceFrame: 0), "a keyframe on its way: hold")
+check(!F.hostMaySend(pendingBytes: 0, needsKeyframe: false, keyframesInFlight: 1, sinceFrame: nil), "a keyframe on its way, whatever streams: hold")
+eq(F.keyframeWait, 1.0, "a second without frames")
 
 // MARK: - The receiver, case by case
 
@@ -596,7 +623,7 @@ for direction in ["device → Mac", "Mac → device"] {
                             runReceiver(receiver.accept(now: now))
                         }
                     } else {
-                        switch P.deviceAnswers(o, receiving: false, askBefore: askBefore) {
+                        switch P.deviceAnswers(o, receiving: false, askBefore: askBefore, askedFor: false) {
                         case .accept: runReceiver(receiver.accept(now: now))
                         case .refuse(let why): disturbed = true; runReceiver(receiver.decline(why))
                         case .ask:
@@ -715,6 +742,17 @@ eq(C.refusedLine(["notPaired": 2, "locked": 1, "off": 0]), "Files: refused 3 off
 eq(C.refusedLine(["rate": 1]), "Files: refused 1 offer from devices: too many offers (1).", "one refusal")
 eq(C.refusedLine(["quota": 2, "busy": 1]), "Files: refused 3 offers from devices: busy (1), other (2).", "a category not known")
 eq(C.defaultPlace, "Downloads › Sill", "the place")
+// The Mac's files to a device, in the log: counts and sizes, never a name.
+eq(C.offeringLine(files: 2, bytes: 12_300_000, device: "iPad"), "Files: offering 2 files (12 MB) to iPad.", "the offering line")
+eq(C.sentLine(files: 1, bytes: 2_000_000, device: "iPad", seconds: 0.44), "Files: sent 1 file (2.0 MB) to iPad in 0.4 s.", "the sent line")
+eq(C.notOfferedLine("locked", device: "iPad"), "Files: nothing offered to iPad (locked).", "the not-offered line")
+eq(C.pickLine(device: "iPad"), "Files: iPad asked for files from this Mac.", "a device's pick in the log")
+eq(C.stoppedLine("lost", device: "iPad", byPeer: false, toDevice: true), "Files: the transfer to iPad stopped (the connection ended).", "a stop of the Mac's own")
+eq(C.stoppedLine("declined", device: "iPad", byPeer: true, toDevice: true), "Files: iPad cancelled (declined).", "the device's no, in the log")
+for line in [C.offeringLine(files: 1, bytes: 1, device: "iPad"), C.sentLine(files: 1, bytes: 1, device: "iPad", seconds: 1),
+             C.notOfferedLine("busy", device: "iPad"), C.pickLine(device: "iPad")] {
+    check(line.hasPrefix("Files: ") && !line.contains("\n"), "a log line begins with the feature: \(line)")
+}
 for line in [C.savedLine(files: 1, bytes: 1, device: "iPad", folder: "Downloads/Sill", seconds: 1), C.offeredLine(files: 1, bytes: 1, device: "iPad"),
              C.stoppedLine("damaged", device: "iPad", byPeer: false)] {
     check(line.hasPrefix("Files: ") && !line.contains("\n"), "a log line begins with the feature: \(line)")
@@ -770,6 +808,84 @@ check(DC.announcement(shot(.stopped(reason: "lost", message: nil, byPeer: false,
 check(shot(.sending).isOver == false && shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil)).isOver, "isOver")
 check(!OutgoingFiles.holdsMoves(nil) && OutgoingFiles.holdsMoves(shot(.preparing)) && OutgoingFiles.holdsMoves(shot(.finishing))
       && !OutgoingFiles.holdsMoves(shot(.done(.done(transfer: 1, kept: [], place: "x")))), "the session's moves wait while a transfer runs, and only then")
+
+// MARK: - Files from the Mac, the device's words (iOSClient/FilesCopy+Device.swift)
+
+eq(DC.getFiles(mac: "Mac mini"), "Get Files from Mac mini…", "the Get Files row")
+eq(DC.askBeforeTitle, "Ask Before Receiving Files", "the ask switch"); eq(DC.photosTitle, "Save Photos and Videos to Photos", "the photos switch")
+eq(DC.receiveFootnote(askBefore: true, photos: false, mac: "Mac mini", device: "iPad"),
+   "Files from Mac mini are in the Files app, in On My iPad › Sill. Sill asks before saving files Mac mini sends you; files you get with Get Files come at once.",
+   "the footnote, asking")
+eq(DC.receiveFootnote(askBefore: false, photos: true, mac: "Mac mini", device: "iPhone"),
+   "Files from Mac mini are in the Files app, in On My iPhone › Sill. Files Mac mini sends you are saved without asking. Photos and videos from Mac mini go to your Photos library.",
+   "the footnote, not asking, photos to Photos")
+eq(DC.folderName(mac: "Mac mini"), "From Mac mini", "the folder"); eq(DC.folderName(mac: ""), "From Mac", "no name: From Mac")
+eq(DC.folderName(mac: "../Noah's\n:Mac."), "From File..-Noah's-Mac", "a Mac's name cleaned as a file's: one component, never hidden")
+eq(DC.place(mac: "Mac mini"), "Files › Sill › From Mac mini", "the place the Mac is told")
+for (name, photo) in [("IMG_1204.HEIC", true), ("a.heic", true), ("clip.mov", true), ("v.mp4", true), ("p.png", true), ("x.jpg", true),
+                      ("doc.pdf", false), ("a.zip", false), ("noext", false), ("heic", false), (".heic", false)] {
+    eq(DC.isPhotoOrVideo(name), photo, "a photo or a video by its extension: \(name)")
+}
+let goingOutEarly = OutgoingFiles(serial: 1, phase: .sending, names: ["a"], total: 1, acked: 0, since: 0)
+func inc(_ phase: IncomingFiles.Phase, names: [String] = ["IMG_1204.heic"], total: UInt64 = 2_400_000, written: UInt64 = 0, since: Double = 0,
+         asked: Bool = false) -> IncomingFiles {
+    IncomingFiles(serial: 1, phase: phase, names: names, total: total, written: written, since: since, asked: asked)
+}
+eq(DC.incomingTitle(inc(.picking, names: [], total: 0), mac: "Mac mini", device: "iPad"), "Choose files on Mac mini", "Get Files waiting for the Mac's panel")
+eq(DC.incomingAnnouncement(inc(.picking, names: [], total: 0), mac: "Mac mini", device: "iPad"), "Choose files on Mac mini.", "and so announced")
+check(IncomingFiles.holdsMoves(inc(.picking)) && !inc(.picking).isOver, "a pick waiting holds the moves, and is not over")
+eq(DC.chip(out: goingOutEarly, incoming: inc(.picking)), .incoming, "a pick waiting over a transfer to the Mac")
+eq(DC.incomingTitle(inc(stop("nothingChosen", byPeer: true)), mac: "Mac mini", device: "iPad"), "No files were chosen on Mac mini.", "nothing chosen")
+eq(DC.incomingTitle(inc(.asking), mac: "Mac mini", device: "iPad"), "Mac mini wants to send you “IMG_1204.heic” (2.4 MB).", "the question")
+eq(DC.incomingTitle(inc(.asking, names: ["a", "b", "c"], total: 3), mac: "Mac mini", device: "iPad"), "Mac mini wants to send you 3 files (3 bytes).", "three")
+eq(DC.incomingTitle(inc(.receiving), mac: "Mac mini", device: "iPad"), "Receiving “IMG_1204.heic” from Mac mini", "receiving")
+eq(DC.incomingDetail(inc(.receiving, written: 1_019_999)), "42%", "its percentage, rounded down")
+eq(DC.incomingDetail(inc(.asking)), nil, "no percentage while asked"); eq(DC.incomingDetail(inc(.done(["a"]))), nil, "nor once over")
+eq(DC.incomingTitle(inc(.done(["IMG_1204 2.heic"])), mac: "Mac mini", device: "iPad"), "“IMG_1204 2.heic” from Mac mini is in Files › Sill.", "kept, by its name as kept")
+eq(DC.incomingTitle(inc(.done(["a", "b"]), names: ["a", "b"]), mac: "Mac mini", device: "iPad"), "2 files from Mac mini are in Files › Sill.", "two kept")
+func stop(_ r: String, byPeer: Bool = false, name: String? = nil) -> IncomingFiles.Phase { .stopped(reason: r, message: nil, byPeer: byPeer, name: name) }
+eq(DC.incomingTitle(inc(stop("cancelled")), mac: "Mac mini", device: "iPad"), "Receiving stopped.", "own Cancel")
+eq(DC.incomingTitle(inc(stop("cancelled", byPeer: true)), mac: "Mac mini", device: "iPad"), "Mac mini stopped the transfer.", "the Mac's person stopped it")
+eq(DC.incomingTitle(inc(stop("noRoom", name: "big.mov")), mac: "Mac mini", device: "iPad"), "There isn’t enough room on this iPad for “big.mov”.", "this device full")
+eq(DC.incomingTitle(inc(stop("noRoom", byPeer: true)), mac: "Mac mini", device: "iPad"), "There isn’t enough room on Mac mini for these files.", "the Mac's noRoom: its words")
+eq(DC.incomingTitle(inc(stop("cantSave")), mac: "Mac mini", device: "iPad"), "Sill couldn’t save “IMG_1204.heic” on this iPad.", "could not save here")
+eq(DC.incomingTitle(inc(stop("lost")), mac: "Mac mini", device: "iPad"), "The connection to Mac mini ended before “IMG_1204.heic” came.", "lost")
+eq(DC.incomingTitle(inc(stop("damaged", byPeer: false, name: "a.pdf")), mac: "M", device: "iPad"), "“a.pdf” didn’t arrive whole.", "damaged")
+eq(DC.incomingTitle(inc(stop("locked", byPeer: true)), mac: "Mac mini", device: "iPad"), "Mac mini locked, so the transfer stopped.", "the Mac locked")
+eq(DC.incomingTitle(inc(stop("background")), mac: "Mac mini", device: "iPad"), "Receiving stopped when Sill left the screen.", "Sill left the screen")
+eq(DC.incomingTitle(inc(.stopped(reason: "quota", message: "Over\nquota.", byPeer: true, name: nil)), mac: "Mac mini", device: "iPad"), "Over quota.",
+   "a reason not known: the Mac's words, cleaned")
+check(!DC.incomingEndShown(inc(stop("declined"))) && !DC.incomingEndShown(inc(stop("noAnswer"))) && DC.incomingEndShown(inc(stop("declined", byPeer: true)))
+      && DC.incomingEndShown(inc(stop("lost"))) && DC.incomingEndShown(inc(.done(["a"]))), "no end shown for this device's own Decline or a question nobody answered")
+check(!DC.incomingWarns(inc(stop("cancelled"))) && DC.incomingWarns(inc(stop("cancelled", byPeer: true))) && DC.incomingWarns(inc(stop("lost")))
+      && !DC.incomingWarns(inc(.done(["a"]))) && !DC.incomingWarns(inc(.receiving)), "a warning but for the person's own Cancel")
+eq(DC.incomingAnnouncement(inc(.asking), mac: "Mac mini", device: "iPad"), "Mac mini wants to send you “IMG_1204.heic”.", "the question announced")
+eq(DC.incomingAnnouncement(inc(.receiving), mac: "Mac mini", device: "iPad"), "Receiving “IMG_1204.heic” from Mac mini.", "the start announced")
+eq(DC.incomingAnnouncement(inc(stop("declined")), mac: "Mac mini", device: "iPad"), nil, "this device's own Decline: nothing")
+check(DC.incomingAnnouncement(inc(.done(["a"])), mac: "Mac mini", device: "iPad") != nil, "the end announced")
+eq(DC.saveToPhotos(count: 1), "Save to Photos", "Save to Photos"); eq(DC.saveToPhotos(count: 3), "Save 3 to Photos", "Save 3 to Photos")
+eq(DC.photosLine(.saved(1)), "Saved to Photos.", "saved"); eq(DC.photosLine(.saved(2)), "Saved 2 to Photos.", "saved two")
+eq(DC.photosLine(.denied), "Sill can’t add to Photos. Allow it in Settings › Privacy & Security › Photos.", "denied")
+eq(DC.photosLine(.failed("a.heic")), "Photos couldn’t take “a.heic”.", "refused by Photos")
+eq(inc(.done(["a.heic", "b.pdf", "c.mov"]), names: ["a.heic", "b.pdf", "c.mov"]).photos, ["a.heic", "c.mov"], "Save to Photos takes the photos and videos")
+eq(inc(.receiving, names: ["a.heic"]).photos, [], "nothing to save before it is kept")
+eq(inc(.receiving, total: 0).fraction, 0, "no bytes: 0 while it runs"); eq(inc(.done([]), total: 0).fraction, 1, "and 1 once done")
+eq(inc(.receiving, total: 10, written: 30).fraction, 1, "never past 1")
+check(!IncomingFiles.holdsMoves(nil) && IncomingFiles.holdsMoves(inc(.asking)) && IncomingFiles.holdsMoves(inc(.receiving))
+      && !IncomingFiles.holdsMoves(inc(.done(["a"]))) && !IncomingFiles.holdsMoves(inc(stop("lost"))), "a transfer from the Mac holds the moves while it runs")
+check(DC.movesWait(out: nil, incoming: inc(.receiving)) && DC.movesWait(out: shot(.sending), incoming: nil) && !DC.movesWait(out: nil, incoming: nil)
+      && !DC.movesWait(out: shot(.done(.done(transfer: 1, kept: [], place: "x"))), incoming: inc(.done([]))), "the moves wait for either direction")
+// The chip: a question first, then a transfer to the Mac, then one from it, then whichever ended last.
+let goingOut = shot(.sending), doneOut = OutgoingFiles(serial: 1, phase: .stopped(reason: "lost", message: nil, byPeer: false, name: nil),
+                                                       names: ["a"], total: 1, acked: 0, since: 5)
+eq(DC.chip(out: nil, incoming: nil), .none, "nothing")
+eq(DC.chip(out: goingOut, incoming: inc(.asking)), .incoming, "a question from the Mac over a transfer to it")
+eq(DC.chip(out: goingOut, incoming: inc(.receiving)), .outgoing, "a transfer to the Mac over one from it")
+eq(DC.chip(out: doneOut, incoming: inc(.receiving)), .incoming, "one from the Mac over an ended one to it")
+eq(DC.chip(out: doneOut, incoming: inc(.done(["a"]), since: 6)), .incoming, "both ended: the later")
+eq(DC.chip(out: doneOut, incoming: inc(.done(["a"]), since: 4)), .outgoing, "both ended: the later, the other way")
+eq(DC.chip(out: nil, incoming: inc(stop("declined"), since: 9)), .none, "this device's own Decline: no chip")
+eq(DC.chip(out: doneOut, incoming: inc(stop("declined"), since: 9)), .outgoing, "nor over another's end")
 
 print("files: \(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

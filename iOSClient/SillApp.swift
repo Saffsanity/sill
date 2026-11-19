@@ -6,8 +6,10 @@ struct SillApp: App {
     @UIApplicationDelegateAdaptor(SillAppDelegate.self) var appDelegate
 
     init() {
-        // What a quit left of the files waiting to go to a Mac (Sill's own copies: DeviceFiles.outbox).
+        // What a quit left of the files waiting to go to a Mac (Sill's own copies: DeviceFiles.outbox), and of
+        // files from a Mac that never came whole (SillDocuments.incoming).
         DeviceFiles.cleanOutbox()
+        DeviceFiles.cleanIncoming()
     }
 
     var body: some Scene {

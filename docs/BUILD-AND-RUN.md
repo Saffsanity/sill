@@ -36,6 +36,7 @@ python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDow
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --pairing --no-files   # take no files from devices (on by default with an identity; docs/files-plan.md)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_FILES_DIR=$T/files SILL_TEST_FILES_LOG=1 SILL_TEST_FILES_PICK=$T/a.pdf SILL_TEST_FILES_OFFER="2 $T/b.mov" .build/release/SillHost --synthetic --pairing   # TEST ONLY: files on a test host (its own folder, never ~/Downloads; each decision logged, sizes never names; SILL_TEST_FILES_FREE=<bytes> the free space read); a device's pick answered with a.pdf, no Open panel (the list says files 2); b.mov offered 2 s after a device whose hello takes files connects, as Sill's menu would. python3 Scripts/files-check/live.py OUT all runs the gates H3 to H6 against such hosts
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
@@ -400,7 +401,9 @@ shares its clipboard in every settings case but `legacy`; live, `-SillSettingsSc
 saved|saved3|cancelled|refused|lost|folder|ask` (files and photos, docs/files-plan.md: the mock
 Mac's `files`, 1 in every settings case but `legacy` and `cli`, and a transfer to the Mac on the
 chip over the stream and the line under the Settings panel's Files rows, or a file shared into
-Sill asking to be sent; `-SillSettingsScroll files` starts the panel at the Files rows),
+Sill asking to be sent; `-SillFiles incoming|picking|receiving|received|received3|photosSaved|
+receiveStopped`: a transfer from the Mac, the mock Mac then giving files, so Get Files and the
+receiving switches show; `-SillSettingsScroll files` starts the panel at the Files rows),
 `-SillMacLocked 1|2|unlocking` (the mock Mac's screen locked, switched to another
 user, or just unlocked: no windows, apps or clipboard, the cover over the stream,
 the drawer's and the panel header's line, docs/locked-mac-plan.md), and in

@@ -263,6 +263,9 @@ struct ContentView: View {
 ///   also gives files (2). `-SillFiles preparing|offering|sending|finishing|saved|saved3|cancelled|refused|
 ///   lost|folder|ask` shows a transfer to the Mac in that state on the chip over the stream and on the
 ///   line under the Settings panel's Files rows (`ask`: a file shared into Sill, "Send ‹name› to ‹Mac›?");
+///   `-SillFiles incoming|picking|receiving|received|received3|photosSaved|receiveStopped` a transfer from
+///   the Mac (its question, Get Files waiting, the percentage, the end with Show and Save to Photos, Photos'
+///   answer, a full device), the mock Mac then giving files (Get Files and the receiving switches show);
 ///   neither goes away by itself. `-SillSettingsScroll files` starts the panel at the Files rows.
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
 ///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and

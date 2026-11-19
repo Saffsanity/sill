@@ -99,6 +99,12 @@ struct HostSettingsPanel: View {
     /// The Files rows' pickers (docs/files-plan.md §8.1): the system's Files picker and its Photos picker.
     @State private var filesPickerShown = false
     @State private var photosPickerShown = false
+    /// Files from the Mac (docs/files-plan.md §9): Ask Before Receiving Files, on unless turned off; Save Photos and
+    /// Videos to Photos, off unless turned on (it asks for add-only access as it goes on). Read by StreamClient+Files.
+    @AppStorage(StreamClient.askBeforeReceivingKey) private var askBeforeReceiving = true
+    @AppStorage(StreamClient.photosAutoSaveKey) private var photosAutoSave = false
+    /// Photos' add-only access was refused as the switch went on: the footnote says where to allow it.
+    @State private var photosDenied = false
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -829,6 +835,49 @@ struct HostSettingsPanel: View {
             if let note = DeviceFilesCopy.footnote(offering, mac: mac, device: device) {
                 Footnote(text: note)
             }
+        }
+        receiveRows
+    }
+
+    /// Files from the Mac (docs/files-plan.md §9): Get Files from ‹Mac›… (the Mac's Open panel, in the stream) and
+    /// the two receiving switches, shown only where the Mac gives files (FilePolicy.deviceGets), enabled while this
+    /// session may ask; the transfer's line while one runs, and the footnote. They move into settings-pane's
+    /// whole-screen pane (#393) with the rest of This ‹device›.
+    @ViewBuilder private var receiveRows: some View {
+        let getting = client.filesGetting
+        if getting != .hidden {
+            Rows {
+                filesButton(DeviceFilesCopy.getFiles(mac: mac), systemImage: "arrow.down.doc", enabled: getting == .yes) { client.getFiles() }
+                RowDivider()
+                Toggle(isOn: $askBeforeReceiving) {
+                    Text(DeviceFilesCopy.askBeforeTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: askBeforeReceiving) { _, _ in client.updateFilesContext() }
+                RowDivider()
+                Toggle(isOn: Binding(get: { photosAutoSave }, set: { on in
+                    guard on else { photosAutoSave = false; return }
+                    PhotoSaver.ask { given in
+                        photosAutoSave = given
+                        photosDenied = !given
+                    }
+                })) {
+                    Text(DeviceFilesCopy.photosTitle).foregroundStyle(Palette.text)
+                }
+                .padding(.vertical, 6)          // two lines on a small iPhone
+                .rowFrame()
+            }
+            if let i = client.fileIn, DeviceFilesCopy.incomingEndShown(i) {
+                Footnote(text: DeviceFilesCopy.incomingTitle(i, mac: mac, device: device) + (DeviceFilesCopy.incomingDetail(i).map { " · " + $0 } ?? ""),
+                         warning: DeviceFilesCopy.incomingWarns(i), top: 6)
+                    .padding(.bottom, -6)
+                    .accessibilityHidden(true)      // announced as it starts and ends
+            }
+            if photosDenied {
+                Footnote(text: DeviceFilesCopy.photosLine(.denied), warning: true, top: 6)
+                    .padding(.bottom, -6)
+            }
+            Footnote(text: DeviceFilesCopy.receiveFootnote(askBefore: askBeforeReceiving, photos: photosAutoSave, mac: mac, device: device))
         }
     }
 

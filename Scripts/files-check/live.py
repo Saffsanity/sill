@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""TEST ONLY: files from a device to the Mac against synthetic test hosts on loopback (docs/files-plan.md §12.2,
-gates H3 to H5). Each case starts .build/release/SillHost --synthetic --pairing (a throwaway identity in a folder of
+"""TEST ONLY: files between a device and the Mac against synthetic test hosts on loopback (docs/files-plan.md §12.2,
+gates H3 to H6). Each case starts .build/release/SillHost --synthetic --pairing (a throwaway identity in a folder of
 the test's own) with SILL_TEST_LOOPBACK, SILL_TEST_SOFTWARE_ENCODER, SILL_TEST_NO_ROUTER and SILL_TEST_NO_SCREEN, so
 nothing touches the hardware encoder, the router, ScreenCaptureKit or this Mac's Downloads (SILL_TEST_FILES_DIR is a
 folder under OUT), pairs a test client by the host's link, and drives Scripts/sillclient.py's --send-file, --raw49,
---raw34 and --cancel-files against it. Every host runs under a minute. Prints a verdict per rule; exits 1 on any FAIL.
+--raw34 and --cancel-files against it, and for the Mac's files to a device (H6) SILL_TEST_FILES_OFFER and
+SILL_TEST_FILES_PICK on the host with the client's --accept-files, --decline-files, --pick-files, --cancel-receive and
+--receive-pace. Every host runs under a minute. Prints a verdict per rule; exits 1 on any FAIL.
 
-    python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]
+    python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|give|all]
     python3 Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST   H2: the CLI's stdout against main's (about 75 s)
     python3 Scripts/files-check/live.py OUT h2 --logs=DIR             H2 judged again on the logs a run saved in DIR"""
 import hashlib, json, os, plistlib, random, re, shutil, signal, subprocess, sys, threading, time
@@ -262,6 +264,88 @@ def case_lock(out):
         h.stop()
 
 
+def case_give(out):
+    print("== give: the Mac's files to a device (H6): offered on cue, a pick, declined, the device's cancel, a lock", flush=True)
+    src = os.path.join(out, "give.src"); os.makedirs(src, exist_ok=True)
+    files = [make(src, n, s, i) for i, (n, s) in enumerate([("report.pdf", 3_000_000), ("empty.txt", 0), ("one.bin", 1),
+                                                          ("chunk-plus-one.bin", 65537)])]
+    big = make(src, "big.bin", 20_000_000, 9)
+    def got(label):
+        d = os.path.join(out, f"{label}.got"); os.makedirs(d, exist_ok=True); return d
+    def kept_in(d): return sorted(n for n in os.listdir(d) if n != ".incoming")
+    def half_written(d): return sorted(os.listdir(os.path.join(d, ".incoming"))) if os.path.isdir(os.path.join(d, ".incoming")) else []
+    # Offered on cue, as Sill's menu would, to each device whose hello takes files; one that takes none, nothing.
+    h = Host(out, "give", {"SILL_TEST_FILES_OFFER": "2 " + ":".join(files)})
+    try:
+        ident = paired(h, out)
+        if ident:
+            d = got("give")
+            text, code = client(h, "give", 10, "--tls", f"--accept-files={d}", "--expect-received=4", identity=ident)
+            verdict(code == 0 and "EXPECT-RECEIVED ok" in text, f"offered on cue: 4 files kept whole ({re.findall(r'files received: .*', text)[:1]})")
+            verdict(kept_in(d) == sorted(os.path.basename(p) for p in files)
+                    and all(sha(os.path.join(d, os.path.basename(p))) == sha(p) for p in files), f"each byte for byte the Mac's: {kept_in(d)}")
+            verdict(half_written(d) == [], "nothing left half written on the device")
+            verdict(re.search(r"windowList: .* files=1", text) is not None, "a host that answers no pick says files=1")
+            sent = h.all(r"^Files: sent 4 files")
+            verdict(bool(sent), f"the host's sent line, counts and sizes: {sent[:1]}")
+            leaked = [l for _, l in h.lines if any(os.path.basename(p) in l for p in files)]
+            verdict(not leaked, f"no file name in the host's output: {leaked[:2]}")
+            text, code = client(h, "nofiles", 5, "--tls", identity=ident)
+            verdict('"op": "offer"' not in text, "a device whose hello takes no files: nothing offered")
+            text, code = client(h, "decline", 6, "--tls", "--decline-files", identity=ident)
+            verdict(bool(h.all(r"^Files: .* cancelled \(declined\)")), f"declined: the host's line {h.all(r'cancelled')[-1:]}")
+    finally:
+        h.stop()
+    # A device's pick (Get Files): a test host answers it with its TEST ONLY choice, no Open panel; the list says 2.
+    h = Host(out, "pick", {"SILL_TEST_FILES_PICK": ":".join(files[:2])})
+    try:
+        ident = paired(h, out)
+        if ident:
+            d = got("pick")
+            text, code = client(h, "pick", 8, "--tls", "--pick-files@2", f"--accept-files={d}", "--expect-received=2", identity=ident)
+            verdict(code == 0 and "(asked for)" in text, f"the pick answered with its files, taken as asked for: {kept_in(d)}")
+            verdict(re.search(r"windowList: .* files=2", text) is not None, "a host that answers picks says files=2")
+            verdict(bool(h.all(r"^Files: .* asked for files from this Mac\.")), "the pick in the host's log")
+            text, code = client(h, "pick-again", 6, "--tls", "--pick-files@1", "--pick-files@2", f"--accept-files={d}", identity=ident)
+            verdict('"reason": "rate"' in text, "a second pick within 5 s of the first's end: rate")
+    finally:
+        h.stop()
+    h = Host(out, "pick-unpaired", {"SILL_TEST_FILES_PICK": files[2], "SILL_TEST_REQUIRE_PAIRING": "0"})
+    try:
+        text, code = client(h, "u", 6, "--tls", "--pin=none", "--pick-files@2", "--expect-files=cancel:notPaired",
+                            identity=os.path.join(out, "pick-unpaired.idU"))
+        verdict(code == 0, "an unpaired session's pick: notPaired")
+    finally:
+        h.stop()
+    h = Host(out, "pick-off", {"SILL_TEST_FILES_PICK": files[2]}, args=["--no-files"])
+    try:
+        ident = paired(h, out)
+        if ident:
+            text, code = client(h, "off", 6, "--tls", "--pick-files@2", "--expect-files=cancel:off", identity=ident)
+            verdict(code == 0 and re.search(r"windowList: .* files=0", text) is not None, "--no-files: the list says files=0, a pick refused off")
+    finally:
+        h.stop()
+    # Mid-file: the device's Cancel, then the Mac locking; the device acknowledges 2 MB a second, so each lasts.
+    lock = os.path.join(out, "givestop.lockfile"); open(lock, "w").write("0")
+    h = Host(out, "givestop", {"SILL_TEST_FILES_OFFER": "1 " + big, "SILL_TEST_LOCKED_FILE": lock})
+    try:
+        ident = paired(h, out)
+        if ident:
+            d = got("givestop")
+            text, code = client(h, "cancel", 7, "--tls", f"--accept-files={d}", "--receive-pace=2000000", "--cancel-receive@3", identity=ident)
+            verdict("sent receive cancel" in text and kept_in(d) == [] and half_written(d) == [], f"the device's cancel mid-file: nothing kept or left ({kept_in(d)})")
+            verdict(bool(h.all(r"^Files: .* cancelled \(its person stopped it\)")), "the host's line for it")
+            th = threading.Thread(target=lambda: client(h, "locked", 10, "--tls", f"--accept-files={d}", "--receive-pace=2000000",
+                                                        "--expect-files=cancel:locked", identity=ident))
+            th.start(); time.sleep(4); open(lock, "w").write("1"); th.join()
+            text = open(os.path.join(out, "givestop-locked.client.log")).read()
+            verdict("EXPECT-FILES ok" in text and kept_in(d) == [], f"the Mac locked mid-file: the device told locked ({re.findall(r'files at .*cancel.*', text)[:1]})")
+            stopped = h.all(r"^Files: the transfer to .* stopped \(locked\)")
+            verdict(bool(stopped), f"the host's line: {stopped[:1]}")
+    finally:
+        h.stop()
+
+
 def case_hostile(out):
     print("== hostile: parts with no offer, another total, a gap, an oversized part, an op not known, names, a flood", flush=True)
     h = Host(out, "hostile")
@@ -370,7 +454,7 @@ def main():
         print(f"files-check: {len(verdicts) - len(failed)} of {len(verdicts)} rules hold")
         sys.exit(1 if failed else 0)
     if not os.path.exists(HOST): raise SystemExit(f"no {HOST}: swift build -c release first")
-    for name, case in [("send", case_send), ("refuse", case_refuse), ("hostile", case_hostile), ("lock", case_lock)]:
+    for name, case in [("send", case_send), ("refuse", case_refuse), ("hostile", case_hostile), ("lock", case_lock), ("give", case_give)]:
         if which in (name, "all"): case(out)
     if which == "h2": case_h2(out, base)
     failed = [w for ok, w in verdicts if not ok]

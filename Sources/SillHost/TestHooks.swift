@@ -25,6 +25,8 @@ enum TestHooks {
         "SILL_TEST_MIN_DEVICE_VERSION", "SILL_TEST_GOODBYE",
         // Files' (FileHub, docs/files-plan.md §7.6): the folder, each decision logged, the free space the rule reads.
         "SILL_TEST_FILES_DIR", "SILL_TEST_FILES_LOG", "SILL_TEST_FILES_FREE",
+        // And the Mac's files to a device: a pick answered with these files (no Open panel), files offered on cue.
+        "SILL_TEST_FILES_PICK", "SILL_TEST_FILES_OFFER",
     ]
 
     /// One line for each such variable set on a host that does not honour them; nothing on a test

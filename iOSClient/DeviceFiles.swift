@@ -7,8 +7,8 @@ import CryptoKit
 import StreamProtocol
 #endif
 
-/// This device's files to the Mac (docs/files-plan.md §8): the session's one outgoing transfer, on a
-/// queue of its own (`sill.files`), never the main thread. The person picks files (the Files picker),
+/// This device's files to and from the Mac (docs/files-plan.md §8): the session's one outgoing transfer and
+/// its one incoming one, on a queue of their own (`sill.files`), never the main thread. The person picks files (the Files picker),
 /// photos (the Photos picker) or shares one into Sill (StreamClient+Files hands them here as `Source`s);
 /// their sizes are read first, off this queue (an iCloud file downloads then, under NSFileCoordinator),
 /// then the offer goes and, once the Mac accepts, the parts: 64 KiB at a time, read from the file in
@@ -20,8 +20,15 @@ import StreamProtocol
 /// window. A transfer belongs to the connection it was offered on: that connection no longer being the
 /// session's (a move, the session's end) ends it `lost`, and the Mac deletes what was partial.
 ///
+/// From the Mac (docs/files-plan.md §5.4, §8.4): an offer the person did not ask for waits for Accept or
+/// Decline while Ask Before Receiving Files is on (FilePolicy.deviceAnswers); one that answers this device's own
+/// pick (FilePolicy.askedFor: its transfer, in time) is taken at once. Its parts are written as they come, 64 KiB
+/// at a time, under Sill's own name in a staging folder (`DeviceInbox`), hashed, acknowledged (the Mac's window
+/// moves on), and each file, once whole and its size and SHA-256 are the Mac's, is protected and moved into
+/// Documents › From ‹Mac› under a free name. What was partial goes at every stop and at launch.
+///
 /// Threading: everything on `queue`, but the sizes' reading (a global queue, so a slow iCloud download
-/// never holds a cancel up). `onSnapshot` comes on `queue`; the client hops to the main thread.
+/// never holds a cancel up). `onSnapshot` and `onIncoming` come on `queue`; the client hops to the main thread.
 /// Foundation, Network and CryptoKit only: checked with swiftc against the Mac's own FileHub on loopback
 /// (Tests/checks/device-files).
 final class DeviceFiles: @unchecked Sendable {
@@ -49,6 +56,10 @@ final class DeviceFiles: @unchecked Sendable {
         var away = false
         /// The Mac reports this device's link behind or stalled (kind 16's `link`).
         var linkBehind = false
+        /// Ask Before Receiving Files (the device's switch, on unless turned off).
+        var askBefore = true
+        /// The Mac's name: its files go into Documents › From ‹Mac›.
+        var mac = ""
     }
 
     /// The outgoing transfer as the chip and the rows show it (FilesCopy+Device.swift, pure).
@@ -83,12 +94,39 @@ final class DeviceFiles: @unchecked Sendable {
         var snapshot: Snapshot
     }
 
+    /// A transfer from the Mac, once it is offered.
+    private final class Incoming {
+        let serial: Int
+        let connection: NWConnection
+        var receiver: FileReceiver
+        var part: DeviceInbox.Part?
+        var snapshot: IncomingFiles
+        let folder: URL
+        var published = 0.0
+
+        init(serial: Int, connection: NWConnection, receiver: FileReceiver, snapshot: IncomingFiles, folder: URL) {
+            self.serial = serial; self.connection = connection; self.receiver = receiver; self.snapshot = snapshot; self.folder = folder
+        }
+    }
+
+    /// This device's own pick (Get Files), until the Mac answers it.
+    private struct Pick {
+        let transfer: UInt32
+        let at: Double
+        let connection: NWConnection
+        let serial: Int
+    }
+
     let queue = DispatchQueue(label: "sill.files", qos: .utility)
     private let link: SessionLink
+    private let inbox: DeviceInbox
     private var context = Context()
     private var preparing: Preparing?
     private var out: Outgoing?
+    private var inn: Incoming?
+    private var pick: Pick?
     private var serials = 0
+    private var inSerials = 0
     private var timer: DispatchSourceTimer?
     /// The scoped URLs this transfer opened (`startAccessingSecurityScopedResource`), closed at its end.
     private var accessing: [URL] = []
@@ -97,6 +135,9 @@ final class DeviceFiles: @unchecked Sendable {
     var onSnapshot: ((Snapshot) -> Void)?
     /// A send dropped because another transfer runs (`send`'s race with its start), on `queue`.
     var onDropped: (() -> Void)?
+    /// The transfer from the Mac as the chip shows it, at each change (throttled to `publishEvery` while parts
+    /// come). On `queue`.
+    var onIncoming: ((IncomingFiles) -> Void)?
     /// TEST ONLY (the device-files check): the window, instead of FileFlow's.
     var windowOverride: Int?
     /// How often the chip's percentage moves at most.
@@ -104,8 +145,10 @@ final class DeviceFiles: @unchecked Sendable {
     /// How often the clock looks while a transfer runs: no answer, no progress, a fence or hold over.
     static let tickEvery = 0.25
 
-    init(link: SessionLink) {
+    /// `inbox`: where files from the Mac are staged and kept (the app's: SillDocuments; a check's, its own folder).
+    init(link: SessionLink, inbox: DeviceInbox = DeviceInbox(staging: SillDocuments.incoming, folder: SillDocuments.fromMac)) {
         self.link = link
+        self.inbox = inbox
         link.onRoom = { [weak self] in self?.roomCame() }
     }
 
@@ -151,8 +194,49 @@ final class DeviceFiles: @unchecked Sendable {
                 cleanUp(p.sources)
                 onSnapshot?(p.snapshot)
             }
+            if let i = inn { perform(i.receiver.stop(reason, tellPeer: tellPeer), i) }
+            if pick != nil { endPick(reason.rawValue, byPeer: false, tellPeer: tellPeer) }
             guard let o = out else { return }
             perform(o.sender.stop(reason, tellPeer: tellPeer), o)
+        }
+    }
+
+    /// Get Files from ‹Mac›…: this device asks the Mac for its files (a `pick`; the Mac shows its Open panel).
+    /// Nothing while another transfer from the Mac runs or a pick waits (the row is disabled then).
+    func pickFiles(on connection: NWConnection) {
+        queue.async { [self] in
+            let transfer = UInt32.random(in: 1 ... .max)
+            guard pick == nil, inn == nil, let payload = FileTransfer.pick(transfer: transfer).payload else { return }
+            inSerials += 1
+            let now = Self.clock()
+            pick = Pick(transfer: transfer, at: now, connection: connection, serial: inSerials)
+            link.send(Self.message(.fileTransfer, payload))
+            onIncoming?(IncomingFiles(serial: inSerials, phase: .picking, names: [], total: 0, written: 0, since: now, asked: true))
+            startClock()
+        }
+    }
+
+    /// The person's Accept of the Mac's offer (Ask Before Receiving Files).
+    func acceptIncoming() {
+        queue.async { [self] in
+            guard let i = inn, i.receiver.phase == .asking else { return }
+            perform(i.receiver.accept(now: Self.clock()), i)
+        }
+    }
+
+    /// The person's Decline: the Mac is told `declined`.
+    func declineIncoming() {
+        queue.async { [self] in
+            guard let i = inn, i.receiver.phase == .asking else { return }
+            perform(i.receiver.decline(.declined), i)
+        }
+    }
+
+    /// The person's Cancel while files come, or while the Mac's panel is up for this device's pick.
+    func cancelIncoming() {
+        queue.async { [self] in
+            if let i = inn { perform(i.receiver.stop(.cancelled, tellPeer: true), i); return }
+            if pick != nil { endPick(FileReason.cancelled.rawValue, byPeer: false, tellPeer: true) }
         }
     }
 
@@ -163,6 +247,26 @@ final class DeviceFiles: @unchecked Sendable {
     /// ignored.
     func received(_ t: FileTransfer, from connection: NWConnection) {
         queue.async { [self] in
+            // From the Mac, for a transfer to this device: its offer, each file's end, a cancel (of that transfer,
+            // or the Mac's answer to this device's pick).
+            switch t.knownOp {
+            case .offer?:
+                incomingOffer(t, from: connection); return
+            case .end?:
+                if let i = inn, i.connection === connection, i.receiver.transfer == t.transfer {
+                    perform(i.receiver.end(file: t.file, sha256: t.sha256, now: Self.clock()), i)
+                }
+                return
+            case .cancel?:
+                if let i = inn, i.connection === connection, i.receiver.transfer == t.transfer {
+                    perform(i.receiver.peerCancelled(t.reason), i, message: t.message); return
+                }
+                if let p = pick, p.connection === connection, p.transfer == t.transfer {
+                    endPick(t.reason ?? FileReason.nothingChosen.rawValue, byPeer: true, tellPeer: false, message: t.message); return
+                }
+            default:
+                break
+            }
             guard let o = out, o.connection === connection, t.transfer == o.sender.transfer else { return }
             let now = Self.clock()
             switch t.knownOp {
@@ -181,10 +285,18 @@ final class DeviceFiles: @unchecked Sendable {
             case .cancel?:
                 perform(o.sender.peerCancelled(t.reason), o, message: t.message)
             case .offer?, .end?, .pick?:
-                break   // the Mac's own transfers: this build takes none (no `Hello.files`)
+                break   // the Mac's own transfers, above; a pick never comes from the Mac
             case nil:
                 break   // an op this build does not know
             }
+        }
+    }
+
+    /// Kind 34 from the Mac on `connection`: a part of the file on its way to this device, written at once.
+    func receivedPart(_ payload: Data, from connection: NWConnection) {
+        queue.async { [self] in
+            guard let i = inn, i.connection === connection, i.receiver.takesParts, let p = FileChunk.unpack(payload) else { return }
+            perform(i.receiver.part(id: p.id, total: p.total, offset: p.offset, count: p.bytes.count, now: Self.clock()), i, bytes: p.bytes)
         }
     }
 
@@ -413,8 +525,7 @@ final class DeviceFiles: @unchecked Sendable {
         o.held = nil
         cleanUp(o.sources)
         if out === o { out = nil }
-        timer?.cancel()
-        timer = nil
+        stopClockIfIdle()
     }
 
     private func cleanUp(_ sources: [Source]) {
@@ -440,7 +551,129 @@ final class DeviceFiles: @unchecked Sendable {
         try? FileManager.default.removeItem(at: outbox)
     }
 
+    /// At launch: what an earlier run left half written of files from a Mac.
+    static func cleanIncoming() {
+        DeviceInbox(staging: SillDocuments.incoming, folder: SillDocuments.fromMac).cleanLeftovers()
+    }
+
+    // MARK: From the Mac
+
+    /// The Mac's offer: refused (`busy`, `tooMany`, `tooBig`), asked about, or taken at once
+    /// (FilePolicy.deviceAnswers, with this device's own judgement of whether it asked for them).
+    private func incomingOffer(_ t: FileTransfer, from connection: NWConnection) {
+        let now = Self.clock()
+        guard let transfer = t.transfer else { return }
+        guard let o = FilePolicy.offer(t) else {
+            if let payload = FileTransfer.refused(transfer: transfer, reason: .damaged).payload { link.send(Self.message(.fileTransfer, payload)) }
+            return
+        }
+        let asked = FilePolicy.askedFor(o, pick: pick?.transfer, pickedAt: pick?.at, now: now) && pick?.connection === connection
+        let answer = FilePolicy.deviceAnswers(o, receiving: inn != nil, askBefore: context.askBefore, askedFor: asked)
+        if case .refuse(let why) = answer {
+            if let payload = FileTransfer.refused(transfer: transfer, reason: why).payload { link.send(Self.message(.fileTransfer, payload)) }
+            return
+        }
+        let serial: Int
+        if asked, let p = pick { serial = p.serial; pick = nil } else { inSerials += 1; serial = inSerials }
+        let receiver = FileReceiver(offer: o, place: DeviceFilesCopy.place(mac: context.mac), now: now)
+        let folder = inbox.folder(context.mac)
+        let snapshot = IncomingFiles(serial: serial, phase: .asking, names: receiver.files.map(\.name), total: o.total, written: 0,
+                                     since: now, asked: asked, folder: folder)
+        let i = Incoming(serial: serial, connection: connection, receiver: receiver, snapshot: snapshot, folder: folder)
+        inn = i
+        inbox.cleanLeftovers()
+        startClock()
+        if answer == .accept { perform(i.receiver.accept(now: now), i) } else { publish(i, now: now) }
+    }
+
+    /// The receiver's actions, in order. A write or a finish that fails skips the rest and stops the transfer
+    /// with its reason (FileReceiver's contract).
+    private func perform(_ actions: [FileReceiver.Action], _ i: Incoming, message: String? = nil, bytes: Data = Data()) {
+        let now = Self.clock()
+        for a in actions {
+            switch a {
+            case .send(let t):
+                // On the person's lane: an ack never waits behind anything of a file.
+                if let payload = t.payload { link.send(Self.message(.fileTransfer, payload)) }
+                if t.knownOp == .answer, t.accept == true { phase(i, .receiving, now: now) }
+            case .open(let file):
+                do { i.part = try inbox.open(transfer: i.receiver.transfer, file: file) }
+                catch { fail(i, error); return }
+            case .write(_, _, let count):
+                guard let part = i.part, count == bytes.count else { fail(i, DeviceInbox.Failure.cantSave); return }
+                do { try inbox.write(bytes, to: part) } catch { fail(i, error); return }
+                i.snapshot.written = i.receiver.bytesWritten
+                if now - i.published >= Self.publishEvery { publish(i, now: now) }
+            case .finish(let file, let sha):
+                guard let part = i.part, let entry = i.receiver.files.first(where: { $0.id == file }) else {
+                    fail(i, DeviceInbox.Failure.cantSave); return
+                }
+                i.part = nil
+                let result: FileReceiver.Finish
+                do { result = .kept(try inbox.finish(part, size: entry.size, sha256: sha, name: entry.name, into: i.folder)) }
+                catch DeviceInbox.Failure.damaged { result = .damaged }
+                catch DeviceInbox.Failure.noRoom { result = .failed(.noRoom) }
+                catch { result = .failed(.cantSave) }
+                perform(i.receiver.finished(file, result, now: now), i)
+                return
+            case .deletePartials:
+                if let part = i.part { inbox.discard(part) }
+                i.part = nil
+            case .completed(let names):
+                i.snapshot.written = i.receiver.bytesWritten
+                phase(i, .done(names), now: now)
+                finishIncoming(i)
+            case .stopped(let reason, let byPeer):
+                let name = i.receiver.files.indices.contains(i.receiver.current) ? i.receiver.files[i.receiver.current].name : nil
+                phase(i, .stopped(reason: reason, message: message, byPeer: byPeer, name: name), now: now)
+                finishIncoming(i)
+            }
+        }
+    }
+
+    private func fail(_ i: Incoming, _ error: Error) {
+        let reason: FileReason = (error as? DeviceInbox.Failure) == .noRoom ? .noRoom : .cantSave
+        perform(i.receiver.stop(reason, tellPeer: true), i)
+    }
+
+    private func phase(_ i: Incoming, _ p: IncomingFiles.Phase, now: Double) {
+        guard i.snapshot.phase != p else { return }
+        i.snapshot.phase = p
+        i.snapshot.since = now
+        publish(i, now: now)
+    }
+
+    private func publish(_ i: Incoming, now: Double) {
+        i.published = now
+        onIncoming?(i.snapshot)
+    }
+
+    private func finishIncoming(_ i: Incoming) {
+        if let part = i.part { inbox.discard(part) }
+        i.part = nil
+        if inn === i { inn = nil }
+        stopClockIfIdle()
+    }
+
+    /// This device's pick ends without files: the Mac said why (`byPeer`), or this device stopped asking.
+    private func endPick(_ reason: String, byPeer: Bool, tellPeer: Bool, message: String? = nil) {
+        guard let p = pick else { return }
+        pick = nil
+        if tellPeer, let payload = FileTransfer.cancel(transfer: p.transfer, reason: .cancelled).payload {
+            link.send(Self.message(.fileTransfer, payload))
+        }
+        onIncoming?(IncomingFiles(serial: p.serial, phase: .stopped(reason: reason, message: message, byPeer: byPeer, name: nil),
+                                  names: [], total: 0, written: 0, since: Self.clock(), asked: true))
+        stopClockIfIdle()
+    }
+
     // MARK: The clock
+
+    private func stopClockIfIdle() {
+        guard out == nil, preparing == nil, inn == nil, pick == nil else { return }
+        timer?.cancel()
+        timer = nil
+    }
 
     private func startClock() {
         guard timer == nil else { return }
@@ -454,8 +687,19 @@ final class DeviceFiles: @unchecked Sendable {
     /// No answer within a minute, no progress within 30 s (FileSender.tick); the transfer's connection
     /// no longer the session's (`lost`); what waited for a fence or a hold to end tried again.
     private func tick() {
-        guard let o = out else { timer?.cancel(); timer = nil; return }
         let now = Self.clock()
+        if let i = inn {
+            if link.connection !== i.connection { perform(i.receiver.stop(.lost, tellPeer: false), i) }
+            else {
+                perform(i.receiver.tick(now: now), i)
+                if inn === i, i.snapshot.written != i.receiver.bytesWritten { i.snapshot.written = i.receiver.bytesWritten; publish(i, now: now) }
+            }
+        }
+        if let p = pick {
+            if link.connection !== p.connection { endPick(FileReason.lost.rawValue, byPeer: false, tellPeer: false) }
+            else if now - p.at > FilePolicy.panelLimit + FilePolicy.pickSlack { endPick(FileReason.noAnswer.rawValue, byPeer: false, tellPeer: true) }
+        }
+        guard let o = out else { stopClockIfIdle(); return }
         if link.connection !== o.connection {
             perform(o.sender.stop(.lost, tellPeer: false), o)
             return
@@ -472,4 +716,123 @@ final class DeviceFiles: @unchecked Sendable {
     var progress: (sent: UInt64, acked: UInt64, window: Int)? {
         queue.sync { out.map { ($0.sender.sentTotal, $0.sender.ackedTotal, window(now: Self.clock())) } }
     }
+
+    /// Whether a transfer from the Mac runs or this device's pick waits. Waits for the queue.
+    var receiving: Bool { queue.sync { inn != nil || pick != nil } }
+}
+
+/// Where files from the Mac are written (docs/files-plan.md §8.4): staged under Sill's own name in `staging`
+/// (Library/Application Support/Sill/Incoming in the app: the same volume as Documents, never shown in the Files
+/// app), created new and never through a link (0600), written with write(2), whose failure is an error and never an
+/// exception (a full device ends the transfer `noRoom`), hashed as it goes; once whole and its size and SHA-256
+/// are the Mac's, made 0644, protected (`complete`: unreadable while the device is locked, as the overview's §2.3
+/// asks of From ‹Mac›) and moved into the Mac's folder (`folder(mac)`, Documents › From ‹Mac› in the app) under a
+/// free name (FileNames.unique) with renamex_np(RENAME_EXCL), which never replaces anything. Foundation and
+/// CryptoKit only: the device-files check runs it on a scratch folder. No stat-family call (lstat, stat, fstat):
+/// those are file-timestamp APIs the privacy manifest does not declare (ITMS-91053, Scripts/release-ios.sh);
+/// FileManager's attributes answer what kind of item is at a path, without following a link.
+struct DeviceInbox {
+    let staging: URL
+    let folder: (String) -> URL
+
+    enum Failure: Error, Equatable {
+        /// The device is full (ENOSPC, EDQUOT).
+        case noRoom
+        case cantSave
+        /// Its size or SHA-256 is not the Mac's.
+        case damaged
+    }
+
+    /// One file on its way: its staging file, open for writing, and what has been written.
+    final class Part {
+        let url: URL
+        fileprivate var fd: Int32
+        fileprivate(set) var written: UInt64 = 0
+        fileprivate var hash = SHA256()
+
+        fileprivate init(url: URL, fd: Int32) { self.url = url; self.fd = fd }
+        deinit { if fd >= 0 { close(fd) } }
+    }
+
+    /// What is at `path`, a link not followed: nil for nothing.
+    private static func kind(_ path: String) -> FileAttributeType? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.type] as? FileAttributeType
+    }
+
+    /// A folder made if it is missing, never a link.
+    private static func folder(_ url: URL, protected: Bool) throws {
+        if let kind = kind(url.path) {
+            guard kind == .typeDirectory else { throw Failure.cantSave }
+        } else {
+            do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) } catch { throw Failure.cantSave }
+        }
+        if protected { try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path) }
+    }
+
+    /// A new, empty staging file for `file` of `transfer`: created exclusively, never through a link, 0600.
+    func open(transfer: UInt32, file: UInt32) throws -> Part {
+        try Self.folder(staging, protected: false)
+        let url = staging.appendingPathComponent(String(format: "%08x-%08x.part", transfer, file))
+        let fd = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw Self.failure(errno) }
+        return Part(url: url, fd: fd)
+    }
+
+    /// The part's bytes at the end of what was written (parts come in order).
+    func write(_ bytes: Data, to p: Part) throws {
+        guard p.fd >= 0 else { throw Failure.cantSave }
+        try bytes.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            var done = 0
+            while done < raw.count {
+                let n = Darwin.write(p.fd, raw.baseAddress! + done, raw.count - done)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    throw Self.failure(errno)
+                }
+                done += n
+            }
+        }
+        p.hash.update(data: bytes)
+        p.written += UInt64(bytes.count)
+    }
+
+    /// The file is whole: its size and SHA-256 checked against the Mac's, then 0644, protected, and moved into
+    /// `into` under a free name, which it returns. On any failure the staging file is deleted.
+    func finish(_ p: Part, size: UInt64, sha256: String, name: String, into: URL) throws -> String {
+        defer { discard(p) }
+        guard p.fd >= 0 else { throw Failure.cantSave }
+        guard p.written == size, Base64URL.encode(Data(p.hash.finalize())) == sha256 else { throw Failure.damaged }
+        guard fsync(p.fd) == 0 || errno == ENOTSUP else { throw Self.failure(errno) }
+        guard fchmod(p.fd, 0o644) == 0 else { throw Self.failure(errno) }
+        close(p.fd); p.fd = -1
+        try Self.folder(into, protected: true)
+        try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: p.url.path)
+        let cleaned = FileNames.clean(name)
+        var tried = Set<String>()
+        for _ in 0..<64 {
+            guard let candidate = FileNames.unique(cleaned, taken: { n in
+                tried.contains(n.lowercased()) || Self.kind(into.appendingPathComponent(n).path) != nil
+            }) else { break }
+            if renamex_np(p.url.path, into.appendingPathComponent(candidate).path, UInt32(RENAME_EXCL)) == 0 { return candidate }
+            guard errno == EEXIST else { throw Self.failure(errno) }
+            tried.insert(candidate.lowercased())
+        }
+        throw Failure.cantSave
+    }
+
+    /// The staging file closed and deleted.
+    func discard(_ p: Part) {
+        if p.fd >= 0 { close(p.fd); p.fd = -1 }
+        unlink(p.url.path)
+    }
+
+    /// Every staging file deleted (no transfer runs: one at a time, and this before each and at launch).
+    func cleanLeftovers() {
+        guard Self.kind(staging.path) == .typeDirectory else { return }
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: staging.path)) ?? [] {
+            unlink(staging.appendingPathComponent(name).path)
+        }
+    }
+
+    private static func failure(_ code: Int32) -> Failure { code == ENOSPC || code == EDQUOT ? .noRoom : .cantSave }
 }

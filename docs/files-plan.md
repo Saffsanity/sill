@@ -816,3 +816,14 @@ The second building run (2026-11-18):
 - Not yet: `PictureDrop` and the rest of step 6; `Hello.files` and everything of the device's receiving (step 7);
   §8.1's `PhotoSaver`; the status menu's card.
 - Next: step 6 (the drop), then the second pull request (Mac to device).
+
+The third building run (2026-11-19), on the branch `files-to-device` (the second pull request, based on `files`):
+
+- Done: step 7's core: the Mac's sending (StreamServer's `sendFilePart` path behind FileFlow.hostMaySend, FileHub's
+  outgoing transfers and the device's pick, the coordinator's `files` 2 where the host gives files, the TEST ONLY
+  SILL_TEST_FILES_PICK and SILL_TEST_FILES_OFFER), the device's receiving (`Hello.files`, DeviceFiles' incoming side,
+  DeviceInbox, SillDocuments, PhotoSaver, the chip, the rows Get Files from ‹Mac›…, Ask Before Receiving Files and Save
+  Photos and Videos to Photos), H6 (`live.py give`) and the harness's incoming states.
+- Not yet: FilePick (Sill.app's Open panel in the stream, after spike S0), the menu and the icon, the status menu's
+  card, H8's `files-down` case.
+
