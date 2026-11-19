@@ -11,6 +11,9 @@ let package = Package(
         .executable(name: "SillHost", targets: ["SillHostCLI"]),
         // Sill.app's executable. Scripts/make-app.sh wraps it into the bundle and signs it.
         .executable(name: "SillMenuBar", targets: ["SillMenuBar"]),
+        // Sill Camera, the Core Media I/O camera extension (docs/camera-plan.md §7): Scripts/make-app.sh embeds it in
+        // Sill.app with SILL_CAMERA_EXTENSION=1. macOS only.
+        .executable(name: "SillCameraExtension", targets: ["SillCameraExtension"]),
         // No product for SillHostCore: the iOS project links this package and must never see it.
     ],
     targets: [
@@ -27,6 +30,8 @@ let package = Package(
         // Sill Camera's rules (CameraFeedPolicy, docs/camera-plan.md §6.4), shared by the extension and Sill.app's sink:
         // Foundation only, and no product, so the iOS project never sees it.
         .target(name: "CameraFeed"),
+        // Sill Camera itself: run by macOS as its own sandboxed process once Sill for Mac activated it.
+        .executableTarget(name: "SillCameraExtension", dependencies: ["CameraFeed"]),
         // Milestone 3 spike: virtual display + window move + capture. Its VirtualDisplay.swift
         // is a symlink to the host's copy. Not shipped.
         .executableTarget(name: "CaptureProbe"),

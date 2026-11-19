@@ -416,6 +416,16 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   second old, else the placeholder) and the placeholder's words (only a device state names a
   device). Its own library target, no product (the iOS project never sees it), because Sill.app's
   sink shares its encodings; pure, `Tests/checks/camera-feed`.
+- `Sources/SillCameraExtension/` — Sill Camera, the Core Media I/O camera extension
+  (docs/camera-plan.md §6.4, §7, §9): `main.swift` (`CMIOExtensionProvider.startService`, the run
+  loop), `SillCameraProvider.swift` (the provider; the device "Sill Camera" with fixed IDs, its
+  source stream for apps and its sink stream for Sill for Mac; the custom properties
+  `4cc_SilS_glob_0000`, the state Sill for Mac writes and never read back, and `4cc_SilD_glob_0000`,
+  the demand, read-only; the feeder's signature checked by pid where the sandbox allows; one serial
+  queue, `sill.camera.feed`, the provider's client queue, the timer's and the sink's) and
+  `Placeholder.swift` (the still, grey, drawn with CoreGraphics into the luma plane of an
+  IOSurface-backed NV12 buffer, once per words and size). macOS only; CameraFeedPolicy decides.
+  Embedded by make-app.sh with `SILL_CAMERA_EXTENSION=1`; never run by a test.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -506,7 +516,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   arm64 and x86_64, each in its own scratch path under `.build/universal`,
   joined with lipo, #62; off by default here, on in the nightlies and, since
   0.6.0, in release.yml's publish job, so releases are universal; `release.sh`'s
-  `check_signature` reads every slice);
+  `check_signature` reads every slice; with `SILL_CAMERA_EXTENSION=1` it also builds
+  Sill Camera and embeds it at `Contents/Library/SystemExtensions/me.saffer.sill.mac.camera.systemextension`
+  with `Packaging/CameraExtension-Info.plist` (SYSX, Core Media I/O's Mach service name
+  `9B2KKVM937.me.saffer.sill.mac.camera`, the app's version and build) and
+  `Packaging/SillCameraExtension.entitlements` (the App Sandbox and that app group), signed
+  before the app; the app asks for `com.apple.developer.system-extension.install` only when its
+  profile grants it; off by default until the portal's System Extension capability exists;
+  `SILL_APP_OUT` builds the bundle into another folder, never with `--install`; `release.sh`'s
+  `check_signature` checks Sill Camera's slices too when a build carries it);
   `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
@@ -636,7 +654,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   own CameraEncoder, CameraPattern, CameraStream and CameraPolicy for macOS with
   `encoder-main.swift` and runs the device's stream end to end on VideoToolbox's
   software encoder and decoder (never the hardware encoder; not in CI, whose
-  runners may lack the software HEVC encoder), writing epoch 0 as a fixture. `Scripts/audio/` is the
+  runners may lack the software HEVC encoder), writing epoch 0 as a fixture.
+  `Scripts/camera-check/package.sh [--universal] [--keep] [OUT]` is P1
+  (docs/camera-plan.md §13.4): Sill.app with Sill Camera inside, built by make-app.sh into OUT
+  (`.build/camera-check` by default) and signed ad hoc, checked (the extension's place, its
+  Info.plist, the Mach service name inside its app group, both entitlements, both signatures, the
+  app's seal over it, the slices), then removed; never in /Applications, never activated or run. `Scripts/audio/` is the
   encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on

@@ -10,6 +10,12 @@
 #                                          the signature is Developer ID; Scripts/release.sh --dry-run
 #                                          sets SILL_RELEASE_DRY_RUN=1, which only warns about the tag)
 #   SILL_INSTALL_DIR=~/Applications Scripts/make-app.sh --install   (another install folder)
+#   SILL_CAMERA_EXTENSION=1 Scripts/make-app.sh
+#                                          …with Sill Camera inside (docs/camera-plan.md §7): the Core Media I/O
+#                                          camera extension, built, embedded and signed before the app
+#   SILL_APP_OUT=DIR/Sill.app Scripts/make-app.sh
+#                                          …into DIR instead of .build (Scripts/camera-check/package.sh); never
+#                                          with --install
 #   SILL_RELEASE_NIGHTLY=1 … Scripts/make-app.sh --release
 #                                          a nightly (Scripts/release.sh --nightly sets it): main's head,
 #                                          untagged, signed and checked exactly as a release is
@@ -35,6 +41,10 @@ for arg in "$@"; do
         *) echo "usage: $0 [--install] [--open] [--release]" >&2; exit 2 ;;
     esac
 done
+if [ -n "${SILL_APP_OUT:-}" ] && [ "$install" = 1 ]; then
+    echo "error: SILL_APP_OUT builds a bundle aside (Scripts/camera-check/package.sh); --install installs only .build/Sill.app" >&2
+    exit 2
+fi
 # --release is for notarization, which accepts only a Developer ID Application signature and says
 # so only after the upload. The default identity is Apple Development, so without
 # SILL_SIGN_IDENTITY stop now, before building; the signature itself is checked after signing.
@@ -67,6 +77,13 @@ fi
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/Info.plist)"
 
+# Sill Camera (docs/camera-plan.md §7, §13.4): with SILL_CAMERA_EXTENSION=1 the Core Media I/O camera extension is built
+# too and embedded at Contents/Library/SystemExtensions, signed before the app that seals it. Off by default: until the
+# developer portal's System Extension capability and the profile made again with it exist (the plan's §15, step 10), a
+# Sill.app can't install it, so every build stays what it was without it.
+camera=0
+if [ "${SILL_CAMERA_EXTENSION:-}" = 1 ]; then camera=1; fi
+
 # SILL_UNIVERSAL=1: one Sill.app for Apple silicon and Intel Macs (#62), one build per architecture
 # joined with lipo. Not one `swift build --arch arm64 --arch x86_64`: that needs Xcode's XCBuild, and
 # the Command Line Tools alone must still build this. Each architecture has its own scratch path: in
@@ -81,14 +98,22 @@ if [ "${SILL_UNIVERSAL:-}" = 1 ]; then
     for arch in arm64 x86_64; do
         swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch"
         cp "$(swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch" --show-bin-path)/SillMenuBar" "$bin/SillMenuBar-$arch"
+        if [ "$camera" = 1 ]; then
+            swift build -c release --product SillCameraExtension --triple "$arch-apple-macosx" --scratch-path "$bin/$arch"
+            cp "$(swift build -c release --product SillCameraExtension --triple "$arch-apple-macosx" --scratch-path "$bin/$arch" --show-bin-path)/SillCameraExtension" "$bin/SillCameraExtension-$arch"
+        fi
     done
     lipo -create "$bin/SillMenuBar-arm64" "$bin/SillMenuBar-x86_64" -output "$bin/SillMenuBar"
+    if [ "$camera" = 1 ]; then
+        lipo -create "$bin/SillCameraExtension-arm64" "$bin/SillCameraExtension-x86_64" -output "$bin/SillCameraExtension"
+    fi
 else
     swift build -c release --product SillMenuBar
     bin="$(swift build -c release --product SillMenuBar --show-bin-path)"
+    if [ "$camera" = 1 ]; then swift build -c release --product SillCameraExtension; fi
 fi
-app=.build/Sill.app
-stage=.build/Sill.app.partial      # assembled aside, so a failed run never leaves half a bundle
+app="${SILL_APP_OUT:-.build/Sill.app}"
+stage="$app.partial"               # assembled aside, so a failed run never leaves half a bundle
 rm -rf "$stage"
 mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
 # The executable, with the SDK it was compiled against recorded in it. SwiftPM links without
@@ -153,6 +178,27 @@ JSON
 fi
 cp "$icon_out"/compiled/* "$stage/Contents/Resources/" 2>/dev/null || true
 
+# Sill Camera inside (SILL_CAMERA_EXTENSION=1): the system extension bundle macOS activates for an app in /Applications,
+# Contents/Library/SystemExtensions/<its identifier>.systemextension, with the app's version and build. It is signed
+# below, before the app, with its own entitlements: the App Sandbox (macOS runs no camera extension without it) and the
+# app group its Core Media I/O Mach service name begins with.
+if [ "$camera" = 1 ]; then
+    cam_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/CameraExtension-Info.plist)"
+    cam_exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' Packaging/CameraExtension-Info.plist)"
+    ext="$stage/Contents/Library/SystemExtensions/$cam_id.systemextension"
+    mkdir -p "$ext/Contents/MacOS"
+    cp "$bin/SillCameraExtension" "$ext/Contents/MacOS/$cam_exe"
+    cp Packaging/CameraExtension-Info.plist "$ext/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)" "$ext/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$ext/Contents/Info.plist"
+fi
+# Signs Sill Camera before the app that seals it: "$@" are codesign's options for this build's path.
+sign_camera() {
+    if [ "$camera" = 1 ]; then
+        codesign --force "$@" --entitlements Packaging/SillCameraExtension.entitlements --sign "$identity" "$ext"
+    fi
+}
+
 # SILL_SIGN_IDENTITY (a name, part of one, or a SHA-1 hash), else the first Apple Development
 # identity in the keychain, by its SHA-1 hash: codesign refuses a name that two valid
 # certificates share, as they do after an early renewal until the old one expires. Either of them
@@ -215,6 +261,15 @@ if [ "$release" = 1 ]; then
         }
         if ! security cms -D -i "$profile" -o "$prof_dir/prof.plist" 2>/dev/null; then
             refuse_profile "could not be decoded"
+        fi
+        # Sill Camera's activation needs com.apple.developer.system-extension.install, which only a profile with the
+        # System Extension capability grants (docs/camera-plan.md §15, step 10): the app asks for it only then, so a
+        # build whose profile predates the capability still signs, and says it can't install Sill Camera.
+        if [ "$camera" = 1 ] && [ "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.system-extension.install' "$prof_dir/prof.plist" 2>/dev/null)" = true ]; then
+            cp "$ents" "$prof_dir/camera.entitlements"
+            plutil -insert com.apple.developer.system-extension.install -bool YES "$prof_dir/camera.entitlements"
+            ents="$prof_dir/camera.entitlements"
+            camera_note="this build can install it (com.apple.developer.system-extension.install)"
         fi
         # Every entitlement the file asks for, by the file's own list of them, so one added later is
         # checked too: an app signed with one the profile does not grant is killed at launch like
@@ -284,6 +339,7 @@ if [ "$release" = 1 ]; then
         # ._embedded.provisionprofile with the download's quarantine record); a file cat writes gets
         # none of them (measured 2026-09-27).
         cat "$profile" > "$stage/Contents/embedded.provisionprofile"
+        sign_camera --options runtime --timestamp
         codesign --force --options runtime --timestamp --entitlements "$ents" --sign "$identity" "$stage"
         # After signing: the certificate that signed it must be one the profile lists. A profile
         # names the certificates it covers, so a renewed Developer ID certificate needs the profile
@@ -310,15 +366,21 @@ if [ "$release" = 1 ]; then
         fi
         keychain_note="data-protection keychain (access group $group)"
     else
+        sign_camera --options runtime --timestamp
         codesign --force --options runtime --timestamp --sign "$identity" "$stage"
         keychain_note="login keychain (no provisioning profile at '$profile'; to harden the identity keychain, mint one — docs/release-checklist.md)"
     fi
 else
     # get-task-allow lets lldb and Xcode's Attach to Process attach to the hardened app.
+    sign_camera --options runtime --timestamp=none
     codesign --force --options runtime --timestamp=none --entitlements Packaging/SillDebug.entitlements --sign "$identity" "$stage"
     keychain_note="login keychain (a development build has no keychain-access-groups entitlement)"
 fi
 codesign --verify --strict "$stage"
+if [ "$camera" = 1 ]; then
+    codesign --verify --strict "$ext"
+    codesign --verify --strict --deep "$stage"
+fi
 # Who signed it, read from the signature: the leaf certificate's name, empty for ad hoc.
 signer="$(codesign -dv --verbose=2 "$stage" 2>&1 | sed -n 's/^Authority=//p' || true)"
 signer="${signer%%$'\n'*}"
@@ -332,6 +394,9 @@ rm -rf "$app"
 mv "$stage" "$app"
 echo "Built $app, version $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") ($build_number), signed by: ${signer:-ad hoc}"
 echo "  identity keychain: ${keychain_note:-login keychain}"
+if [ "$camera" = 1 ]; then
+    echo "  Sill Camera: inside; ${camera_note:-this build cannot install it (no System Extension capability in its signature)}"
+fi
 codesign -d -r- "$app" 2>&1 | sed -n 's/^# *designated => /  designated requirement: /p; s/^designated => /  designated requirement: /p'
 
 dest="${SILL_INSTALL_DIR:-/Applications}/Sill.app"

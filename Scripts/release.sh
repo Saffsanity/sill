@@ -336,6 +336,32 @@ check_signature() {
                 || fail "$app ($arch) embeds a provisioning profile but does not carry com.apple.application-identifier (a Mac profile grants no other application identifier); it would be killed at launch"
         fi
     done
+    # Sill Camera, when the build carries it (SILL_CAMERA_EXTENSION=1, docs/camera-plan.md §7): every slice of it
+    # signed as the app is (Developer ID, the hardened runtime, a secure timestamp, no get-task-allow), sandboxed
+    # (macOS runs no camera extension that is not), and of the app's slices and build.
+    local ext ext_exe ext_archs
+    for ext in "$app"/Contents/Library/SystemExtensions/*.systemextension; do
+        [ -d "$ext" ] || continue
+        ext_exe="$ext/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$ext/Contents/Info.plist")"
+        ext_archs="$(lipo -archs "$ext_exe")" || fail "lipo can't read $ext_exe"
+        [ "$(tr ' ' '\n' <<<"$ext_archs" | sort | xargs)" = "$(tr ' ' '\n' <<<"$archs" | sort | xargs)" ] \
+            || fail "$ext is built for $ext_archs, the app for $archs"
+        [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ext/Contents/Info.plist")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" ] \
+            || fail "$ext is of another build than the app"
+        for arch in $ext_archs; do
+            details="$(codesign -dvvv --architecture "$arch" "$ext" 2>&1)"
+            grep -q '^Authority=Developer ID Application: ' <<<"$details" || fail "$ext ($arch) is not signed with Developer ID"
+            grep -q '^CodeDirectory .*flags=.*runtime' <<<"$details" || fail "$ext ($arch) is not signed with the hardened runtime"
+            grep -q '^Timestamp=' <<<"$details" || fail "$ext ($arch) has no secure timestamp"
+            entitlements="$(codesign -d --architecture "$arch" --entitlements - --xml "$ext" 2>/dev/null)" || entitlements=""
+            if grep -q 'get-task-allow' <<<"$entitlements"; then
+                fail "$ext ($arch) carries the get-task-allow entitlement, which notarization refuses"
+            fi
+            grep -q '<key>com.apple.security.app-sandbox</key>' <<<"$entitlements" \
+                || fail "$ext ($arch) is not sandboxed; macOS runs no camera extension that is not"
+        done
+        say "Sill Camera: $(basename "$ext") inside, signed as the app is, for $ext_archs"
+    done
     # No profile means the login keychain, the safe fallback, worth naming in a release's log so it
     # is never a silent surprise.
     if [ -f "$app/Contents/embedded.provisionprofile" ]; then
