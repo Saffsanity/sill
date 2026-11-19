@@ -8,6 +8,12 @@ most, so a 60 Hz stop would not show the stop's rate at work). Test clients (sil
 kind 47, tap it (the dry run's log, SILL_TEST_INPUT_LOG, shows where each tap lands) and read its window
 lists; the lock is the test's file (SILL_TEST_LOCKED_FILE, with SILL_TEST_LOCK_IGNORE_MAC so this Mac's own
 lock never counts). One verdict per rule. A second host without the stops checks that nothing changes there.
+Then the Virtual Desktop (phase 2b): a host with --virtual-desktop, two stops and SILL_TEST_VIRTUAL_DESKTOP (said, never
+made; its grace SILL_TEST_VD_GRACE=3 s): the stop after the screens, a step onto it (said, at the device's room, 1218×800),
+following its turn (once after 1 s steady, nothing for a turn back within it), stepped away and its grace, made again,
+kept while locked and back after the unlock, removed off console, the span after the device left; and a --pairing host
+with Require pairing off: an unpaired client's "on" refused, a paired one's shown at once, the switch flipped four times
+a second making at most one change of the display every 3 s, and off.
 Each host is killed at the end; nothing is posted, warped or captured.
 
     Scripts/desktop-check/live.py OUT
@@ -33,11 +39,11 @@ def verdict(ok, what):
 
 class Host:
     """One synthetic host: its output's lines with the time each was read, and its port (loopback only)."""
-    def __init__(self, out, label, env):
+    def __init__(self, out, label, env, args=()):
         self.lines, self.out, self.label = [], out, label
         e = dict(os.environ); e.update(BASE_ENV); e.update(env)
         self.start = time.time()
-        self.p = subprocess.Popen(["nice", "-n", "10", HOST, "--synthetic"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        self.p = subprocess.Popen(["nice", "-n", "10", HOST, "--synthetic", *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   env=e, start_new_session=True, text=True, bufsize=1)
         self.reader = threading.Thread(target=self._read, daemon=True); self.reader.start()
         self.port = None
@@ -176,9 +182,135 @@ def main(out):
     verdict(not h2.all(r"^Desktop: display"), "a host without the stops ignores kind 47")
     verdict(bool(h2.all(r"^Streaming a synthetic test pattern( \(software encoder\))? at 1512×94\d, 60 fps")), "a host without the stops streams the plain test pattern")
     verdict(not h2.all(r"^Test displays"), "a host without the stops says nothing of them")
+    virtual(out)
     failed = [w for ok, w in verdicts if not ok]
     print(f"{len(verdicts) - len(failed)} of {len(verdicts)} verdicts held")
     return 0 if not failed else 1
+
+
+VD_STOPS = "Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0"
+VD_NAMES = '["Built-in Retina Display", "DELL U2723QE", "Virtual Desktop"]'
+
+
+def vd_lines(host, after=0.0, before=1e9):
+    """The Virtual Desktop's makes and removals between two times: [(t, "made"|"removed", line)]."""
+    out = []
+    for t, l in host.all(r"^Virtual Desktop ", after, before):
+        if "said, never made" in l: out.append((t, "made", l))
+    for t, l in host.all(r"^Virtual Desktop: .*removed it", after, before):
+        out.append((t, "removed", l))
+    return sorted(out)
+
+
+def virtual(out):
+    """The Virtual Desktop on two test hosts (phase 2b), nothing made: see the docstring."""
+    lock = os.path.join(out, "vd.lock"); open(lock, "w").write("0")
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3", "SILL_TEST_LOCKED_FILE": lock}
+    h = Host(out, "vd", env, args=["--virtual-desktop"])
+    try:
+        verdict(bool(h.all(r"^Test Virtual Desktop: this host can have it .* its grace 3 s\.")), "VD: the host says the hook and its 3 s grace")
+        verdict(bool(h.all(r"^Virtual Desktop on for this run: .*Match the device")), "VD: --virtual-desktop's line, the device's size")
+        # A: two steps (DELL, then the Virtual Desktop), its turn held (a line after 1 s), back (a line), a turn and back
+        # within the settle (no line), a step away (its grace), back onto it (made again), a lock and unlock, off console.
+        a, ra = client(h, out, "vd-a", 41, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",
+                                            "--next-display@2", "--next-display@4", "--room-after=744x1133@7", "--room-after=1133x744@10",
+                                            "--room-after=744x1133@13", "--room-after=1133x744@13.5", "--next-display@15",
+                                            "--next-display@20", "--next-display@21"], 1)
+        h.at(23); open(lock, "w").write("1")
+        h.at(29); open(lock, "w").write("0")
+        h.at(35); open(lock, "w").write("2")
+        h.at(38); open(lock, "w").write("0")
+        a.join()
+        # B, 4 s after A left: the Desktop back on the Virtual Desktop's stop (the span), made again; then none for its grace.
+        b, rb = client(h, out, "vd-b", 6, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",
+                                           "--expect=desktopVirtual=3,desktopDisplay=3,virtualDesktop=1,virtualDesktopShown=1"], 46)
+        b.join()
+        h.at(57)
+    finally:
+        h.stop()
+    la = lists(ra.get("out", ""))
+    verdict(any(re.search(r"desktopDisplays=3 desktopDisplay=1 desktopVirtual=3 names=" + re.escape(VD_NAMES), l)
+                for l in ra.get("out", "").splitlines()), "VD: the list says three stops, the Virtual Desktop the third")
+    steps = [l.split(", asked by")[0] for _, l in h.all(r"^Desktop: display \d of 3", 0, 23)]
+    verdict(steps[:2] == ["Desktop: display 2 of 3 (DELL U2723QE)", "Desktop: display 3 of 3 (Virtual Desktop)"],
+            f"VD: a step past the screens lands on it: {steps[:2]}")
+    made = vd_lines(h, 4.5, 6.5)
+    verdict(len(made) == 1 and made[0][1] == "made" and "1218×800 pt @2× at 60 Hz" in made[0][2] and "for iPad mini (its screen)" in made[0][2],
+            f"VD: made (said) at the device's room grown to 800 points, 60 Hz: {made}")
+    on_vd = streams(h, 4.5, 7)
+    verdict(bool(on_vd) and on_vd[0][:2] == (3, "Virtual Desktop") and on_vd[0][2] == "2436×1600" and on_vd[0][3] == 60,
+            f"VD: the Desktop on it, its size at Retina, 60 fps: {on_vd}")
+    follows = h.all(r"^Virtual Desktop: iPad mini (turned|changed its room)", 5, 15.5)
+    verdict([round(t) for t, _ in follows] in ([9, 12], [8, 11], [9, 11], [8, 12]) and len(follows) == 2
+            and "the next one is made at 800×1218 pt" in follows[0][1] and "at 1218×800 pt" in follows[1][1],
+            f"VD: a turn held followed once after 1 s steady (by the next make, P2 not run), and back: {[(round(t, 1), l) for t, l in follows]}")
+    verdict(not h.all(r"^Virtual Desktop: iPad mini", 13.2, 15.5), "VD: a turn and back within the settle: nothing")
+    gone = vd_lines(h, 15, 20)
+    verdict(len(gone) == 1 and gone[0][1] == "removed" and 17.5 <= gone[0][0] <= 19.8 and "no device has shown it for 3 s" in gone[0][2]
+            and "(TEST ONLY: none was made.)" in gone[0][2], f"VD: stepped away, removed after its 3 s grace: {gone}")
+    again = vd_lines(h, 20, 23)
+    verdict(len(again) == 1 and again[0][1] == "made", f"VD: stepped onto again: made again: {again}")
+    locked = streams(h, 23, 26)
+    verdict(bool(locked) and locked[0][:2] == (1, "Built-in Retina Display"), f"VD: locked, the Desktop on the main display: {locked}")
+    verdict(not vd_lines(h, 23, 29), "VD: kept while locked, past its grace")
+    verdict(bool(h.all(r"^Virtual Desktop: kept while this Mac is locked; it goes 3 s after the unlock", 25, 29.5)),
+            "VD: the kept-while-locked line, once its grace had passed")
+    back = streams(h, 29, 35)
+    verdict(bool(back) and back[-1][:2] == (3, "Virtual Desktop"), f"VD: unlocked, back on it: {back}")
+    off = vd_lines(h, 35, 38)
+    verdict(len(off) == 1 and off[0][1] == "removed" and "this session is off the console" in off[0][2] and off[0][0] < 36.5,
+            f"VD: off console, removed at once: {off}")
+    verdict(any(l[3] for l in la), "VD: a locked list (no stop fields)")
+    verdict(not any(l[3] and "desktopVirtual" in raw for l, raw in zip(la, [x for x in ra.get("out", "").splitlines() if x.strip().startswith("windowList:")])),
+            "VD: no locked list says desktopVirtual")
+    span = [x for x in vd_lines(h, 46, 52) if x[1] == "made"]
+    verdict(rb.get("exit") == 0 and "EXPECT ok" in rb.get("out", "") and len(span) == 1,
+            f"VD: B within the span: back on its stop, made again, shown: {span}")
+    end = [x for x in vd_lines(h, 52, 58) if x[1] == "removed"]
+    verdict(len(end) == 1 and "no device has shown it for 3 s" in end[0][2], f"VD: B gone: removed after its grace: {end}")
+    changes = [t for t, _, _ in vd_lines(h)]
+    verdict(all(b2 - b1 >= 2.95 for b1, b2 in zip(changes, changes[1:])), f"VD: never two changes within 3 s: {[round(t, 1) for t in changes]}")
+
+    # The switch from a device: --pairing, Require pairing off; P paired by the host's link, U not.
+    remote = os.path.join(out, "vdp.remote"); os.makedirs(remote, exist_ok=True); os.chmod(remote, 0o700)
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3", "SILL_TEST_REMOTE_DIR": remote,
+           "SILL_TEST_REQUIRE_PAIRING": "0"}
+    h2 = Host(out, "vdp", env, args=["--pairing"])
+    try:
+        h2.at(1.0)
+        link = next((re.search(r"(sill://pair\S+)", l).group(1) for _, l in h2.lines if re.search(r"sill://pair\S+", l)), None)
+        idp, idu = os.path.join(out, "vdp.idP"), os.path.join(out, "vdp.idU")
+        if link:
+            pair = subprocess.run([sys.executable, "-I", CLIENT, h2.port, "2", "none", f"--pair-url={link}", f"--identity={idp}"],
+                                  capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
+            open(os.path.join(out, "vdp-pair.client.log"), "w").write(pair.stdout + pair.stderr)
+        u, ru = client(h2, out, "vdp-u", 5, ["none", "--tls", f"--identity={idu}", "--pin=none", "--device=Unpaired iPad",
+                                             "--set=virtualDesktop=1@2", "--expect=virtualDesktop=0,sessionPaired=0"], 4)
+        flips = [f"--set=virtualDesktop={1 if i % 2 else 0}@{6 + 0.25 * i:g}" for i in range(8)]
+        pc, rp = client(h2, out, "vdp-p", 18, ["desktop", "--tls", f"--identity={idp}", "--fps=60", "--room=1133x744", "--device=Paired iPad",
+                                               "--set=virtualDesktop=1@2", *flips, "--set=virtualDesktop=0@14",
+                                               "--expect=virtualDesktop=0,sessionPaired=1,virtualDesktopAvailable=1"], 4)
+        u.join(); pc.join()
+        h2.at(24)
+    finally:
+        h2.stop()
+    verdict(bool(link), "VD: the --pairing host printed its link")
+    verdict(ru.get("exit") == 0 and "EXPECT ok" in ru.get("out", "")
+            and bool(h2.all(r"^Settings from Unpaired iPad refused: virtual desktop \(only a paired device\)")),
+            "VD: an unpaired device's on: refused, named, its switch back off")
+    shown = h2.all(r"^Desktop: Virtual Desktop, turned on by Paired iPad\.", 5, 7)
+    first = vd_lines(h2, 5, 7)
+    verdict(bool(shown) and len(first) == 1 and first[0][1] == "made" and "for Paired iPad (its screen)" in first[0][2],
+            f"VD: a paired device's on: shown to it at once, made at its room: {first}")
+    pstreams = streams(h2, 5, 8)
+    verdict(any(x[:2] == (3, "Virtual Desktop") for x in pstreams), f"VD: the Desktop on it: {pstreams}")
+    churn = vd_lines(h2, 6, 14)
+    ct = [t for t, _, _ in vd_lines(h2)]
+    verdict(len(churn) <= 3 and all(b2 - b1 >= 2.95 for b1, b2 in zip(ct, ct[1:])),
+            f"VD: the switch flipped four times a second: at most one change every 3 s: {[(round(t, 1), k) for t, k, _ in vd_lines(h2)]}")
+    verdict(rp.get("exit") == 0 and "EXPECT ok" in rp.get("out", ""), "VD: the paired device's last word (off) stands, and it says available")
+    last = vd_lines(h2)
+    verdict(bool(last) and last[-1][1] == "removed", f"VD: off at the end: removed: {last[-1:] if last else last}")
 
 
 if __name__ == "__main__":

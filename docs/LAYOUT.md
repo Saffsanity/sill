@@ -662,7 +662,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/desktop-check/live.py OUT` (TEST ONLY; docs/virtual-desktop-plan.md): the Desktop's
+  stops on a test host (SILL_TEST_DISPLAYS: steps, taps, rates, the lock, the span), and from phase 2b the Virtual
+  Desktop on two more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's room, its
+  turn, its grace, locked and off console, the span; a paired device's switch shown at once, an unpaired one's refused,
+  the switch flipped four times a second against the spacing), a verdict per rule. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness

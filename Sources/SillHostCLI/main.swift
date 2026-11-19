@@ -62,6 +62,28 @@ config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
 // the size of that device. Without --virtual-display none is made either way (it needs the AppKit loop).
 config.headlessDisplay = !CommandLine.arguments.contains("--no-headless-display")
 
+// `SillHost --virtual-desktop[=device|main|WxH@S[:HZ]]`: the Virtual Desktop for this run (phase 2b of
+// docs/virtual-desktop-plan.md; HostConfig.virtualDesktop): a desktop of Sill's own after this Mac's screens, the Desktop
+// button's last stop, made while a device shows it and 30 s after. By default the size and rate of the device that shows it
+// (`device`); `main` the main display's mode, or a size from Sill for Mac's list ("1920x1080@2"), and a rate after a colon
+// (30, 60, 120). Off by default, as in Sill.app (Settings › Displays). Runs the AppKit loop as --virtual-display does (every
+// display Sill makes needs it). A paired device can turn it off and on for the run. Without it the output is as it was.
+let virtualDesktopFlag = CommandLine.arguments.first { $0 == "--virtual-desktop" || $0.hasPrefix("--virtual-desktop=") }
+if let flag = virtualDesktopFlag {
+    config.virtualDesktop = true
+    if flag.hasPrefix("--virtual-desktop=") {
+        guard let chosen = VirtualDesktopSize.flag(String(flag.dropFirst("--virtual-desktop=".count))) else {
+            print("--virtual-desktop=… takes device, main or a size of Sill for Mac's list (" + VirtualDesktopSize.offered.map(VirtualDesktopSize.id)
+                  .joined(separator: ", ") + "), then :30, :60 or :120 for its rate.")
+            exit(2)
+        }
+        config.virtualDesktopSize = chosen.size
+        config.virtualDesktopHz = chosen.hz
+    }
+}
+// The AppKit loop: the virtual display's, and the Virtual Desktop's.
+let appKitLoop = virtualDisplay || virtualDesktopFlag != nil
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
@@ -153,7 +175,7 @@ func startHost() {
     Task { @MainActor in
         do {
             let remote = config.remoteAccess || pairingFlag ? makeRemoteAccess() : nil
-            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay, remote: remote,
+            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: appKitLoop, remote: remote,
                                           homePairing: pairingFlag, testHooks: true)
             coordinator = c
             await c.start(preselect: preselect)
@@ -163,6 +185,10 @@ func startHost() {
             remote?.openPairing(requestedBy: nil)
             if synthetic { print("Synthetic mode: pick Desktop on the device (or from a test client) to stream a test pattern.") }
             if virtualDisplay { print("Virtual display mode: a picked window streams from its own HiDPI display; Ctrl-C puts it back.") }
+            if virtualDesktopFlag != nil {
+                print("Virtual Desktop on for this run: the Desktop's last stop, sized \(VirtualDesktopSize.words(config.virtualDesktopSize)), "
+                      + "\(VirtualDesktopSize.rateWords(config.virtualDesktopHz)); made while a device shows it, Ctrl-C moves its windows off it.")
+            }
             print("\(c.windowCount) windows on screen. Advertising _sill._tcp on the local network.")
             if c.active == .none { print("Nothing is streaming yet: pick a window from the iOS app. Ctrl-C to stop.") }
             if audioFlag {
@@ -214,7 +240,7 @@ func makeRemoteAccess() -> RemoteAccess {
     return remote
 }
 
-if virtualDisplay {
+if appKitLoop {
     // The window server delivers display reconfiguration through the app's event port, which
     // dispatchMain() never drains; only under NSApplication.run() does this process learn the
     // virtual display's modes. The main dispatch queue (Task { @MainActor }, Stats' timer, the

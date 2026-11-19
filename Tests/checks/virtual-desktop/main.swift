@@ -382,6 +382,14 @@ check(VS.rate(choice: 30, viewportFPS: 120, limit: 120) == 30 && VS.rate(choice:
       "…a chosen rate, whatever the device's")
 check(VS.rate(choice: 120, viewportFPS: 60, limit: 60) == 60, "…held to the Frame Rate limit")
 check(VS.rate(choice: 75, viewportFPS: 120, limit: 120) == 120, "…one not offered is the device's")
+// The CLI's --virtual-desktop=VALUE.
+check(VS.flag("device")! == ("device", 0) && VS.flag("main")! == ("main", 0) && VS.flag("1920x1080@2")! == ("1920x1080@2", 0),
+      "the CLI's flag: a size choice alone, the device's rate")
+check(VS.flag("device:120")! == ("device", 120) && VS.flag("3440x1440@1:60")! == ("3440x1440@1", 60) && VS.flag("main:30")! == ("main", 30),
+      "…with a rate after a colon")
+for bad in ["", "Device", "1920x1080", "device:", "device:0", "device:75", "device:60:60", "8K", ":60", "1920x1080@2:x"] {
+    check(VS.flag(bad) == nil, "the CLI's flag refuses \(bad.debugDescription)")
+}
 // Same as main display, the 11-12 plan's §2 table.
 let mainRows: [(String, CGSize, Int, VS.Size)] = [
     ("14-inch MacBook Pro", CGSize(width: 1512, height: 982), 2, VS.Size(widthPt: 1512, heightPt: 982, scale: 2)),

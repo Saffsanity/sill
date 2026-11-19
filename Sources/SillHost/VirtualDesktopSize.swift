@@ -168,6 +168,16 @@ package enum VirtualDesktopSize {
         return Size(widthPt: max(1, Int(w)), heightPt: max(1, Int(h)), scale: 1)
     }
 
+    /// The CLI's `--virtual-desktop=VALUE`: a size choice (`device`, `main` or one of `offered` as "WxH@S"), and a rate
+    /// after a colon (`:30`, `:60`, `:120`; none: the device's). Nil for anything else.
+    package static func flag(_ value: String) -> (size: String, hz: Int)? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard (1...2).contains(parts.count), choice(parts[0]) != nil else { return nil }
+        guard parts.count == 2 else { return (parts[0], 0) }
+        guard let hz = Int(parts[1]), hz != 0, rateChoices.contains(hz) else { return nil }
+        return (parts[0], hz)
+    }
+
     /// The person's choice in words, for Sill for Mac's pickers and the log: "Match the device", "Same as main display",
     /// "1920 × 1080 (Retina)", "3440 × 1440"; an id not offered reads as This device.
     package static func words(_ id: String) -> String {

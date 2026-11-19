@@ -167,6 +167,11 @@ MUTANTS = [
      "        if fit < 1 { w = (w * fit).rounded(); h = (h * fit).rounded() }"),
     ("main never shrunk", "size", "        if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }", "        if false { }"),
     ("the words without Retina", "size", "+ (s.scale == 2 ? \" (Retina)\" : \"\")", "+ \"\""),
+    ("the flag takes any size", "size", "        guard (1...2).contains(parts.count), choice(parts[0]) != nil else { return nil }\n",
+     "        guard (1...2).contains(parts.count) else { return nil }\n"),
+    ("the flag's rate unchecked", "size", "        guard let hz = Int(parts[1]), hz != 0, rateChoices.contains(hz) else { return nil }\n",
+     "        guard let hz = Int(parts[1]) else { return nil }\n"),
+    ("the flag's rate dropped", "size", "        return (parts[0], hz)\n", "        return (parts[0], 0)\n"),
     ("a rate not offered named", "size", "hz == 0 || !rateChoices.contains(hz) ? \"Match the device\"", "hz == 0 ? \"Match the device\""),
     # VirtualDesktopLife: when it exists (plan §6, §10)
     ("the grace 300 s", "life", "    static let grace: Double = 30\n", "    static let grace: Double = 300\n"),
