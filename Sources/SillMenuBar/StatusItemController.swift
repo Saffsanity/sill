@@ -58,12 +58,27 @@ struct LoginState: Equatable {
 /// The status menu, top to bottom. Titles are title case, subtitles sentence case. The controls
 /// mirror the Settings window and only ever set the app's settings.
 enum MenuBuilder {
+    /// Update Now as the menu's update item needs it (AppUpdater.menu). `.none`: not in this build, and
+    /// the item is what it was before Update Now.
+    struct UpdateMenuState: Equatable {
+        var phase: UpdateInstallPolicy.Phase = .idle
+        var available = false
+        var refusal: UpdateInstallPolicy.Refusal?
+        /// This Sill is a nightly: its build, for the item's "You have nightly 0.6.2 (1597)".
+        var runningBuild: Int?
+
+        static let none = UpdateMenuState()
+    }
+
     /// `update`: a newer release the update check found, and this Sill's version: one item right
     /// after the card and anything needing attention. The glyph never changes for it: the attention
-    /// glyph means Sill needs the person before it can work, and an update needs nothing.
+    /// glyph means Sill needs the person before it can work, and an update needs nothing. With Update
+    /// Now available (`install`) the item opens Settings › General, where its button is, and says how
+    /// an update under way goes; otherwise it opens the release's page, as before.
     static func entries(presentation p: StatusPresentation, config: HostConfig, login: LoginState,
                         permissions: PermissionState,
-                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil) -> [MenuEntry] {
+                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil,
+                        install: UpdateMenuState = .none) -> [MenuEntry] {
         var menu: [MenuEntry] = [MenuEntry(kind: .card, title: p.header)]
         for a in p.attention {
             let action: MenuEntry.Action = switch a.action {
@@ -71,6 +86,7 @@ enum MenuBuilder {
             case .allowAccessibility: .allowAccessibility
             case .showRemoteAccess: .showSettingsTab(.remoteAccess)
             case .showDevices: .showSettingsTab(.devices)
+            case .showGeneral: .showSettingsTab(.general)
             case .pairingRequest(let name, let showing): .showPairingRequest(name: name, showing: showing)
             case .none: .none
             }
@@ -78,8 +94,16 @@ enum MenuBuilder {
                                   attention: true, action: action))
         }
         if let update {
-            menu.append(MenuEntry(kind: .item, title: UpdatePolicy.menuTitle(update.offer),
-                                  subtitle: UpdatePolicy.menuSubtitle(running: update.running), action: .openUpdate(update.offer.url)))
+            if install.available {
+                let item = UpdateInstallPolicy.menuItem(install.phase, offered: update.offer.version, running: update.running,
+                                                        available: true, refusal: install.refusal, offeredBuild: update.offer.build,
+                                                        runningBuild: install.runningBuild)
+                menu.append(MenuEntry(kind: .item, title: item.title, subtitle: item.subtitle,
+                                      action: item.opensSettings ? .showSettingsTab(.general) : .openUpdate(update.offer.url)))
+            } else {
+                menu.append(MenuEntry(kind: .item, title: UpdatePolicy.menuTitle(update.offer),
+                                      subtitle: UpdatePolicy.menuSubtitle(running: update.running), action: .openUpdate(update.offer.url)))
+            }
         }
         menu.append(.separator)
 
@@ -161,9 +185,11 @@ enum MenuBuilder {
                                needsApproval: model.loginItem.needsApproval, error: model.loginItem.error)
         let permissions = PermissionState(screenRecording: model.permissions.screenRecording,
                                           accessibility: model.permissions.accessibility)
-        let update = model.updates.offer.flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
+        // Update Now's own choice where it has one (a nightly), else the check's.
+        let update = (model.updater.offered ?? model.updates.offer).flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
+        if update != nil { model.updater.refresh() }
         return entries(presentation: model.presentation, config: model.settings.config, login: login, permissions: permissions,
-                       update: update)
+                       update: update, install: model.updater.menu)
     }
 
     /// The menu as text, for the previews: "✓" checked, "⚠" attention, "(off)" disabled.
@@ -247,6 +273,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         model.permissions.refresh()
         model.loginItem.refresh()
+        // The macOS firewall asked again (FirewallCheck: read-only, a few ms, off the main thread), so
+        // a block that came after launch (a Deny in the firewall's own prompt, Block all incoming
+        // connections turned on) is told where the user looks when devices can't connect: the glyph at
+        // once, Devices Can’t Connect from the menu's next opening (it is built before the answer).
+        model.coordinator?.checkFirewall()
         rebuild()
     }
 

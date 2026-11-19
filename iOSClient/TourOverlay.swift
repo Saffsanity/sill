@@ -44,16 +44,24 @@ extension View {
 // MARK: - What it remembers
 
 /// `Sill.tourSeen` (the topics passed with Next or Done) and `Sill.tourSkipped`, in the app's own
-/// defaults: per device, not per Mac (the privacy manifest's UserDefaults reason covers them).
+/// defaults: per device, not per Mac (the privacy manifest's UserDefaults reason covers them); and
+/// `Sill.tourVersion`, the tour's version they are of (an Int; 0.5 and 0.5.1 stored none). A memory
+/// of an older version, or of none, is cleared once and stored with this version
+/// (TourPolicy.upgraded), so the tour shows once more for everyone who launches it. SwiftUI makes a
+/// TourStore at every StreamScreen init (`@State`'s initial value) and keeps the first, so the
+/// upgrade writes only while what is stored is older, and every later one reads it back as it is.
 ///
 /// DEBUG: the automatic tour runs only with `-SillTourState fresh|landscape|done|skipped|saved`
 /// (otherwise no harness photo and no other feature's live test ever gets a tour over it); `fresh`
-/// is nothing seen, `landscape` the three sideways steps seen, `done` all four, `skipped` Skip
-/// tapped, each for this run only and never written back; `saved` reads and writes the saved keys,
-/// as a Release build does. The mock harness writes nothing unless `saved` says so.
+/// is nothing seen, `landscape` the sideways steps seen, `done` all of them, `skipped` Skip tapped,
+/// each for this run only and never written back; `saved` reads and writes the saved keys, as a
+/// Release build does, the version and its upgrade included. Without `saved` a Debug build never
+/// upgrades the memory nor writes the version, so it never uses up the once more that a TestFlight
+/// or App Store build gives. The mock harness writes nothing unless `saved` says so.
 final class TourStore {
     static let seenKey = "Sill.tourSeen"
     static let skippedKey = "Sill.tourSkipped"
+    static let versionKey = "Sill.tourVersion"
 
     private(set) var memory: TourMemory
     /// Whether the automatic tour runs at all (Release: always).
@@ -63,26 +71,44 @@ final class TourStore {
     init(defaults: UserDefaults = .standard) {
         let saved = TourMemory(names: defaults.stringArray(forKey: Self.seenKey) ?? [],
                                skipped: defaults.bool(forKey: Self.skippedKey))
+        let savedVersion: Int? = defaults.object(forKey: Self.versionKey) == nil ? nil : defaults.integer(forKey: Self.versionKey)
         #if DEBUG
         let state = defaults.string(forKey: "SillTourState")
         let mock = defaults.string(forKey: "SillLayout") != nil && !defaults.bool(forKey: "SillLive")
         automatic = state != nil
         switch state {
         case "fresh": memory = TourMemory(); persists = false
-        case "landscape": memory = TourMemory(seen: [.touch, .bar, .settings]); persists = false
+        case "landscape": memory = TourMemory(seen: Set(TourPolicy.steps(.landscape, voiceOver: false))); persists = false
         case "done": memory = TourMemory(seen: Set(TourTopic.allCases)); persists = false
         case "skipped": memory = TourMemory(skipped: true); persists = false
-        case "saved": memory = saved; persists = true
+        case "saved": memory = Self.upgrade(saved, version: savedVersion, defaults); persists = true
         default: memory = saved; persists = !mock
         }
         #else
         automatic = true
-        memory = saved
+        memory = Self.upgrade(saved, version: savedVersion, defaults)
         persists = true
         #endif
     }
 
+    /// The memory as this tour version reads it; a cleared one is written back at once with the
+    /// version, before any card shows (TourPolicy.upgraded).
+    private static func upgrade(_ saved: TourMemory, version: Int?, _ defaults: UserDefaults) -> TourMemory {
+        let (memory, write) = TourPolicy.upgraded(saved, savedVersion: version)
+        guard write else { return memory }
+        defaults.set(memory.names, forKey: seenKey)
+        defaults.set(memory.skipped, forKey: skippedKey)
+        defaults.set(TourPolicy.version, forKey: versionKey)
+        #if DEBUG
+        let was = version.map { "tour version \($0)" } ?? "tour version 1 (none stored)"
+        let seen = saved.names.isEmpty ? "none" : saved.names.joined(separator: ", ")
+        print("tour: memory of \(was) (seen: \(seen)\(saved.skipped ? "; skipped" : "")) cleared: version \(TourPolicy.version) shows once")
+        #endif
+        return memory
+    }
+
     /// Next, Done and Skip save as they go, so a session that ends mid-tour keeps what was passed.
+    /// The version is the upgrade's alone.
     func save(_ m: TourMemory) {
         memory = m
         guard persists else { return }
@@ -595,13 +621,15 @@ private struct TourCard: View {
             .accessibilityHidden(true)
     }
 
-    /// The row's words with its control's name semibold: attributes on plain text, never Markdown,
-    /// so the Mac's name is shown as it is.
+    /// The row's words with its control's name semibold, and the "New:" of a row about what this
+    /// version adds semibold in the accent: attributes on plain text, never Markdown, so the Mac's name
+    /// is shown as it is. One Text, so "New:" wraps with its row at every text size.
     static func attributed(_ row: TourRow) -> AttributedString {
         var out = AttributedString()
         for span in row.spans {
             var piece = AttributedString(span.text)
             if span.strong { piece.font = .subheadline.weight(.semibold) }
+            if span.isNew { piece.foregroundColor = Palette.accent }
             out += piece
         }
         return out
@@ -755,7 +783,7 @@ private struct TailEdge: Shape {
 #if DEBUG
 /// The harness's stand-ins for what the gates may not do (tap, touch, turn on VoiceOver), read once
 /// from the launch arguments (ContentView's contract):
-/// `-SillTour touch|bar|settings|laptop` starts the tour at that step, as Take the Tour does, at the
+/// `-SillTour touch|bar|sharing|settings|laptop` starts the tour at that step, as Take the Tour does, at the
 /// first picture (the mock's is at once); `-SillTourPress next@S|skip@S` presses Next (Done on the
 /// last card) S seconds after each card appears, or Skip once; `-SillTourActivityAt S` is a touch S
 /// seconds after the picture of the app run's first session (so the automatic reconnect's session

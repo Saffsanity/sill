@@ -28,6 +28,9 @@ final class InputInjector {
 
     private struct ButtonState {
         var isDown = false
+        /// The device whose down of it went last, while it is down: once the Mac no longer serves that
+        /// device, its up of this button is the only input of it that still goes (RevokedInput).
+        var owner: KeyStrokes.Device?
         var clicks: Int64 = 1
         var lastDownAt: CFAbsoluteTime = -1_000
         var lastDownPoint: CGPoint = .zero
@@ -82,6 +85,12 @@ final class InputInjector {
     /// input with nowhere to land that still goes (`isUpOfSomethingDown`: StreamCoordinator), a
     /// button's up then going where the pointer is.
     func apply(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
+        // A Mac off console takes nothing from a device but the up of what it holds down (LockPolicy,
+        // docs/locked-mac-plan.md): the coordinator decides first; this is the last word before a post.
+        if lockReading?() == .offConsole, !releasesWhatItHolds(event, from: device) {
+            Stats.shared.bump("in.locked")
+            return
+        }
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         switch event {
         case .pointer(let action, let x, let y):
@@ -97,7 +106,7 @@ final class InputInjector {
                     else if gap > 0.025 { Stats.shared.bump("in.gap>25ms") }
                 }
             }
-            pointer(action, at: point(x, y, in: rect))
+            pointer(action, at: point(x, y, in: rect), from: device)
         case .scroll(let x, let y, let dx, let dy):
             scroll(at: point(x, y, in: rect), dx: dx * rect.width, dy: dy * rect.height)
         case .text(let string):
@@ -280,7 +289,9 @@ final class InputInjector {
 
     // MARK: Pointer
 
-    private func pointer(_ action: PointerAction, at location: CGPoint) {
+    /// `device`: whose input it is (nil for the host's own let-go at its end, `releaseAll`); a button's
+    /// down makes it the button's owner until its up.
+    private func pointer(_ action: PointerAction, at location: CGPoint, from device: KeyStrokes.Device? = nil) {
         let type: CGEventType
         let button: CGMouseButton
         var clicks: Int64 = 1
@@ -293,16 +304,16 @@ final class InputInjector {
             else if right.isDown { type = .rightMouseDragged; button = .right; clicks = right.clicks }
             else { type = .mouseMoved; button = .left }
         case .leftDown:
-            beginClick(&left, at: location)
+            beginClick(&left, at: location, by: device)
             type = .leftMouseDown; button = .left; clicks = left.clicks
         case .leftUp:
-            left.isDown = false
+            left.isDown = false; left.owner = nil
             type = .leftMouseUp; button = .left; clicks = left.clicks   // the up carries the down's count
         case .rightDown:
-            beginClick(&right, at: location)
+            beginClick(&right, at: location, by: device)
             type = .rightMouseDown; button = .right; clicks = right.clicks
         case .rightUp:
-            right.isDown = false
+            right.isDown = false; right.owner = nil
             type = .rightMouseUp; button = .right; clicks = right.clicks
         }
 
@@ -323,7 +334,16 @@ final class InputInjector {
         DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown)
     }
 
-    private func beginClick(_ state: inout ButtonState, at location: CGPoint) {
+    /// Whether this input of `device`, a device the Mac no longer serves (its pairing removed, Remote
+    /// Access or internet access off, Require pairing on) or one that has left, is the up of a key or a
+    /// button it pressed and the Mac still has down: the only input of it that still goes
+    /// (RevokedInput, StreamCoordinator), a button's where the pointer is (`.null`).
+    func releasesWhatItHolds(_ event: InputEvent, from device: KeyStrokes.Device) -> Bool {
+        RevokedInput.stillGoes(event, from: device, keyOwner: { keys.down[$0] },
+                               leftOwner: left.isDown ? left.owner : nil, rightOwner: right.isDown ? right.owner : nil)
+    }
+
+    private func beginClick(_ state: inout ButtonState, at location: CGPoint, by device: KeyStrokes.Device?) {
         let now = CFAbsoluteTimeGetCurrent()
         let moved = hypot(location.x - state.lastDownPoint.x, location.y - state.lastDownPoint.y)
         if now - state.lastDownAt <= Self.multiClickInterval && moved <= Self.multiClickSlop {
@@ -332,6 +352,7 @@ final class InputInjector {
             state.clicks = 1
         }
         state.isDown = true
+        state.owner = device
         state.lastDownAt = now
         state.lastDownPoint = location
     }
@@ -604,9 +625,15 @@ final class InputInjector {
 
     /// A device left: every key it still holds down goes up (KeyStrokes.release), so a key or a
     /// modifier whose up it never sent (its connection ended in between) does not stay down on the
-    /// Mac and make the next click a ⌘-click. Counted, `in.keyLetGo`, when posted.
-    func releaseKeys(of device: KeyStrokes.Device) {
+    /// Mac and make the next click a ⌘-click. Counted, `in.keyLetGo`, when posted. A device the Mac
+    /// no longer served (`revoked`) lets go of a button it holds down too, where the pointer is
+    /// (RevokedInput.buttonsLetGo), or every later move would be a drag.
+    func releaseKeys(of device: KeyStrokes.Device, revoked: Bool = false) {
         post(keys.release(device), letGo: true)
+        for action in RevokedInput.buttonsLetGo(by: device, revoked: revoked, leftOwner: left.isDown ? left.owner : nil,
+                                                rightOwner: right.isDown ? right.owner : nil) {
+            pointer(action, at: pointerNow())
+        }
     }
 
     /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
@@ -667,6 +694,10 @@ final class InputInjector {
     var heardFrom: ((KeyStrokes.Device) -> Double?)?
     /// Where a repeat would land now (the coordinator's, KeyRepeat.Landing). Unset: on the source.
     var repeatLanding: (() -> KeyRepeat.Landing)?
+    /// The lock's reading now (the coordinator's: SessionLock's gate; LockPolicy). Off console nothing is
+    /// posted but the up of what a device holds down; locked, no gesture's shortcut and no key repeat.
+    /// Unset: as ever.
+    var lockReading: (() -> LockPolicy.Reading)?
 
     /// The repeat's clock: seconds of system uptime (StreamServer.lastHeard's).
     static func clock() -> Double { ProcessInfo.processInfo.systemUptime }
@@ -710,6 +741,14 @@ final class InputInjector {
     /// One step of the held key's repeat now (KeyRepeat.step): a repeat posted or not, and how long
     /// until the next; nil when nothing repeats any more.
     private func repeatStep() -> Double? {
+        // A locked Mac repeats no key (LockPolicy): the coordinator stops the repeat at the lock, and a
+        // step that comes first finds the gate.
+        if lockReading?().locked == true {
+            repeating.stop()
+            repeatScheduled = nil
+            repeatTask = nil
+            return nil
+        }
         let now = Self.clock()
         var heard: Double? = now
         if let held = repeating.held, let heardFrom { heard = heardFrom(held.device) }
@@ -756,6 +795,8 @@ final class InputInjector {
     /// Spotlight key's ⌘ once reached the text typed after it (`type`). The shortcut acts on the key
     /// down. `checkModifiersLeft` says so in the log if the table still holds the chord's modifiers.
     func chord(keyCode: UInt16, flags: UInt64) {
+        // No gesture's shortcut at a locked Mac (LockPolicy): the coordinator refuses it first.
+        if lockReading?().locked == true { Stats.shared.bump("in.locked"); return }
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         let before = CGEventSource.flagsState(.hidSystemState).rawValue
         let strokes = KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: before)

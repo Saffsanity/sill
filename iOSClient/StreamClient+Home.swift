@@ -380,12 +380,13 @@ extension StreamClient {
     }
 
     /// How a session at home over TLS ended (§7.6, DiscoveryPolicy.homeEnd): the Mac removed this
-    /// device, now asks devices to pair, or another key answered as the saved Mac. True when it
-    /// said the words and chose what follows (never the ordinary reconnect); false for every other
-    /// end, which `sessionEnded` words as before. A saved Mac whose pin failed has its other rows
-    /// dialed first, pinned: a stranger replaying its tag makes a row that looks like it, and the
-    /// words would tell the user to forget the real Mac. A row the reconnect took by its Bonjour
-    /// name alone is skipped from then on, without those words. Main thread.
+    /// device, now asks devices to pair, or another key answered as the saved Mac, or at the
+    /// reconnect of an unsaved one on an open door. True when it said the words and chose what
+    /// follows (never the ordinary reconnect); false for every other end, which `sessionEnded`
+    /// words as before. A saved Mac whose pin failed has its other rows dialed first, pinned: a
+    /// stranger replaying its tag makes a row that looks like it, and the words would tell the user
+    /// to forget the real Mac. A row the reconnect took by its Bonjour name alone is skipped from
+    /// then on, without those words. Main thread.
     func homeSessionEnded(_ s: Session?, error: NWError?, goodbye: String?) -> Bool {
         guard let s, !s.route.isRemote else { return false }
         let end = DiscoveryPolicy.homeEnd(trust: s.home, goodbye: goodbye, tls: error.flatMap { RemoteTLS.status(of: $0) })
@@ -408,6 +409,12 @@ extension StreamClient {
             endAtHome(DiscoveryPolicy.HomeCopy.removed(mac: name, device: Self.deviceWord))
         case .pairingRequired:
             endAtHome(DiscoveryPolicy.HomeCopy.pairingRequired(mac: name, device: Self.deviceWord))
+        case .otherKey:
+            // The reconnect of a Mac this device was connected to without pairing, pinned to the key
+            // that session saw (DiscoveryPolicy.reconnectTrust), met another: whatever now answers
+            // under its name is not dialed again by itself. The reconnect ends; its row reads Not
+            // paired, and a tap connects with any key, as a tap there always has.
+            endAtHome(DiscoveryPolicy.HomeCopy.otherKey(mac: name, device: Self.deviceWord))
         case .wrongKey:
             let tried = s.row.map { $0.tried + [$0.id] } ?? []
             guard let mac = saved, let pin = mac.fingerprintData else {
@@ -1005,7 +1012,10 @@ extension StreamClient {
                            recognitionKey: recognition, remotePort: HostConfigDefaults.remotePort, addresses: [], typedAddresses: nil,
                            infoIssuedAt: 0, bonjourName: bonjourName, lastWorked: nil, pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
-        if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
+        if let info {
+            mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback,
+                                      now: Date().timeIntervalSince1970) ?? mac
+        }
         if let link, link.fingerprint == fingerprint {
             mac = SavedMacs.applyingLink(link.addresses.map(RemoteDialPolicy.address(for:)), port: link.port, to: mac,
                                          allowLoopback: Self.keepsLoopback)

@@ -16,7 +16,7 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              shareClipboard, offConsoleView, remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
@@ -37,7 +37,10 @@ import StreamProtocol
 ///     -SillMenuAfter '<s>[; <s> …]'            print the status menu as menu.txt shows it, one
 ///                                              "SillMenuAfter <s> s: " line per line, s seconds
 ///                                              after launch (the "‹device› Wants to Pair",
-///                                              older-device and "Devices Can’t Connect" items)
+///                                              older-device and "Devices Can’t Connect" items);
+///                                              the macOS firewall is asked again first, as the
+///                                              menu does when it opens, its answer shown by the
+///                                              next print
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
 ///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
 ///                                              a feed on this Mac only (http or https to
@@ -52,7 +55,8 @@ import StreamProtocol
 ///                                              s; no jitter)
 ///     -SillPrintMenuAfter <s>                  print the status menu as it would open (as menu.txt
 ///                                              draws it, "menu: " before each line) and Settings ›
-///                                              General's update line, s seconds after launch
+///                                              General's update and firewall lines, s seconds after
+///                                              launch
 ///     -SillSettingsAfter '<s> <tab>[; <s> <tab> …]'
 ///                                              open Settings on that tab s seconds after launch,
 ///                                              as the menu does, and 0.6 s later print the window's
@@ -72,17 +76,20 @@ import StreamProtocol
 ///                                              (title bar, toolbar, pane) to <dir>/settings-<s>s-<tab>.png
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
 ///                                              Access panes in each of their states, General's
-///                                              update section in each of its), the pairing
+///                                              update section in each of its, General with the
+///                                              macOS firewall's line and that line alone in each
+///                                              of its verdicts), the pairing
 ///                                              window's states and the cable notice,
 ///                                              status cards, glyphs and menu.txt to <dir>, then
 ///                                              exit (no Screen Recording needed: views render
 ///                                              offscreen; no identity is loaded, no listener)
 ///
 /// These are the bare SillMenuBar binary's (defaults domain "SillMenuBar"; delete it after). Sill.app
-/// itself, an app bundle's executable, ignores every `-Sill…After` hook and `-requirePairing`, each
-/// with one line (docs/home-pairing-plan.md §6.6): they open, answer or remove pairings, or change
-/// what the doors admit, and any process of this user can start Sill.app with arguments, which then
-/// runs with Sill's Screen Recording and Accessibility grants. `-SillTestScreenHeight` and
+/// itself (`AppModel.bundled`: Sill's own code wherever it runs from, AppIdentity) ignores every
+/// `-Sill…After` hook and `-requirePairing`, each with one line (docs/home-pairing-plan.md §6.6):
+/// they open, answer or remove pairings, or change what the doors admit, and any process of this
+/// user can start Sill.app, or a copy of it, with arguments, which then runs with Sill's Screen
+/// Recording and Accessibility grants. `-SillTestScreenHeight` and
 /// `-SillSettingsShot` go with `-SillSettingsAfter` and are ignored the same way: Sill.app has no
 /// use for them. `--synthetic`, `-SillLogFile`,
 /// `-SillRenderPreviews` and the update check's `-SillUpdateFeed`, `-SillUpdateNow`,
@@ -218,6 +225,7 @@ enum DebugHooks {
         for delay in times(defaults.string(forKey: "SillMenuAfter")) {
             after(delay) {
                 model.permissions.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens; the answer shows at the next
                 for line in MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation).split(separator: "\n") {
                     print("SillMenuAfter \(delay) s: \(line)")
                 }
@@ -228,10 +236,18 @@ enum DebugHooks {
             after(printAfter) {
                 model.permissions.refresh()
                 model.loginItem.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens
                 print("SillPrintMenuAfter \(printAfter) s:")
                 let text = MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation)
                 for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty { print("menu: \(line)") }
                 print("Settings › General's update line: \(model.updates.pane.line)")
+                // The macOS firewall's line as the pane shows it (FirewallRule), with its command.
+                let firewall = model.coordinator?.status.snapshot.firewall
+                if let firewall, let line = FirewallRule.Copy.paneLine(firewall) {
+                    print("Settings › General's firewall line: \(line)\(FirewallRule.Copy.command(firewall).map { " \($0)" } ?? "")")
+                } else {
+                    print("Settings › General's firewall line: none (\(firewall.map { String(describing: $0) } ?? "not asked yet"))")
+                }
             }
         }
         let shots = defaults.string(forKey: "SillSettingsShot").flatMap { $0.isEmpty ? nil : $0 }
@@ -353,6 +369,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
+        case "offConsoleView": config.offConsoleView = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -385,12 +402,30 @@ enum DebugHooks {
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
                                    showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
+                                   offConsoleView: .constant(sample.offConsoleView),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
+            }
+        }
+        // General while the macOS firewall blocks Sill's executable (the report's Mac), and the line alone
+        // in each verdict that shows one (FirewallRule).
+        for (name, appearance) in appearances {
+            render(SettingsPane(tab: .general, model: model, previewUpdates: neverChecked, previewClipboardAccess: .allowed,
+                                previewFirewall: firewallSamples[0].verdict)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   appearance: appearance, to: out.appendingPathComponent("pane-general-firewall-\(name).png"))
+        }
+        for (sampleName, verdict) in firewallSamples {
+            let section = Form { FirewallSection(verdict: verdict) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-firewall-\(sampleName)-\(name).png"))
             }
         }
         // General's clipboard section in each of macOS's answers (ClipboardPolicy.MacAccess), and with
@@ -416,6 +451,28 @@ enum DebugHooks {
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-updates-\(sample.name)-\(name).png"))
             }
+        }
+        // Update Now's states, as a build with an update key draws them (this branch's builds have none).
+        let offered = updatePaneSamples().first { $0.name == "available" }!.pane
+        for sample in updateNowSamples() {
+            // "auto-updated" runs the version it updated to, and "nightly-running-off" a nightly newer than any
+            // release: the check's line is the up-to-date one.
+            let checkPane = ["auto-updated", "nightly-running-off"].contains(sample.name)
+                ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
+            let section = Form { UpdatesSection(pane: checkPane, install: sample.install, installAvailable: true, automatic: .constant(sample.checkOn),
+                                                autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn),
+                                                nightlySwitch: sample.nightlySwitch, nightly: .constant(sample.nightlyOn)) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-update-now-\(sample.name)-\(name).png"))
+            }
+            // Larger text: SwiftUI on macOS has no Dynamic Type for a Settings form (dynamicTypeSize renders the
+            // same, byte for byte), so the section's own text is set at 17 points instead of 13, to see every row
+            // wrap rather than cut off at the pane's width.
+            render(section.font(.system(size: 17)), appearance: .aqua,
+                   to: out.appendingPathComponent("pane-update-now-\(sample.name)-light-larger.png"))
         }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
@@ -477,6 +534,19 @@ enum DebugHooks {
                                               update: (offer: previewOffer, running: SillVersion("0.3.0")!))
             menuText += "=== update-available (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            // With Update Now (a build with an update key): the item opens Settings, and says an update's step.
+            let installStates: [(String, MenuBuilder.UpdateMenuState)] = [
+                ("update-now-available", MenuBuilder.UpdateMenuState(phase: .idle, available: true)),
+                ("update-now-refused", MenuBuilder.UpdateMenuState(phase: .idle, available: true, refusal: .notWritable("/Applications"))),
+                ("update-now-downloading", MenuBuilder.UpdateMenuState(phase: .downloading(received: 2_400_000, total: 5_920_002), available: true)),
+                ("update-now-waiting", MenuBuilder.UpdateMenuState(phase: .waiting, available: true)),
+            ]
+            for (label, install) in installStates {
+                let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: idle.permissions,
+                                                  update: (offer: previewOffer, running: SillVersion("0.3.0")!), install: install)
+                menuText += "=== \(label) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
+                menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            }
         }
         try? menuText.write(to: out.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
         renderGlyphSheet(to: out.appendingPathComponent("glyphs.png"))
@@ -605,8 +675,31 @@ enum DebugHooks {
         closed.remote = RemoteStatus(identityProblem: keychainProblem,
                                      homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))
         list.append(Sample(name: "devices-cant-connect", snapshot: closed))
+        // The macOS firewall blocks Sill's executable (the report's Mac), and blocks every incoming
+        // connection: "Devices Can’t Connect", which opens Settings › General.
+        var blocked = idle
+        blocked.remote = RemoteStatus(homeDoor: .pairingRequired)
+        blocked.firewall = firewallSamples[0].verdict
+        list.append(Sample(name: "firewall-blocked", snapshot: blocked))
+        var blocksAll = blocked
+        blocksAll.firewall = firewallSamples.first { $0.name == "all" }?.verdict
+        list.append(Sample(name: "firewall-blocks-all", snapshot: blocksAll))
         return list
     }
+
+    /// The macOS firewall's verdicts that Settings › General shows a line for (pane-firewall-<name>),
+    /// each FirewallRule's own verdict on the answers SILL_TEST_FIREWALL's word gives (as macOS 27
+    /// prints them) for Sill.app in Applications: the report's Mac first (its executable blocked), its
+    /// bundle, both, every incoming connection, and a copy whose path a shell needs quoted.
+    static let firewallSamples: [(name: String, verdict: FirewallRule.Verdict)] = {
+        let installed = FirewallRule.paths(executable: "/Applications/Sill.app/Contents/MacOS/Sill")
+        let spaced = FirewallRule.paths(executable: "/Applications/Sill Beta.app/Contents/MacOS/Sill")
+        func judged(_ word: String, _ paths: FirewallRule.Paths) -> FirewallRule.Verdict {
+            FirewallRule.verdict(FirewallRule.testAnswers(.word(word), fileText: nil, paths: paths), paths: paths)
+        }
+        return [("executable", judged("executable", installed)), ("bundle", judged("bundle", installed)),
+                ("both", judged("both", installed)), ("all", judged("all", installed)), ("quoted", judged("executable", spaced))]
+    }()
 
     /// The remote device of `remote-device`, every connected device away: the away quality runs.
     private static func remoteAway() -> HostStatusSnapshot {
@@ -710,6 +803,9 @@ enum DebugHooks {
         waiting.network = .waiting("POSIXErrorCode(rawValue: 50): Network is down")
         var failed = HostStatusSnapshot()
         failed.network = .failed("POSIXErrorCode(rawValue: 48): Address already in use")
+        // The off-console view (docs/off-console-plan.md): another user on the screen, this account shown.
+        var offConsoleView = streaming
+        offConsoleView.offConsoleView = true
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -728,6 +824,7 @@ enum DebugHooks {
             Sample(name: "waiting", snapshot: waiting),
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
+            Sample(name: "off-console-view", snapshot: offConsoleView),
         ]
     }
 }
@@ -769,6 +866,123 @@ extension DebugHooks {
             UpdatePaneSample(name: "testpattern", pane: pane(testPatternOnly: true)),
         ]
     }
+
+    struct UpdateNowSample {
+        var name: String
+        var install: UpdateInstallPolicy.Pane
+        /// Automatically update Sill's switch, as the section draws it.
+        var autoSwitch = UpdateAutoPolicy.Switch(shown: true, enabled: true)
+        var autoOn = false
+        /// The daily check's switch.
+        var checkOn = true
+        /// "Use nightly builds", as the section draws it (plan §16).
+        var nightlySwitch = UpdateAutoPolicy.Switch()
+        var nightlyOn = false
+    }
+
+    /// pane-update-now-*: the section with Update Now (a build with an update key), Sill 0.4 offered to
+    /// a running 0.3, in each of Update Now's states and refusals (docs/one-click-update-plan.md §4.7).
+    static func updateNowSamples() -> [UpdateNowSample] {
+        typealias P = UpdateInstallPolicy
+        typealias A = UpdateAutoPolicy
+        let v04 = previewOffer.version, now = previewNow
+        func pane(_ phase: P.Phase, mode: P.Mode = .manual, refusal: P.Refusal? = nil, keptAt: String? = nil, offered: SillVersion? = v04,
+                  automatic: P.AutomaticPane = P.AutomaticPane(), offeredBuild: Int? = nil, ownLine: Bool = false, version: SillVersion? = nil) -> P.Pane {
+            P.pane(P.State(phase: phase, mode: mode), offered: version ?? offered, running: SillVersion("0.3.0")!, available: true,
+                   refusal: refusal, keptAt: keptAt, automatic: automatic, offeredBuild: offeredBuild, ownLine: ownLine)
+        }
+        let v062 = SillVersion("0.6.2")!
+        func nightlySwitch(on: Bool) -> UpdateAutoPolicy.Switch {
+            A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: on, runningNightly: nil)
+        }
+        // What the automatic update remembers in each sample, and its part of the pane.
+        let on = A.switched(A.Memory(), on: true)
+        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04, build: Int? = nil,
+                  release: (version: SillVersion, tag: String, waitUntil: Date?)? = nil) -> P.AutomaticPane {
+            A.pane(m, offered: offered, offeredTag: build != nil ? "nightly" : offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil,
+                   now: now, offeredBuild: build, release: release)
+        }
+        let nightlyOn = A.switchedNightly(on, on: true)
+        let tried = A.began(on, v04, now: now.addingTimeInterval(-26 * 3600))
+        let twice = A.failed(A.began(tried, v04, now: now.addingTimeInterval(-2 * 3600)), v04, why: "the download stopped")
+        let updated = A.updated(on, to: v04, at: now.addingTimeInterval(-2 * 3600))
+        let switchOn = UpdateAutoPolicy.Switch(shown: true, enabled: true)
+        return [
+            UpdateNowSample(name: "available", install: pane(.idle)),
+            UpdateNowSample(name: "refused-folder", install: pane(.idle, refusal: .notWritable("/Applications"))),
+            UpdateNowSample(name: "refused-account", install: pane(.idle, refusal: .otherAccount("Alex Example"))),
+            UpdateNowSample(name: "refused-owner", install: pane(.idle, refusal: .otherOwner("Alex Example"))),
+            UpdateNowSample(name: "refused-translocated", install: pane(.idle, refusal: .translocated)),
+            UpdateNowSample(name: "confirming", install: pane(.confirming(devices: [P.Device(key: "1", name: "iPad (iPad14,1)")]))),
+            UpdateNowSample(name: "fetching", install: pane(.fetching)),
+            UpdateNowSample(name: "downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002))),
+            UpdateNowSample(name: "downloading-start", install: pane(.downloading(received: 0, total: 0))),
+            UpdateNowSample(name: "checking", install: pane(.checking)),
+            UpdateNowSample(name: "ready", install: pane(.ready(devices: [P.Device(key: "1", name: "iPad (iPad14,1)"), P.Device(key: "2", name: "iPhone (iPhone16,1)")]))),
+            UpdateNowSample(name: "installing", install: pane(.installing)),
+            UpdateNowSample(name: "restarting", install: pane(.restarting)),
+            UpdateNowSample(name: "failed-download", install: pane(.failed(.download("The network connection was lost.")))),
+            // The two checks, named apart: Apple's (Developer ID, notarization) and Sill's update key's.
+            UpdateNowSample(name: "failed-signature", install: pane(.failed(.bundle(.wrongSigner)))),
+            UpdateNowSample(name: "failed-notarized", install: pane(.failed(.bundle(.notNotarized)))),
+            UpdateNowSample(name: "failed-codesignature", install: pane(.failed(.bundle(.invalidSignature(-67061))))),
+            UpdateNowSample(name: "failed-notsigned", install: pane(.failed(.notSigned))),
+            UpdateNowSample(name: "failed-updatekey", install: pane(.failed(.manifest(.badSignature)))),
+            UpdateNowSample(name: "failed-otherkey", install: pane(.failed(.manifest(.unknownKey("1a2b3c4d"))))),
+            UpdateNowSample(name: "failed-mismatch", install: pane(.failed(.manifestMismatch("sha256")))),
+            UpdateNowSample(name: "failed-notthecode", install: pane(.failed(.bundle(.notManifest("code"))))),
+            UpdateNowSample(name: "failed-stopped", install: pane(.failed(.stopped(tag: "v0.4.0")))),
+            UpdateNowSample(name: "failed-stopunreadable", install: pane(.failed(.stopUnreadable(.badSignature)))),
+            UpdateNowSample(name: "failed-didnotstart", install: pane(.failed(.didNotStart("it quit as it started", putBack: true)))),
+            UpdateNowSample(name: "failed-lost", install: pane(.failed(.didNotStart("it quit as it started", putBack: false)),
+                                                               keptAt: "/private/var/folders/xy/T/TemporaryItems/Sill previous copy ab12Cd/Sill.app")),
+            UpdateNowSample(name: "failed-gone", install: pane(.failed(.checkAfterSwap(.invalidSignature(-67054), putBack: false)))),
+            // Automatically update Sill (§15): the switch and every state it adds.
+            UpdateNowSample(name: "auto-off", install: pane(.idle)),
+            UpdateNowSample(name: "auto-on", install: pane(.idle, automatic: auto(on)), autoOn: true),
+            UpdateNowSample(name: "auto-coolingoff", install: pane(.idle, automatic: auto(on, waitUntil: now.addingTimeInterval(30 * 3600))), autoOn: true),
+            UpdateNowSample(name: "auto-downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-waiting", install: pane(.waiting, mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed", install: pane(.failed(.download("The network connection was lost.")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed-twice", install: pane(.failed(.hashMismatch), mode: .automatic, automatic: auto(twice)), autoOn: true),
+            UpdateNowSample(name: "auto-notautomatic", install: pane(.failed(.notAutomatic("it was signed more than 120 days ago")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-restored", install: pane(.failed(.didNotStart("it quit before it had run for long enough", putBack: true)), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-rollback", install: pane(.idle, automatic: auto(A.signedRelease(on, SillVersion("0.5")!))), autoOn: true),
+            UpdateNowSample(name: "auto-stopped", install: pane(.idle, automatic: auto(A.stopped(on, "v0.4.0"))), autoOn: true),
+            UpdateNowSample(name: "auto-updated", install: pane(.idle, offered: nil, automatic: auto(updated, running: "0.4.0", offered: nil)), autoOn: true),
+            UpdateNowSample(name: "auto-checkoff", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: false), checkOn: false),
+            UpdateNowSample(name: "auto-nokeychain", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false)),
+            UpdateNowSample(name: "auto-refused", install: pane(.idle, refusal: .translocated, automatic: auto(on)),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: true), autoOn: true),
+            // The second security pass: Install Now's second look at GitHub (G1), and an item Sill couldn't read (A3).
+            UpdateNowSample(name: "auto-lookingagain", install: pane(.lookingAgain(devices: []), automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-unreadable", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)),
+            // Use nightly builds (plan §16): the switch in a build with a nightly key, on and off, a nightly offered
+            // (with Automatically update Sill on: releases only, and with a release it would install meanwhile),
+            // Update Now downloading one, failed, and this Sill a nightly with the switch off. No sample has a nightly
+            // installing by itself: none can (option 4).
+            UpdateNowSample(name: "nightly-off", install: pane(.idle), nightlySwitch: nightlySwitch(on: false), nightlyOn: false),
+            UpdateNowSample(name: "nightly-offered", install: pane(.idle, offeredBuild: 1471, ownLine: true, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-auto", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, ownLine: true, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-auto-release", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471,
+                                                                                                release: (version: v04, tag: "v0.4", waitUntil: nil)),
+                                                                        offeredBuild: 1471, ownLine: true, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-downloading", install: pane(.downloading(received: 2_400_000, total: 6_210_000),
+                                                                       automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-failed-key", install: pane(.failed(.manifest(.badSignature)), offeredBuild: 1471, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-running-off", install: pane(.idle, offered: nil),
+                            nightlySwitch: A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (SillVersion("0.6.3")!, 1520)),
+                            nightlyOn: false),
+        ].map { var s = $0; if s.autoSwitch == switchOn, s.autoOn { s.autoSwitch = A.switchState(available: true, canKeep: true, checkOn: s.checkOn, refusal: nil, on: true) }; return s }
+    }
 }
 
 // MARK: Remote access previews
@@ -793,6 +1007,7 @@ extension DebugHooks {
         var status: RemoteStatus
         var requirePairing = true
         var showPairingWindowToScreenSharing = false
+        var offConsoleView = false
     }
 
     /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
@@ -816,6 +1031,7 @@ extension DebugHooks {
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
                               showPairingWindowToScreenSharing: true),
+            DevicesPaneSample(name: "offconsoleview", status: RemoteStatus(homeDoor: .pairingRequired), offConsoleView: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

@@ -324,7 +324,9 @@ package var directWireless: Bool
 - `accepted` starts with
   `var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: c.directWireless)`.
   It is always accepted, on every host, including the synthetic one, where it changes only which
-  interfaces the listener accepts on.
+  interfaces the listener accepts on. (Since 2026-10-29, the security scan's finding 8, PR #253:
+  only from a session whose key is on the Mac's trust list, at home, `accepted`'s `paired` and
+  `fromRemote`; anywhere else refused, on or off, "direct wireless (only a paired device)".)
 - "these five knobs" becomes "these six".
 
 #### 3.2 `StreamServer.swift`: the listener and its replacement
@@ -920,6 +922,16 @@ Builds:
 
 Throughout, `AWDL0` is awdl0's interface index, read at run time.
 
+Since 2026-10-29 (the security scan's finding 8, PR #253) a device changes Direct Wireless only
+from a session whose key is on the Mac's trust list, at home. At SillHost's plain door (H3's host)
+a test client's change of it is refused (`dw=0 paired=0`, "Settings from sillclient refused:
+direct wireless (only a paired device)"), so H5's `--expect=directWireless=0` still passes while
+none of its host lines comes, and the simulator's switch in S3 is dimmed. The gates that change it
+from a client (H5, H7, H8, H10 (b), S3) run on `--pairing` with `SILL_TEST_REMOTE_DIR`: the client
+paired once by the host's link (`--pair-url=URL`), then a session with `--tls --identity=DIR`, and
+in S3 a simulator session the Mac paired. H7's five changes in 0.4 s also meet the limit of four
+kind 17s a second per connection (since 2026-09-24): the fifth is answered and ignored.
+
 | # | Check | Pass when |
 |---|---|---|
 | H0 | **Preflight, before any edit.** `mkdir -p $SP/base && git -C $WT archive 35a1238 \| tar -x -C $SP/base`, then build it. Take the base logs: `SillHost --synthetic` idle 35 s (`base-idle.log`), and with `Scripts/sillclient.py PORT 5 desktop` (`base-client.log`). Take base previews: `defaults delete SillMenuBar; $SP/base/.build/release/SillMenuBar -SillRenderPreviews $SP/prev-base`, with md5s. Copy this plan to `$WT/docs/direct-wireless-plan.md` (untracked until step 6). Copy `hostlib.py` and `ledgercheck/` from `$SP/../ipad-settings-build/`. | The files exist |
@@ -1036,7 +1048,10 @@ Throughout, `AWDL0` is awdl0's interface index, read at run time.
 - **The memory's key** (`macName`) moves to the Mac `id` that step 3 adds for saved addresses.
 - **Network exposure.** Direct Wireless is the first device-writable setting that widens it, which
   goes against the host-settings plan's §9 line ("a device sets stream quality, never network
-  exposure"). Revisit it with pairing (M5), before any remote device can change it.
+  exposure"). Revisit it with pairing (M5), before any remote device can change it. Revisited
+  2026-10-29 (the security scan's finding 8, PR #253): a device changes it only from a session
+  whose key is on the Mac's trust list, at home; never from away, from an unpaired key at an open
+  door, or at the CLI's plain door (`DeviceSettings.accepted`, kind 16's `sessionPaired`).
 - **Security prerequisites.** §9's payload-length cap and the kind 17 rate limit matter more with it
   on.
 

@@ -545,7 +545,7 @@ check("TLS: the client's pin does not match — waiting -9808, never ready (\(r.
       !r.clientReady && r.box.lines.contains { $0.contains("-9808") })
 r = handshake(dev, alpn: "sill/2", pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: false)
 check("TLS: an ALPN the host does not offer — refused (\(r.box.lines.joined(separator: "; ")))", !r.clientReady && !r.echo)
-// The floor (CLAUDE.md): a host offers sill/1 and sill-pair/1 for good, and a later generation only
+// The floor (docs/COMPATIBILITY.md): a host offers sill/1 and sill-pair/1 for good, and a later generation only
 // ever adds to them. A 1.0 device offers exactly one of the two and hears kind 22 "update" only
 // inside a sill/1 session: a host without sill/1 would leave it a failed handshake (-9838, as the
 // sill/2 case above shows from the other side) and a redial for ever.

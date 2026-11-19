@@ -32,7 +32,8 @@ config.virtualDisplay = virtualDisplay
 // `SillHost --direct-wireless`: also advertise over, and accept connections from, peer-to-peer
 // Wi-Fi (AWDL), so a device with no network in common can connect. Off by default: while it is on
 // the Mac's radio leaves its Wi-Fi channel up to ~97 ms every 524 ms, which is the stutter in
-// CLAUDE.md. A device can still turn it on or off; that lasts until SillHost quits.
+// CLAUDE.md. A device paired at the --pairing door can still turn it on or off (no other device
+// can: DeviceSettings.accepted); that lasts until SillHost quits.
 config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 
 // `SillHost --no-clipboard`: share nothing of the clipboard with devices for this run (kind 32,
@@ -48,6 +49,12 @@ config.shareClipboard = !CommandLine.arguments.contains("--no-clipboard")
 // that lasts until SillHost quits. Without it the output is what it always was.
 let audioFlag = CommandLine.arguments.contains("--audio")
 config.sendAudio = audioFlag
+
+// `SillHost --off-console-view`: show this account while another user is on the screen, for this run
+// (docs/off-console-plan.md, issue #316): while another user's session, the login window or nobody holds
+// this Mac's console, devices see this session's own desktop and windows, to look at, and nothing they send
+// acts on it. Off by default, as in Sill.app (Settings › Devices): such a Mac shows nothing of this session.
+config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
 
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
@@ -82,6 +89,12 @@ if let remoteFlag {
 // both are given); a pairing window is always open, and its code goes to this process's stdout
 // only. Without it the home door stays plain and open, as it always was: a development host.
 let pairingFlag = CommandLine.arguments.contains("--pairing")
+
+// TEST ONLY: SILL_TEST_REQUIRE_PAIRING=0 on a --synthetic host: --pairing's TLS home door lets any
+// device in, still over TLS, as Sill.app's does with Require pairing off (Settings › Devices), so an
+// unpaired device's session can be tried headless. Anywhere else TestHooks says it is ignored (the
+// bare app takes `-requirePairing NO` instead).
+if synthetic, ProcessInfo.processInfo.environment["SILL_TEST_REQUIRE_PAIRING"] == "0" { config.requirePairing = false }
 
 // `SillHost --print-reachability`: the addresses this Mac would give devices away from home, as
 // its Remote Access pane lists them, read once (read-only SystemConfiguration); then exits.
@@ -174,14 +187,17 @@ func makeRemoteAccess() -> RemoteAccess {
     remote.logsPairingWindows = false
     remote.userWindowsOpenRemoteDoor = config.remoteAccess
     var first = true
+    // The home door's own line: Require pairing is off only under SILL_TEST_REQUIRE_PAIRING=0.
+    let homeDoor = config.requirePairing ? "Pairing required for this run (TLS on the home door)."
+                                         : "Pairing not required for this run (TLS on the home door; SILL_TEST_REQUIRE_PAIRING=0)."
     remote.onPairingOffer = { offer in
         if first {
             first = false
             if config.remoteAccess {
                 print("Remote access for this run on port \(offer.port) (TLS, paired devices only). Pair with \(offer.groupedCode) or \(offer.url)")
-                if pairingFlag { print("Pairing required for this run (TLS on the home door).") }
+                if pairingFlag { print(homeDoor) }
             } else {
-                print("Pairing required for this run (TLS on the home door). Pair with \(offer.groupedCode) or \(offer.url)")
+                print("\(homeDoor) Pair with \(offer.groupedCode) or \(offer.url)")
             }
         } else if let who = offer.askedBy {
             print("Pairing: \(who) asked; code \(offer.groupedCode) or \(offer.url)")

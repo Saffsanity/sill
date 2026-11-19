@@ -1,0 +1,5 @@
+# `device-idle`
+
+**Checks:** when Sill holds the device's own auto-lock off (PR #230, towards issue #134): while one of its windows the person can see streams, until 10 minutes after the person last used it (not at exactly 10 minutes), the later end of two windows, a window in the background, not streaming or never used holding nothing and extending nothing, a window that closed (absent from the list) holding nothing, a limit for one run; then 20,000 random sets of windows against the four invariants; what counts as the person's use (the verification's N1: the latest of input, a control, a session's start and the front; a session's start only as the person started it, carried across the automatic reconnect's), a model of the timer's stamps through a link that keeps reconnecting by itself, a Mac that keeps stopping its capture and the device's own pointer re-centre (each held for good by the rule before), and 20,000 random lives of one window against D5 (the hold ends at the person's latest use plus the limit)
+
+**Compiles:** `iOSClient/DeviceIdlePolicy.swift` (`swiftc`)

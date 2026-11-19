@@ -72,9 +72,10 @@ bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/In
 # the Command Line Tools alone must still build this. Each architecture has its own scratch path: in
 # one shared .build, every switch of triple costs a relink (16 s measured), so no rebuild stays at
 # ~2 s. Off by default: it doubles every build (50 to 97 s cold, 21 to 42 s after a one-line change,
-# measured 2026-10-20), the x86_64 slice had not streamed on an Intel Mac by then, and releases stay
-# arm64 until #62 decides (release.sh names the architectures it built). Unset, the build is for this
-# Mac's own architecture, as it always was.
+# measured 2026-10-20), and the x86_64 slice had not streamed on an Intel Mac by then. Releases from
+# 0.6.0 on and the nightlies set it (release.yml's publish job, nightly.yml's mac job; #62), and
+# release.sh names the architectures it built. Unset, the build is for this Mac's own architecture,
+# as it always was.
 if [ "${SILL_UNIVERSAL:-}" = 1 ]; then
     bin=.build/universal
     for arch in arm64 x86_64; do
@@ -101,6 +102,18 @@ xcrun vtool -set-build-version macos "${minos:?vtool reported no deployment targ
 cp Packaging/Info.plist "$stage/Contents/Info.plist"
 build_number="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$stage/Contents/Info.plist"
+# The commit this Sill is built from, sealed by its code signature (docs/one-click-update-plan.md §12d, R1):
+# Scripts/sign-update.sh signs a release only when its app names the commit of the tag whose trust it read.
+# "+changes" when the files that make Sill.app differ from that commit; nothing outside a git checkout.
+if built_from="$(git rev-parse --verify -q HEAD 2>/dev/null)"; then
+    [ -z "$(git status --porcelain -- Package.swift Sources Packaging design Scripts/make-app.sh 2>/dev/null)" ] || built_from="$built_from+changes"
+    /usr/libexec/PlistBuddy -c "Add :SillCommit string $built_from" "$stage/Contents/Info.plist"
+fi
+# A nightly says so in its signed Info.plist (SillChannel = nightly): its update check orders by version, then
+# build, against releases and nightlies alike (docs/one-click-update-plan.md §16.3). A release has no such key.
+if [ "${SILL_RELEASE_NIGHTLY:-}" = 1 ]; then
+    /usr/libexec/PlistBuddy -c "Add :SillChannel string nightly" "$stage/Contents/Info.plist"
+fi
 printf 'APPL????' > "$stage/Contents/PkgInfo"
 
 # The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a

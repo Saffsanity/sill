@@ -15,6 +15,9 @@ final class AppModel {
     /// The update check (GitHub's releases feed): the menu's "Sill 0.4 Is Available…" and Settings ›
     /// General's section. Started once the host has started, or could not.
     let updates: UpdateChecker
+    /// Update Now: the one-click update of the release the check offers (docs/one-click-update-plan.md).
+    /// Not available without an update key compiled in (UpdateManifest.releaseKeys).
+    let updater: AppUpdater
     /// `--synthetic`: the Desktop streams a test pattern and the host stays off Bonjour, exactly
     /// as with the CLI's flag. No onboarding in this mode.
     let synthetic = CommandLine.arguments.contains("--synthetic")
@@ -36,11 +39,18 @@ final class AppModel {
         var reason: String
     }
 
-    /// Sill.app itself, not the bare SillMenuBar binary: an app bundle's executable, which runs with
-    /// Sill's Screen Recording and Accessibility grants. It honours no TEST ONLY variable or `-Sill…After`
-    /// hook that bears on who gets in or what pairing needs (docs/home-pairing-plan.md §4.3, §6.6):
-    /// any process of this user can start it with an environment and arguments.
-    nonisolated static let bundled = Bundle.main.bundleURL.pathExtension == "app"
+    /// What this process is, read once at launch: its signing identifier as the kernel holds it, how
+    /// it is signed, its bundle's identifier and folder (AppIdentity).
+    nonisolated static let launchIdentity = AppIdentity.Facts.current()
+    /// Sill.app itself, not the bare SillMenuBar binary: Sill's own code, which runs with Sill's
+    /// Screen Recording and Accessibility grants wherever it runs from, decided by what the code is
+    /// (signed as Sill or with any certificate, or a bundle that says it is Sill, or a `.app`), never
+    /// by its folder's name alone (the security scan of 2026-10-18, finding 1, fixed 2026-10-29: a
+    /// copy renamed Sill.bin, or a link to Sill.app's executable, read as the bare binary). It
+    /// honours no TEST ONLY variable or `-Sill…After` hook that bears on who gets in or what pairing
+    /// needs (docs/home-pairing-plan.md §4.3, §6.6): any process of this user can start it with an
+    /// environment and arguments.
+    nonisolated static let bundled = AppIdentity.isSillApp(launchIdentity)
 
     /// Wired by the app delegate: the status item's glyph and tooltip, and the windows.
     @ObservationIgnored var onPresentation: ((StatusPresentation) -> Void)?
@@ -76,9 +86,41 @@ final class AppModel {
         // is up (up to a second or more), and -SillSetAfter counts from launch. Before `start()`
         // the checker only records it.
         settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(settings.updateCheck) }
+        let updater = AppUpdater(bundled: Self.bundled, accessGroup: Self.entitledKeychainAccessGroup())
+        self.updater = updater
+        updater.offer = { [updates] in updates.offer }
+        // Automatically update Sill (docs/one-click-update-plan.md §15): the daily check's switch, a check's
+        // answer, the pairing window, and the host's hold on new sessions (none connected and none can be,
+        // or nothing installs by itself).
+        updater.checkOn = { [settings] in settings.updateCheck }
+        updates.onAnswered = { [weak updater] in updater?.checkAnswered() }
+        updater.latestRelease = { [updates] in updates.latest }
+
+        // A test feed or a test version (the check's -SillUpdateFeed, -SillUpdateVersion) is in use: Update
+        // Now is then unavailable rather than acting on what a test said.
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        updater.checkerUsesTestValues = { [updates] in
+            updates.configuration.testFeed || updates.configuration.running != bundleVersion
+        }
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
+        // The devices an update would disconnect, each by its connection (two iPads of one name are two
+        // devices), named as the menu's card names it. The key is the connection's endpoint (a new
+        // connection has a new source port) with its object's identity, which alone can be reused once a
+        // connection is gone: a device that connects later is never taken for one the person agreed to.
+        // After an update the person started in Settings › General, the new Sill opens that window again.
+        updater.showUpdated = { [weak self] in self?.showSettings?(.general) }
+        updater.devices = { [weak self] in
+            (self?.coordinator?.status.snapshot.devices ?? []).map {
+                UpdateInstallPolicy.Device(key: "\($0.endpoint) \(String(describing: $0.id))", name: $0.name ?? "a device")
+            }
+        }
+        updater.pairing = { [weak self] in
+            if case .open? = self?.coordinator?.status.snapshot.remote?.pairing { return true }
+            return false
+        }
+        updater.hold = { [weak self] on in self?.coordinator?.holdNewSessions(on) ?? 0 }
     }
 
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
@@ -87,6 +129,9 @@ final class AppModel {
     /// Starts the host: the same coordinator as the CLI, under the AppKit loop that is already
     /// running, asking for no permission at launch. Never exits on an error.
     func start() {
+        // Sill.app's code in a folder that is not a .app (a renamed copy, a link to its executable):
+        // one line on why it takes no test hook. Nothing for Sill.app where it belongs, or the bare binary.
+        if let note = AppIdentity.note(Self.launchIdentity) { print(note) }
         observePresentation()
         // The lock notifications: the ask rule's second witness that this Mac is locked
         // (SessionLock), beside the session dictionary the CLI has alone.
@@ -129,9 +174,14 @@ final class AppModel {
                 // Off by default, and worth seeing in a log someone sends (issue #108).
                 if settings.showPairingWindowToScreenSharing { print(PairingWindowSharing.line(on: true)) }
                 onboardIfNeeded()
+                // This Sill's host is up: the copy an update replaced (kept until now so it could be put
+                // back) and anything else earlier updates left go. Not when the host could not start: the
+                // copy before may be the way back.
+                updater.afterHostUp()
             } catch {
                 startupError = "\(error)"
                 print("Sill couldn’t start: \(error)")
+                updater.hostDidNotStart()
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
@@ -146,6 +196,10 @@ final class AppModel {
             MainActor.assumeIsolated { self?.updates.systemDidWake() }
         }
         updates.start()
+        // An offer the last check stored, with the switch on: the rule decides at once (it never repeats an
+        // attempt within its own spacing, so a relaunch is no loop). With Use nightly builds on, the nightly is
+        // read first, only while the daily check is on.
+        updater.checkAnswered(atLaunch: true)
     }
 
     // MARK: Pairing and remote access
@@ -210,7 +264,7 @@ final class AppModel {
     /// without an embedded provisioning profile (every development and ad hoc build reads its own
     /// entitlement as nil, measured 2026-09-27), which is exactly the signal to use the legacy store.
     /// This reads only this process's own entitlements; it authenticates nothing about other apps.
-    private static func entitledKeychainAccessGroup() -> String? {
+    static func entitledKeychainAccessGroup() -> String? {
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else { return nil }
         if let groups = value as? [String], !groups.isEmpty {
@@ -370,6 +424,8 @@ final class AppModel {
         }
         let snapshot = coordinator?.status.snapshot
         holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0)
+        // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).
+        updater.devicesChanged(snapshot?.devices.count ?? 0)
         scheduleExpiry()
     }
 
