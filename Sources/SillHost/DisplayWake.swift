@@ -135,7 +135,8 @@ struct DisplayWake {
             case .pressMenuItem: return .menuItem
             case .gesture: return .gesture
             case .nextDisplay: return .nextDisplay
-            default: return nil                          // a pick (6), the viewport (9), settings (17), …
+            default: return nil                          // a pick (6), the viewport (9), settings (17), a device's
+                                                         // microphone (48: its sound comes by itself), …
             }
         }
     }

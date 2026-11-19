@@ -1,0 +1,7 @@
+# Compiled as one module by ../module.py, each file's `import StreamProtocol` dropped, with main.swift: the device's
+# sender and capture (iOSClient/MicrophoneSender.swift, MicrophoneCapture.swift; AVFAudio is on the Mac too, and no
+# audio device is opened), SillAudio's encoder, packetizer and decoder, and StreamProtocol.
+Sources/StreamProtocol/*.swift
+Sources/SillAudio/*.swift
+iOSClient/MicrophoneSender.swift
+iOSClient/MicrophoneCapture.swift

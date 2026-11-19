@@ -52,6 +52,7 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
+        static let deviceMicrophone = "deviceMicrophone"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -143,6 +144,9 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off, like the CLI: a Mac off console shows nothing of this session unless its user says so here.
             Key.offConsoleView: base.offConsoleView,
+            // Off, like the CLI: nothing of a device's microphone until this Mac's user turns it on, which the
+            // Settings pane of Sill Microphone (the microphone plan's next part) does.
+            Key.deviceMicrophone: base.deviceMicrophone,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -163,7 +167,8 @@ final class HostSettings {
                             requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
-                            offConsoleView: defaults.bool(forKey: Key.offConsoleView)).validated()
+                            offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            deviceMicrophone: defaults.bool(forKey: Key.deviceMicrophone)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -191,6 +196,7 @@ final class HostSettings {
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
+        if config.deviceMicrophone != old.deviceMicrophone { defaults.set(config.deviceMicrophone, forKey: Key.deviceMicrophone) }
     }
 
     // MARK: Remote devices seen (display only)

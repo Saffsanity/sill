@@ -4,10 +4,10 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = {
-    "AudioEncoder.swift": "Sources/SillHost/AudioEncoder.swift",
-    "AudioPacketizer.swift": "Sources/SillHost/AudioPacketizer.swift",
+    "AudioEncoder.swift": "Sources/SillAudio/AudioEncoder.swift",
+    "AudioPacketizer.swift": "Sources/SillAudio/AudioPacketizer.swift",
     "TestTone.swift": "Sources/SillHost/TestTone.swift",
-    "AudioDecoder.swift": "iOSClient/AudioDecoder.swift",
+    "AudioDecoder.swift": "Sources/SillAudio/AudioDecoder.swift",
 }
 MUTANTS = [
     ("the bitrate 64 kbps", "AudioEncoder.swift", "var rate = UInt32(bitrate)", "var rate = UInt32(64_000)"),
@@ -23,6 +23,10 @@ MUTANTS = [
     ("a frame short", "AudioDecoder.swift", "            let n = Int(frames)\n", "            let n = Int(frames) - 1\n"),
     ("the click 3 frames late", "TestTone.swift", "let wall = wallAtFrame0 + Double(k) / sampleRate", "let wall = wallAtFrame0 + Double(k - 3) / sampleRate"),
     ("stamps without the priming", "AudioPacketizer.swift", "hostTime: time(ofFrame: index * framesPerPacket - priming)", "hostTime: time(ofFrame: index * framesPerPacket)"),
+    # A device's microphone (docs/microphone-plan.md §3.4): mono through the same encoder and decoder. (The input
+    # format's channel count alone is no mutant: the decoder takes it from the cookie, as it takes the frame length.)
+    ("a mono decoder's second buffer empty", "AudioDecoder.swift", "return (l, channels > 1 ? Array(UnsafeBufferPointer(start: right, count: n)) : l)",
+     "return (l, channels > 1 ? Array(UnsafeBufferPointer(start: right, count: n)) : [])"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

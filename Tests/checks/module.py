@@ -1,5 +1,5 @@
 """Builds and runs a check that compiles the app's files as one module, their `import StreamProtocol`
-lines dropped, with the check's own main.swift: the files its `module.txt` lists (paths from the
+and `import SillAudio` lines dropped, with the check's own main.swift: the files its `module.txt` lists (paths from the
 repository's root, globs allowed; a line `flags: …` adds swiftc flags). Home pairing's checks
 (door-policy, cable-link, ask-limits, home-records, home-device, home-txt, home-model) came with this
 from the branch's own scratch folder (docs/home-pairing-plan.md, Results), where it was `lib.py`.
@@ -51,7 +51,7 @@ def build(check, root, exe, overrides=None):
         for f in sources(check, root):
             rel = os.path.relpath(f, root)
             text = overrides.get(rel, open(f).read())
-            lines = [l for l in text.split("\n") if l.strip() != "import StreamProtocol"]
+            lines = [l for l in text.split("\n") if l.strip() not in ("import StreamProtocol", "import SillAudio")]
             open(os.path.join(t, os.path.basename(f)), "w").write("\n".join(lines))
         open(os.path.join(t, "main.swift"), "w").write(open(os.path.join(HERE, check, "main.swift")).read())
         r = subprocess.run(["swiftc", "-O", *flags, *sorted(glob.glob(os.path.join(t, "*.swift"))), "-o", exe],

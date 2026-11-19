@@ -40,6 +40,8 @@ SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TES
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
 python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
+SILL_TEST_MIC_SINK=file:$T/mic.wav SILL_TEST_MIC_LOG=1 SILL_TEST_REMOTE_DIR=$T/remote SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic --pairing   # TEST ONLY: a test host's Sill Microphone (docs/microphone-plan.md): it takes paired devices' microphones (kind 48) as if Sill Microphone were set up and Use iPhone and iPad microphones on, and writes exactly what Sill Microphone would hear to the WAV (48 kHz mono float; "Test microphone: the file's sample 0 is at …"), or with `dry` only counts it (mic.dry); SILL_TEST_MIC_APP=<file> (`0` or no file: no app reads Sill Microphone; else one does) and SILL_TEST_MIC_SETUP=<file> (`missing` or `notloaded`: not set up), each read four times a second; nothing played, no audio device opened
+Scripts/mic-check/build.sh $T/tools && python3 Scripts/mic-check/live.py $T all   # the microphone's gates against such hosts, each under a minute (a release SillHost first): paired test clients send the tone's packets (sillclient.py --mic=FILE@T, --mic-claim@T, --mic-end@T, --mic-flood@T, --mic-formats=N@T, --raw48=HEX@T, --expect-mic=STATE; only to a --synthetic host on this Mac) and analyze finds each click in the WAV
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
@@ -349,7 +351,15 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
+scrolled to its end), `-SillMicCase ready|waiting|inuse|another|anotheroff|off|setup|unpaired|refused|older|denied|interrupted|noinput|window`
+(the mock Mac a Sill.app that takes the microphone, Share Microphone's row in that state; without it the
+mock lists no microphone and shows no row), `-SillSettingsScroll mic` (the panel at Share Microphone's row),
+and in the normal app and under `-SillLive 1` `-SillMicOn 1` (Share Microphone on at launch),
+`-SillMicPermission granted|denied` (the permission as if iOS said it, no prompt) and `-SillMicSource tone`
+(a device records the test tone, never its microphone; the simulator always does, and never opens the
+Mac's microphone through it); the console's "mic: …" lines say what happened (the offer, its claim and
+pause, the Mac's word, the recording's epoch, the tap's buffers, a skipped message, a move's format again),
+`-SillSettingsScroll gestures` (the panel scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

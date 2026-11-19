@@ -8,7 +8,7 @@ OUT = os.path.join(WT, ".build", "checks", "fence")   # the mutants' sources and
 os.makedirs(OUT, exist_ok=True)
 SRC = WT + "/iOSClient/SessionLink.swift"
 orig = open(SRC).read()
-MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
+MODES = ["microphone", "ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
 ADOPT_END = "        holding = nil\n        return endedLocked(since: h.since)\n    }\n\n    /// Ends the hold on `c`"
 UNHOLD_END = "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n"
 MUTANTS = {
@@ -66,6 +66,9 @@ MUTANTS = {
     "C10 every message counted, not only inputs": ("private static func isInput(_ data: Data) -> Bool { data.first == 8 }",
                                                    "private static func isInput(_ data: Data) -> Bool { !data.isEmpty }"),
     "C11 dropHandOver keeps counting what it dropped": ("        inputs -= waitingInputs\n", ""),
+    # The microphone's packets (docs/microphone-plan.md §3.3, rule 7): never queued behind a fence, and capped.
+    "MIC1 the microphone's packets queued behind a fence": ("        guard fences.isEmpty, holding == nil else { return .fenced }\n", ""),
+    "MIC2 the microphone's packets uncapped": ("        guard micUnsent < unsentAtMost else { return .behind }\n", ""),
     "C12 unhold restarts the count": ("        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n",
                                       "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        inputs = 0\n        return endedLocked(since: h.since)\n"),
 }

@@ -1,6 +1,7 @@
 import AVFAudio
 import Foundation
 import QuartzCore
+import SillAudio
 import StreamProtocol
 import UIKit
 
@@ -40,6 +41,9 @@ final class AudioOutput {
 
     /// Headphones taken out (the route's old device unavailable): the client mutes and says so. Main thread.
     var onRouteMuted: (() -> Void)?
+    /// The microphone's voice engine would not start (no microphone, voice processing refused, the session's
+    /// recording category refused): the client pauses the microphone as if none were there. Main thread.
+    var onMicrophoneFailed: ((String) -> Void)?
 
     // On `queue`.
     private var model = AudioPlayout()
@@ -49,6 +53,10 @@ final class AudioOutput {
     /// Each kept packet's frames (after its priming), by the model's id.
     private var kept: [Int: (left: [Float], right: [Float])] = [:]
     private var engine: SoundEngine?
+    /// This window's microphone's tap while it records (MicrophoneCapture, docs/microphone-plan.md §3.5): the
+    /// engine then runs in its voice mode whatever the Mac's sound does, with the tap on its input node, so iOS's
+    /// voice processing takes what this engine plays, the Mac's sound included, out of what the microphone hears.
+    private var micTap: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?
     private var muted = false
     /// The app in the foreground, and this window's scene not in the background (a second window
     /// minimized or swiped away leaves the app active): heard with both, or while this window's picture
@@ -195,7 +203,8 @@ final class AudioOutput {
             if !on { activationBlocked = false }
             updateSilence()
             if on {
-                stopEngine(reason: "muted", fade: true)
+                // The microphone's voice engine runs on, silent: the Mac's sound is not decoded while muted.
+                if micTap == nil { stopEngine(reason: "muted", fade: true) } else { apply(model.reset(.playback)); kept = [:] }
             } else {
                 #if DEBUG
                 print("audio: unmuted")
@@ -251,6 +260,21 @@ final class AudioOutput {
     /// is made. Main thread: it takes no lock (`SharedSession.prepareCategory`).
     static func preparePictureInPictureCategory() {
         SharedSession.prepareCategory()
+    }
+
+    /// This window's microphone records (`tap`) or stops (nil): a change of mode makes the engine again, in its
+    /// voice mode while the microphone records (one jump in the Mac's sound, the playout's rule 12), plainly when
+    /// it stops and the Mac's sound wants it (its next packet starts it). Not in manual rendering, which has no
+    /// input: there the microphone is the test tone, and the engine never knows. Any thread.
+    func setMicrophone(_ tap: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?) {
+        queue.async { [self] in
+            guard SoundEngine.sinkFromLaunchArguments == .device else { return }
+            let was = micTap != nil
+            micTap = tap
+            guard was != (tap != nil) else { return }
+            if engine != nil { stopEngine(reason: tap != nil ? "into the microphone's voice mode" : "out of the microphone's voice mode") }
+            if tap != nil { startEngine() }
+        }
     }
 
     /// The session goes away from home or comes home (the cover's start and bounds). Any thread.
@@ -438,7 +462,7 @@ final class AudioOutput {
         }
         #endif
         if let last = lastPacketAt, now - last >= Self.idleAfter {
-            if engine != nil {
+            if engine != nil, micTap == nil {
                 stopEngine(reason: "idle")
                 #if DEBUG
                 print("audio: idle, engine off")
@@ -454,7 +478,7 @@ final class AudioOutput {
 
     private func startEngine() {
         let sink = SoundEngine.sinkFromLaunchArguments
-        let made = SoundEngine(manual: sink == .manual, queue: queue)
+        let made = SoundEngine(manual: sink == .manual, voice: sink == .device ? micTap : nil, queue: queue)
         switch made.start() {
         case .success:
             engine = made
@@ -478,9 +502,16 @@ final class AudioOutput {
                   + "picture \(lag.map { Self.ms($0) } ?? "none") + 1 frame \(Self.ms(1 / streamFPS)))")
             #endif
         case .failure(let reason):
-            activationBlocked = true
-            updateSilence()
-            print("audio: no sound: \(reason)")
+            if micTap != nil {
+                // The microphone's start failed, not the sound's: the client stops the microphone (its tap goes),
+                // and the Mac's sound's next packet starts a plain engine, unblocked.
+                print("audio: the microphone's voice engine did not start: \(reason)")
+                DispatchQueue.main.async { [weak self] in self?.onMicrophoneFailed?(reason) }
+            } else {
+                activationBlocked = true
+                updateSilence()
+                print("audio: no sound: \(reason)")
+            }
         }
         engineBusyUntil = CACurrentMediaTime()
     }
@@ -539,6 +570,8 @@ final class AudioOutput {
     private func configurationChanged(_ object: AnyObject?) {
         guard let e = engine, !e.manual, e.owns(object) else { return }
         stopEngine(reason: "the output's configuration changed")
+        // The microphone's voice engine is made again at once in the new configuration (its input too).
+        if micTap != nil { startEngine() }
     }
 
     private func interrupted(_ note: Notification) {
@@ -578,7 +611,8 @@ final class AudioOutput {
             guard sessionLive, !muted, heard, lastPacketAt != nil, SoundEngine.sinkFromLaunchArguments == .device else { return }
             muted = true
             updateSilence()
-            stopEngine(reason: nil, fade: true)
+            // Headphones out keep the microphone (only the sound mutes, as before it).
+            if micTap == nil { stopEngine(reason: nil, fade: true) } else { apply(model.reset(.playback)); kept = [:] }
             #if DEBUG
             print("audio: muted (headphones disconnected)")
             #endif
@@ -610,6 +644,7 @@ final class AudioOutput {
         #if DEBUG
         print("audio: media services were reset")
         #endif
+        if micTap != nil { startEngine() }
     }
 
     // MARK: - Words
@@ -623,11 +658,18 @@ final class AudioOutput {
 /// One AVAudioEngine with its player node: rendering to the device's output (the session active), or
 /// in manual rendering mode, which opens no output device (DEBUG, and every simulator build). Its
 /// methods run on the output's queue; its completion handlers return buffers to the pool.
+///
+/// In its voice mode (`voice`, the microphone's tap; docs/microphone-plan.md §3.5) it also records: voice
+/// processing on its input node (and so its output's), other apps' audio ducked as little as iOS allows, the tap
+/// on its input, and the app's session in its recording category (`SharedSession`'s second need).
 private final class SoundEngine {
     enum Sink { case device, manual }
     enum Started { case success, failure(String) }
 
     let manual: Bool
+    /// The microphone's tap: the voice mode. Never in manual rendering.
+    private let voice: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    var voiceMode: Bool { voice != nil }
     private let queue: DispatchQueue
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -649,8 +691,9 @@ private final class SoundEngine {
     static let standInIO = 0.005
     static let standInOutput = 0.010
 
-    init(manual: Bool, queue: DispatchQueue) {
+    init(manual: Bool, voice: ((AVAudioPCMBuffer, AVAudioTime) -> Void)? = nil, queue: DispatchQueue) {
         self.manual = manual
+        self.voice = manual ? nil : voice
         self.queue = queue
     }
 
@@ -713,16 +756,37 @@ private final class SoundEngine {
             return .success
         }
         do {
-            try SharedSession.take()
+            try SharedSession.take(recording: voiceMode)
         } catch {
             return .failure("the audio session: \(error.localizedDescription)")
+        }
+        if let voice {
+            // Voice processing before anything is connected or started (AVAudioIONode.h), the tap on the input as it
+            // comes out of it: about 100 ms a buffer, the least a tap gives.
+            let input = engine.inputNode
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                SharedSession.give(recording: true)
+                return .failure("voice processing: \(error.localizedDescription)")
+            }
+            input.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            let inputFormat = input.outputFormat(forBus: 0)
+            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+                SharedSession.give(recording: true)
+                return .failure("no microphone input")
+            }
+            input.installTap(onBus: 0, bufferSize: AVAudioFrameCount((inputFormat.sampleRate * 0.1).rounded()), format: inputFormat) { buffer, when in
+                voice(buffer, when)
+            }
         }
         engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.prepare()
         do {
             try engine.start()
         } catch {
-            SharedSession.give()
+            if voiceMode { engine.inputNode.removeTap(onBus: 0) }
+            SharedSession.give(recording: voiceMode)
             return .failure("the engine: \(error.localizedDescription)")
         }
         holdsSession = true
@@ -746,6 +810,7 @@ private final class SoundEngine {
         #if DEBUG
         if manual { player.removeTap(onBus: 0) }
         #endif
+        if voiceMode { engine.inputNode.removeTap(onBus: 0) }
         player.stop()
         engine.stop()
         giveSession()
@@ -762,7 +827,7 @@ private final class SoundEngine {
     private func giveSession() {
         guard holdsSession else { return }
         holdsSession = false
-        SharedSession.give()
+        SharedSession.give(recording: voiceMode)
     }
 
     /// The player's timeline: a sample of it and the device time it goes out at.
@@ -823,19 +888,39 @@ private final class SoundEngine {
 /// any of them plays on the device or holds it. Deactivating it stops every engine's I/O, running or not
 /// (AVAudioSession.h), so it goes only when the last holder lets go. The lock is held across the session's
 /// calls, so one window's deactivation never lands after another's activation.
+///
+/// Two needs (docs/microphone-plan.md §3.5): playing alone, `.playback` mixing with other audio, as ever; with a
+/// window's microphone recording (an engine in its voice mode), `.playAndRecord` in `.voiceChat` mode, still
+/// mixing with other audio (Sill never stops the person's music), to the speaker rather than the receiver, and
+/// a Bluetooth headset's microphone in call quality. Back to `.playback` once the last recorder goes while others
+/// play. Nothing else in the app sets the category.
 private enum SharedSession {
     private static let lock = NSLock()
     private static var engines = 0
+    /// Engines in their voice mode; read alone (`prepareCategory`) under its own lock, never behind an activation.
+    private static let recordersLock = NSLock()
+    private static var recorders = 0
 
-    /// Activated (.playback, mixing with other audio) for one more engine, or Picture in Picture's hold.
-    static func take() throws {
+    private static func category(recording: Bool) throws {
+        let session = AVAudioSession.sharedInstance()
+        if recording {
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+        } else {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        }
+    }
+
+    /// Activated for one more engine (recording, for one in its voice mode), or Picture in Picture's hold.
+    static func take(recording: Bool = false) throws {
         try lock.withLock {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            let records = recording || recordersLock.withLock { recorders > 0 }
+            try category(recording: records)
             try? session.setPreferredSampleRate(AudioPlayout.rate)
             try? session.setPreferredIOBufferDuration(0.005)
             try session.setActive(true)
             engines += 1
+            if recording { recordersLock.withLock { recorders += 1 } }
         }
     }
 
@@ -844,6 +929,8 @@ private enum SharedSession {
     /// category `take` sets too, so the order of the two does not matter, and the main thread, which calls this,
     /// must never wait behind another holder's activation.
     static func prepareCategory() {
+        // A microphone recording keeps its category: Picture in Picture plays in it too.
+        guard recordersLock.withLock({ recorders == 0 }) else { return }
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
         } catch {
@@ -851,11 +938,19 @@ private enum SharedSession {
         }
     }
 
-    /// One engine fewer; the last lets the session go.
-    static func give() {
+    /// One engine fewer (`recording`: one in its voice mode); the last lets the session go, and the last recorder
+    /// puts the playing category back for the others.
+    static func give(recording: Bool = false) {
         lock.withLock {
             engines = max(0, engines - 1)
-            guard engines == 0 else { return }
+            let left = recordersLock.withLock { () -> Int in
+                if recording { recorders = max(0, recorders - 1) }
+                return recorders
+            }
+            guard engines == 0 else {
+                if recording, left == 0 { try? category(recording: false) }
+                return
+            }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }

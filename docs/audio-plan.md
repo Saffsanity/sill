@@ -1,5 +1,10 @@
 # The Mac's sound on the device — the plan
 
+Since 2026-11-18 (branch `sill-audio`) `AudioEncoder`, `AudioDecoder`, `AudioPlayout` and the packetizer
+(`PCMChunk`, `AudioBlock`, `AudioPacketizer`) are in `Sources/SillAudio`, a library both apps link, and
+`AudioKey`, `AudioSourceRule`, `PCMLayout` and `AudioBufferTally` in `Sources/SillHost/AudioSourceRule.swift`;
+the paths below are those of before.
+
 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of origin/main at 8b0d418 ("Merge pull request #18", update-notice), of the
 `remote-pacing` branch at 3126821 ("remote pacing counts bytes") and of the plans that hold message

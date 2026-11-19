@@ -70,7 +70,7 @@
 import Foundation
 import Network
 
-let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
+let modes = ["microphone", "ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
              "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
 /// The modes whose connections are TLS: the remote door's, then the home door's (the move home).
 let remoteModes: Set<String> = ["remotehome", "remotedead"]
@@ -170,6 +170,7 @@ final class Stub {
     var finished: Set<Int> = []                   // read to their end, through their line
     var arrived: [UInt32] = []
     var inputsOn: [Int: Int] = [:]                // the inputs (kind 8) read on each connection
+    var micOn: [Int: [UInt8]] = [:]               // each kind 48's type byte read on each connection, in order
     var ready = DispatchSemaphore(value: 0)
     /// The remote door's stand-in (remotehome, remotedead): TLS 1.3 with the remote door's own
     /// parameters, a key of its own and any client key trusted. Its connections join the same list.
@@ -244,6 +245,8 @@ final class Stub {
         case .input:
             arrived.append(payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) })
             inputsOn[i, default: 0] += 1
+        case .microphone:
+            micOn[i, default: []].append(payload.first ?? 0)
         default: break
         }
     }
@@ -547,7 +550,28 @@ func handOver(from: NWConnection, to: NWConnection) {
 
 send(before)                                    // inputs, pings and frames on the first connection
 var adoptDuringFence: SessionLink.Released?? = nil
+/// The microphone (docs/microphone-plan.md §3.3, rule 7): what each `sendMicrophone` said, and the new connection.
+var micSends: [SessionLink.MicrophoneSend] = []
+var micNew: NWConnection?
+let micPackets = Data([2, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0xAA])     // type 2: epoch 1, seq 0, the segment flag, one packet
+let micOffer = Data([1]) + Data(#"{"claim":true}"#.utf8)             // type 1
 switch mode {
+case "microphone":
+    // Its packets go on the session's connection while no fence stands, are skipped (never queued) while one
+    // does, and go again once it is down; its offer, sent with `send` during the fence, waits there in order.
+    micSends.append(link.sendMicrophone(message(.microphone, micPackets), unsentAtMost: 2))
+    let new = connect()
+    micNew = new
+    handOverFromSlow(to: new)
+    micSends.append(link.sendMicrophone(message(.microphone, micPackets), unsentAtMost: 2))
+    link.send(message(.microphone, micOffer))
+    send(5)
+    allow()
+    slowLine.resume()
+    settle(1)
+    timeout([old])
+    micSends.append(link.sendMicrophone(message(.microphone, micPackets), unsentAtMost: 2))
+    micSends.append(link.sendMicrophone(message(.microphone, micPackets), unsentAtMost: 0))
 case "ok":
     let new = connect()
     handOverFromSlow(to: new)
@@ -786,7 +810,7 @@ if let f = fence {
 }
 if ends.count > 1 { print("ends: " + ends.map { "\($0.how) (\($0.held) out, \($0.waiting) waiting\($0.clear ? ", clear" : "")\($0.closed > 0 ? ", \($0.closed) to close" : ""))" }.joined(separator: ", ")) }
 // The stale pong, in the modes that hand over from the slow connection: read there, and it ended nothing.
-let staleSent = ["ok", "timeout", "oldcloses", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "remotehome"].contains(mode)
+let staleSent = ["microphone", "ok", "timeout", "oldcloses", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "remotehome"].contains(mode)
 let staleOK = !staleSent || staleEnded == 0
 if staleSent {
     print(staleEnded == nil ? "stale pong: never read on the first connection" : "stale pong: read on the first connection, \(staleEnded == 0 ? "ended nothing" : "ENDED \(staleEnded!) (only the fence's own pong may)")")
@@ -797,7 +821,7 @@ let clearOK = ends.last.map { $0.clear } ?? true
     && ends.dropLast().allSatisfy { !($0.held == 0 && $0.waiting > 0) || !$0.clear }
 // Each hand-over's old connection is handed back for closing exactly once, and only by an end that is clear
 // (what waited, its viewport first, has gone out).
-let fencesMade = ["ok": 1, "timeout": 1, "oldcloses": 1, "adoptfence": 1, "twofences": 2, "twomoves": 2, "holdfence": 1, "holdadopt": 1,
+let fencesMade = ["microphone": 1, "ok": 1, "timeout": 1, "oldcloses": 1, "adoptfence": 1, "twofences": 2, "twomoves": 2, "holdfence": 1, "holdadopt": 1,
                   "hold": 0, "holdclosed": 0, "unhold": 0, "nofence": 0, "newsession": 0, "newsessionhold": 0,
                   "remotehome": 1, "remotedead": 0][mode] ?? -1
 #if OLD   // SessionLink before the review fixes knew nothing of it (its caller closed each old connection at its fence's end)
@@ -809,6 +833,14 @@ var ok: Bool
 if !clearOK { print("clear: wrong") }
 if !closeOK { print("close: wrong (\(ends.map(\.closed)) for \(fencesMade) fences)") }
 switch mode {
+case "microphone":
+    // As "ok", and the microphone's: sent before, skipped during the fence, sent after, skipped past its cap; the
+    // first connection read its one packets message, the new one the offer that waited, then the packets after.
+    let first = connections.first.flatMap { stubIndex(of: $0) }, second = micNew.flatMap { stubIndex(of: $0) }
+    let (onOld, onNew) = stub.queue.sync { (first.flatMap { stub.micOn[$0] } ?? [], second.flatMap { stub.micOn[$0] } ?? []) }
+    print("microphone: sends \(micSends), the first connection read types \(onOld), the new one \(onNew)")
+    ok = increasing && missing.isEmpty && dupes == 0 && fence?.how == "pong" && (fence?.held ?? 0) > 0
+        && micSends == [.sent, .fenced, .sent, .behind] && onOld == [2] && onNew == [1, 2]
 case "ok", "remotehome":
     // Its pong, a round trip of the slow connection at least after the hand-over, let out what waited.
     ok = increasing && missing.isEmpty && dupes == 0 && fence?.how == "pong" && (fence?.held ?? 0) > 0

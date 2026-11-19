@@ -4,7 +4,8 @@ import Foundation
 /// are played, and where each goes on the player's timeline, so that the sound is never ahead of the
 /// picture and trails it by as little as its own path allows. Pure (Foundation only): the
 /// `audio-playout` check runs it on a simulated clock, the harness's device (Scripts/audiocheck.swift)
-/// on real arrivals, and AudioOutput on `sill.audio`, doing what it says.
+/// on real arrivals, and AudioOutput on `sill.audio`, doing what it says. Public: SillAudio, which
+/// SillHostCore and the iOS app both link.
 ///
 /// Clocks. Device times are seconds of the monotonic clock (CACurrentMediaTime, the clock whose ticks
 /// AVAudioTime's hostTime counts). Stamps are the Mac's wall clock (seconds since 1970, the header's).
@@ -58,116 +59,129 @@ import Foundation
 ///    or the path changing. The floor starts again from that second's packets (or that packet), the
 ///    picture's window from its next frame, and the difference is closed by a jump.
 /// The engine's idle (rule 14) is AudioOutput's.
-struct AudioPlayout {
+///
+/// The microphone's mode (`Mode.microphone`, docs/microphone-plan.md §3.4): the same model times a device's
+/// microphone on the Mac (MicrophoneReceiver), where no picture rides along. No frame is fed and none is
+/// taken (`frame` ignores one), so rule 3 has no lag and rule 4's delay is the need; the cover starts at
+/// `microphoneCoverStartHome` at home (a capture buffer's 100 ms burst and a packet, which the device's ten
+/// packets a message arrive in), away as the sound's; and a message's packets, which arrive together, count
+/// for rule 1 and rule 2 all before its first is placed (`message`), so the first message of a session is
+/// not placed by a floor its own last packet lowers 90 ms later. Every other rule is the sound's.
+public struct AudioPlayout {
+    /// What the model times: the Mac's sound on the device (with the picture's guard), or a device's
+    /// microphone on the Mac (none).
+    public enum Mode: Equatable, Sendable { case sound, microphone }
     // MARK: - Constants (§7.2's table)
 
     /// The player's timeline: 48 kHz, whatever the route (the mixer converts).
-    static let rate = 48_000.0
+    public static let rate = 48_000.0
     /// Rule 1: the floor's window, in whole seconds of 1 s buckets.
-    static let floorSeconds = 10
+    public static let floorSeconds = 10
     /// Rule 2: the jitter cover's first value, and how long the session's first packets are left out.
-    static let coverStartHome = 0.040
-    static let coverStartAway = 0.150
-    static let coverGrace = 2.0
-    static let coverHome: ClosedRange<Double> = 0.020...0.150
-    static let coverAway: ClosedRange<Double> = 0.060...0.600
+    public static let coverStartHome = 0.040
+    public static let coverStartAway = 0.150
+    /// The microphone's at home: a burst of ten 10 ms packets every 100 ms, and one packet.
+    public static let microphoneCoverStartHome = 0.110
+    public static let coverGrace = 2.0
+    public static let coverHome: ClosedRange<Double> = 0.020...0.150
+    public static let coverAway: ClosedRange<Double> = 0.060...0.600
     /// Rule 2's last term, and rule 6's margin beyond the IO buffer.
-    static let margin = 0.002
+    public static let margin = 0.002
     /// Rule 3.
-    static let pictureSeconds = 2.0
-    static let pictureRefreshes = 1.5
-    static let pictureExtra = 0.004
+    public static let pictureSeconds = 2.0
+    public static let pictureRefreshes = 1.5
+    public static let pictureExtra = 0.004
     /// Rule 11: a frame a packet while the error is past `correctFrom`, until it is back under `correctTo`.
-    static let correctFrom = 0.001
-    static let correctTo = 0.00025
+    public static let correctFrom = 0.001
+    public static let correctTo = 0.00025
     /// Rule 12.
-    static let jumpOver = 0.040
+    public static let jumpOver = 0.040
     /// Rule 13: above the floor (with twice the rtt median, if more), under it; and how many packets
     /// make "a second of packets" (half a second's worth).
-    static let stepAbove = 0.050
-    static let stepBelow = 0.020
-    static let stepPackets = 50
+    public static let stepAbove = 0.050
+    public static let stepBelow = 0.020
+    public static let stepPackets = 50
     /// Fades, in and out.
-    static let fadeSeconds = 0.005
+    public static let fadeSeconds = 0.005
     /// Rule 7.
-    static let dedupeCount = 256
+    public static let dedupeCount = 256
     /// Packets kept while the engine starts, before its first render gives a timeline (a second's).
-    static let waitingLimit = 100
+    public static let waitingLimit = 100
 
     // MARK: - What it says
 
     /// Where one packet goes, as the model saw it when it placed it: for the console and the checks.
-    struct Decision: Equatable {
+    public struct Decision: Equatable {
         /// When the packet's first frame is due at the ear (stamp + floor + delay).
-        let due: Double
+        public let due: Double
         /// When it will be heard where it is placed (its render time + the output latency).
-        let ear: Double
+        public let ear: Double
         /// When the picture of the same stamp shows (stamp + floor + the picture's lag); −∞ before
         /// any frame came.
-        let picture: Double
+        public let picture: Double
         /// due − ear: positive, the sound is ahead of where it is due; negative, behind.
-        var error: Double { due - ear }
+        public var error: Double { due - ear }
     }
 
     /// A part of a packet to hand to the player now: its body at once, its last 5 ms (the tail) once
     /// the next packet says whether it follows (rule 10).
-    struct Schedule: Equatable {
-        enum Part: Equatable { case body, tail }
-        let id: Int
-        let part: Part
+    public struct Schedule: Equatable {
+        public enum Part: Equatable { case body, tail }
+        public let id: Int
+        public let part: Part
         /// Which of the packet's kept frames: from `offset`, `count` of them (before `change`).
-        let offset: Int
-        let count: Int
+        public let offset: Int
+        public let count: Int
         /// Its first frame's place on the player's timeline, or nil: right after the buffer before it.
-        let at: Double?
+        public let at: Double?
         /// Where it starts either way (planned).
-        let start: Double
+        public let start: Double
         /// Its frames once `change` is made.
-        let frames: Int
+        public let frames: Int
         /// The body's: +1, a frame added; −1, one dropped (rule 11); 0.
-        let change: Int
+        public let change: Int
         /// Fade its first 5 ms in (the packet's first part), or its last 5 ms out (the tail).
-        let fadeIn: Bool
-        let fadeOut: Bool
+        public let fadeIn: Bool
+        public let fadeOut: Bool
         /// The stamp of the packet's first kept frame, its seq and epoch.
-        let stamp: Double
-        let seq: UInt32
-        let epoch: Int
-        let decision: Decision
+        public let stamp: Double
+        public let seq: UInt32
+        public let epoch: Int
+        public let decision: Decision
         /// When its first frame goes out (renders), as the model reads the timeline now.
-        let goesOut: Double
-        var end: Double { start + Double(frames) }
+        public let goesOut: Double
+        public var end: Double { start + Double(frames) }
     }
 
     /// What to do with the player and the kept packets.
-    struct Output: Equatable {
-        var schedules: [Schedule] = []
+    public struct Output: Equatable {
+        public var schedules: [Schedule] = []
         /// Kept packets never to be played (late, dropped by a jump, left by a reset).
-        var discards: [Int] = []
+        public var discards: [Int] = []
 
-        mutating func add(_ other: Output) {
+        public mutating func add(_ other: Output) {
             schedules += other.schedules
             discards += other.discards
         }
     }
 
     /// What to do with one packet.
-    struct Plan: Equatable {
+    public struct Plan: Equatable {
         /// Decode it: every packet of the epoch playing that is not a duplicate and does not arrive
         /// while muted, including those not played (rule 6, rule 9).
-        var decode = false
+        public var decode = false
         /// Reset the decoder before it (AudioConverterReset).
-        var resetFirst = false
+        public var resetFirst = false
         /// Frames dropped from its start once decoded: the codec's priming, or all of them.
-        var dropFront = 0
+        public var dropFront = 0
         /// The id its kept frames go by until a Schedule or a discard names it; nil when none are kept.
-        var id: Int?
+        public var id: Int?
         /// The hand, scheduled or discarded now, and this packet, discarded when late.
-        var output = Output()
+        public var output = Output()
     }
 
     /// Why a jump was owed: the console's words (docs/audio-plan.md §7.8, "audio: jump +52 ms (clock step)").
-    enum JumpCause: String, Equatable {
+    public enum JumpCause: String, Equatable {
         /// Rule 13: the Mac's clock stepped, or the path changed.
         case step = "clock step"
         /// Rule 12: off by more than 40 ms (a stall, a fast change of the picture's lag).
@@ -182,47 +196,47 @@ struct AudioPlayout {
     /// `playback`: the timeline (the engine restarted or stopped, unmuted, an interruption): the kept
     /// packets, the placement and the decoder's continuity, never the floor, the cover or the dedupe.
     /// `jump`: the next packet is placed by time (a route's new latency).
-    enum Reset: Equatable { case session, playback, jump }
+    public enum Reset: Equatable { case session, playback, jump }
 
     /// One second of what happened, for the console, the HUD and the stats sent to the Mac.
-    struct Second: Equatable {
+    public struct Second: Equatable {
         /// How far the sound trailed the picture, ms, over the packets placed (their ear − their
         /// picture); nil for a second with none.
-        var behindMs: Int?
-        var placed = 0
-        var late = 0
-        var duplicates = 0
-        var framesAdded = 0
-        var framesDropped = 0
-        var jumps = 0
+        public var behindMs: Int?
+        public var placed = 0
+        public var late = 0
+        public var duplicates = 0
+        public var framesAdded = 0
+        public var framesDropped = 0
+        public var jumps = 0
         /// Packets decoded and dropped whole (a join, a gap), and packets dropped by a jump.
-        var joins = 0
-        var jumpDrops = 0
+        public var joins = 0
+        public var jumpDrops = 0
         /// The numbers now, in seconds.
-        var need = 0.0
-        var cover = 0.0
-        var delay = 0.0
-        var lag: Double?
-        var error: Double?
+        public var need = 0.0
+        public var cover = 0.0
+        public var delay = 0.0
+        public var lag: Double?
+        public var error: Double?
     }
 
     // MARK: - State
 
     // The format.
-    private(set) var epoch: Int?
-    private(set) var framesPerPacket = 480
-    private(set) var primingFrames = 240
+    public private(set) var epoch: Int?
+    public private(set) var framesPerPacket = 480
+    public private(set) var primingFrames = 240
     private var cookie = Data()
 
     // Latencies and the link (AudioOutput's and the client's readings).
     /// The output latency: the session's, or the player's presentation latency if more.
-    private(set) var outputLatency = 0.0
-    private(set) var ioBuffer = 0.005
-    private(set) var refresh = 1.0 / 60
-    private(set) var streamFPS = 60.0
-    private(set) var rttMedian: Double?
-    private(set) var away = false
-    private(set) var muted = false
+    public private(set) var outputLatency = 0.0
+    public private(set) var ioBuffer = 0.005
+    public private(set) var refresh = 1.0 / 60
+    public private(set) var streamFPS = 60.0
+    public private(set) var rttMedian: Double?
+    public private(set) var away = false
+    public private(set) var muted = false
 
     // Rules 1 and 2: the floor and the cover, by second of arrival.
     private struct Bucket {
@@ -327,21 +341,24 @@ struct AudioPlayout {
     /// Rule 11's direction: +1 adding frames, −1 dropping, 0.
     private var correcting = 0
     /// The error of the last packet that followed another.
-    private(set) var lastError: Double?
+    public private(set) var lastError: Double?
 
     // The second being counted.
     private var second = Second()
     private var behind: [Double] = []
     /// A packet was placed this session: the stats say so from then on.
-    private(set) var placedThisSession = false
+    public private(set) var placedThisSession = false
 
-    init() {}
+    /// What it times; the sound's by default.
+    public let mode: Mode
+
+    public init(mode: Mode = .sound) { self.mode = mode }
 
     // MARK: - Inputs
 
     /// A format message (kind 43, type 1). True for a new epoch (a new decoder); false for the epoch
     /// playing with the same cookie, as a move's new connection sends it again (rule 7): ignored.
-    mutating func format(epoch: Int, framesPerPacket: Int, primingFrames: Int, cookie: Data) -> Bool {
+    public mutating func format(epoch: Int, framesPerPacket: Int, primingFrames: Int, cookie: Data) -> Bool {
         if self.epoch == epoch, self.cookie == cookie, self.framesPerPacket == framesPerPacket,
            self.primingFrames == primingFrames { return false }
         self.epoch = epoch
@@ -357,7 +374,8 @@ struct AudioPlayout {
     }
 
     /// A video frame (kind 1), stamped at arrival: for the picture's lag (rule 3).
-    mutating func frame(stamp: Double, arrival: Double) {
+    public mutating func frame(stamp: Double, arrival: Double) {
+        guard mode == .sound else { return }
         let raw = arrival - stamp
         guard raw.isFinite else { return }
         frameArrivals.append(arrival)
@@ -368,7 +386,7 @@ struct AudioPlayout {
     }
 
     /// The output's latencies as read back once it runs, the panel's refresh, and the stream's rate.
-    mutating func latency(output: Double, io: Double, refresh: Double, streamFPS: Double) {
+    public mutating func latency(output: Double, io: Double, refresh: Double, streamFPS: Double) {
         outputLatency = max(0, output.isFinite ? output : 0)
         ioBuffer = max(0, io.isFinite ? io : 0)
         self.refresh = max(0, refresh.isFinite ? refresh : 0)
@@ -376,19 +394,19 @@ struct AudioPlayout {
     }
 
     /// The pings' median round trip of the last second, for the step test (rule 13).
-    mutating func rtt(median: Double?) { rttMedian = median.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
+    public mutating func rtt(median: Double?) { rttMedian = median.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
 
     /// Whether this session is away from home: the cover's start and bounds (rule 2). A move home
     /// changes them at the hand-over and nothing else.
-    mutating func away(_ away: Bool) { self.away = away }
+    public mutating func away(_ away: Bool) { self.away = away }
 
     /// Muted (or in the background): each packet still counts for the floor and the cover, and none
     /// is decoded. Unmuting is a `.playback` reset, which the caller makes.
-    mutating func mute(_ muted: Bool) { self.muted = muted }
+    public mutating func mute(_ muted: Bool) { self.muted = muted }
 
     /// The player's timeline, read at each schedule: `sample` goes out at device time `time`. The
     /// first reading after a start places what waited for it.
-    mutating func played(sample: Double, at time: Double, now: Double) -> Output {
+    public mutating func played(sample: Double, at time: Double, now: Double) -> Output {
         guard sample.isFinite, time.isFinite else { return Output() }
         let first = mapping == nil
         mapping = (sample, time)
@@ -400,14 +418,28 @@ struct AudioPlayout {
         return out
     }
 
+    /// The microphone's mode: a message of `count` packets of `epoch` from `seq`, each `framesPerPacket` apart
+    /// from `stamp`, which arrived together at `arrival`: each one's (arrival − stamp) counts for the floor and
+    /// the cover now, before the first is placed (rule 1), and its `packet` call then takes none
+    /// (`recorded`). Duplicates (rule 7) and packets of another epoch count nowhere, as in `packet`.
+    public mutating func message(epoch: Int, seq: UInt32, count: Int, stamp: Double, arrival: Double) {
+        guard mode == .microphone, let playing = self.epoch, epoch == playing, stamp.isFinite, arrival.isFinite else { return }
+        for i in 0..<max(0, count) {
+            let key = Int64(epoch & 0xFFFF) << 32 | Int64(seq &+ UInt32(i))
+            guard !recentSet.contains(key) else { continue }
+            record(raw: arrival - (stamp + Double(i * framesPerPacket) / Self.rate), arrival: arrival)
+        }
+    }
+
     /// One packet of kind 43's type 2, with its own stamp (the message's + its place × F ÷ rate), taken
     /// `now`. Its (arrival − stamp) is taken now too, not when the network queue read it: what the
     /// packet in hand waits for is the next packet reaching the playout (rule 10), so the hop between
     /// the two queues is part of what the cover must cover. But a packet that waited behind Sill's own
     /// engine starting or stopping gives `arrival`, when it came: that wait is not the link's, and the
     /// floor and the cover take `arrival`, the late test and the placement `now` (rule 6).
-    mutating func packet(epoch: Int, seq: UInt32, stamp: Double, segmentStart: Bool, arrival came: Double? = nil,
-                         now: Double) -> Plan {
+    /// `recorded`: the microphone's `message` counted it already.
+    public mutating func packet(epoch: Int, seq: UInt32, stamp: Double, segmentStart: Bool, arrival came: Double? = nil,
+                         recorded: Bool = false, now: Double) -> Plan {
         let arrival = came ?? now
         guard let playing = self.epoch, epoch == playing, stamp.isFinite, arrival.isFinite else { return Plan() }
         // Rule 7: before anything counts.
@@ -417,7 +449,7 @@ struct AudioPlayout {
             return Plan()
         }
         remember(key)
-        record(raw: arrival - stamp, arrival: arrival)
+        if !recorded { record(raw: arrival - stamp, arrival: arrival) }
         if muted {
             // Nothing decoded: the decoder's next packet starts afresh.
             expectedSeq = nil
@@ -470,25 +502,25 @@ struct AudioPlayout {
 
     /// The decoder could not decode a packet the plan kept: the caller plays silence in its place,
     /// and the decoder starts afresh at the next packet (rule 9).
-    mutating func decodeFailed() {
+    public mutating func decodeFailed() {
         expectedSeq = nil
         primingLeft = 0
         fadeNext = true
     }
 
     /// Time passing: the tail in hand goes out, faded, once its deadline has passed (rule 10).
-    mutating func tick(now: Double) -> Output {
+    public mutating func tick(now: Double) -> Output {
         guard hand != nil, let d = deadline, now >= d else { return Output() }
         return handOver(fadeOut: true)
     }
 
     /// When `tick` next has something to do, or nil.
-    var deadline: Double? {
+    public var deadline: Double? {
         guard let h = hand else { return nil }
         return time(ofSample: h.tailStart) - ioBuffer - Self.margin
     }
 
-    mutating func reset(_ kind: Reset) -> Output {
+    public mutating func reset(_ kind: Reset) -> Output {
         switch kind {
         case .jump:
             owe(.route)
@@ -533,7 +565,7 @@ struct AudioPlayout {
     }
 
     /// The second that ends now, and the next one starts.
-    mutating func takeSecond(now: Double) -> Second {
+    public mutating func takeSecond(now: Double) -> Second {
         expireFrames(now: now)
         var s = second
         s.behindMs = behind.isEmpty ? nil : Int((Self.median(behind.sorted()) * 1000).rounded())
@@ -551,11 +583,11 @@ struct AudioPlayout {
     // MARK: - The numbers
 
     /// Rule 1.
-    var floor: Double? { buckets.isEmpty ? floorKept : buckets.map(\.min).min() }
+    public var floor: Double? { buckets.isEmpty ? floorKept : buckets.map(\.min).min() }
 
     /// Rule 2's cover.
-    func cover(now: Double) -> Double {
-        let start = away ? Self.coverStartAway : Self.coverStartHome
+    public func cover(now: Double) -> Double {
+        let start = away ? Self.coverStartAway : mode == .microphone ? Self.microphoneCoverStartHome : Self.coverStartHome
         guard let begun = sessionStart, now - begun >= Self.coverGrace, let floor,
               let top = buckets.compactMap(\.max).max() else { return start }
         let bounds = away ? Self.coverAway : Self.coverHome
@@ -563,12 +595,12 @@ struct AudioPlayout {
     }
 
     /// Rule 2.
-    func need(now: Double) -> Double {
+    public func need(now: Double) -> Double {
         cover(now: now) + Double(framesPerPacket) / Self.rate + ioBuffer + outputLatency + Self.margin
     }
 
     /// Rule 3: nil before any frame came (or before the floor).
-    func pictureLag(now: Double) -> Double? {
+    public func pictureLag(now: Double) -> Double? {
         guard let floor else { return nil }
         let raw: Double?
         if !sortedRaws.isEmpty, liveFramesAfterExpiry(now: now) > 0 {
@@ -580,13 +612,13 @@ struct AudioPlayout {
     }
 
     /// Rule 4.
-    func delay(now: Double, lag: Double?) -> Double {
-        let guardDelay = lag.map { $0 + 1 / streamFPS } ?? -.infinity
+    public func delay(now: Double, lag: Double?) -> Double {
+        let guardDelay = mode == .sound ? lag.map { $0 + 1 / streamFPS } ?? -.infinity : -.infinity
         return max(need(now: now), guardDelay)
     }
 
     /// A packet in hand (for the checks and the console).
-    var holding: Bool { hand != nil }
+    public var holding: Bool { hand != nil }
 
     // MARK: - Placement
 
@@ -682,7 +714,7 @@ struct AudioPlayout {
 
     /// The jump the last placement by time made, once: how far (seconds; positive, the sound placed later
     /// with silence before it; negative, packets dropped) and why. For the console.
-    mutating func takeJump() -> (by: Double, cause: JumpCause)? {
+    public mutating func takeJump() -> (by: Double, cause: JumpCause)? {
         defer { madeJump = nil }
         return madeJump
     }
@@ -817,7 +849,7 @@ struct AudioPlayout {
         return lo
     }
 
-    static func median(_ sorted: [Double]) -> Double {
+    public static func median(_ sorted: [Double]) -> Double {
         guard !sorted.isEmpty else { return 0 }
         let mid = sorted.count / 2
         return sorted.count % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
@@ -828,10 +860,10 @@ struct AudioPlayout {
 
 extension AudioPlayout {
     /// A fade's frames at the timeline's rate: 5 ms.
-    static var fadeFrames: Int { Int((fadeSeconds * rate).rounded()) }
+    public static var fadeFrames: Int { Int((fadeSeconds * rate).rounded()) }
 
     /// A raised-cosine fade over the first (`in`) or last `frames` frames of `x`, in place.
-    static func fade(_ x: inout [Float], in fadeIn: Bool, frames: Int = fadeFrames) {
+    public static func fade(_ x: inout [Float], in fadeIn: Bool, frames: Int = fadeFrames) {
         let n = min(frames, x.count)
         guard n > 0 else { return }
         for i in 0..<n {
@@ -844,7 +876,7 @@ extension AudioPlayout {
     /// middle half, blended into its neighbours: an added frame is the mean of the two it goes between,
     /// and a dropped one leaves the mean of itself and the one before it. Nothing for 0, or for a
     /// packet under 4 frames.
-    static func change(_ left: inout [Float], _ right: inout [Float], by change: Int) {
+    public static func change(_ left: inout [Float], _ right: inout [Float], by change: Int) {
         let n = min(left.count, right.count)
         guard change != 0, n >= 4 else { return }
         let from = n / 4, to = max(from + 1, (3 * n) / 4)
