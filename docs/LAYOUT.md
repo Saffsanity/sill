@@ -1021,6 +1021,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   Info.plists' `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`); the panel's Record
   Sound (`Sill.recordSound`, on) and Start or Stop Recording after Send Audio, the 3, 2, 1 count and
   the light (`RecordingBadge`) over both stream screens, DEBUG `-SillRecordFor S`; pbxproj AE90/FE90.
+  The recording's rules, pure (Foundation only) and checked together by `Tests/checks/recording`
+  with mutants: `RecordingPolicy` (what is offered, the count and the keyframe ask, where the movie
+  starts and the pre-roll, the picture's chain, parts and names, what ends it, space, the light, what
+  the Mac is told, and every sentence in `Copy`; A284/F284), `RecordingClock` (the movie's timeline
+  from the Mac's stamps: the floor, the anchor, the Mac clock's steps, the stop) with
+  `RecordingTimeline` (the recorder's order of things: parts, the chain, the clock and the sound
+  together, as actions StreamRecorder carries out; A285/F285) and `RecordedSound` (the movie's sound
+  track from the Mac's packets: segments, joins, gaps, overlaps, silence; A286/F286).
+  `SillDocuments` is the one owner of Documents, which Files shows (Sill Recordings,
+  `completeUnlessOpen`; the files work adds its folder there): no other file of the app names the
+  Documents directory, and `Tests/checks/recording` fails if one does (A289/F289).
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).

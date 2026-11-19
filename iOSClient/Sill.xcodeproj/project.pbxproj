@@ -40,6 +40,10 @@
 		A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC64 /* StreamClient+Clipboard.swift */; };
 		A1000001000000000000AD64 /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FD64 /* ClipboardChip.swift */; };
 		A1000001000000000000AE90 /* StreamRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE90 /* StreamRecorder.swift */; };
+		A1000001000000000000A284 /* RecordingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F284 /* RecordingPolicy.swift */; };
+		A1000001000000000000A285 /* RecordingClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F285 /* RecordingClock.swift */; };
+		A1000001000000000000A286 /* RecordedSound.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F286 /* RecordedSound.swift */; };
+		A1000001000000000000A289 /* SillDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F289 /* SillDocuments.swift */; };
 		A1000001000000000000AE65 /* StreamZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE65 /* StreamZoom.swift */; };
 		A1000001000000000000A113 /* ThumbnailHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F113 /* ThumbnailHold.swift */; };
 		A1000001000000000000AE01 /* VersionLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE01 /* VersionLabel.swift */; };
@@ -108,6 +112,10 @@
 		A1000001000000000000FC64 /* StreamClient+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Clipboard.swift"; sourceTree = "<group>"; };
 		A1000001000000000000FD64 /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
 		A1000001000000000000FE90 /* StreamRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRecorder.swift; sourceTree = "<group>"; };
+		A1000001000000000000F284 /* RecordingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPolicy.swift; sourceTree = "<group>"; };
+		A1000001000000000000F285 /* RecordingClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingClock.swift; sourceTree = "<group>"; };
+		A1000001000000000000F286 /* RecordedSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordedSound.swift; sourceTree = "<group>"; };
+		A1000001000000000000F289 /* SillDocuments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillDocuments.swift; sourceTree = "<group>"; };
 		A1000001000000000000FE65 /* StreamZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamZoom.swift; sourceTree = "<group>"; };
 		A1000001000000000000F113 /* ThumbnailHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailHold.swift; sourceTree = "<group>"; };
 		A1000001000000000000FE01 /* VersionLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionLabel.swift; sourceTree = "<group>"; };
@@ -178,6 +186,10 @@
 				A1000001000000000000FC64 /* StreamClient+Clipboard.swift */,
 				A1000001000000000000FD64 /* ClipboardChip.swift */,
 				A1000001000000000000FE90 /* StreamRecorder.swift */,
+				A1000001000000000000F284 /* RecordingPolicy.swift */,
+				A1000001000000000000F285 /* RecordingClock.swift */,
+				A1000001000000000000F286 /* RecordedSound.swift */,
+				A1000001000000000000F289 /* SillDocuments.swift */,
 				A1000001000000000000FE65 /* StreamZoom.swift */,
 				A1000001000000000000F113 /* ThumbnailHold.swift */,
 				A1000001000000000000FE01 /* VersionLabel.swift */,
@@ -339,6 +351,10 @@
 				A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */,
 				A1000001000000000000AD64 /* ClipboardChip.swift in Sources */,
 				A1000001000000000000AE90 /* StreamRecorder.swift in Sources */,
+				A1000001000000000000A284 /* RecordingPolicy.swift in Sources */,
+				A1000001000000000000A285 /* RecordingClock.swift in Sources */,
+				A1000001000000000000A286 /* RecordedSound.swift in Sources */,
+				A1000001000000000000A289 /* SillDocuments.swift in Sources */,
 				A1000001000000000000AE65 /* StreamZoom.swift in Sources */,
 				A1000001000000000000A113 /* ThumbnailHold.swift in Sources */,
 				A1000001000000000000AE01 /* VersionLabel.swift in Sources */,

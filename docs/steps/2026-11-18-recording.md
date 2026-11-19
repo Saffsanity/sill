@@ -72,3 +72,38 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
     `recording` yet (the plan's commit 6), so Noah has nothing to try from this group.
 - **Proposed words** for the site, What's New and the review notes: none yet; they come with the device's commits
   (the plan's "Docs, site and App Store words", commit 9). The Mac's own words are above.
+
+**Run 2 (2026-11-19): the device's rules, then the recorder, the client and the views.**
+- **4, the device's rules** (the plan's commit 4): `RecordingPolicy` (rules 1–3, 5, 6, 8–11 and `Copy`),
+  `RecordingClock` (rule 4) and `RecordedSound` (rule 7), Foundation only, pbxproj A284–A286/F284–F286. Beyond the
+  plan's text:
+  - `RecordingTimeline` (in RecordingClock.swift): the recorder's order of things as a pure type, rules 3 to 7
+    together (the light's start, the pre-roll before 0:00, the chain, the clock, parts opening at a keyframe and
+    closing at new parameter sets, each part's sound track, the follow), as actions the recorder carries out. So the
+    random recordings run the decisions StreamRecorder makes, not a copy of them.
+  - The clock keeps the Mac's time (stamp + correction) and goes on from the last picture at a step, also among the
+    pictures before the anchor (a step inside the pre-roll's second made a 5.7 s jump in a random recording before
+    this); a picture of a step back that is not yet seen is held a tick after the last one written.
+  - A frame delivered twice is known by its stamp (the last 8 written), not by its time: a picture whose time a
+    step back has not yet corrected is not a duplicate, and dropping it would break the chain.
+  - New parameter sets empty the pre-roll and make the kept keyframe stale (a light between a new source's kind 0
+    and its keyframe wrote the old source's frames into the new one's part in a random recording).
+  - `SillDocuments` (the next features' overview, §2.3; no branch had it): the one owner of Documents, pbxproj
+    A289/F289 (one past the plan's A284–A288, free on main, the 299 branches and the 115 pull request heads). The
+    check's source rule lets only it name the Documents directory (the plan's text named StreamClient+Recording;
+    the overview's rule is the one followed); #303's `StreamRecorder.folder` goes through it until the rewrite.
+  - Space: minutes left at most 999 (a still window without sound writes almost nothing); an unreadable free space
+    allows the start. Bytes are decimal (1 MB = 1,000,000), as Files counts them.
+  - The light's time is the stop's formula at now (A − floor + correction − anchor, never before the last
+    picture), not the newest sample's time: a still window without sound writes no sample for minutes, and the
+    movie lasts to the stop all the same, so this is the time the movie would have.
+- `Tests/checks/recording` (new): every rule's cases, `SillDocuments`, the timeline scripted, 20,000 random
+  recordings against the invariants (each track's times increase; no jump beyond the link's own spread, through
+  the Mac clock's steps and stalls; a delta only after its keyframe; each part closed after its last picture,
+  its sound to its end and nothing held; the sound never 0.5 s behind the picture and each packet within 20 ms of
+  its stamp; the recording's asks a second from any other; "Starting…" always has an ask or its give-up due, and
+  gives up only with a Mac that skips the asks), and the source rules. 84 mutants. KeyframeRecovery compiled in
+  for `answerWait`.
+- `lock-policy`: a locked list keeps `recordings` (both locked readings), and its one mutant, "list: a locked list
+  drops `recordings`". Only that mutant was run of the check's 189: no other mutant's pattern is in what changed
+  (main.swift alone), and each of their patterns was confirmed to match once, a text check.

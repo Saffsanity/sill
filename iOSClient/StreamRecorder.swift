@@ -10,9 +10,8 @@ import SwiftUI
 /// and the next starts at the keyframe that follows. On its own queue; the frames' and the sound's
 /// callers hand over and return.
 final class StreamRecorder: @unchecked Sendable {
-    static var folder: URL {
-        URL.documentsDirectory.appending(path: "Sill Recordings", directoryHint: .isDirectory)
-    }
+    /// Documents/Sill Recordings, through its one owner (SillDocuments).
+    static var folder: URL { SillDocuments.url(.recordings) }
 
     let withSound: Bool
     /// The movies written so far, finished or not.
@@ -96,7 +95,7 @@ final class StreamRecorder: @unchecked Sendable {
     }
 
     private func open(_ fmt: CMFormatDescription) -> Bool {
-        try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+        _ = try? SillDocuments.make(.recordings)
         let names = DateFormatter()
         names.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"     // this device's own clock, as Screenshots name theirs
         let stamp = names.string(from: Date())

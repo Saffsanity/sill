@@ -1,0 +1,7 @@
+# Compiled as one module by ../module.py with main.swift: the device's rules for recording the stream (#284),
+# KeyframeRecovery for its `answerWait`, and SillDocuments, the one owner of Documents.
+iOSClient/RecordingPolicy.swift
+iOSClient/RecordingClock.swift
+iOSClient/RecordedSound.swift
+iOSClient/KeyframeRecovery.swift
+iOSClient/SillDocuments.swift

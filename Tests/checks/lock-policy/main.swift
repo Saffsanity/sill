@@ -418,6 +418,7 @@ let windows = [WindowInfo(id: 11, title: "Budget.numbers", appName: "Numbers", b
 var full = WindowList(macName: "Noah’s MacBook Pro", windows: windows, active: .window(11), launchID: "L1", hostVersion: "0.6.0",
                       protocol: 1, gestures: 1, clipboard: 1)
 full.keyRepeat = 1
+full.recordings = 1
 full.desktopDisplays = 2
 full.desktopDisplay = 1
 full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
@@ -435,6 +436,9 @@ for rd in [Reading.screenLocked, .offConsole] {
           "\(rd): `offConsole` \(rd == .offConsole ? "true" : "left out")")
     check(l.macName == full.macName && l.active == full.active && l.launchID == "L1" && l.hostVersion == "0.6.0" && l.protocol == 1
           && l.gestures == 1 && l.keyRepeat == 1, "\(rd): the rest of the list as it is")
+    // A recording on the device goes on through a lock (it records the lock screen, or the placeholder): the Mac
+    // still says it shows one (#284, RecordingNotice).
+    check(l.recordings == 1 && json(l).contains(#""recordings":1"#), "\(rd): `recordings` kept")
     check(!json(l).contains("Budget") && !json(l).contains("Inbox") && !json(l).contains("com.apple.mail"), "\(rd): no window's title, app or bundle in the bytes")
     let back = Wire.decode(WindowList.self, from: Wire.encode(l))
     check(back?.locked == true && back?.offConsole == l.offConsole && back?.windows.isEmpty == true, "\(rd): the list round-trips")
