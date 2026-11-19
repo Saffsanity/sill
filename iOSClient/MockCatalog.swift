@@ -159,11 +159,54 @@ enum MockCatalog {
                 break
             }
         }
+        // Share Camera (docs/camera-plan.md §13.3, G1 and G2): what the mock Mac says of this device's camera and what
+        // the camera does, for the Settings rows (`-SillCameraCase`, with `-Sill.shareCamera 1` for the switch on) and
+        // the indicator over the stream (`-SillCameraChip`). Nothing captures: the mock's camera is never decided.
+        seedCamera(client)
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
         // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
         if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }   // the view too: no app's menus
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
+    }
+
+    /// `-SillCameraCase <case>` (the Settings rows) and `-SillCameraChip on|paused` (the indicator; with
+    /// `-SillFullScreen 1` the symbol alone). The cases: `off` (the Mac's Use iPhone and iPad cameras off: its list
+    /// says 0), `update` (a Sill.app from before the camera: "Update Sill"), `notready` (Sill Camera not ready there),
+    /// `unpaired`, `idle` (nothing on the Mac uses it), `inuse` (FaceTime does), `another` (iPhone is the Mac's
+    /// camera), and the device's pauses while FaceTime wants it: `denied` (with Open Settings), `multitasking`,
+    /// `busy`, `thermal`, `nocamera`. A case of the switch's (all but `off`, `update`, `notready` and `unpaired`)
+    /// shows what it shows with `-Sill.shareCamera 1`. A locked mock Mac (`-SillMacLocked`) shows none.
+    private static func seedCamera(_ client: StreamClient) {
+        let defaults = UserDefaults.standard
+        let chip = defaults.string(forKey: "SillCameraChip")
+        guard let raw = defaults.string(forKey: "SillCameraCase") ?? chip.map({ $0 == "paused" ? "busy" : "inuse" }) else { return }
+        client.cameraSession.mocked = true
+        guard !client.macLocked else { return }
+        let on = StreamClient.shareCameraOn || chip != nil
+        func state(_ s: String, holder: String? = nil, app: String? = nil) -> CameraState { CameraState(state: s, holder: holder, app: app) }
+        var look = CameraLook()
+        switch raw {
+        case "off": client.hostCamera = 0; client.cameraState = state(CameraState.off)
+        case "update": client.hostCamera = nil; client.hostVersion = "0.6.3"
+        case "notready": client.hostCamera = 0; client.cameraState = state(CameraState.notReady)
+        case "unpaired": client.hostCamera = 1; client.cameraState = state(CameraState.unpaired)
+        case "idle": client.hostCamera = 1; client.cameraState = state(CameraState.idle); look = CameraLook(offering: on, pause: on ? CameraFormat.waiting : nil)
+        case "inuse": client.hostCamera = 1; client.cameraState = state(CameraState.inUse, app: "FaceTime"); look = CameraLook(offering: on, capturing: on)
+        case "another": client.hostCamera = 1; client.cameraState = state(CameraState.another, holder: "Noah’s iPhone")
+            look = CameraLook(offering: on, pause: on ? CameraFormat.waiting : nil)
+        case "denied", "multitasking", "busy", "thermal", "nocamera":
+            client.hostCamera = 1
+            client.cameraState = state(CameraState.inUse, app: "FaceTime")
+            let pause = ["denied": CameraFormat.denied, "multitasking": CameraFormat.multitasking, "busy": CameraFormat.busy,
+                         "thermal": CameraFormat.thermal, "nocamera": CameraFormat.unavailable][raw]
+            look = CameraLook(offering: on, pause: on ? pause : nil)
+        default:
+            print("-SillCameraCase \(raw): not a case (off, update, notready, unpaired, idle, inuse, another, denied, multitasking, busy, thermal, nocamera)")
+            return
+        }
+        client.cameraLook = look
+        print("harness: camera case \(raw), the switch \(on ? "on" : "off"), chip \(CameraChip.chip(client))")
     }
 
     /// `-SillPointer <state>`: the mock's pointer in one of the plan's states (see the harness's

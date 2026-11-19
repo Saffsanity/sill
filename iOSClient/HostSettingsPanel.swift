@@ -93,6 +93,11 @@ struct HostSettingsPanel: View {
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// Share Camera (docs/camera-plan.md §10, a beta): off at every launch until turned on, read by
+    /// StreamClient+Camera at each decision; a change offers the camera or stops it at once.
+    @AppStorage(StreamClient.shareCameraKey) private var shareCamera = false
+    /// Camera: Front | Back under it while it is on: front unless chosen, remembered.
+    @AppStorage(StreamClient.cameraPositionKey) private var cameraPosition = CameraCodec.positionFront
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -120,6 +125,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `camera`, to Share Camera's rows and their footnote (docs/camera-plan.md §13.3).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -131,6 +137,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "camera"?: return cameraRowsID
         default: return nil
         }
         #else
@@ -144,6 +151,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let cameraRowsID = "camera"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -750,6 +758,9 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        // Share Camera (docs/camera-plan.md §10), after the clipboard's rows as the 2026-11-18 overview's §2.2 orders
+        // This ‹device›: they move into settings-pane's whole-screen pane, its device part, with the rest of this group.
+        cameraRows
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)
@@ -780,6 +791,65 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+    }
+
+    /// Share Camera (docs/camera-plan.md §10, §11; a beta): shown while the Mac's list says `camera` (disabled at its
+    /// 0, with the Mac's words), "Update Sill" for a Sill.app from before it, nothing for the CLI or a locked Mac
+    /// (CameraPolicy.row); Camera: Front | Back under the switch while it is on; the footnote from kind 16's word, this
+    /// device's pause and the switch (CameraPolicy.Copy.footnote), and Open Settings when iOS refuses the camera.
+    @ViewBuilder private var cameraRows: some View {
+        let row = CameraPolicy.row(hostCamera: client.hostCamera, hostVersion: client.hostVersion, locked: client.macLocked)
+        if row != .hidden {
+            Rows {
+                Toggle(isOn: $shareCamera) {
+                    HStack(spacing: 8) {
+                        Text(CameraPolicy.Copy.row).foregroundStyle(Palette.text)
+                        BetaTag()
+                    }
+                }
+                .disabled(row != .enabled)
+                .accessibilityLabel("\(CameraPolicy.Copy.row), beta")
+                .accessibilityInputLabels([CameraPolicy.Copy.row])
+                .rowFrame()
+                .onChange(of: shareCamera) { _, _ in
+                    client.noteAction()
+                    client.cameraSwitchChanged()
+                }
+                if shareCamera, row == .enabled {
+                    RowDivider()
+                    HStack(spacing: 12) {
+                        Text(CameraPolicy.Copy.position).foregroundStyle(Palette.text)
+                        Spacer(minLength: 8)
+                        Picker(CameraPolicy.Copy.position, selection: $cameraPosition) {
+                            Text(CameraPolicy.Copy.front).tag(CameraCodec.positionFront)
+                            Text(CameraPolicy.Copy.back).tag(CameraCodec.positionBack)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    .rowFrame()
+                    .onChange(of: cameraPosition) { _, _ in
+                        client.noteAction()
+                        client.cameraPositionChanged()
+                    }
+                }
+            }
+            .id(Self.cameraRowsID)
+            Footnote(text: CameraPolicy.Copy.footnote(row: row, switchOn: shareCamera, state: client.cameraState,
+                                                      pause: client.cameraLook.pause, mac: mac, device: device))
+            if shareCamera, CameraPolicy.Copy.showsOpenSettings(pause: client.cameraLook.pause) {
+                Button(CameraPolicy.Copy.openSettings) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(minHeight: 44)
+                .padding(.horizontal, 14)
+                .padding(.top, -6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every
