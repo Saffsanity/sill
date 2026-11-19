@@ -140,6 +140,20 @@ do {
     eq(standard.changes(to: app), "virtual display off → on, send audio off → on", "changes: the two knobs that differ")
 }
 
+// Send Audio after an update (issue #419): an install that ran an earlier Sill.app and never saved
+// the key gets it saved off, once; a fresh install keeps the default; a saved choice always wins.
+do {
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, ranBefore: true), false, "an update: saved off")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, ranBefore: false), nil, "a fresh install: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: true, ranBefore: true), nil, "once only: a later launch saves nothing")
+    for saved in [true, false] {
+        for settled in [true, false] {
+            eq(HostConfig.sendAudioToSave(saved: saved, settled: settled, ranBefore: true), nil,
+               "the user's choice (\(saved ? "on" : "off")) wins, settled \(settled)")
+        }
+    }
+}
+
 // MARK: DeviceSettings
 
 do {

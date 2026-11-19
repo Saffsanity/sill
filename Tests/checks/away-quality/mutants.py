@@ -74,6 +74,10 @@ MUTANTS = [
      "        return trusted.contains(key)\n", "        return !trusted.isEmpty\n"),
     ("AQ39 a prefix of a paired key counts", H + "DeviceSettings.swift",
      "        return trusted.contains(key)\n", "        return trusted.contains { $0.starts(with: key) }\n"),
+    ("AQ45 an update leaves Send Audio on (#419)", H + "HostConfig.swift", "        return false\n    }", "        return nil\n    }"),
+    ("AQ46 a fresh install's Send Audio saved off too", H + "HostConfig.swift", "guard saved == nil, !settled, ranBefore else", "guard saved == nil, !settled else"),
+    ("AQ47 every launch saves it off", H + "HostConfig.swift", "guard saved == nil, !settled, ranBefore else", "guard saved == nil, ranBefore else"),
+    ("AQ48 a saved choice overwritten", H + "HostConfig.swift", "guard saved == nil, !settled, ranBefore else", "guard !settled, ranBefore else"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

@@ -129,6 +129,18 @@ package struct HostConfig: Equatable, Sendable {
         return c
     }()
 
+    /// What Sill.app saves for Send Audio at launch, before it registers its defaults (issue #419),
+    /// or nil to save nothing. Send Audio is on by default since 2026-10-27 (#236), but only a fresh
+    /// install should get that: a Mac that ran an earlier Sill.app and never saved the key would
+    /// start sending its sound after an update without its user choosing it. So the first launch of
+    /// this build on such a Mac (`ranBefore`: a key an earlier Sill.app writes is there) saves it off;
+    /// the user can turn it on in the menu or Settings as before. Once only (`settled`), so a fresh
+    /// install keeps the default on at every later launch, and a saved choice (`saved`) always wins.
+    package static func sendAudioToSave(saved: Bool?, settled: Bool, ranBefore: Bool) -> Bool? {
+        guard saved == nil, !settled, ranBefore else { return nil }
+        return false
+    }
+
     /// The remote door's port when none is set.
     package static let defaultRemotePort = 7455
 
