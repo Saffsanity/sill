@@ -39,6 +39,10 @@ enum RemoteDialPolicy {
         var kind: String
         /// "Tailscale", "Wi‑Fi"…; "" for an address with no service name (typed, or from a link).
         var via: String
+        /// An address the Mac no longer lists (SavedMac.rememberedAddresses): dialed after its own
+        /// list (`order`), where only the Mac's own answers and silence count (`classify`) and no other
+        /// saved Mac's key is taken (`successors`).
+        var remembered = false
 
         /// "host|port", how `SavedMac.lastWorked` names the address that won.
         var key: String { "\(host)|\(port)" }
@@ -51,17 +55,33 @@ enum RemoteDialPolicy {
         }
     }
 
-    /// The dial order: the address that last worked; VPN names, VPN IPv4, VPN IPv6; LAN addresses
-    /// in a subnet this device shares (it is at home, and Bonjour failed); internet names, then
-    /// internet addresses; the other LAN addresses (reached through a VPN into the home network).
-    /// Duplicates (same host and port) are dialed once. `localIPv4` is this device's own IPv4
-    /// networks (address and prefix length).
+    /// The dial order: first `addresses`, the Mac's own list and the typed ones; then `remembered`, the
+    /// VPN addresses an earlier list of the Mac's had (SavedMacs.remembered), marked so, which never go
+    /// before the Mac's own list. Each group in this order: the address that last worked; VPN names,
+    /// VPN IPv4, VPN IPv6; LAN addresses in a subnet this device shares (it is at home, and Bonjour
+    /// failed); internet names, then internet addresses; the other LAN addresses (reached through a
+    /// VPN into the home network). Duplicates (same host and port) are dialed once, in the first
+    /// group that has them. `localIPv4` is this device's own IPv4 networks (address and prefix
+    /// length).
     ///
-    /// A loopback address goes before all of them: only a test host lists one (127.0.0.1, "This
+    /// A loopback address goes before all of a group's: only a test host lists one (127.0.0.1, "This
     /// Mac", first in its list so the simulator on the same Mac reaches it that way), and it either
     /// is this very machine or nothing answers at once.
-    static func order(_ addresses: [MacAddress], remotePort: Int, lastWorked: String?,
+    static func order(_ addresses: [MacAddress], remembered: [MacAddress] = [], remotePort: Int, lastWorked: String?,
                       localIPv4: [(address: [UInt8], prefix: Int)]) -> [Candidate] {
+        let later = group(remembered, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4).map { c -> Candidate in
+            var c = c
+            c.remembered = true
+            return c
+        }
+        var seen = Set<String>()
+        return (group(addresses, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4) + later)
+            .filter { seen.insert($0.key.lowercased()).inserted }
+    }
+
+    /// One group of `order`, in its order, duplicates not yet dropped.
+    private static func group(_ addresses: [MacAddress], remotePort: Int, lastWorked: String?,
+                              localIPv4: [(address: [UInt8], prefix: Int)]) -> [Candidate] {
         let all = addresses.map { Candidate(host: $0.host, port: $0.port ?? remotePort, kind: $0.kind, via: $0.via) }
         func vpn(_ c: Candidate) -> Bool { c.kind == MacAddress.vpn || isVPNAddress(c.host) }
         func shared(_ c: Candidate) -> Bool {
@@ -80,8 +100,7 @@ enum RemoteDialPolicy {
         if let lastWorked, let i = ordered.firstIndex(where: { $0.key == lastWorked }) {
             ordered.insert(ordered.remove(at: i), at: 0)
         }
-        var seen = Set<String>()
-        return ordered.filter { seen.insert($0.key.lowercased()).inserted }
+        return ordered
     }
 
     /// Tailscale's shapes: 100.64/10, fd7a:115c:a1e0::/48, a .ts.net name. An address with one of
@@ -108,7 +127,10 @@ enum RemoteDialPolicy {
     ///   network (the home Mac's 192.168.1.10 is the office Mac's at the office), and a pin refused
     ///   there is no wrong Mac either (`classify`). Loopback only with `allowLoopback` (DEBUG: the
     ///   simulator's test hosts on this Mac).
+    /// - An address the Mac still lists: never a remembered one (`Candidate.remembered`), which may be
+    ///   another machine's by now and proves nothing about who holds which key.
     static func successors(of old: SavedMac, at candidate: Candidate, in list: [SavedMac], allowLoopback: Bool) -> [SavedMac] {
+        guard !candidate.remembered else { return [] }
         let h = candidate.host.lowercased()
         let loopback = h.hasPrefix("127.") || h == "::1" || h == "localhost"
         let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)
@@ -183,6 +205,14 @@ enum RemoteDialPolicy {
         priority.first { failures.contains($0) }
     }
 
+    /// A dial every attempt of which failed (RemoteConnector): its most telling failure, no answer
+    /// when none counted, and the address that failure came from (the first attempt that ended so;
+    /// with none, the first address dialed), for the status line (RemoteCopy.dialFailure).
+    static func failed(_ results: [(Failure, Candidate)], candidates: [Candidate]) -> (failure: Failure, candidate: Candidate?) {
+        let failure = Self.worst(results.map(\.0)) ?? .noAnswer
+        return (failure, results.first { $0.0 == failure }?.1 ?? candidates.first)
+    }
+
     static let dnsNoSuchName: Int32 = -65538
     static let dnsNoSuchRecord: Int32 = -65554
     static let dnsPolicyDenied: Int32 = -65570
@@ -190,8 +220,22 @@ enum RemoteDialPolicy {
     /// One attempt's end as a failure; nil for one that does not count (another machine answered
     /// at a LAN address: only a stranger at that number, not a wrong Mac). `usedTunnel`: whether
     /// the attempt's path went through a tunnel interface (nil when unknown).
+    ///
+    /// At a remembered address (`Candidate.remembered`), which the Mac no longer lists and may be
+    /// another machine's by now, an answer that is not the Mac's own counts for nothing either:
+    /// another key (the pin refused), a TLS that is not Sill's, a name that no longer resolves (the
+    /// addresses beside it still say whether a VPN is off). The Mac's own answers (our key refused
+    /// after the pin, a goodbye; a refusal by its door, as at any address) and silence (no answer,
+    /// this device's VPN off) count as anywhere, so the words still say a VPN may be off (#309).
     static func classify(_ end: End, candidate: Candidate, usedTunnel: Bool?) -> Failure? {
         let vpnAddress = candidate.kind == MacAddress.vpn || isVPNAddress(candidate.host)
+        if candidate.remembered {
+            switch end {
+            case .tls(-9825), .tls(-9829), .tls(-9816), .tls(-9806): break
+            case .tls, .dns: return nil
+            default: break
+            }
+        }
         switch end {
         case .tls(-9808):
             return candidate.kind == MacAddress.lan && !isVPNAddress(candidate.host) ? nil : .wrongMac
@@ -247,5 +291,57 @@ enum RemoteDialPolicy {
             }
             return true
         }
+    }
+}
+
+/// The status line's words for a remote dial that failed and for a goodbye (§7.8).
+enum RemoteCopy {
+    static func dialFailure(_ failure: RemoteDialPolicy.Failure, mac: String, candidate: RemoteDialPolicy.Candidate?,
+                            vpnName: String?, device: String) -> String {
+        let at = candidate?.display ?? "its address"
+        switch failure {
+        case .wrongMac:
+            return "This isn’t the \(mac) this \(device) paired with. If Sill was set up again on it, forget it here and pair again."
+        case .revoked:
+            return "\(mac) no longer accepts this \(device). Pair it again from Sill’s Settings on the Mac."
+        case .remoteOff:
+            return "\(mac) turned off Remote Access."
+        case .busy:
+            return "\(mac) is already serving 8 devices."
+        case .refused:
+            return "\(mac) answered, but Sill isn’t accepting remote connections there. Check that Sill is open and Remote Access is on. If you changed its port, connect at home once."
+        case .vpnOff:
+            // Either end's VPN may be the one off (#309): a lookup or a dial that fails tells the device no more.
+            let name = candidate.flatMap { vpnLabel($0) } ?? "Your VPN"
+            return "\(name) looks off on this \(device) or on \(mac). Turn it on for both, then tap \(mac)."
+        case .nameNotFound:
+            let host = candidate?.host ?? "its name"
+            return RemoteDialPolicy.isTailscaleName(host) ? "This \(device) can’t look up \(host). Is Tailscale on, here and on \(mac)?"
+                                                        : "This \(device) can’t look up \(host)."
+        case .localNetwork:
+            return "To reach \(at), allow Local Network for Sill in Settings."
+        case .notSill:
+            return "Something answered at \(at), but it isn’t Sill. Your home’s internet address may have changed."
+        case .noAnswer:
+            if let c = candidate, c.kind == MacAddress.internet, !c.isName {
+                return "\(mac) didn’t answer at \(at). If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac."
+            }
+            return vpnName.map { "\(mac) didn’t answer. It may be asleep, or \($0) may be off on the Mac." } ?? "\(mac) didn’t answer. It may be asleep."
+        }
+    }
+
+    /// The VPN that a dial's "didn't answer" names on the Mac ("…or Tailscale may be off on the
+    /// Mac"): the first of `addresses` with a VPN service name. The dial passes every address it had:
+    /// the Mac's list, the typed ones and the remembered ones (SavedMacs.remembered), so a VPN that
+    /// was off on the Mac while this device connected at home is still named.
+    static func vpnName(_ addresses: [MacAddress]) -> String? {
+        addresses.lazy.compactMap { vpnLabel(RemoteDialPolicy.Candidate(host: $0.host, port: $0.port ?? 7455, kind: $0.kind, via: $0.via)) }.first
+    }
+
+    /// A VPN address's service name when it carries one ("Tailscale", "Home WireGuard").
+    static func vpnLabel(_ c: RemoteDialPolicy.Candidate) -> String? {
+        guard c.kind == MacAddress.vpn || RemoteDialPolicy.isVPNAddress(c.host) else { return nil }
+        if !c.via.isEmpty, !c.via.hasPrefix("VPN ("), !["Router", "Address name", "IPv6", "This Mac"].contains(c.via) { return c.via }
+        return RemoteDialPolicy.isVPNAddress(c.host) ? "Tailscale" : nil
     }
 }
