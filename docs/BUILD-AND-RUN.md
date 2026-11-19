@@ -351,7 +351,15 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
+scrolled to its end), `-SillMicCase ready|waiting|inuse|another|anotheroff|off|setup|unpaired|refused|older|denied|interrupted|noinput|window`
+(the mock Mac a Sill.app that takes the microphone, Share Microphone's row in that state; without it the
+mock lists no microphone and shows no row), `-SillSettingsScroll mic` (the panel at Share Microphone's row),
+and in the normal app and under `-SillLive 1` `-SillMicOn 1` (Share Microphone on at launch),
+`-SillMicPermission granted|denied` (the permission as if iOS said it, no prompt) and `-SillMicSource tone`
+(a device records the test tone, never its microphone; the simulator always does, and never opens the
+Mac's microphone through it); the console's "mic: …" lines say what happened (the offer, its claim and
+pause, the Mac's word, the recording's epoch, the tap's buffers, a skipped message, a move's format again),
+`-SillSettingsScroll gestures` (the panel scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

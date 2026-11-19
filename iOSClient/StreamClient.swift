@@ -138,6 +138,7 @@ final class StreamClient: ObservableObject {
             guard connected != oldValue else { return }
             DeviceIdleTimer.shared.update()          // auto-lock (PR #230)
             PictureInPictureHub.shared.update()      // Picture in Picture's offer (#291)
+            MicrophoneHub.shared.update()            // the window the microphone goes from
         }
     }
     /// The nearby (peer-to-peer) browser runs: the status line says so, or under the hint the line
@@ -397,6 +398,7 @@ final class StreamClient: ObservableObject {
         lastActionAt = ProcessInfo.processInfo.systemUptime
         DeviceIdleTimer.shared.used()
         PictureInPictureHub.shared.used(self)     // with several windows, the one used last offers it (#291)
+        MicrophoneHub.shared.used(self)           // …and sends the microphone
     }
     /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
     /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
@@ -959,6 +961,21 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    // This device's microphone as Sill Microphone (StreamClient+Microphone, docs/microphone-plan.md). Main thread.
+    /// The window list's `microphone`: generation 1 or more, 0, or nil (an older Mac, the CLI, a locked Mac).
+    @Published var hostMicrophone: Int?
+    /// This connection's kind 16 `microphone`, kept across a move's hand-over until the new connection says.
+    @Published var micState: MicrophoneState?
+    /// The offers and ends this connection has sent (MicrophonePolicy.DeviceLink).
+    var micDeviceLink = MicrophonePolicy.DeviceLink()
+    /// MicrophoneHub's word: this window is the one, or another of Sill's windows sends the microphone.
+    var micChosen = true
+    @Published var micOtherWindow = false
+    /// An audio interruption (a call) holds the audio.
+    @Published var micInterrupted = false
+    /// The microphone records and sends now.
+    @Published var micRecording = false
+    var micCapture: MicrophoneCapture?
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
     /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
     /// windows then, it streams a black placeholder, and the Apps drawer and the Settings panel's header
@@ -1030,6 +1047,8 @@ final class StreamClient: ObservableObject {
     /// Where every message to the Mac goes, in the order sent, also across a move's hand-over from
     /// the direct connection to the network one (SessionLink).
     private let link = SessionLink()
+    /// The session's link, for the microphone's packets (StreamClient+Microphone: `sendMicrophone`).
+    var sessionLink: SessionLink { link }
     let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
     /// The session's last keyframe with the parameter sets it came with (the Mac sends them before
@@ -1144,6 +1163,8 @@ final class StreamClient: ObservableObject {
         sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
         // The picture's window going away and coming back (KeyframeRecovery).
         observePictureActivation()
+        // A call pausing the microphone (StreamClient+Microphone).
+        observeMicrophoneInterruptions()
     }
 
     // MARK: - The picture's recovery
@@ -1188,7 +1209,7 @@ final class StreamClient: ObservableObject {
 
     /// This window's scene is in the foreground and active, or, while the picture is in no window, Sill is
     /// active. Main thread.
-    private var sceneInFront: Bool {
+    var sceneInFront: Bool {
         if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
         return UIApplication.shared.applicationState == .active
     }
@@ -1956,6 +1977,7 @@ final class StreamClient: ObservableObject {
         resetHomeMove()       // …and what a remote session knew of its move home
         resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
         sound.sessionStarted(away: false)   // …and its sound starts afresh (a move's hand-over keeps it)
+        microphoneSessionStarted()          // …and its microphone's offers (a move's hand-over keeps the recording)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -2748,6 +2770,8 @@ final class StreamClient: ObservableObject {
             print("path: no fence (the old connection\(reconnected ? " is gone" : "'s path is gone")): \(released?.held ?? 0) held messages went out on the new connection\(waiting)")
             #endif
         }
+        // The microphone's offer, with the recording's epoch, goes again on the new connection (behind the fence).
+        microphoneMoved()
         // The Mac takes the new connection for a new device and reports the pointer to it at once,
         // having read nothing on it: while this device had the pointer, that report is its own doing
         // and must not bring up the Mac's arrow (docs/pointer-visibility-plan.md §7.3). Its control
@@ -3457,6 +3481,7 @@ final class StreamClient: ObservableObject {
         // Away from home through a VPN or the internet: away's cover, its start and bounds (rule 2). By
         // address (a LAN address through the remote door) is home, as the Mac's AwayPolicy counts it.
         sound.sessionStarted(away: s.route != .remote(.address))
+        microphoneSessionStarted()
         session = s
         goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -3797,6 +3822,8 @@ final class StreamClient: ObservableObject {
         // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
         // loses the Mac's menus at its next rebuild.
         resetMenus()
+        // Nor its microphone: the recording stops, nothing more is sent.
+        microphoneSessionEnded()
         // Nor its sound: the engine stops, and the next session's floor and cover start afresh.
         sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
@@ -4001,6 +4028,7 @@ final class StreamClient: ObservableObject {
             lastPersonInputAt = lastInputAt
             DeviceIdleTimer.shared.used()      // the person is at the device: auto-lock held off again (PR #230)
             PictureInPictureHub.shared.used(self)   // with several windows, the one used last offers it (#291)
+            MicrophoneHub.shared.used(self)         // …and sends the microphone
         }
         // A click or a key from any view: what the input view remembers of what was typed goes (#138).
         if TextInputRules.movesCaret(event) { onCaretMayMove?() }
@@ -4449,6 +4477,8 @@ final class StreamClient: ObservableObject {
                 #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
+                // The microphone: offer, record or stop as the Mac's word and this device's switch say.
+                self.hostMicrophoneChanged(list.microphone)
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -4776,6 +4806,7 @@ extension StreamClient {
         #endif
         let refused = settings.receive(state)
         if let fps = state.stream?.fps { sound.setStreamFPS(fps) }
+        microphoneStateChanged(state.microphone)
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()

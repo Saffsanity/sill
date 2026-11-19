@@ -1038,6 +1038,24 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
+  This device's microphone as Sill Microphone on the Mac (docs/microphone-plan.md, the first part):
+  `MicrophoneSender` (a capture buffer's 48 kHz mono frames in, kind 48's messages out: SillAudio's
+  packetizer and its encoder, mono at 64 kbps, ten packets a message, the epoch and seq, each stamp the
+  capture time on the wall clock; no AVFAudio; pbxproj A190/F190), `MicrophoneCapture` (its queue
+  `sill.mic`: the tap's buffers copied off AVFAudio's tap thread, converted to 48 kHz if the route gives
+  another rate, through the sender to the session's link; the test tone in the simulator, whose
+  microphone is never opened, and in DEBUG with `-SillMicSource tone`; A191/F191; both checked on the
+  Mac, `Tests/checks/mic-send`) and `StreamClient+Microphone` (A192/F192: `MicrophoneSwitch`, Share
+  Microphone, the app's one switch, off at every launch, and the permission, asked only as it is turned
+  on; `MicrophoneHub`, the window the microphone goes from; the glue that steps MicrophonePolicy's
+  DeviceLink on every change and starts or stops the recording; an interruption's pause). AudioOutput's
+  engine runs in its voice mode while the window's microphone records (`setMicrophone`: voice
+  processing, the tap on its input, other audio ducked as little as iOS allows), and `SharedSession`
+  holds two needs, playing (`.playback`, mixing) and recording (`.playAndRecord`, `.voiceChat`, mixing,
+  to the speaker, Bluetooth in call quality). `SessionLink.sendMicrophone` sends its packets only while
+  no fence or hold stands and at most two are unsent, never queued (`Tests/checks/fence`'s `microphone`
+  mode). The Settings panel's Share Microphone row (with a "Beta" tag) follows the clipboard's, its
+  words MicrophonePolicy's; Info.plist's `NSMicrophoneUsageDescription`, which release-ios.sh checks.
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).

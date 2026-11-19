@@ -121,6 +121,7 @@ final class WindowSessionObserverView: UIView {
         MacMenuHub.shared.session(client, window: window)
         DeviceIdleTimer.shared.session(client, window: window)     // auto-lock across windows (PR #230)
         PictureInPictureHub.shared.session(client, window: window) // which window offers Picture in Picture (#291)
+        MicrophoneHub.shared.session(client, window: window)       // which window sends the microphone
     }
 }
 
