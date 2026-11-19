@@ -10,16 +10,15 @@ import StreamProtocol
 extension HostConfig {
     /// As a device sees them: the quality its connection controls in `bitrate` and `captureScale`,
     /// the away pair for a connection the Mac counts as away (docs/remote-bundle-plan.md §4.2), the
-    /// home pair for any other; the other five are shared.
+    /// home pair for any other; the other six are shared. The Virtual Desktop's switch is reported by
+    /// every host from phase 2b on, the CLI without its AppKit loop too (its state then says why it
+    /// cannot be made: `HostSettingsState.virtualDesktopState`), so a device shows the switch and sends
+    /// it only to a host that has it.
     func streamSettings(away: Bool) -> StreamSettings {
         let pair = effective(away: away)
         return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
                               prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                              directWireless: directWireless, sendAudio: sendAudio,
-                              // The Virtual Desktop's switch is reported once the coordinator makes the display (phase
-                              // 2b's commit 8, which sends `virtualDesktop` here): until then no device shows a switch
-                              // that would do nothing, and a device sends it to no host that did not report it.
-                              virtualDesktop: nil)
+                              directWireless: directWireless, sendAudio: sendAudio, virtualDesktop: virtualDesktop)
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:

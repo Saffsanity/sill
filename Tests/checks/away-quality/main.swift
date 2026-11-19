@@ -169,8 +169,9 @@ do {
                                  directWireless: true, sendAudio: true)
     check(on.applying(all).virtualDesktop && on.applyingAway(all).virtualDesktop && !standard.applying(all).virtualDesktop
           && !standard.applyingAway(all).virtualDesktop, "a change without it leaves it as it was")
-    check(standard.streamSettings(away: false).virtualDesktop == nil && on.streamSettings(away: true).virtualDesktop == nil,
-          "not reported to devices before the coordinator makes it, so no device shows a switch that does nothing")
+    check(standard.streamSettings(away: false).virtualDesktop == false && on.streamSettings(away: false).virtualDesktop == true
+          && on.streamSettings(away: true).virtualDesktop == true && standard.streamSettings(away: true).virtualDesktop == false,
+          "reported to every device as it is, home or away (phase 2b's coordinator makes it), never nil from a host that has it")
     let unpairedWords = "virtual desktop (only a paired device)", cannotWords = "virtual desktop (this Mac cannot make it now)"
     for remote in [false, true] {
         for paired in [false, true] {

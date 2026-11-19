@@ -310,6 +310,25 @@ eq(D.resolve(chosen: D.virtualDesktopChoice, among: withVD)?.id, 0, "chosen: the
 eq(D.resolve(chosen: D.virtualDesktopChoice, among: madeVD)?.id, 66, "chosen: its display, once made")
 eq(D.resolve(chosen: D.virtualDesktopChoice, among: madeVD, mainOnly: true)?.id, 1, "locked or off console: the main display")
 eq(D.resolve(chosen: D.virtualDesktopChoice, among: D.candidates(listed, main: 1))?.id, 1, "its switch turned off: the main display")
+// The stop the Desktop streams (`streamed`): the Virtual Desktop's before its display exists shows the main display meanwhile.
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: withVD)?.id, 1, "streamed: the Virtual Desktop chosen before it exists: the main display meanwhile")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: madeVD)?.id, 66, "streamed: once made, its display")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: madeVD, mainOnly: true)?.id, 1, "streamed: locked, the main display")
+eq(D.streamed(chosen: "BENQ-R", among: withVD)?.id, 2, "streamed: a screen chosen, that screen")
+eq(D.streamed(chosen: nil, among: withVD)?.id, 1, "streamed: nothing chosen, the main display")
+let vdFirst = [D.virtualStop([])] + c
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: vdFirst)?.id, 1, "streamed: the first stop that has a display, not the stop before it")
+eq(D.streamed(chosen: D.virtualDesktopChoice, among: D.candidates([sills], main: 1, virtualDesktop: true))?.id, nil,
+   "streamed: the Virtual Desktop alone, not made: none (the host's own display then)")
+for chosen in [nil, "BENQ-R", "GONE", D.virtualDesktopChoice] {
+    for among in [c, withVD, madeVD, [D.Display]()] {
+        for locked in [false, true] {
+            let r = D.resolve(chosen: chosen, among: among, mainOnly: locked), st = D.streamed(chosen: chosen, among: among, mainOnly: locked)
+            check(r?.id == 0 ? st?.id == among.first(where: { $0.id != 0 })?.id : st?.id == r?.id,
+                  "streamed is resolve's but a stop with no display: \(String(describing: chosen)) among \(among.map(\.id)) locked \(locked)")
+        }
+    }
+}
 eq(D.next(after: 2, in: withVD)?.id, 0, "from the last screen: the Virtual Desktop's stop (a step onto it makes it)")
 eq(D.next(after: 66, in: madeVD)?.id, 1, "from the Virtual Desktop: back to the main display")
 eq(D.number(of: 66, in: madeVD), 4, "its number: the last")

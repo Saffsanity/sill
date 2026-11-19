@@ -97,8 +97,12 @@ MUTANTS = [
     ("AQ-V7 on taken where it cannot be made", H + "DeviceSettings.swift", "            } else if v, !virtualDesktopAvailable {", "            } else if false {"),
     ("AQ-V8 off refused where it cannot be made", H + "DeviceSettings.swift", "            } else if v, !virtualDesktopAvailable {",
      "            } else if !virtualDesktopAvailable {"),
-    ("AQ-V9 reported before it is made", H + "DeviceSettings.swift", "                              virtualDesktop: nil)",
-     "                              virtualDesktop: virtualDesktop)"),
+    ("AQ-V9 not reported to devices (a host before 2b's)", H + "DeviceSettings.swift",
+     "directWireless: directWireless, sendAudio: sendAudio, virtualDesktop: virtualDesktop)",
+     "directWireless: directWireless, sendAudio: sendAudio, virtualDesktop: nil)"),
+    ("AQ-V9b reported always off", H + "DeviceSettings.swift",
+     "directWireless: directWireless, sendAudio: sendAudio, virtualDesktop: virtualDesktop)",
+     "directWireless: directWireless, sendAudio: sendAudio, virtualDesktop: false)"),
     ("AQ-V10 a taken Virtual Desktop dropped", H + "DeviceSettings.swift", "                ok.virtualDesktop = v\n", ""),
 ]
 caught = 0

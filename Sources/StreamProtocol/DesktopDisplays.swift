@@ -158,6 +158,14 @@ public enum DesktopDisplays {
         return candidates.first
     }
 
+    /// The stop whose display the Desktop streams now: `resolve`'s, but while that is the Virtual Desktop before its
+    /// display exists (a stop with ID 0: listed, not made yet), the first stop that has a display (the main display)
+    /// meanwhile; the host makes it, and the Desktop moves onto it once a look lists it (phase 2b). Nil with none.
+    public static func streamed(chosen: String?, among candidates: [Display], mainOnly: Bool = false) -> Display? {
+        guard let d = resolve(chosen: chosen, among: candidates, mainOnly: mainOnly) else { return nil }
+        return d.id != 0 ? d : candidates.first { $0.id != 0 }
+    }
+
     /// How long the Mac keeps the stop a device stepped to after the last device left, in seconds: a
     /// Desktop asked for again within it (a reconnect, a move to the cable) comes back to it.
     public static let choiceGrace: Double = 30

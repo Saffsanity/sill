@@ -67,8 +67,8 @@ for f in hostFiles where f != "VirtualDisplay.swift" {
 check(makers == ["SillDisplays.swift 1", "VirtualDisplaySelfTest.swift 1"],
       "a display made only in SillDisplays.make and the self test: \(makers)")
 check(manager.contains("d = try VirtualDisplay(name: role.name, widthPt: widthPt, heightPt: heightPt, scale: scale, refreshHz: refreshHz,\n"
-                       + "                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial)"),
-      "SillDisplays.make makes each display with its role's identity")
+                       + "                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes)"),
+      "SillDisplays.make makes each display with its role's identity, and the modes it is asked for")
 // The guard for #380 around every make: the marker taken back on a throw and once it is up (or not).
 check(manager.contains("        } catch {\n            makeGuard?.made(cameUp: false)\n            throw error\n        }"),
       "a make that throws takes the guard's marker back as a make that failed")
@@ -107,18 +107,35 @@ check(coordinator.contains("d = try displays.make(.desktop, widthPt: asked.width
 check(coordinator.contains("            displays.willMake(.desktop)\n            if testHeadlessFile != nil {"),
       "its marker is written just before it is made, or said to be")
 check(coordinator.contains("_ = await displays.waitUntilOnline(d, timeout: 3)"), "it is waited for there, which takes the marker back")
-check(occurrences("displays.say(.desktop)", coordinator) == 1 && coordinator.contains("            if testHeadlessFile != nil {\n"),
-      "a test host's is only said to be made (SILL_TEST_HEADLESS)")
+check(occurrences("displays.say(.desktop)", coordinator) == 2 && coordinator.contains("            if testHeadlessFile != nil {\n")
+      && coordinator.contains("        if testVirtualDesktop {\n            // TEST ONLY: said, never made (SillDisplays.say)"),
+      "a test host's is only said to be made (SILL_TEST_HEADLESS, SILL_TEST_VIRTUAL_DESKTOP), each in its hook's branch")
 check(coordinator.contains("let said = testHeadlessMade && headlessDisplay == nil\n        displays.remove(.desktop)"),
       "it is removed there, a said one with it")
+// The Virtual Desktop (phase 2b's commit 8): the same role's display, made, waited for, listed and removed there.
+check(coordinator.contains("newDisplay = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, refreshHz: Double(hz),"),
+      "the Virtual Desktop is made by SillDisplays, as the Desktop's display")
+check(coordinator.contains("        displays.willMake(.desktop)\n        let t0 = CFAbsoluteTimeGetCurrent()\n        if testVirtualDesktop {"),
+      "its marker is written just before it is made, or said to be")
+check(coordinator.contains("_ = await displays.waitUntilOnline(newDisplay, timeout: 3)"), "it is waited for there, which takes the marker back")
+check(coordinator.contains("_ = await displays.waitUntilListed(newDisplay, as: .desktop, timeout: 3)"), "and listed there")
+check(coordinator.contains("            displays.say(.desktop)\n            desktopLife.made(.virtualDesktop, at: now)\n"),
+      "a test host's is only said to be made")
+check(coordinator.contains("moveVirtualDesktopWindowsOut(waitsForFullScreen: true)\n        displays.remove(.desktop)\n"),
+      "it is removed there, its windows moved off it first")
+check(coordinator.contains("displays.onLost[.desktop] = { [weak self] in self?.desktopDisplayLost() }"),
+      "the coordinator hears the Desktop's display lost (either role)")
 check(coordinator.contains("private var headlessDisplay: VirtualDisplay? { displays.display(.desktop) }")
       && coordinator.contains("private var hasHeadlessDisplay: Bool { displays.exists(.desktop) }"),
       "the coordinator keeps no display of its own: it reads SillDisplays'")
 if let quit = coordinator.range(of: "package func shutdownForExit() {") {
-    let body = String(coordinator[quit.upperBound...].prefix(700))
+    let body = String(coordinator[quit.upperBound...].prefix(1000))
     let release = body.range(of: "stage.release()"), all = body.range(of: "displays.removeAll()")
+    let out = body.range(of: "if desktopLife.role == .virtualDesktop { _ = moveVirtualDesktopWindowsOut(waitsForFullScreen: false) }")
     check(release != nil && all != nil && release!.lowerBound < all!.lowerBound,
           "Quit sends the stage's window home and removes its display, then every display Sill made")
+    check(out != nil && all != nil && out!.lowerBound < all!.lowerBound,
+          "Quit moves the Virtual Desktop's windows to the main display before its display goes, and waits for no full screen")
 } else { check(false, "shutdownForExit not found") }
 check(manager.contains("func removeAll() {\n        for role in SillDisplayRole.allCases { remove(role) }"), "removeAll removes every role's display")
 check(manager.contains("        said.insert(role)\n        makeGuard?.made(cameUp: true)\n"),

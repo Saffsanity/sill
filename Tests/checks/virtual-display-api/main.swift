@@ -257,6 +257,16 @@ check(HDP.pool([HDP.Kind.real, .stage, .gone, .real], kind: { $0 }) == [.real, .
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
 check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, sillsFirst: true) == [.real], "kept but not listed yet: the real one")
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: false) == [.real], "not kept: the real one first, as before")
+// Sill's display as the Virtual Desktop (phase 2b, VirtualDesktopLife's role): one more screen after the real ones, so the
+// Desktop may stream it beside them (its stop the last); with no real one, or kept as the headless display, as before.
+check(HDP.pool([HDP.Kind.sills, .standIn, .real, .stage, .gone, .real], kind: { $0 }, virtualDesktop: true) == [.real, .real, .sills],
+      "the Virtual Desktop: the real screens, then Sill's display, never the stand-in, the stage's or a gone one")
+check(HDP.pool([HDP.Kind.sills, .standIn], kind: { $0 }, virtualDesktop: true) == [.sills], "…no real screen: Sill's alone, as before")
+check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, virtualDesktop: true) == [.real], "…Sill's not listed yet: the real one")
+check(HDP.pool([HDP.Kind.sills, .real], kind: { $0 }, sillsFirst: true, virtualDesktop: true) == [.sills],
+      "…kept as the headless display (sillsFirst): Sill's alone, as before")
+check(HDP.pool([HDP.Kind.standIn], kind: { $0 }, virtualDesktop: true) == [.standIn], "…only the stand-in: the stand-in")
+check(HDP.pool([HDP.Kind.sills, .real], kind: { $0 }, virtualDesktop: false) == [.real], "not the Virtual Desktop: the real one alone, as before")
 
 // MARK: When Sill's display is made and when it goes (Watch; Noah's test of 2026-11-12)
 

@@ -1,6 +1,6 @@
 """Mutants of VirtualDesktopSize.swift, DisplayMakeGuard.swift, VirtualDesktopLife.swift and DesktopWindowLedger.swift
-(Sources/SillHost): each changes one of them in one place, is compiled with the check (main.swift; WindowRestore.swift
-too, unmutated) and must make it fail. A mutant that does not compile is not counted as caught.
+(Sources/SillHost) and VirtualDesktopWords.swift (Sources/StreamProtocol): each changes one of them in one place, is
+compiled with the check (main.swift; WindowRestore.swift and DesktopDisplays.swift too, unmutated) and must make it fail. A mutant that does not compile is not counted as caught.
 usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +11,9 @@ FILES = {"size": os.path.join(ROOT, "Sources/SillHost/VirtualDesktopSize.swift")
          "guard": os.path.join(ROOT, "Sources/SillHost/DisplayMakeGuard.swift"),
          "life": os.path.join(ROOT, "Sources/SillHost/VirtualDesktopLife.swift"),
          "ledger": os.path.join(ROOT, "Sources/SillHost/DesktopWindowLedger.swift"),
-         "restore": os.path.join(ROOT, "Sources/SillHost/WindowRestore.swift")}   # compiled, never mutated
+         "words": os.path.join(ROOT, "Sources/StreamProtocol/VirtualDesktopWords.swift"),
+         "restore": os.path.join(ROOT, "Sources/SillHost/WindowRestore.swift"),          # compiled, never mutated
+         "displays": os.path.join(ROOT, "Sources/StreamProtocol/DesktopDisplays.swift")}  # compiled, never mutated
 MUTANTS = [
     # VirtualDesktopSize.device
     ("the room after the panel", "size", "[room, panel].compactMap({ $0 })", "[panel, room].compactMap({ $0 })"),
@@ -200,6 +202,38 @@ MUTANTS = [
     ("one window said as windows", "life", "windows = \"moved \\(of) window\\(of == 1 ? \"\" : \"s\") to",
      "windows = \"moved \\(of) windows to"),
     ("the minute never said", "life", "let why = fullMinute ? ", "let why = false ? "),
+    # The coordinator's pieces (commit 8): a test host's grace, the make's line, the TEST ONLY hook
+    ("a test host's grace ignored", "life", "        let end = max(lastShown ?? madeAt ?? now, unlockedAt ?? -Double.infinity) + graceSeconds\n",
+     "        let end = max(lastShown ?? madeAt ?? now, unlockedAt ?? -Double.infinity) + Self.grace\n"),
+    ("the grace's words the 30 s whatever the grace", "life", "        return \"Virtual Desktop: \\(words(why, grace: grace)); \\(windows)removed it.\"",
+     "        return \"Virtual Desktop: \\(words(why)); \\(windows)removed it.\""),
+    ("the kept-locked line's grace fixed", "life", "it goes \\(Int(grace)) s after the unlock", "it goes 30 s after the unlock"),
+    ("the make's line names the mode asked for", "life", "        let mode = \"\\(came.widthPt)×\\(came.heightPt) pt @\\(came.scale)× at \\(hz) Hz\"",
+     "        let mode = \"\\(asked.widthPt)×\\(asked.heightPt) pt @\\(asked.scale)× at \\(hz) Hz\""),
+    ("the make's line hides a mode macOS changed", "life", "        let askedWords = came == asked ? \"\" :", "        let askedWords = true ? \"\" :"),
+    ("the make's line without its time", "life", "id \\(id): made in \\(ms) ms \\(whose).", "id \\(id): made \\(whose)."),
+    ("a said display claimed as made", "life", "        guard let id else { return \"Virtual Desktop \\(mode)\\(askedWords): said, never made",
+     "        guard let id else { return \"Virtual Desktop \\(mode)\\(askedWords) id 0: made in 0 ms"),
+    ("the hook on any host", "life", "        guard testHost else {\n", "        guard testHost || true else {\n"),
+    ("the hook without test stops", "life", "        guard asked, stops else {\n", "        guard asked else {\n"),
+    ("the hook's grace unbounded", "life", "if let v = Double(raw), v.isFinite, v >= 1, v <= 120 { g = v }", "if let v = Double(raw), v.isFinite { g = v }"),
+    ("the hook's grace from 0", "life", "if let v = Double(raw), v.isFinite, v >= 1, v <= 120 { g = v }", "if let v = Double(raw), v.isFinite, v >= 0, v <= 120 { g = v }"),
+    ("the hook on at 0", "life", "map { !$0.isEmpty && $0 != \"0\" } ?? false", "map { !$0.isEmpty } ?? false"),
+    ("the hook's grace alone turns it on", "life", "        guard asked || !raw.isEmpty else { return (false, nil, []) }\n",
+     "        guard asked else { return (false, nil, []) }\n"),
+    # VirtualDesktopWords.note: the first reason that applies, in its order
+    ("a test host not said", "words", "        if testHost { return Self.testHost }\n", ""),
+    ("the CLI's loop said after the API", "words", "        if !appKitLoop { return needsLoop }\n        if let apiProblem { return apiMissing(apiProblem) }\n",
+     "        if let apiProblem { return apiMissing(apiProblem) }\n        if !appKitLoop { return needsLoop }\n"),
+    ("Screen Recording never said", "words", "        if !screenRecording { return needsScreenRecording }\n", ""),
+    ("a failed make not said", "words", "        if let failure { return failed(failure) }\n", ""),
+    ("the guard not said", "words", "        if guardHolds { return Self.guardHolds }\n", ""),
+    ("the guard said before a failed make", "words", "        if let failure { return failed(failure) }\n        if guardHolds { return Self.guardHolds }\n",
+     "        if guardHolds { return Self.guardHolds }\n        if let failure { return failed(failure) }\n"),
+    ("off console not said", "words", "        if offConsole { return Self.offConsole }\n", ""),
+    ("the API's problem unnamed", "words", "    public static func apiMissing(_ problem: String) -> String { \"Not available on this version of macOS: \\(problem)\" }",
+     "    public static func apiMissing(_ problem: String) -> String { \"Not available on this version of macOS.\" }"),
+    ("its name another", "words", "    public static let name = \"Virtual Desktop\"\n", "    public static let name = \"Virtual Display\"\n"),
     # DesktopWindowLedger: out and back (plan §7)
     ("the same area recomputed", "ledger", "        if from == to { return frame }\n", ""),
     ("the share unheld", "ledger", "let share = room > 0 ? min(max((p - a0) / room, 0), 1) : 0", "let share = room > 0 ? (p - a0) / room : 0"),

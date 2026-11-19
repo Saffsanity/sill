@@ -21,8 +21,9 @@ MUTANTS = [
     (ROLE, "R6 the Desktop's marker word one the next launch does not read", "    case desktop\n", '    case desktop = "headless"\n'),
     (ROLE, "R7 another vendor", "var vendor: UInt32 { DesktopDisplays.sillVendor }", "var vendor: UInt32 { 0x5112 }"),
     # SillDisplays
-    (MANAGER, "W1 made without the role's identity", "vendorID: role.vendor, productID: role.product, serialNum: role.serial)",
-     "vendorID: 0x5111, productID: 0x0001, serialNum: 1)"),
+    (MANAGER, "W1 made without the role's identity", "vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes)",
+     "vendorID: 0x5111, productID: 0x0001, serialNum: 1, otherModes: otherModes)"),
+    (MANAGER, "W1b made without the modes asked for", "serialNum: role.serial, otherModes: otherModes)", "serialNum: role.serial)"),
     (MANAGER, "W2 a make that throws keeps the guard's marker", "            makeGuard?.made(cameUp: false)\n            throw error\n",
      "            throw error\n"),
     (MANAGER, "W3 the marker kept once the display is up", "        makeGuard?.made(cameUp: d.bounds.width > 0)\n", ""),
@@ -67,6 +68,23 @@ MUTANTS = [
     (MANAGER, "W25 a change's beginning taken for a change", "guard !flags.contains(.beginConfigurationFlag), let context else { return }",
      "guard let context else { return }"),
     (MANAGER, "W26 registered at every call", "        guard onReconfigured == nil else { return }\n", ""),
+    # The Virtual Desktop (phase 2b's commit 8): the Desktop's role's display, through SillDisplays
+    (COORD, "W27 the coordinator makes the Virtual Desktop itself", "newDisplay = try displays.make(.desktop, widthPt:",
+     "newDisplay = try VirtualDisplay(name: \"Sill Desktop\", widthPt:"),
+    (COORD, "W28 the Virtual Desktop's marker not written", "        displays.willMake(.desktop)\n        let t0 = CFAbsoluteTimeGetCurrent()\n",
+     "        let t0 = CFAbsoluteTimeGetCurrent()\n"),
+    (COORD, "W29 the Virtual Desktop waited for without the guard", "_ = await displays.waitUntilOnline(newDisplay, timeout: 3)",
+     "_ = await newDisplay.waitUntilOnline(timeout: 3)"),
+    (COORD, "W30 the Virtual Desktop never waited to be listed", "        _ = await displays.waitUntilListed(newDisplay, as: .desktop, timeout: 3)\n", ""),
+    (COORD, "W31 a test host makes the Virtual Desktop", "            displays.say(.desktop)\n            desktopLife.made(.virtualDesktop, at: now)\n",
+     "            displays.willMake(.desktop)\n            desktopLife.made(.virtualDesktop, at: now)\n"),
+    (COORD, "W32 its windows moved after it went",
+     "        let moved = why == .offConsole ? (moved: 0, of: 0, to: \"\") : moveVirtualDesktopWindowsOut(waitsForFullScreen: true)\n        displays.remove(.desktop)\n",
+     "        displays.remove(.desktop)\n        let moved = why == .offConsole ? (moved: 0, of: 0, to: \"\") : moveVirtualDesktopWindowsOut(waitsForFullScreen: true)\n"),
+    (COORD, "W33 Quit leaves its windows on it", "        if desktopLife.role == .virtualDesktop { _ = moveVirtualDesktopWindowsOut(waitsForFullScreen: false) }\n", ""),
+    (COORD, "W34 Quit waits for a full-screen window", "moveVirtualDesktopWindowsOut(waitsForFullScreen: false) }",
+     "moveVirtualDesktopWindowsOut(waitsForFullScreen: true) }"),
+    (COORD, "W35 macOS's removal of the Desktop's display unheard", "        displays.onLost[.desktop] = { [weak self] in self?.desktopDisplayLost() }\n", ""),
 ]
 caught = 0
 originals = {}

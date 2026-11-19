@@ -771,9 +771,16 @@ enum HeadlessDesktopPolicy {
     /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while it
     /// exists and is not being released (the coordinator's `catalog.keepsSills`), so the Desktop stays on it through
     /// `Watch`'s two seconds and moves once, when the display goes. Never the stage's display, which holds a picked
-    /// window alone, nor one that has gone: with nothing else, none.
-    static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false) -> [T] {
+    /// window alone, nor one that has gone: with nothing else, none. `virtualDesktop`: Sill's display is the Virtual
+    /// Desktop (phase 2b, VirtualDesktopLife's role), one more screen after the real ones, so it joins them, after them,
+    /// among the displays the Desktop may stream (its stop is the last: DesktopDisplays.candidates); with no real one, or
+    /// kept as the headless display (`sillsFirst`), as before.
+    static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false, virtualDesktop: Bool = false) -> [T] {
         let desktops = displays.filter { kind($0) != .stage && kind($0) != .gone }
+        if virtualDesktop, !sillsFirst {
+            let real = desktops.filter { kind($0) == .real }
+            if !real.isEmpty { return real + desktops.filter { kind($0) == .sills } }
+        }
         for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
             let some = desktops.filter { kind($0) == wanted }
             if !some.isEmpty { return some }

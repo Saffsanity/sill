@@ -535,6 +535,73 @@ check(Life.waitedLine(.make, waited: 2.1, fullMinute: false) == "Virtual Desktop
       "a make that waited")
 check(Life.waitedLine(.remove(.grace), waited: 12.04, fullMinute: true) == "Virtual Desktop: waited 12.0 s before removing it (10 changes in a minute).",
       "a removal held by the minute")
+check(Life.lockedLine(grace: 30) == Life.keptLockedLine && Life.lockedLine(grace: 3).contains("it goes 3 s after the unlock"),
+      "the kept-locked line with a test host's grace")
+check(Life.removedLine(.grace, moved: 0, of: 0, to: "x", grace: 4) == "Virtual Desktop: no device has shown it for 4 s; removed it.",
+      "the grace's line with a test host's grace")
+check(Life.words(.grace) == "no device has shown it for 30 s" && Life.words(.switchedOff, grace: 4) == "turned off", "the words, the grace's own")
+// The make's line (the coordinator's), from the mode it came up at.
+let made = VirtualDesktopSize.Size(widthPt: 1218, heightPt: 800, scale: 2)
+check(Life.madeLine(came: made, asked: made, hz: 60, id: 7, ms: 412, device: "iPad mini")
+      == "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini (its screen).", "the make's line, as the plan words it")
+check(Life.madeLine(came: VirtualDesktopSize.Size(widthPt: 1218, heightPt: 800, scale: 1), asked: made, hz: 60, id: 7, ms: 9, device: nil)
+      == "Virtual Desktop 1218×800 pt @1× at 60 Hz (asked 1218×800 @2×) id 7: made in 9 ms at 1920×1080: no device's screen known yet.",
+      "…the mode it came up at, the one asked too, and no device known")
+check(Life.madeLine(came: made, asked: made, hz: 120, id: nil, ms: 0, device: "sillclient")
+      == "Virtual Desktop 1218×800 pt @2× at 120 Hz: said, never made (TEST ONLY, SILL_TEST_VIRTUAL_DESKTOP), for sillclient (its screen).",
+      "…a test host's, said and never made")
+// A test host's grace (SILL_TEST_VD_GRACE): the same rules, its seconds.
+var quick = Life(grace: 3)
+check(quick.graceSeconds == 3 && Life().graceSeconds == 30, "a grace of its own, 30 s by default")
+var qs = asked
+_ = quick.look(qs, at: 0)
+quick.made(.virtualDesktop, at: 0)
+qs.exists = true
+qs.shown = false
+check(quick.look(qs, at: 5) == .keep(until: 8) && quick.look(qs, at: 8) == .remove(.grace), "a 3 s grace: kept 3 s, then removed")
+// The TEST ONLY hook: honoured only by a test host with SILL_TEST_DISPLAYS' stops.
+let hookOn = Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3"], testHost: true, stops: true)
+check(hookOn.on && hookOn.grace == 3 && hookOn.lines == ["Test Virtual Desktop: this host can have it and only says it makes it, never makes one (SILL_TEST_VIRTUAL_DESKTOP); its grace 3 s."],
+      "the hook on a test host with stops: on, its grace, one line: \(hookOn.lines)")
+let none = Life.testHook(environment: [:], testHost: true, stops: true)
+check(!none.on && none.grace == nil && none.lines.isEmpty, "no variable: off, no line (the CLI's output as before)")
+let app = Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "1"], testHost: false, stops: true)
+check(!app.on && app.grace == nil && app.lines.count == 1 && app.lines[0].contains("ignored: only a --synthetic test host"), "Sill.app, or a host that advertises: ignored, said once")
+let noStops = Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "1"], testHost: true, stops: false)
+check(!noStops.on && noStops.lines.count == 1 && noStops.lines[0].contains("they need SILL_TEST_DISPLAYS"), "no test stops: ignored, said")
+let graceAlone = Life.testHook(environment: ["SILL_TEST_VD_GRACE": "3"], testHost: true, stops: true)
+check(!graceAlone.on && graceAlone.grace == nil && graceAlone.lines.count == 1, "the grace alone: ignored, said")
+for bad in ["0", "0.5", "121", "nan", "inf", "-3", "x", "3s"] {
+    let h = Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": bad], testHost: true, stops: true)
+    check(h.on && h.grace == nil && h.lines.count == 2 && h.lines[0] == "SILL_TEST_VD_GRACE=\(bad) ignored: seconds from 1 to 120."
+          && h.lines[1].hasSuffix("its grace 30 s."), "a grace of \(bad): ignored, the 30 s kept")
+}
+for good in ["1", "120", "2.5"] {
+    let h = Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": good], testHost: true, stops: true)
+    check(h.on && h.grace == Double(good) && h.lines.count == 1, "a grace of \(good) s: taken")
+}
+check(!Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": "0"], testHost: true, stops: true).on
+      && !Life.testHook(environment: ["SILL_TEST_VIRTUAL_DESKTOP": ""], testHost: true, stops: true).on, "0 or empty: off")
+
+// MARK: VirtualDesktopWords: why this Mac cannot make it now (kind 16's note, Sill for Mac's Settings › Displays)
+
+typealias Words = VirtualDesktopWords
+check(Words.name == "Virtual Desktop" && Words.name == DesktopDisplays.virtualDesktopName, "its name, one word for both apps and the stop's")
+func note(test: Bool = false, loop: Bool = true, api: String? = nil, sr: Bool = true, failure: String? = nil, held: Bool = false,
+          off: Bool = false) -> String? {
+    Words.note(testHost: test, appKitLoop: loop, apiProblem: api, screenRecording: sr, failure: failure, guardHolds: held, offConsole: off)
+}
+check(note() == nil, "everything it needs: no note, it can be made")
+check(note(test: true, loop: false, api: "x", sr: false, failure: "y", held: true, off: true) == "Not on a test host.", "a test host first")
+check(note(loop: false, api: "x", sr: false, failure: "y", held: true, off: true) == "Start SillHost with --virtual-desktop to use it.",
+      "then the CLI without its AppKit loop")
+check(note(api: "private class CGVirtualDisplay not found", sr: false, failure: "y", held: true, off: true)
+      == "Not available on this version of macOS: private class CGVirtualDisplay not found", "then the private API")
+check(note(sr: false, failure: "y", held: true, off: true) == "Needs Screen Recording.", "then Screen Recording")
+check(note(failure: "it never came up", held: true, off: true) == "Off for this session: it never came up. Turn it off and on to try again.",
+      "then a make that failed this run")
+check(note(held: true, off: true) == "Off for now: Sill stopped while making a display, twice in a row.", "then the guard for #380")
+check(note(off: true) == "Not while another user is on this Mac’s screen.", "then the console")
 
 // 5,000 random sessions: devices showing it and stepping away, the switch flipped (a fifth of them as fast as a device
 // can, a fifth with the switch on and a device stepping onto it now and then), locks, user switches, monitors coming and going, macOS or the person making it the main display, the guard and

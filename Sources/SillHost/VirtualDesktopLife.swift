@@ -124,8 +124,11 @@ struct VirtualDesktopLife: Equatable {
     private var lastReal: Int?
     /// The times of the last changes of the Desktop's display, the newest last, at most `perMinute`.
     private(set) var changes: [Double] = []
+    /// How long it stays once no device shows it, for this coordinator: `grace`, or a test host's (SILL_TEST_VD_GRACE,
+    /// `testHook`), so a live gate runs the grace in seconds.
+    let graceSeconds: Double
 
-    init() {}
+    init(grace: Double = VirtualDesktopLife.grace) { graceSeconds = grace }
 
     /// A look at `now`: what the coordinator sees, and what to do. Call it at each display change, show, step, switch,
     /// lock and unlock, and again at a `keep`'s or a `spaced`'s time.
@@ -166,7 +169,7 @@ struct VirtualDesktopLife: Equatable {
         if s.locked { return .keep(until: nil) }
         if !s.switchOn { return spaced(.remove(.switchedOff), now: now) }
         if s.shown { return .keep(until: nil) }
-        let end = max(lastShown ?? madeAt ?? now, unlockedAt ?? -Double.infinity) + Self.grace
+        let end = max(lastShown ?? madeAt ?? now, unlockedAt ?? -Double.infinity) + graceSeconds
         return now >= end ? spaced(.remove(.grace), now: now) : .keep(until: end)
     }
 
@@ -209,8 +212,8 @@ struct VirtualDesktopLife: Equatable {
 
     // MARK: The lines (Sill.log; each names no window)
 
-    /// Why it went, in the removal's line.
-    static func words(_ why: Why) -> String {
+    /// Why it went, in the removal's line; `grace`: the grace it had (a test host's may be shorter).
+    static func words(_ why: Why, grace: Double = VirtualDesktopLife.grace) -> String {
         switch why {
         case .grace: return "no device has shown it for \(Int(grace)) s"
         case .switchedOff: return "turned off"
@@ -221,7 +224,7 @@ struct VirtualDesktopLife: Equatable {
 
     /// "Virtual Desktop: no device has shown it for 30 s; moved 3 windows to Built-in Retina Display and removed it.":
     /// `moved` of `of` windows on it went to `to` (the main display's name) first.
-    static func removedLine(_ why: Why, moved: Int, of: Int, to: String) -> String {
+    static func removedLine(_ why: Why, moved: Int, of: Int, to: String, grace: Double = VirtualDesktopLife.grace) -> String {
         let windows: String
         if of == 0 {
             windows = ""
@@ -230,11 +233,60 @@ struct VirtualDesktopLife: Equatable {
         } else {
             windows = "moved \(moved) of \(of) windows to \(to) (the rest go where macOS puts them) and "
         }
-        return "Virtual Desktop: \(words(why)); \(windows)removed it."
+        return "Virtual Desktop: \(words(why, grace: grace)); \(windows)removed it."
     }
 
     /// The grace ended while the Mac is locked: once a lock.
-    static let keptLockedLine = "Virtual Desktop: kept while this Mac is locked; it goes \(Int(grace)) s after the unlock unless a device shows it."
+    static let keptLockedLine = lockedLine(grace: grace)
+
+    /// The same for a grace of `grace` seconds (a test host's).
+    static func lockedLine(grace: Double) -> String {
+        "Virtual Desktop: kept while this Mac is locked; it goes \(Int(grace)) s after the unlock unless a device shows it."
+    }
+
+    /// The make's line: "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini (its screen).": the
+    /// mode it came up at (`came`, its points and scale as CoreGraphics reads them, and its rate), the one asked for too
+    /// when it differs, its ID, how long the make took, and the device it is sized to (`device`: nil for none known,
+    /// VirtualDesktopSize.fallback). `id` nil: a test host's, said and never made (SILL_TEST_VIRTUAL_DESKTOP).
+    static func madeLine(came: VirtualDesktopSize.Size, asked: VirtualDesktopSize.Size, hz: Int, id: UInt32?, ms: Int,
+                         device: String?) -> String {
+        let mode = "\(came.widthPt)×\(came.heightPt) pt @\(came.scale)× at \(hz) Hz"
+        let askedWords = came == asked ? "" : " (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)×)"
+        let f = VirtualDesktopSize.fallback
+        let whose = device.map { "for \($0) (its screen)" } ?? "at \(f.widthPt)×\(f.heightPt): no device's screen known yet"
+        guard let id else { return "Virtual Desktop \(mode)\(askedWords): said, never made (TEST ONLY, \(testVariable)), \(whose)." }
+        return "Virtual Desktop \(mode)\(askedWords) id \(id): made in \(ms) ms \(whose)."
+    }
+
+    // MARK: TEST ONLY (a --synthetic host: the rules run for real, and nothing is made)
+
+    static let testVariable = "SILL_TEST_VIRTUAL_DESKTOP"
+    static let testGraceVariable = "SILL_TEST_VD_GRACE"
+
+    /// TEST ONLY: `SILL_TEST_VIRTUAL_DESKTOP=1` on a test host (`--synthetic`, never Sill.app's own executable:
+    /// DoorPolicy.isTestHost) with SILL_TEST_DISPLAYS (`stops`), whose stops are its screens: this host can have the
+    /// Virtual Desktop, which it only says it makes (SillDisplays.say, as SILL_TEST_HEADLESS's display), listed as one more
+    /// stop after them; and `SILL_TEST_VD_GRACE=<s>` (1 to 120) its grace in place of 30 s. Whether it is on, the grace,
+    /// and the lines it prints at start (none without the variables; anywhere else one line says they are ignored).
+    static func testHook(environment: [String: String], testHost: Bool, stops: Bool) -> (on: Bool, grace: Double?, lines: [String]) {
+        let asked = environment[testVariable].map { !$0.isEmpty && $0 != "0" } ?? false
+        let raw = environment[testGraceVariable] ?? ""
+        guard asked || !raw.isEmpty else { return (false, nil, []) }
+        guard testHost else {
+            return (false, nil, ["\(testVariable) and \(testGraceVariable) ignored: only a --synthetic test host takes them, never Sill.app."])
+        }
+        guard asked, stops else {
+            return (false, nil, ["\(testVariable) and \(testGraceVariable) ignored: they need SILL_TEST_DISPLAYS, whose stops are the screens, and \(testVariable)=1."])
+        }
+        var lines: [String] = []
+        var g: Double?
+        if !raw.isEmpty {
+            if let v = Double(raw), v.isFinite, v >= 1, v <= 120 { g = v } else { lines.append("\(testGraceVariable)=\(raw) ignored: seconds from 1 to 120.") }
+        }
+        lines.append("Test Virtual Desktop: this host can have it and only says it makes it, never makes one (\(testVariable)); "
+                     + "its grace \(Int(g ?? grace)) s.")
+        return (true, g, lines)
+    }
 
     /// A make or a removal that waited for the spacing, once done: "Virtual Desktop: waited 2.1 s before making it (3 s
     /// since the last change)."; `perMinute` changes in the last minute say so instead.

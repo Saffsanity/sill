@@ -65,8 +65,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   lands, the pointer's target, and the device's button (its label, dots or
   "3/7", VoiceOver's words); from phase 2b the Virtual Desktop's stop, the last
   (`candidates`' `virtualDesktop`, `virtualStop`, its choice by a fixed key,
-  `virtualNumber` for `WindowList.desktopVirtual`) and its button (`rectangle.dashed`,
-  "Virtual"); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  `virtualNumber` for `WindowList.desktopVirtual`), the stop streamed while its display is not made yet
+  (`streamed`: the main display meanwhile) and its button (`rectangle.dashed`,
+  "Virtual"); pure, `Tests/checks/desktop-displays`. `VirtualDesktopWords.swift` — every sentence that names the
+  Virtual Desktop to a person, for both apps (phase 2b; a rename is one edit there), and `note`, why a Mac
+  cannot make it now (kind 16's `virtualDesktopState.note`, Sill for Mac's Settings); pure,
+  `Tests/checks/virtual-desktop`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
   `image` reserved for a later generation, a device's `stop`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
@@ -257,7 +261,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   one place: made with its role's identity, the guard's marker around it, online, listed by
   ScreenCaptureKit, its lost callback, removed, the stage's IDs given to the catalog, macOS's one
   reconfiguration callback, the teardown at Quit, a test host's display only said to be made; the
-  stage's display and the Desktop's for a Mac with no screen; main actor) and
+  stage's display and the Desktop's, one display in two roles: a Mac with no screen's and the Virtual
+  Desktop; main actor) and
   `SillDisplayRole` (the stage's and the Desktop's identities; pure, `Tests/checks/sill-displays`, which
   also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
@@ -267,8 +272,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
   `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
   the roles changing hands with the headless display, never the main display beside a real screen;
-  pure) and `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
-  and back as it returns, over WindowRestore's `Access`; pure; both `Tests/checks/virtual-desktop`),
+  pure; its make's line, a test host's grace and the TEST ONLY hook SILL_TEST_VIRTUAL_DESKTOP) and
+  `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
+  and back as it returns, over WindowRestore's `Access`; on the Mac `WindowSizer.DesktopWindows`; pure; both
+  `Tests/checks/virtual-desktop`); the coordinator drives them (StreamCoordinator.swift's "The Virtual
+  Desktop": its stop, its make and removal through SillDisplays, its windows, following its device, the
+  roles changing hands, kind 16's `virtualDesktopState`, Quit),
   `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's

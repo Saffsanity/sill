@@ -3,9 +3,9 @@ import CoreGraphics
 import ScreenCaptureKit
 
 /// Every display Sill makes, in one place (docs/virtual-desktop-plan.md §9 as revised 2026-11-18, phase 2b): one
-/// manager for the stage's display (a picked window's, VirtualStage) and the Desktop's (a Mac with no working screen's,
-/// PR #200; the Virtual Desktop's next), so the Virtual Desktop and the stage never make two of one role, nor one in a way
-/// the other does not know. It owns, for each role (SillDisplayRole):
+/// manager for the stage's display (a picked window's, VirtualStage) and the Desktop's (one display in two roles: a Mac
+/// with no working screen's, PR #200, and the Virtual Desktop's), so the Virtual Desktop and the stage never make two of
+/// one role, nor one in a way the other does not know. It owns, for each role (SillDisplayRole):
 /// - making it, with the role's identity (the private CGVirtualDisplay, VirtualDisplay.swift), and waiting until it is
 ///   online at its mode and until ScreenCaptureKit lists it;
 /// - the guard for #380 (DisplayMakeGuard): its marker just before the private calls, taken back once the display came
@@ -16,11 +16,12 @@ import ScreenCaptureKit
 ///   so a stage display that went is never one of the Desktop's stops);
 /// - macOS's reconfiguration callback (#200's, one for the process, never removed: `watchReconfiguration`);
 /// - the teardown at Quit and at the signals (`removeAll`, after the stage's window went home);
-/// - TEST ONLY, a test host's display that is only said to be made (`say`: SILL_TEST_HEADLESS), so the rules around a
-///   display run on loopback with nothing made: the seam a dry run goes through.
+/// - TEST ONLY, a test host's display that is only said to be made (`say`: SILL_TEST_HEADLESS, SILL_TEST_VIRTUAL_DESKTOP),
+///   so the rules around a display run on loopback with nothing made: the seam a dry run goes through.
 ///
 /// What a role does with its display stays its own: the stage places its window, measures the menu bar and remakes the
-/// display for it; the coordinator decides when the Desktop's is made and when it goes (HeadlessDesktopPolicy.Watch).
+/// display for it; the coordinator decides when the Desktop's is made and when it goes (HeadlessDesktopPolicy.Watch for a
+/// Mac with no working screen, VirtualDesktopLife for the Virtual Desktop).
 /// Each asks this for the display, and each display's lines are its owner's, as they were.
 ///
 /// Threading: main actor, as the stage and the coordinator. A display's termination handler runs on its private queue
@@ -31,9 +32,9 @@ final class SillDisplays {
     /// The guard for #380 (Sill.app's, and a test host's under SILL_TEST_MAKE_GUARD; nil in the CLI, which keeps none).
     var makeGuard: DisplayMakeGuard.Store?
     /// What a role does when macOS removes its display on its own (the window server: a sleep, display arbitration),
-    /// called on the main actor once the display is forgotten here. The stage puts its window home and stages it again. A
-    /// role with none is told nothing, and its display is kept as it was until its owner removes it (the Desktop's:
-    /// the coordinator finds it offline at the next Desktop, as #200 did).
+    /// called on the main actor once the display is forgotten here. The stage puts its window home and stages it again;
+    /// the coordinator, for the Desktop's (either role), counts it gone and starts a Desktop that showed it again on what
+    /// is left (phase 2b). A role with none is told nothing, and its display is kept as it was until its owner removes it.
     var onLost: [SillDisplayRole: () -> Void] = [:]
 
     private var made: [SillDisplayRole: VirtualDisplay] = [:]
@@ -73,14 +74,16 @@ final class SillDisplays {
     }
 
     /// Makes `role`'s display at `widthPt`×`heightPt` points, `scale` and `refreshHz`, with the role's identity, in place
-    /// of the role's old one, which its owner removed first. A throw is VirtualDisplay's (a missing private method, a
-    /// size out of bounds, a mode refused), with the guard's marker taken back as a make that failed. The display is
-    /// online a moment later (`waitUntilOnline`).
-    func make(_ role: SillDisplayRole, widthPt: Int, heightPt: Int, scale: Int = 2, refreshHz: Double) throws -> VirtualDisplay {
+    /// of the role's old one, which its owner removed first; `otherModes`: more sizes listed beside it (the Virtual
+    /// Desktop's turn, when probe P2's verdict allows a way in place: VirtualDesktopSize.otherModes; none by default). A
+    /// throw is VirtualDisplay's (a missing private method, a size out of bounds, a mode refused), with the guard's marker
+    /// taken back as a make that failed. The display is online a moment later (`waitUntilOnline`).
+    func make(_ role: SillDisplayRole, widthPt: Int, heightPt: Int, scale: Int = 2, refreshHz: Double,
+              otherModes: [VirtualDisplay.ModeSize] = []) throws -> VirtualDisplay {
         let d: VirtualDisplay
         do {
             d = try VirtualDisplay(name: role.name, widthPt: widthPt, heightPt: heightPt, scale: scale, refreshHz: refreshHz,
-                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial)
+                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes)
         } catch {
             makeGuard?.made(cameUp: false)
             throw error

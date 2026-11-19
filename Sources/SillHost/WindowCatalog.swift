@@ -153,6 +153,15 @@ final class WindowCatalog {
     var testDisplays: [DesktopDisplays.Display]? {
         didSet { resolveDesktopDisplay() }
     }
+    /// The Virtual Desktop's stop (phase 2b, the coordinator's: its switch on and this Mac able to make it): the stops end
+    /// with it (DesktopDisplays.candidates' `virtualDesktop`), listed before its display exists; a step onto it makes it.
+    var virtualDesktopStop = false {
+        didSet { if virtualDesktopStop != oldValue { resolveDesktopDisplay() } }
+    }
+    /// Sill's display is the Virtual Desktop (VirtualDesktopLife's role, the coordinator's): a look keeps it beside the real
+    /// screens among the displays the Desktop may stream (HeadlessDesktopPolicy.pool's `virtualDesktop`), so its stop has
+    /// its display from the next look on.
+    var sillsAsVirtualDesktop = false
     /// The Desktop's stops, which one it shows, or their names changed: the list goes out again, and a
     /// Desktop streaming another display restarts on the one it shows now.
     var onDesktopDisplaysChanged: (() -> Void)?
@@ -408,7 +417,8 @@ final class WindowCatalog {
         if remembersBuiltIn, let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) {
             Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height)
         }
-        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { self.headlessKind(of: $0.displayID) }, sillsFirst: keepsSills)
+        lookedDisplays = HeadlessDesktopPolicy.pool(content.displays, kind: { self.headlessKind(of: $0.displayID) }, sillsFirst: keepsSills,
+                                                    virtualDesktop: sillsAsVirtualDesktop)
         resolveDesktopDisplay()
         // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
         // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
@@ -471,12 +481,14 @@ final class WindowCatalog {
     /// `display` from the last look (DesktopDisplays.resolve): the main display while `mainOnly`; else the
     /// stop a device stepped to while it is connected; else the main display, with Virtual Display on or
     /// off (issue #345). With no stop at all (every display Sill's own or macOS's stand-in): the main
-    /// display, else macOS's first, as before.
+    /// display, else macOS's first, as before. The Virtual Desktop's stop before its display exists: the main
+    /// display meanwhile (DesktopDisplays.streamed).
     private func resolveDesktopDisplay() {
         let before = (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID)
         let stops = testDisplays ?? lookedDisplays.map(described)
-        desktopCandidates = DesktopDisplays.candidates(stops, main: testDisplays?.first?.id ?? CGMainDisplayID())
-        let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, mainOnly: mainOnly)?.id
+        desktopCandidates = DesktopDisplays.candidates(stops, main: testDisplays?.first?.id ?? CGMainDisplayID(),
+                                                       virtualDesktop: virtualDesktopStop)
+        let id = DesktopDisplays.streamed(chosen: desktopDisplayUUID, among: desktopCandidates, mainOnly: mainOnly)?.id
         display = lookedDisplays.first { $0.displayID == id } ?? mainDisplay
         desktopDisplayID = testDisplays != nil ? id : display?.displayID
         if before != (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID) {

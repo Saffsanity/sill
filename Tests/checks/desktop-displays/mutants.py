@@ -18,7 +18,7 @@ SORT = "        let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY, $0.id
 TURN = "        let screens = mainStop.map { Array(sorted[$0...] + sorted[..<$0]) } ?? sorted\n"
 MAIN_MIRROR = "            ?? displays.first { $0.id == main }?.mirrors.flatMap { m in sorted.firstIndex { $0.id == m } }\n"
 CHOSEN = "        if !mainOnly, let chosen, let d = candidates.first(where: { $0.uuid == chosen }) { return d }\n"
-RESOLVE_FIRST = "        return candidates.first\n    }\n\n    /// How long"
+RESOLVE_FIRST = "        return candidates.first\n    }\n\n    /// The stop whose display"
 KEEP = "        return now >= leftAt && now - leftAt < choiceGrace\n"
 FEW = "        guard candidates.count > 1 else { return nil }\n"
 AT = "        guard let i = candidates.firstIndex(where: { $0.id == current }) else { return candidates[0] }\n"
@@ -56,7 +56,7 @@ MUTANTS = [
     ("D14 locked, the chosen stop all the same", CHOSEN, "        if let chosen, let d = candidates.first(where: { $0.uuid == chosen }) { return d }\n"),
     ("D15 the choice ignored", CHOSEN, ""),
     ("D16 the choice by ID, not UUID", CHOSEN, "        if !mainOnly, let chosen, let d = candidates.first(where: { String($0.id) == chosen }) { return d }\n"),
-    ("D17 nothing chosen: the last stop", RESOLVE_FIRST, "        return candidates.last\n    }\n\n    /// How long"),
+    ("D17 nothing chosen: the last stop", RESOLVE_FIRST, "        return candidates.last\n    }\n\n    /// The stop whose display"),
     # The choice's span
     ("D18 a span of 300 s", "    public static let choiceGrace: Double = 30\n", "    public static let choiceGrace: Double = 300\n"),
     ("D19 no span", "    public static let choiceGrace: Double = 30\n", "    public static let choiceGrace: Double = 0\n"),
@@ -142,6 +142,12 @@ MUTANTS = [
     ("V14 on it judged by the count", "        let onVirtual = virtual == n\n", "        let onVirtual = virtual == count\n"),
     ("V15 the dashed symbol misnamed", "    public static let virtualSymbol = \"rectangle.dashed\"\n", "    public static let virtualSymbol = \"rectangle.dashed.badge.record\"\n"),
     ("V16 its choice's key a display's", "    public static let virtualDesktopChoice = \"sill-virtual-desktop\"\n", "    public static let virtualDesktopChoice = \"BUILTIN\"\n"),
+    # The stop the Desktop streams while the Virtual Desktop's has no display yet (commit 8 of phase 2b).
+    ("V17 a stop with no display streamed", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d\n"),
+    ("V18 meanwhile the last stop", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d.id != 0 ? d : candidates.last { $0.id != 0 }\n"),
+    ("V19 meanwhile the first stop, display or not", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d.id != 0 ? d : candidates.first\n"),
+    ("V20 streamed ignores the lock", "        guard let d = resolve(chosen: chosen, among: candidates, mainOnly: mainOnly) else { return nil }\n",
+     "        guard let d = resolve(chosen: chosen, among: candidates) else { return nil }\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
