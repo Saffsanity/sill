@@ -73,7 +73,6 @@ MUTANTS = [
     ("M9 the Mac's gestures left open when the pair breaks", "if owner == .macPinch { closeMac(); if at.count == 2 { formPair() } }",
      "if owner == .macPinch, at.count == 2 { formPair() }"),
     ("M10 three fingers leave the Mac's pinch open", "            if was == .macPinch { closeMac() }\n", ""),
-    ("M11 the last lift's end lost", "            macSteps = steps\n", ""),
     ("M12 the place where the pair is now, not where it landed",
      "                if macAt == nil { macAt = Self.midpoint(pairFrom[0], pairFrom[1]) }\n                macSteps.append(.magnify(.began",
      "                macAt = Self.midpoint(now[0], now[1])\n                macSteps.append(.magnify(.began"),

@@ -88,7 +88,8 @@ check("Pinch: Zoom Picture unless chosen", R.zoomOnMacDefault == false && R.on(s
 check("Rotate on Mac: off unless turned on", R.rotateDefault == false && R.on(stored: nil, standard: R.rotateDefault) == false)
 check("the keys: the PR's own for Pinch, and Rotate's", R.zoomOnMacKey == "Sill.pinchZoomsMac" && R.rotateKey == "Sill.rotateOnMac")
 check("the panel's Bool", R.on(stored: true, standard: false) && !R.on(stored: false, standard: true))
-check("a number", R.on(stored: NSNumber(value: 1), standard: false) && !R.on(stored: NSNumber(value: 0), standard: true))
+check("a number", R.on(stored: NSNumber(value: 1), standard: false) && !R.on(stored: NSNumber(value: 0), standard: true)
+      && R.on(stored: NSNumber(value: 2), standard: false))
 check("a launch argument's string: 1, YES, true on; 0, NO off",
       ["1", "YES", "true"].allSatisfy { R.on(stored: $0, standard: false) } && ["0", "NO", "false"].allSatisfy { !R.on(stored: $0, standard: true) })
 check("anything else: the standard", R.on(stored: [1], standard: false) == false && R.on(stored: Data(), standard: true) == true)

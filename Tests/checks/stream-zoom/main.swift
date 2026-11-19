@@ -623,6 +623,16 @@ do {
                                   1: (c.x - 50 * cos(CGFloat(k) * 2 * .pi / 180), c.y - 50 * sin(CGFloat(k) * 2 * .pi / 180))]) }
     check("Rotate on: a pair whose angle crosses ±180° turns the short way: -40, every step small",
           nearD(wrap.degrees, -40, 0.001) && wrap.rotate.allSatisfy { abs($0.1) < 20 })
+    // The other way across it: landed just past -180° (1° round), turning back through +180°.
+    var back = MacRig(turns: true)
+    func turnedTo(_ deg: CGFloat) -> [Int: (CGFloat, CGFloat)] {
+        let a = deg * .pi / 180
+        return [0: (c.x + 50 * cos(a), c.y + 50 * sin(a)), 1: (c.x - 50 * cos(a), c.y - 50 * sin(a))]
+    }
+    back.down(0, turnedTo(1)[0]!.0, turnedTo(1)[0]!.1); back.down(1, turnedTo(1)[1]!.0, turnedTo(1)[1]!.1)
+    for k in 1...20 { back.moves(turnedTo(1 - CGFloat(k) * 2)) }
+    check("Rotate on: the other way across ±180°: +40 (counterclockwise on screen), every step small",
+          nearD(back.degrees, 40, 0.001) && back.rotate.allSatisfy { abs($0.1) < 20 })
 }
 
 do {
@@ -642,6 +652,11 @@ do {
     m.moves([0: (300, 300), 1: (700, 300)])
     m.up(0); m.up(1)
     check("three fingers: nothing more for the Mac, to the stroke's end", phases(m.magnify).filter { $0 == .ended }.count == 1 && phases(m.rotate).filter { $0 == .ended }.count == 1)
+    // Rotate off, a spread that turns: the pinch, and no turn at all.
+    var spreadOff = MacRig(turns: false)
+    spreadOff.down(0, 450, 300); spreadOff.down(1, 550, 300)
+    for k in 1...20 { spreadOff.moves(pair(c, 100 + CGFloat(k) * 4, CGFloat(k) * 1.5 * .pi / 180)) }
+    check("Rotate off, a spread that turns: the pinch alone, no turn", !spreadOff.magnify.isEmpty && spreadOff.rotate.isEmpty)
     // Rotate on, a spread alone: no turn.
     var s = MacRig(turns: true)
     s.down(0, 450, 300); s.down(1, 550, 300)

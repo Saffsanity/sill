@@ -309,10 +309,8 @@ extension StreamZoom {
                 if owner == .macPinch { closeMac(); if at.count == 2 { formPair() } }
             }
             guard at.isEmpty else { return false }
-            let steps = macSteps
             let ended = owner
             self = Stroke()
-            macSteps = steps
             guard ended == .picture else { return false }
             let before = zoom
             zoom.settle()
