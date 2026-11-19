@@ -94,13 +94,28 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, deviceMicrophone: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(!off.applying(all).shareClipboard && !off.applyingAway(all).shareClipboard
           && standard.applying(all).shareClipboard && standard.applyingAway(all).shareClipboard,
           "a device's change never moves it, at home or away")
+}
+
+// Use iPhone and iPad microphones (docs/microphone-plan.md §3.3), the Mac's alone: off in `standard` and `app`,
+// named in the log's line, kept by `validated`, and never moved by a device's change.
+do {
+    check(!standard.deviceMicrophone && !HostConfig.app.deviceMicrophone, "standard and app: device microphones off")
+    var on = standard
+    on.deviceMicrophone = true
+    eq(standard.changes(to: on), "device microphones off → on", "changes: the device microphones' switch")
+    eq(on.changes(to: standard), "device microphones on → off", "changes: and back")
+    check(on.validated().deviceMicrophone && !standard.validated().deviceMicrophone, "validated keeps it either way")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(on.applying(all).deviceMicrophone && on.applyingAway(all).deviceMicrophone && !standard.applying(all).deviceMicrophone
+          && !standard.applyingAway(all).deviceMicrophone, "a device's change never moves it, at home or away")
 }
 
 // Show this account while another user is on the screen (docs/off-console-plan.md, issue #316), the Mac's alone:
@@ -114,7 +129,7 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, deviceMicrophone: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)

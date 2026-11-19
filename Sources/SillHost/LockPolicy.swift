@@ -430,6 +430,10 @@ enum LockPolicy {
         case clipboardSubscription
         /// Kind 8. `letsGo`: it is the up of a key or a button this device holds down on the Mac.
         case input(letsGo: Bool)
+        /// Kind 48 from a device: its microphone's offer, format, packets or end (MicrophoneReceiver, on its own
+        /// queue, never through the main actor; docs/microphone-plan.md §3.3). Refused at any lock, a paired
+        /// device's too: Sill Microphone is every app's on this Mac, and off console another user's.
+        case microphone
         /// Anything else: settings (17), the viewport (9), a keyframe (44), Pair This iPad… (21, whose
         /// ask answers "locked" by itself), pings, stats, the hello.
         case other
@@ -437,7 +441,7 @@ enum LockPolicy {
 
     /// What the lock refuses, one line each a minute at most.
     enum Refusal: String, CaseIterable, Equatable {
-        case pick, launch, windowCommand, menus, gesture, clipboard, input
+        case pick, launch, windowCommand, menus, gesture, clipboard, input, microphone
     }
 
     enum Decision: Equatable {
@@ -465,6 +469,7 @@ enum LockPolicy {
         case .gesture: return .refuse(.gesture)
         case .clipboardText: return .refuse(.clipboard)
         case .input(let letsGo): return takesInput(r, paired: paired) ? .take : (letsGo ? .letGo : .refuse(.input))
+        case .microphone: return .refuse(.microphone)
         case .menuSubscription, .clipboardSubscription, .other: return .take
         }
     }
@@ -488,7 +493,8 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
+    /// then, and offers no Paste), no `microphone` (a device sends no kind 48, and stops recording), no
+    /// `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
     /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
     /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
     /// were before this change.
@@ -500,6 +506,7 @@ enum LockPolicy {
         var l = list
         l.windows = []
         l.clipboard = nil
+        l.microphone = nil
         l.desktopDisplays = nil
         l.desktopDisplay = nil
         l.desktopDisplayNames = nil
@@ -690,6 +697,9 @@ enum LockPolicy {
         case .input:
             return "Locked: dropped " + (n == 1 ? "an input event" : "\(n) input events")
                 + "; only a paired device types at a locked Mac, and no device at one switched to another user."
+        case .microphone:
+            return "Locked: dropped " + (n == 1 ? "a device's microphone message" : "\(n) microphone messages from devices")
+                + "; Sill Microphone waits for this Mac to be unlocked."
         }
         return "Locked: refused \(what); devices see none of this Mac until it is unlocked."
     }

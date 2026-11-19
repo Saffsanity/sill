@@ -393,6 +393,21 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
   and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
   drops only frames).
+  A device's microphone (kind 48, docs/microphone-plan.md; the first part, before Sill Microphone itself):
+  `MicrophoneReceiver` (its queue `sill.mic`: kind 48 straight from StreamServer's network queue
+  (`onMicrophoneMessage`, after the revoked check, never `onMessage` or the main actor), judged by LockPolicy's
+  `.microphone` at its arrival and now, then StreamProtocol's `MicrophonePolicy.Host`; the holder's packets
+  through SillAudio's decoder (mono) and `AudioPlayout` in its microphone mode to the output; kind 16's
+  microphone per connection and the list's `microphone` to the coordinator only when they change; a 256 KiB
+  backlog past which packets are dropped; `mic.*` counts), `MicrophoneOutput` (the seam where Sill Microphone
+  takes the sound: its readiness, the apps that read it, a timeline, `schedule`; with `MicrophoneClock`, the
+  host clock both read) and the TEST ONLY `MicrophoneTestOutput` (a test host's Sill Microphone: its setup and
+  apps from the hook's files, a stand-in timeline counting `mic.dry` and, with `file:PATH`, a WAV of exactly
+  what Sill Microphone would hear; no audio device) and `MicrophoneTestHook` (`SILL_TEST_MIC_SINK`, `_APP`,
+  `_SETUP`, `_LOG`, honoured only by a test host; pure, `Tests/checks/mic-host`). Only a test host makes a
+  receiver in this part: the CLI never says `microphone`, and Sill.app gets its receiver with Sill Microphone.
+  `HostConfig.deviceMicrophone` (Use iPhone and iPad microphones, the Mac's alone, off in `standard` and `app`;
+  Sill.app's key `deviceMicrophone`) is its switch.
   A sleeping display (issue #134): `DisplayWake` (which of a device's messages
   are a person at it, so the host declares user activity on the Mac for it, as
   a key press would: a session's connect every time, kinds 7, 8, 15, 25 and 28
@@ -646,7 +661,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/mic-check/` (TEST ONLY; docs/microphone-plan.md §10.2): `build.sh [OUT]` makes
+  `tone` (`tone.swift`: the host's test tone, its left channel, through SillAudio's packetizer and encoder as a
+  device's microphone, into the packets file `sillclient.py --mic` sends, 120 s of it as `OUT/tone.packets`)
+  and `analyze` (`analyze.swift`: each click of that tone found in a test host's file sink against the second it
+  was stamped at: the delay, its spread, gaps); `live.py OUT [nohook|live|two|lock|unpaired|hostile|setup|all]`
+  runs paired test clients against synthetic test hosts on loopback with the file sink (each under 60 s) and
+  prints a verdict per rule. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
