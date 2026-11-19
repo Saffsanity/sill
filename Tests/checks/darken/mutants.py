@@ -1,6 +1,11 @@
 """DarkenPolicy mutants (Sources/SillHost/DarkenPolicy.swift; docs/privacy-mode-plan.md, part 2): each changes the rule
 in one place, must compile and make darken/main.swift fail. usage: mutants.py ROOT
 
+The last five change part 1's PrivacyPolicy (Sources/SillHost/PrivacyPolicy.swift, compiled into this check): its
+switches (Lock this Mac when the last device leaves, Only after a device away from home, Turn off its display too) and
+a session's route, as the cases of both rules together see them (the review of PR #400, follow-up 2). The privacy
+check has its own mutants of that rule; these prove this check runs it beside darkening, switches and routes included.
+
 Left out as equivalent (each a second guard behind one that already holds): the `!quitting` guards of `sessions`,
 `switched`, `reading`, `local`, `called` and `tick` (a quit has cleared the wait, the hold and the lock asked and taken
 the windows down, so nothing after it can raise, lift or lock); `screens`' guard that only a change across zero acts
@@ -11,7 +16,21 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "Sources/SillHost/DarkenPolicy.swift"
+P = "Sources/SillHost/PrivacyPolicy.swift"
 M = [
+    # Rule 14: only Sill.app itself darkens, the lock's rule (the review of PR #400, follow-up 1).
+    ("the bare binary and the CLI darken for real (--synthetic alone decides)", F,
+     "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "!synthetic"),
+    ("Sill.app with --synthetic darkens for real", F, "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "bundled"),
+    ("everything darkens for real", F, "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "true"),
+    ("Sill.app darkens before the probe fills its seams", F, "-> Bool { real && !filled }", "-> Bool { false }"),
+    ("a dry run held back", F, "-> Bool { real && !filled }", "-> Bool { !filled }"),
+    ("Sill.app held back once its seams are filled", F, "-> Bool { real && !filled }", "-> Bool { real }"),
+    ("the dry run's raise says test host", F, '"Privacy (dry run): would darken \\(displays(screens)); nothing is drawn."',
+     '"Privacy (test host): would darken \\(displays(screens)); nothing is drawn."'),
+    ("the start line hides the dry run", F, '+ (dry ? " A dry run here', '+ (false ? " A dry run here'),
+    ("the start line's scopes swapped", F, 'scope == .away ? "while a device away from home is connected"', 'scope == .any ? "while a device away from home is connected"'),
+    ("the start line's keys swapped", F, '(keysLock ? "; a key or click on this Mac locks it."', '(!keysLock ? "; a key or click on this Mac locks it."'),
     # The constants.
     ("the dark's wait is not the lock's", F, "package static let grace: Double = PrivacyPolicy.grace", "package static let grace: Double = 20"),
     ("the device's window 5 s", F, "package static let remoteUnlockWindow: Double = 10", "package static let remoteUnlockWindow: Double = 5"),
@@ -111,6 +130,11 @@ M = [
     ("off says the scope's line", F, "out.append(.line(scope == .off ? Words.switchedOff : Words.noneCounts))", "out.append(.line(scope != .off ? Words.switchedOff : Words.noneCounts))"),
     ("a new wording waits for the next hint", F, "            if up, hint != hintBefore, !out.contains(.raise) { out += showHint(at: now) }\n", ""),
     ("the lock's switch off leaves it following", F, "            if !lockAfterSession { lockFollows = false }\n", ""),
+    # Both rules together: part 1's switches as the dark keeps them (the review of PR #400, follow-up 2).
+    ("the dark never learns the lock's switch", F,
+     "            self.lockAfterSession = lockAfterSession\n            if !lockAfterSession { lockFollows = false }\n",
+     "            if !lockAfterSession { lockFollows = false }\n"),
+    ("the dark follows a lock that is off", F, "lockFollows = lockAfterSession && sessions == 0", "lockFollows = sessions == 0"),
     # Rule 13's count, and rule 11, a quit.
     ("no screen lifts without its line", F, "            if screens == 0, up { out.append(.line(Words.noScreen)) }\n", ""),
     ("a quit says so with nothing dark", F, "            guard up else { return [] }\n            up = false", "            up = false"),
@@ -136,5 +160,12 @@ M = [
     ("a device's name not cleaned", F, "let n = SafeText.label(name ?? \"\")", "let n = name ?? \"\""),
     ("no name, an empty one", F, 'return "Privacy: unlocked from \\(n.isEmpty ? "a device" : n);', 'return "Privacy: unlocked from \\(n);'),
     ("the hint's lines swapped", F, 'hint == .lock ? "Press any key to lock it." : "To use it here', 'hint == .pass ? "Press any key to lock it." : "To use it here'),
+    # Part 1's switches and a session's route, beside the dark (the review of PR #400, follow-up 2).
+    ("the lock waits with its switch off", P, "guard on, !onlyAway || awaySeen else {", "guard !onlyAway || awaySeen else {"),
+    ("the lock's only away ignored at the departure", P, "guard on, !onlyAway || awaySeen else {", "guard on else {"),
+    ("the lock takes a session's route the wrong way round", P, "if away { awaySeen = true }", "if !away { awaySeen = true }"),
+    ("only away turned on keeps a visit at home's wait", P, "            waitingSince = nil\n            return [.line(Words.nowOnlyAway)]",
+     "            return [.line(Words.nowOnlyAway)]"),
+    ("the display sleeps whatever its switch says", P, "                    if !sleeps {\n", "                    if false {\n"),
 ]
 sys.exit(0 if module.mutate("darken", M, sys.argv[1]) else 1)

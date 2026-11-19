@@ -3,9 +3,11 @@ import Foundation
 import StreamProtocol
 
 // Privacy mode, part 2 (docs/privacy-mode-plan.md; DarkenPolicy): this Mac's screens dark while a device uses it, the
-// main actor's side, built up to the two places where the Mac itself is touched. Each is a seam, filled on a test host
-// by a dry run that only says what it would do, and in Sill.app by what the probe G0 decides
-// (docs/steps/2026-11-18-privacy-darken.md): until then Sill.app has neither, and darkening cannot be turned on there.
+// main actor's side, built up to the two places where the Mac itself is touched. Each is a seam, filled by a dry run
+// that only says what it would do on every host but Sill.app itself (DarkenPolicy.darkensForReal, the lock's rule: the
+// CLI, the bare SillMenuBar binary, a test host), and in Sill.app by what the probe G0 decides
+// (docs/steps/2026-11-18-privacy-darken.md): until then Sill.app has neither, and darkening cannot be turned on there
+// (DarkenPolicy.heldBack).
 
 /// The seam where this Mac's screens are actually darkened: DarkenPolicy's `raise`, `lift` and `hint`. Sill.app's, once
 /// G0 has measured them, are its own black windows (#184's recipe: one borderless black window per screen, no shadow,
@@ -41,10 +43,12 @@ protocol LocalInput: AnyObject {
 /// at the locked screen (`deviceInputAtLockedScreen`); a quit (`quit`). While the rule waits on the clock it ticks every
 /// `DarkenPolicy.tick` on a main-actor Task (the CLI's dispatchMain drains the main queue on a worker thread, so nothing
 /// here assumes isolation), reading the lock's `pending` (HostStatus.privacyLock) for rule 6's hold. Its lock (rule 7)
-/// is ScreenLocker's (a dry run on a test host), confirmed by SessionLock's reading like the lock's own.
+/// is ScreenLocker's (a dry run anywhere but in Sill.app itself), confirmed by SessionLock's reading like the lock's own.
 @MainActor
 final class PrivacyScreen {
     private var state: DarkenPolicy.State
+    /// Sill.app itself (DarkenPolicy.darkensForReal): its seams are its own, and its locker locks.
+    private let real: Bool
     /// The two seams: nil where nothing fills them (Sill.app until G0), and then nothing is darkened or watched.
     private let curtain: Curtain?
     private let input: LocalInput?
@@ -60,38 +64,31 @@ final class PrivacyScreen {
     private var watching = false
     private let origin = ContinuousClock.now
 
-    /// `dry`: a test host (synthetic), whose seams are dry runs; `testHost`: whether the TEST ONLY hooks count.
-    init(config: HostConfig, dry: Bool, testHost: Bool, status: HostStatus, gate: LockGate,
+    /// `real`: Sill.app itself (DarkenPolicy.darkensForReal, the lock's rule), whose seams wait for the probe G0 (and
+    /// darkening with them: DarkenPolicy.heldBack) and whose locker locks; anything else gets the dry run: DryCurtain, a
+    /// test host's FileInput, ScreenLocker's dry run. `testHost`: whether the TEST ONLY hooks count.
+    init(config: HostConfig, real: Bool, testHost: Bool, status: HostStatus, gate: LockGate,
          environment: [String: String] = ProcessInfo.processInfo.environment) {
         hooks = DarkenPolicy.testHooks(testHost: testHost, environment: environment)
         let lockHooks = PrivacyPolicy.testHooks(testHost: testHost, environment: environment)
         testScreens = lockHooks.displays
-        curtain = dry ? DryCurtain(stamped: hooks.log) : nil
-        input = dry ? hooks.inputFile.map { FileInput(path: $0) } : nil
-        locker = ScreenLocker(mode: dry ? .dry(noSymbol: lockHooks.noSymbol) : .real)
-        // Nothing fills the seams outside a test host yet: darkening stays off there, whatever the config says.
-        var scope = config.darkenScreen
+        self.real = real
+        curtain = real ? nil : DryCurtain(stamped: hooks.log)
+        input = real ? nil : hooks.inputFile.map { FileInput(path: $0) }
+        locker = ScreenLocker(mode: real ? .real : .dry(noSymbol: lockHooks.noSymbol))
+        // Sill.app's seams are not filled yet: darkening stays off there, whatever the config says.
+        let heldBack = DarkenPolicy.heldBack(real: real, filled: curtain != nil)
+        let scope = heldBack ? .off : config.darkenScreen
         var lines = hooks.lines
-        if curtain == nil, scope != .off {
-            lines.append(Self.waitsForProbe)
-            scope = .off
-        }
+        if heldBack, config.darkenScreen != .off { lines.append(DarkenPolicy.Words.waitsForProbe) }
         state = DarkenPolicy.State(scope: scope, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession,
                                    grace: lockHooks.grace ?? DarkenPolicy.grace)
-        if scope != .off { lines.append(Self.startLine(scope, keysLock: config.darkenKeysLock)) }
+        if scope != .off { lines.append(DarkenPolicy.Words.startLine(scope, keysLock: config.darkenKeysLock, dry: !real)) }
         startLines = lines
         self.status = status
         self.gate = gate
         if scope != .off { run(state.screens(screenIDs().count, at: 0)) }
         run(state.reading(PrivacyPolicy.mac(gate.reading, established: gate.established), at: 0))
-    }
-
-    /// Outside a test host, until G0 fills the seams.
-    static let waitsForProbe = "Privacy: darkening this Mac’s screen waits for its probe (docs/privacy-mode-plan.md, G0); this build darkens nothing."
-
-    static func startLine(_ scope: HostConfig.Darken, keysLock: Bool) -> String {
-        "Privacy: Darken this Mac’s screen is on: \(scope == .away ? "while a device away from home is connected" : "while a device is connected")"
-            + (keysLock ? "; a key or click on this Mac locks it." : "; keys and clicks on this Mac reach its apps.")
     }
 
     // MARK: Inputs
@@ -104,9 +101,9 @@ final class PrivacyScreen {
         run(state.sessions(away: away, home: home, at: now))
     }
 
-    /// The switches, at once (`setTarget`). Outside a test host darkening stays off until G0 fills the seams.
+    /// The switches, at once (`setTarget`). In Sill.app darkening stays off until G0 fills the seams.
     func switched(_ config: HostConfig) {
-        let scope = curtain == nil ? .off : config.darkenScreen
+        let scope = DarkenPolicy.heldBack(real: real, filled: curtain != nil) ? .off : config.darkenScreen
         let now = now()
         if scope != .off { run(state.screens(screenIDs().count, at: now)) }
         run(state.switched(scope: scope, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession, at: now))
@@ -226,9 +223,10 @@ final class PrivacyScreen {
     }
 }
 
-// MARK: A test host's seams: dry runs
+// MARK: The dry run's seams (everything but Sill.app itself)
 
-/// A test host's curtain: says what it would draw and counts it (`priv.raise`, `priv.lift`, `priv.hint`); never a window.
+/// The dry run's curtain (the CLI, the bare SillMenuBar binary, a test host): says what it would draw and counts it
+/// (`priv.raise`, `priv.lift`, `priv.hint`); never a window.
 @MainActor
 final class DryCurtain: Curtain {
     private let stamped: Bool

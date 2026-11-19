@@ -395,10 +395,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   Darken this Mac's screen (docs/privacy-mode-plan.md, part 2): `DarkenPolicy` (which sessions darken, the
   dark and its raise before the wake, the wait and the hold for the lock, under
   the lock screen, a key on the dark Mac, taken back, the switches, the
-  watchdog's decisions, the screens, the words; pure, `Tests/checks/darken`)
+  watchdog's decisions, the screens, who darkens: only Sill.app itself, the
+  lock's rule; the words; pure, `Tests/checks/darken`, which also runs it
+  beside the lock's rule with part 1's switches and each session's route)
   and `PrivacyScreen` (main actor: the rule's state and tick; its seams
-  `Curtain` and `LocalInput`, a test host's dry runs `DryCurtain` and
-  `FileInput`, and nothing in Sill.app until the probe G0 fills them).
+  `Curtain` and `LocalInput`, the dry run's `DryCurtain` and a test host's
+  `FileInput` everywhere but in Sill.app itself, and nothing in Sill.app
+  until the probe G0 fills them).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link

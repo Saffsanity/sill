@@ -45,10 +45,13 @@ import StreamProtocol
 /// - **A hung Sill** (rule 12): the watchdog's decisions, `watchdogFires` and `reopens`, pure here.
 /// - **Screens** (rule 13, `screens`): every screen (DesktopDisplays.role) of some size; never Sill's stage or Desktop
 ///   display, nor macOS's stand-in for a Mac with no screen.
-/// - **A test host** (rule 14) decides the same; its glue draws nothing, watches no input and locks nothing.
+/// - **Only Sill.app itself darkens** (rule 14, `darkensForReal`: the lock's rule, PrivacyPolicy.locksForReal). The
+///   CLI, the bare SillMenuBar binary and every test host decide the same and act on nothing: their glue says what it
+///   would do (the "(dry run)" lines), draws nothing, watches no input and locks nothing. Sill.app's own glue waits for
+///   the probe G0 (`heldBack`): until it is filled, darkening stays off there whatever the switch says.
 ///
-/// Pure (Foundation, StreamProtocol's DesktopDisplays and SafeText, HostConfig's scope, PrivacyPolicy's constants and
-/// readings), checked with them as one module (Tests/checks/darken).
+/// Pure (Foundation, StreamProtocol's DesktopDisplays and SafeText, HostConfig's scope, PrivacyPolicy's constants,
+/// readings and rule of who acts), checked with them as one module (Tests/checks/darken).
 package enum DarkenPolicy {
     // MARK: The constants
 
@@ -78,6 +81,23 @@ package enum DarkenPolicy {
     static let tick: Double = 0.5
     /// Rule 4: the black windows sit under macOS's lock screen (true until the probe G0 says otherwise).
     package static let staysUnderLockScreen = true
+
+    // MARK: Who darkens (rule 14)
+
+    /// Whether this host darkens for real: its black windows, its watch on this Mac's own keys, clicks and pointer, and
+    /// the lock a key on the dark Mac asks (ScreenLocker's `.real`). The lock's own rule (PrivacyPolicy.locksForReal):
+    /// Sill.app itself alone (`bundled`: AppModel.bundled, the coordinator's `testHooks` false), and never with
+    /// `--synthetic`. The CLI, the bare SillMenuBar binary (whose previews and `-SillSetAfter` any agent runs) and every
+    /// test host get the dry run whatever the switch says: they say what they would do (`Words.dryRaise`, `.dryLift`,
+    /// `.dryHint`, PrivacyPolicy.Words.dryLock) and draw, watch and lock nothing (the review of PR #400, follow-up 1).
+    static func darkensForReal(synthetic: Bool, bundled: Bool) -> Bool {
+        PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)
+    }
+
+    /// Whether darkening stays off here whatever the switch says: a host that darkens for real (`real`) whose seams are
+    /// not filled (`filled`: Sill.app until the probe G0 has chosen how its black windows are made), which says so once
+    /// (`Words.waitsForProbe`). A dry run is never held back: it draws nothing anyway.
+    static func heldBack(real: Bool, filled: Bool) -> Bool { real && !filled }
 
     // MARK: Inputs
 
@@ -448,6 +468,15 @@ package enum DarkenPolicy {
 
     package enum Words {
         // Sill.log
+        /// The start line while the switch is on. `dry`: not Sill.app itself (`darkensForReal`), which only says what it
+        /// would do.
+        package static func startLine(_ scope: HostConfig.Darken, keysLock: Bool, dry: Bool) -> String {
+            "Privacy: Darken this Mac’s screen is on: \(scope == .away ? "while a device away from home is connected" : "while a device is connected")"
+                + (keysLock ? "; a key or click on this Mac locks it." : "; keys and clicks on this Mac reach its apps.")
+                + (dry ? " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do." : "")
+        }
+        /// Sill.app itself with the switch on, until the probe G0 fills its seams (`heldBack`).
+        package static let waitsForProbe = "Privacy: darkening this Mac’s screen waits for its probe (docs/privacy-mode-plan.md, G0); this build darkens nothing."
         package static func dark(_ scope: HostConfig.Darken, screens: Int) -> String {
             let who = scope == .away ? "a device away from home is connected" : "a device is connected"
             return "Privacy: this Mac’s screen is dark while \(who) (\(displays(screens)))."
@@ -483,13 +512,13 @@ package enum DarkenPolicy {
             hint == .lock ? "Press any key to lock it." : "To use it here, press Control-Command-Q, then unlock it."
         }
 
-        // A test host's dry run (PrivacyScreen)
+        // The dry run (PrivacyScreen's DryCurtain) of everything but Sill.app itself: the CLI, the bare binary, a test host
         package static func dryRaise(_ screens: Int) -> String {
-            "Privacy (test host): would darken \(displays(screens)); nothing is drawn."
+            "Privacy (dry run): would darken \(displays(screens)); nothing is drawn."
         }
-        package static let dryLift = "Privacy (test host): would light this Mac’s screen again; nothing was drawn."
+        package static let dryLift = "Privacy (dry run): would light this Mac’s screen again; nothing was drawn."
         package static func dryHint(_ hint: Hint) -> String {
-            "Privacy (test host): would show “\(hintFirst) \(hintSecond(hint))”; nothing is drawn."
+            "Privacy (dry run): would show “\(hintFirst) \(hintSecond(hint))”; nothing is drawn."
         }
 
         /// "1 display", "2 displays".

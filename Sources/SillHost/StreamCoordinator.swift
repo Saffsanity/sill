@@ -113,8 +113,9 @@ package final class StreamCoordinator {
     private let privacy: PrivacyLock
     /// Darken this Mac's screen while a device uses it (PrivacyScreen, DarkenPolicy; docs/privacy-mode-plan.md, part 2):
     /// the registered sessions away and at home (at a connect before the wake, rule 5), the switches (at once, from
-    /// `setTarget`), the lock's reading, a paired device's input at the locked screen and a quit go to it. A test host's
-    /// (`synthetic`) draws nothing and watches nothing: it says what it would do. Sill.app's waits for the probe G0.
+    /// `setTarget`), the lock's reading, a paired device's input at the locked screen and a quit go to it. Only Sill.app's
+    /// own would darken (DarkenPolicy.darkensForReal, the lock's rule), and it waits for the probe G0; the CLI's, the
+    /// bare SillMenuBar binary's and a test host's draw nothing, watch nothing and lock nothing: they say what they would.
     private let darken: PrivacyScreen
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
@@ -448,7 +449,7 @@ package final class StreamCoordinator {
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
                               testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                               status: status, gate: SessionLock.shared.gate)
-        darken = PrivacyScreen(config: config, dry: synthetic,
+        darken = PrivacyScreen(config: config, real: DarkenPolicy.darkensForReal(synthetic: synthetic, bundled: !testHooks),
                                testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                status: status, gate: SessionLock.shared.gate)
         var home = StreamServer.HomeDoorMode.plain

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """TEST ONLY (docs/privacy-mode-plan.md, part 2; G4's first cases): Darken this Mac's screen on synthetic test hosts on
-loopback, the darkening a dry run (PrivacyScreen's DryCurtain: lines, never a window; the Mac's own input from the
-SILL_TEST_PRIVACY_INPUT file, never an event monitor; the lock ScreenLocker's dry run). Each host runs on 127.0.0.1
-alone with the software encoder, no router and no screen (SILL_TEST_LOCK_IGNORE_MAC: the lock's reading is the test's
-own file, never this Mac's), lives under 30 s and is killed at the end. One verdict per rule:
+loopback, the darkening a dry run, as on every host but Sill.app itself (DarkenPolicy.darkensForReal: PrivacyScreen's
+DryCurtain, lines and never a window; the Mac's own input from the SILL_TEST_PRIVACY_INPUT file, never an event
+monitor; the lock ScreenLocker's dry run). Each host runs on 127.0.0.1 alone with the software encoder, no router and
+no screen (SILL_TEST_LOCK_IGNORE_MAC: the lock's reading is the test's own file, never this Mac's), lives under 30 s
+and is killed at the end. One verdict per rule:
 
   order     the black is up (\"would darken\") before the connect's display wake is counted (rule 5), both stamped
-  home      --darken=away and a device at home: nothing darkens; the start line says the switch
+  home      --darken=away and a device at home: nothing darkens; the start line says the switch, and a dry run
   away      --darken=away and a paired device at the remote door: away from a relay on this Mac, it darkens; at home
             (SILL_TEST_REMOTE_ORIGIN=lan), it does not
   wait      --darken=any: dark at the connect, the wait's line at the departure, a return within it, lit at its end
@@ -28,10 +29,12 @@ HOST = os.path.join(ROOT, ".build/release/SillHost")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
             "SILL_TEST_LOCK_IGNORE_MAC": "1", "SILL_TEST_PRIVACY_DISPLAYS": "1"}
-DARK = "Privacy (test host): would darken 1 display; nothing is drawn."
-LIGHT = "Privacy (test host): would light this Mac’s screen again; nothing was drawn."
-HINT_LOCK = "Privacy (test host): would show “This Mac is in use from another device. Press any key to lock it.”"
-HINT_PASS = "Privacy (test host): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”"
+DARK = "Privacy (dry run): would darken 1 display; nothing is drawn."
+LIGHT = "Privacy (dry run): would light this Mac’s screen again; nothing was drawn."
+HINT_LOCK = "Privacy (dry run): would show “This Mac is in use from another device. Press any key to lock it.”"
+HINT_PASS = "Privacy (dry run): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”"
+DRY_CURTAIN = ("Privacy (dry run): would darken", "Privacy (dry run): would light", "Privacy (dry run): would show")
+DRY_START = " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do."
 LOCK_DRY = "Privacy (dry run): would lock this Mac now; nothing is locked."
 
 verdicts = []
@@ -119,9 +122,10 @@ def case_home(out):
     h = Host(out, "home", {}, ["--darken=away"])
     c = client(h, "home", 3, 1.0)
     c.join(); h.at(5); h.stop()
-    verdict(bool(h.find("Privacy: Darken this Mac’s screen is on: while a device away from home is connected; a key or click on this Mac locks it.")),
-            "the start line says the switch")
-    dark = h.find("Privacy (test host): would")
+    start = h.find("Privacy: Darken this Mac’s screen is on: while a device away from home is connected; a key or click on this Mac locks it.")
+    verdict(bool(start), "the start line says the switch")
+    verdict(len(start) == 1 and start[0][2].endswith(DRY_START), "and that it is a dry run here (only Sill.app itself darkens a Mac's screen)")
+    dark = [x for p in DRY_CURTAIN for x in h.find(p)]
     verdict(not dark, f"a device at home darkens nothing under only away: {dark[:1]}")
 
 

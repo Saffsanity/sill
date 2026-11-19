@@ -3,10 +3,13 @@
 // as one module (module.txt).
 //
 //   Tests/checks/darken/run.sh             compile and run the check
-//   Tests/checks/darken/run.sh --mutants   one-line mutants of DarkenPolicy.swift; each must fail it
+//   Tests/checks/darken/run.sh --mutants   one-line mutants of DarkenPolicy.swift (and five of PrivacyPolicy.swift's
+//                                          switches and route); each must fail it
 //
 // What it checks: the constants (the lock's wait and confirmation shared, the windows under the lock screen until G0);
-// rule 13's screens (through DesktopDisplays.role's real identities); rule 2's sessions that darken; rule 1, off
+// rule 14, who darkens (Sill.app itself alone, the lock's rule PrivacyPolicy.locksForReal; held back until the probe
+// fills its seams; the dry run's words for everything else); rule 13's screens (through DesktopDisplays.role's real
+// identities); rule 2's sessions that darken; rule 1, off
 // (nothing ever); rules 3 and 5, the dark and its raise at a connect (its line, the hint, the order); rule 6, the wait
 // (its line, a return, its boundary, two sessions, a move, a move home, a test host's shorter wait) and the hold for the
 // lock when the same departure started the lock's wait (held while the lock is under way, never past its bound, never
@@ -14,9 +17,12 @@
 // the pointer on the dark Mac (the lock asked once per confirmation, its confirmation, a lock that does not show or
 // cannot be made, the hint's wording and pace, Sill's own events, a locked Mac); rule 8, taken back (the Mac's own unlock
 // and the device's, the window, off console, until every session has left or a switch changes); rule 9, the switches;
-// rule 11, a quit; rule 12, the watchdog's decisions; rule 13's count; the TEST ONLY hooks; every word; then a model of
-// the coordinator's glue running this rule beside the lock's (PrivacyPolicy) through 20,000 seeded random sessions
-// against the invariants:
+// rule 11, a quit; rule 12, the watchdog's decisions; rule 13's count; the TEST ONLY hooks; every word; both rules
+// together, scripted (part 1's three switches and each session's route: a visit away and one at home under only after a
+// device away, a device at home left behind, a move home, a switch turned on or off during the waits, the display left
+// on); then a model of the coordinator's glue running this rule beside the lock's (PrivacyPolicy, its three switches,
+// each session's route given to it as the server orders the callbacks) through 20,000 seeded random sessions against
+// the invariants:
 //   I1 the windows are up exactly when the rule says (`up` == `shouldBeUp` after every event), and always while a
 //      session that darkens is connected with the switch on, a screen, no quit, not taken back, and (under the lock
 //      screen, or unlocked);
@@ -29,8 +35,12 @@
 //      cleared once no session is connected or a switch of darkening changes;
 //   I6 `raise` and `lift` alternate, and the glue's windows follow them;
 //   I7 Sill's own (tagged) input never does anything;
-//   I8 the dark never lifts while the lock its departure started is still under way, within the hold's bound;
-//   I9 at a connect that darkens, `raise` comes from the session count, before the glue declares the display wake.
+//   I8 the dark never lifts while the lock its departure started is still under way, within the hold's bound (the lock's
+//      own line says whether its wait started with that departure: Only after a device away from home lets a visit
+//      at home go);
+//   I9 at a connect that darkens, `raise` comes from the session count, before the glue declares the display wake;
+//   I10 a hold begins only for a departure that left no session with the lock's switch on, nothing since ending that,
+//      while the lock's rule has its wait or a confirmation under way.
 import Foundation
 
 var checks = 0, failures = 0
@@ -74,6 +84,23 @@ check(D.eventTag != 0 && D.eventTag != 1 && D.eventTag != -1, "the tag is no val
 check(D.tick > 0 && D.tick * 2 <= D.lockConfirm, "the tick looks at least twice within a confirmation")
 check(D.holdSlack >= 2 * D.tick, "the hold's slack covers the two rules' ticks")
 check(D.staysUnderLockScreen, "the black windows sit under the lock screen until the probe G0 says otherwise")
+
+// MARK: - Rule 14: only Sill.app itself darkens (the review of PR #400, follow-up 1)
+
+check(D.darkensForReal(synthetic: false, bundled: true), "Sill.app itself: its own black windows, watch and lock")
+check(!D.darkensForReal(synthetic: false, bundled: false),
+      "the bare SillMenuBar binary and the CLI (not bundled), even without --synthetic: the dry run")
+check(!D.darkensForReal(synthetic: true, bundled: true), "Sill.app with --synthetic: the dry run")
+check(!D.darkensForReal(synthetic: true, bundled: false), "a test host: the dry run")
+for synthetic in [false, true] {
+    for bundled in [false, true] {
+        same(D.darkensForReal(synthetic: synthetic, bundled: bundled), PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled),
+             "the lock's rule, synthetic \(synthetic), bundled \(bundled): whatever darkens for real locks for real, and nothing else")
+    }
+}
+check(D.heldBack(real: true, filled: false), "Sill.app before the probe G0 fills its seams: darkening off whatever the switch says")
+check(!D.heldBack(real: true, filled: true), "Sill.app once they are filled: the switch decides")
+check(!D.heldBack(real: false, filled: true) && !D.heldBack(real: false, filled: false), "a dry run is never held back: it draws nothing anyway")
 
 // MARK: - Rule 13: the screens to cover
 
@@ -567,7 +594,8 @@ do {
 do {
     let all: [String] = [W.dark(.away, screens: 1), W.dark(.any, screens: 2), W.lastLeft(30), W.cameBack(30), W.lit, W.switchedOff,
                          W.noneCounts, W.noScreen, W.quitting, W.locking, W.couldNotLock("why"), W.lockScreenShows, W.takenBack,
-                         W.deviceUnlocked("iPad"), W.watchdog, W.reopened]
+                         W.deviceUnlocked("iPad"), W.watchdog, W.reopened, W.startLine(.away, keysLock: true, dry: false),
+                         W.startLine(.any, keysLock: false, dry: true), W.waitsForProbe]
     check(all.allSatisfy { $0.hasPrefix("Privacy: ") && $0.hasSuffix(".") && !$0.contains("\n") }, "every log line begins with Privacy: and is one sentence")
     check(Set(all).count == all.count, "no two lines alike")
     check(all.allSatisfy { !$0.contains("'") }, "typographic apostrophes only")
@@ -576,12 +604,232 @@ do {
     same(W.hintFirst, "This Mac is in use from another device.", "the hint's first line")
     same(W.hintSecond(.lock), "Press any key to lock it.", "its second, keys locking")
     same(W.hintSecond(.pass), "To use it here, press Control-Command-Q, then unlock it.", "its second, keys passing")
-    same(W.dryRaise(1), "Privacy (test host): would darken 1 display; nothing is drawn.", "a test host's raise")
-    same(W.dryRaise(3), "Privacy (test host): would darken 3 displays; nothing is drawn.", "plural")
-    same(W.dryLift, "Privacy (test host): would light this Mac’s screen again; nothing was drawn.", "a test host's lift")
-    same(W.dryHint(.pass), "Privacy (test host): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”; nothing is drawn.", "a test host's hint")
+    same(W.dryRaise(1), "Privacy (dry run): would darken 1 display; nothing is drawn.", "the dry run's raise (anything but Sill.app itself)")
+    same(W.dryRaise(3), "Privacy (dry run): would darken 3 displays; nothing is drawn.", "plural")
+    same(W.dryLift, "Privacy (dry run): would light this Mac’s screen again; nothing was drawn.", "the dry run's lift")
+    same(W.dryHint(.pass), "Privacy (dry run): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”; nothing is drawn.", "the dry run's hint")
+    check([W.dryRaise(1), W.dryLift, W.dryHint(.lock), PW.dryLock].allSatisfy { $0.hasPrefix("Privacy (dry run): would ") },
+          "the dry curtain's lines begin as the lock's dry run's")
+    same(W.startLine(.away, keysLock: true, dry: false),
+         "Privacy: Darken this Mac’s screen is on: while a device away from home is connected; a key or click on this Mac locks it.",
+         "the start line, only away, keys locking (Sill.app itself)")
+    same(W.startLine(.any, keysLock: false, dry: true),
+         "Privacy: Darken this Mac’s screen is on: while a device is connected; keys and clicks on this Mac reach its apps. A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do.",
+         "whenever, keys passing, a dry run: it says so")
+    check(W.startLine(.away, keysLock: true, dry: true).hasPrefix(W.startLine(.away, keysLock: true, dry: false)),
+          "the dry run's sentence comes after the switch's words")
+    same(W.waitsForProbe, "Privacy: darkening this Mac’s screen waits for its probe (docs/privacy-mode-plan.md, G0); this build darkens nothing.",
+         "Sill.app with the switch on, before G0")
     same(W.displays(1) + ", " + W.displays(0) + ", " + W.displays(2), "1 display, 0 displays, 2 displays", "display counts")
     same(W.stillUnlocked, PW.stillUnlockedLog, "the same words as the lock's for a lock that did not show")
+}
+
+// MARK: - Both rules together: part 1's switches and each session's route (the review of PR #400, follow-up 2)
+
+/// Darkening beside the lock (part 1's PrivacyPolicy with its three switches: Lock this Mac when the last device leaves,
+/// Turn off its display too, Only after a device away from home), run as the coordinator runs them: at a registration
+/// the server's count first (the lock's `sessions`, then `joined(away:)` with the session's route: onClientCountChanged
+/// comes before onClientConnected), then the dark's sessions; at a departure the dark's first (onClientDisconnected
+/// comes before onClientCountChanged), then the lock's count; the switches as setTarget gives them (the lock's, then the
+/// dark's); both rules' ticks every `D.tick`, the lock's first, the dark reading the lock's `pending`; a lock asked shows
+/// in the reading 1 s later. Every action of both, with its time.
+struct Pair {
+    var d: D.State
+    var p: PrivacyPolicy.State
+    var away = 0, home = 0
+    var mac: PrivacyPolicy.Mac = .unlocked
+    var askedAt: Double?
+    var t = 0.0
+    var log: [(t: Double, what: String)] = []
+
+    init(_ scope: HostConfig.Darken, lock: Bool, sleeps: Bool = true, onlyAway: Bool = false) {
+        d = D.State(scope: scope, keysLock: true, lockAfterSession: lock)
+        p = PrivacyPolicy.State(on: lock, sleeps: sleeps, onlyAway: onlyAway)
+        _ = d.screens(1, at: 0)
+        _ = d.reading(.unlocked, at: 0)
+    }
+
+    mutating func dark(_ actions: [A]) {
+        for a in actions {
+            switch a {
+            case .raise: log.append((t, "dark raise"))
+            case .lift: log.append((t, "dark lift"))
+            case .lock: log.append((t, "dark lock"))
+            case .line(let l): log.append((t, "dark: " + l))
+            case .hint, .look: break
+            }
+        }
+    }
+
+    mutating func lock(_ actions: [PrivacyPolicy.Action]) {
+        for a in actions {
+            switch a {
+            case .lock: log.append((t, "lock lock")); askedAt = t
+            case .sleepDisplays: log.append((t, "lock sleepDisplays"))
+            case .line(let l): log.append((t, "lock: " + l))
+            case .look: break
+            }
+        }
+    }
+
+    /// Both rules' ticks up to `until`.
+    mutating func run(to until: Double) {
+        while t + D.tick <= until + 1e-9 {
+            t += D.tick
+            if let asked = askedAt, t >= asked + 1, mac == .unlocked {
+                mac = .screenLocked
+                askedAt = nil
+                dark(d.reading(mac, at: t))
+            }
+            lock(p.tick(at: t, mac: mac, display: true))
+            dark(d.tick(at: t, lockHolds: p.pending))
+        }
+        t = until
+    }
+
+    mutating func join(away isAway: Bool, at time: Double) {
+        run(to: time)
+        if isAway { away += 1 } else { home += 1 }
+        lock(p.sessions(away + home, at: t))
+        p.joined(away: isAway)
+        dark(d.sessions(away: away, home: home, at: t))
+    }
+
+    mutating func leave(away isAway: Bool, at time: Double) {
+        run(to: time)
+        if isAway { away -= 1 } else { home -= 1 }
+        dark(d.sessions(away: away, home: home, at: t))
+        lock(p.sessions(away + home, at: t))
+    }
+
+    /// The switches as setTarget gives them: PrivacyLock.switched (its display, the lock, only away), then the dark's.
+    mutating func switches(lock on: Bool, sleeps: Bool = true, onlyAway: Bool, scope: HostConfig.Darken, at time: Double) {
+        run(to: time)
+        p.setSleeps(sleeps)
+        lock(p.switched(on, at: t))
+        lock(p.setOnlyAway(onlyAway, at: t))
+        dark(d.switched(scope: scope, keysLock: d.keysLock, lockAfterSession: on, at: t))
+    }
+
+    /// When `what` happened.
+    func at(_ what: String) -> [Double] { log.filter { $0.what == what }.map(\.t) }
+}
+
+do {
+    var b = Pair(.away, lock: true, onlyAway: true)
+    b.join(away: true, at: 1)
+    b.leave(away: true, at: 10)
+    b.run(to: 45)
+    same(b.at("lock: " + PW.lastLeft(G)), [10], "only away, and the lock only after a device away: a device away leaves, the lock's wait starts")
+    same(b.at("dark: " + W.lastLeft(G)), [10], "and the dark's, at the same departure")
+    same(b.at("lock lock"), [40], "the lock at the wait's end")
+    same(b.at("lock: " + PW.lockedAndSleeps), [41], "confirmed when the reading says locked, its display asleep")
+    same(b.at("dark lift"), [41], "the dark held through the lock, lit once it showed and never before (rule 6)")
+}
+do {
+    var b = Pair(.any, lock: true, onlyAway: true)
+    b.join(away: false, at: 1)
+    b.leave(away: false, at: 10)
+    b.run(to: 50)
+    same(b.at("dark raise"), [1], "whenever: a device at home darkens")
+    same(b.at("lock: " + PW.notAway), [10], "the lock only after a device away: a visit at home starts no lock's wait")
+    same(b.at("lock lock"), [], "and no lock comes")
+    same(b.at("dark lift"), [40], "so the dark is lit at its own wait's end, held for no lock")
+}
+do {
+    var b = Pair(.any, lock: true, onlyAway: true)
+    b.join(away: true, at: 1)
+    b.join(away: false, at: 2)
+    b.leave(away: true, at: 5)
+    b.leave(away: false, at: 10)
+    b.run(to: 45)
+    same(b.at("dark: " + W.lastLeft(G)) + b.at("lock: " + PW.lastLeft(G)), [10, 10],
+         "whenever, a visit with a device away that left first: both waits start at the last departure, the one at home")
+    same(b.at("lock lock"), [40], "the lock, for the visit had a device away")
+    same(b.at("dark lift"), [41], "and the dark held for it")
+}
+do {
+    var b = Pair(.away, lock: true)
+    b.join(away: true, at: 1)
+    b.join(away: false, at: 2)
+    b.leave(away: true, at: 5)
+    b.leave(away: false, at: 10)
+    b.run(to: 45)
+    same(b.at("dark: " + W.lastLeft(G)), [5], "only away: the last device away leaves, the dark's wait (a device at home stays)")
+    same(b.at("lock: " + PW.lastLeft(G)), [10], "the lock's wait at the last departure of all")
+    same(b.at("dark lift"), [35], "the dark lit at its own end: its departure left a device behind, so no lock followed it")
+    same(b.at("lock lock"), [40], "the lock 30 s after the device at home left")
+    same(b.at("dark raise"), [1], "nothing darkened again for the device at home")
+}
+do {
+    var b = Pair(.away, lock: true, onlyAway: true)
+    b.join(away: true, at: 1)
+    b.join(away: false, at: 10)   // a move home: its new connection first
+    b.leave(away: true, at: 10)   // then the old one away leaves
+    b.leave(away: false, at: 20)
+    b.run(to: 55)
+    same(b.at("dark: " + W.lastLeft(G)), [10], "a move home under only away: the dark's wait")
+    same(b.at("lock: " + PW.lastLeft(G)), [20], "the lock's at the departure from home (the visit had a device away)")
+    same(b.at("dark lift"), [40], "the dark lit at its own end, never held for that later lock")
+    same(b.at("lock lock"), [50], "the lock 30 s after that departure")
+}
+do {
+    var b = Pair(.any, lock: true)
+    b.join(away: false, at: 1)
+    b.leave(away: false, at: 10)
+    b.switches(lock: true, onlyAway: true, scope: .any, at: 15)
+    b.run(to: 50)
+    same(b.at("lock: " + PW.nowOnlyAway), [15], "only after a device away turned on during a visit at home's waits: the lock's ends")
+    same(b.at("lock lock"), [], "no lock")
+    same(b.at("dark lift"), [40], "the dark's wait goes on (none of its switches changed) and ends lit, held for nothing")
+}
+do {
+    var b = Pair(.away, lock: false)
+    b.join(away: true, at: 1)
+    b.switches(lock: true, onlyAway: false, scope: .away, at: 5)
+    b.leave(away: true, at: 10)
+    b.run(to: 45)
+    same(b.at("lock lock"), [40], "the lock's switch turned on while a device is connected: its departure locks")
+    same(b.at("dark lift"), [41], "and the dark, told of that switch, holds for that lock")
+}
+do {
+    var b = Pair(.away, lock: true, sleeps: false)
+    b.join(away: true, at: 1)
+    b.leave(away: true, at: 10)
+    b.run(to: 45)
+    same(b.at("lock: " + PW.locked), [41], "Turn off its display too off: locked, its display left on")
+    same(b.at("lock sleepDisplays"), [], "no display sleep")
+    same(b.at("dark lift"), [41], "the dark held for the lock as with it on: that switch is the lock's alone")
+}
+do {
+    var b = Pair(.away, lock: true)
+    b.join(away: true, at: 1)
+    b.leave(away: true, at: 10)
+    b.switches(lock: false, onlyAway: false, scope: .away, at: 20)
+    b.run(to: 45)
+    same(b.at("lock: " + PW.switchedOff), [20], "the lock's switch off during the waits: its wait ends")
+    same(b.at("lock lock"), [], "no lock")
+    same(b.at("dark lift"), [40], "the dark ends at its own time, held for nothing")
+}
+do {
+    var b = Pair(.away, lock: true, onlyAway: true)
+    b.join(away: true, at: 1)
+    b.leave(away: true, at: 10)
+    b.join(away: false, at: 12)
+    b.leave(away: false, at: 20)
+    b.run(to: 55)
+    same(b.at("lock: " + PW.cameBack(G)), [12], "a device at home during the waits: the lock's wait ends")
+    same(b.at("lock: " + PW.lastLeft(G)), [10, 20], "and starts again as it leaves (the visit had a device away)")
+    same(b.at("dark lift"), [40], "the dark, which a device at home does not keep, lit at its own end: not held for the later lock")
+    same(b.at("lock lock"), [50], "the lock 30 s after the device at home left")
+}
+do {
+    var b = Pair(.away, lock: false)
+    b.join(away: true, at: 1)
+    b.leave(away: true, at: 10)
+    b.run(to: 45)
+    same(b.at("lock: " + PW.lastLeft(G)) + b.at("lock lock"), [], "the lock's switch off: darkening alone, no lock's wait and no lock")
+    same(b.at("dark lift"), [40], "the dark lit at its own wait's end")
 }
 
 // MARK: - A model of the glue, both rules together, through random sessions
@@ -610,6 +858,7 @@ func violated(_ name: String, _ what: String) {
 let runs = 20_000
 let eps = 1e-9
 var raises = 0, lifts = 0, keyLocks = 0, holds = 0, takenBacks = 0, deviceUnlocks = 0, waitsLit = 0, fallbackRuns = 0
+var holdsBegun = 0, onlyAwayHolds = 0, visitsAtHomeLetGo = 0, onlyAwayEndedWaits = 0, displayOnLocks = 0
 var rng = Rng(state: 0x5111_DA2C)
 for run in 0..<runs {
     let under = rng.below(5) != 0
@@ -618,9 +867,12 @@ for run in 0..<runs {
     var scope = scopes[rng.below(3)]
     var keysLock = rng.below(4) != 0
     var lockOn = rng.below(2) == 0
+    // Part 1's two other switches (the review of PR #400, follow-up 2): its display, and only after a device away.
+    var lockSleeps = rng.below(3) != 0
+    var lockOnlyAway = rng.below(3) == 0
     let grace = rng.below(3) == 0 ? 2.0 : 6.0
     var d = D.State(scope: scope, keysLock: keysLock, lockAfterSession: lockOn, grace: grace, underLockScreen: under)
-    var p = PrivacyPolicy.State(on: lockOn, grace: grace)
+    var p = PrivacyPolicy.State(on: lockOn, sleeps: lockSleeps, onlyAway: lockOnlyAway, grace: grace)
     var t = 0.0
     var sessions: [Bool] = []           // each connected session's away flag
     var mac: PrivacyPolicy.Mac = .unlocked
@@ -631,7 +883,8 @@ for run in 0..<runs {
     var lastAsk: Double? = nil
     var deviceTypedAt: Double? = nil
     var takenBack = false
-    var lockWaitFor: Double? = nil      // the departure whose lock the dark may hold for (both waits started together)
+    var lockWaitFor: Double? = nil      // the departure that started the dark's wait and the lock's own (its line said)
+    var holdAllowed = false             // the dark's wait's departure left no session with the lock on, and nothing since ended that
     var lockShowsAt: Double? = nil      // a lock asked: the reading says locked then
     var pendingCall: PrivacyPolicy.Call? = nil
     var callFor = 0                     // 1: the dark's lock, 2: the lock rule's
@@ -681,15 +934,24 @@ for run in 0..<runs {
         }
     }
 
-    func applyLock(_ actions: [PrivacyPolicy.Action]) {
+    /// The lock's actions; whether its wait started (its own line says so, whatever its switches decided).
+    @discardableResult
+    func applyLock(_ actions: [PrivacyPolicy.Action]) -> Bool {
+        var started = false
         for a in actions {
             switch a {
             case .lock:
                 if rng.below(6) == 0 { pendingCall = .unavailable(PW.unavailableLog); callFor = 2 }
                 else { lockShowsAt = rng.below(4) != 0 ? t + rng.unit() * 4 : nil }
+            case .line(let l):
+                if l == PW.lastLeft(grace) { started = true }
+                if l == PW.notAway { visitsAtHomeLetGo += 1 }
+                if l == PW.nowOnlyAway { onlyAwayEndedWaits += 1 }
+                if l == PW.locked { displayOnLocks += 1 }
             default: break
             }
         }
+        return started
     }
 
     /// I1, I2, I3 after every event.
@@ -706,16 +968,22 @@ for run in 0..<runs {
         if takenBack != d.takenBack { violated("I5", "run \(run): taken back \(d.takenBack), the model's \(takenBack) after \(event)") }
     }
 
+    /// A session registers (the last of `new`, its route with it) or leaves, in the server's order: at a registration
+    /// the count first (the lock's `sessions`, then `joined(away:)`: onClientCountChanged comes before
+    /// onClientConnected), then the dark's sessions and the wake; at a departure the dark's first (onClientDisconnected
+    /// comes before onClientCountChanged), then the lock's count. Each callback is a main-actor Task of its own.
     func setSessions(_ new: [Bool], _ event: String) {
         let before = counting()
         let darkBefore = d.wantsDark
+        let joining = new.count > sessions.count ? new.last : nil
         sessions = new
         if counting() == 0 { if before > 0 { lastCountingAt = t } } else { lastCountingAt = nil }
-        if before > 0, counting() == 0, sessions.isEmpty, lockOn, darkBefore { lockWaitFor = t }
-        if !sessions.isEmpty { lockWaitFor = nil }
         if sessions.isEmpty { takenBack = false }
-        // The glue: the dark's count first, then the wake (the coordinator's `deviceActive(.connect)`), then the server's
-        // count for the lock (its own Task).
+        var lockStarted = false
+        if let away = joining {
+            lockStarted = applyLock(p.sessions(sessions.count, at: t))
+            p.joined(away: away)
+        }
         let a = d.sessions(away: sessions.filter { $0 }.count, home: sessions.filter { !$0 }.count, at: t)
         apply(a, from: event)
         // I9 (rule 5): a session that darkens is up when the dark's call returns, before the wake is declared; and only
@@ -723,7 +991,14 @@ for run in 0..<runs {
         let wanted = scope != .off && counting() > 0 && screens > 0 && !quit && !takenBack && (under || mac == .unlocked)
         if wanted && !windows { violated("I9", "run \(run): not up when \(event) returned, before the wake, at \(t)") }
         if a.contains(.raise), counting() <= before { violated("I9", "run \(run): a raise from \(event) with no session that darkens joining") }
-        applyLock(p.sessions(sessions.count, at: t))
+        if joining == nil { lockStarted = applyLock(p.sessions(sessions.count, at: t)) }
+        // The dark's wait started at this departure: whether the lock may hold it (no session left, the lock on), and,
+        // for I8, whether the lock's own wait started with it (Only after a device away from home lets a visit at home go).
+        if !sessions.isEmpty { lockWaitFor = nil; holdAllowed = false }
+        if before > 0, counting() == 0, darkBefore {
+            holdAllowed = sessions.isEmpty && lockOn
+            lockWaitFor = lockStarted ? t : nil
+        }
         invariants(event)
     }
 
@@ -740,14 +1015,28 @@ for run in 0..<runs {
                 applyLock(p.tick(at: t, mac: mac, display: screens > 0))
                 invariants("reading")
             }
+            let wasHolding = d.holdingSince != nil
+            var lockHolds = false
             if rng.below(2) == 0 {
                 applyLock(p.tick(at: t, mac: mac, display: screens > 0))
-                apply(d.tick(at: t, lockHolds: p.pending), from: "tick")
+                lockHolds = p.pending
+                apply(d.tick(at: t, lockHolds: lockHolds), from: "tick")
             } else {
-                apply(d.tick(at: t, lockHolds: p.pending), from: "tick")
+                lockHolds = p.pending
+                apply(d.tick(at: t, lockHolds: lockHolds), from: "tick")
                 applyLock(p.tick(at: t, mac: mac, display: screens > 0))
             }
             if d.holdingSince != nil { holds += 1 }
+            // I10: a hold begins only for a departure that left no session with the lock's switch on (nothing since ending
+            // that: a session, the lock's switch off, a change of scope, taken back), while the lock's rule has its wait
+            // or a confirmation under way.
+            if !wasHolding, d.holdingSince != nil {
+                holdsBegun += 1
+                if lockOnlyAway { onlyAwayHolds += 1 }
+                if !holdAllowed || !lockHolds {
+                    violated("I10", "run \(run): a hold begun at \(t) (allowed \(holdAllowed), the lock under way \(lockHolds))")
+                }
+            }
             invariants("tick")
             t = saved
             nextTick = (d.pending || p.pending) ? due + D.tick : nil
@@ -779,7 +1068,7 @@ for run in 0..<runs {
                 mac = new
                 if new == .unlocked, was != .unlocked, d.wantsDark {
                     let devices = was == .screenLocked && (deviceTypedAt.map { t - $0 <= D.remoteUnlockWindow } ?? false)
-                    if !devices { takenBack = true; lockWaitFor = nil }
+                    if !devices { takenBack = true; lockWaitFor = nil; holdAllowed = false }
                 }
                 if new == .unlocked { deviceTypedAt = nil }
                 apply(d.reading(new, at: t), from: "reading")
@@ -803,16 +1092,21 @@ for run in 0..<runs {
             invariants("local")
         case 11:
             let newScope = scopes[rng.below(3)], newKeys = rng.below(4) != 0, newLock = rng.below(2) == 0
+            let newSleeps = rng.below(3) != 0, newOnlyAway = rng.below(3) == 0
             if newScope != scope || newKeys != keysLock { takenBack = false }
             let wasCounting = counting()
             scope = newScope; keysLock = newKeys
-            if newScope != d.scope || counting() == 0 { lockWaitFor = nil }
-            if newLock != lockOn, !newLock { lockWaitFor = nil }
+            if newScope != d.scope { lockWaitFor = nil; holdAllowed = false }
+            if newLock != lockOn, !newLock { lockWaitFor = nil; holdAllowed = false }
             if counting() == 0, wasCounting > 0 || newScope != d.scope { lastCountingAt = t }
             if counting() > 0 { lastCountingAt = nil }
-            lockOn = newLock
+            lockOn = newLock; lockSleeps = newSleeps; lockOnlyAway = newOnlyAway
+            // As setTarget gives them: the lock's (PrivacyLock.switched: its display, the switch, only away), then the dark's.
+            p.setSleeps(lockSleeps)
+            let lockActions = p.switched(lockOn, at: t) + p.setOnlyAway(lockOnlyAway, at: t)
+            if lockActions.contains(.line(PW.nowOnlyAway)) { lockWaitFor = nil }
+            applyLock(lockActions)
             apply(d.switched(scope: newScope, keysLock: newKeys, lockAfterSession: newLock, at: t), from: "switch")
-            applyLock(p.switched(newLock, at: t))
             invariants("switch")
         case 12:
             screens = rng.below(4) == 0 ? 0 : 1 + rng.below(3)
@@ -831,12 +1125,16 @@ for run in 0..<runs {
         if nextTick == nil, d.pending || p.pending { nextTick = t + D.tick }
     }
 }
-for name in ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9"] {
+for name in ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10"] {
     check(violations[name] == nil, "\(runs) random sessions hold \(name)" + (violations[name].map { ": \($0) violations, e.g. \(firstViolation[name]!)" } ?? ""))
 }
 check(raises > 10_000 && lifts > 10_000 && keyLocks > 1_000 && holds > 100 && takenBacks > 500 && deviceUnlocks > 100 && waitsLit > 1_000 && fallbackRuns > 1_000,
       "the random sessions reach what they test: \(raises) raises, \(lifts) lifts, \(keyLocks) locks at a key, \(holds) ticks held for a lock, "
       + "\(takenBacks) taken back, \(deviceUnlocks) devices' unlocks, \(waitsLit) waits that ended lit, \(fallbackRuns) runs with the fallback")
+check(holdsBegun > 100 && onlyAwayHolds > 20 && visitsAtHomeLetGo > 100 && onlyAwayEndedWaits > 10 && displayOnLocks > 50,
+      "and part 1's switches with each session's route beside the dark: \(holdsBegun) holds begun, \(onlyAwayHolds) of them under only "
+      + "after a device away, \(visitsAtHomeLetGo) visits at home the lock let go, \(onlyAwayEndedWaits) lock waits only away ended, "
+      + "\(displayOnLocks) locks with the display left on")
 
 print("darken: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
