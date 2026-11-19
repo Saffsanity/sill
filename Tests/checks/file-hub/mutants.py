@@ -36,7 +36,10 @@ M = [
      "FilePolicy.macOffers(helloFiles: FilePolicy.deviceTakes,"),
     ("an offer while locked", F, "locked: lockedNow, shareFiles: context.share, sendingToDevice: outgoing[id] != nil) {",
      "locked: false, shareFiles: context.share, sendingToDevice: outgoing[id] != nil) {"),
-    ("a folder offered", F, "v.isRegularFile == true,", "true,"),
+    # Not "the regular-file test removed" alone: Foundation gives no size for a folder, a named pipe, a socket or a
+    # device (tried 2026-11-19), so the size's test backs it and that mutant cannot be told apart. Both removed:
+    ("a folder or a named pipe offered", F, "v.isRegularFile == true,\n                  let size = v.fileSize, size >= 0,",
+     "true,\n                  let size = Optional(v.fileSize ?? 0), size >= 0,"),
     ("a Mac's file not hashed", F, "        o.hash.update(data: data)\n", ""),
     ("the hash carried into the Mac's next file", F, "                o.hash = SHA256()\n", ""),
     ("a short read of the Mac's file sent", F, "let data = try? r.handle.read(upToCount: count), data.count == count else { return nil }",
