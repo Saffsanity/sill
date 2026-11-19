@@ -209,7 +209,8 @@ def virtual(out):
     h = Host(out, "vd", env, args=["--virtual-desktop"])
     try:
         verdict(bool(h.all(r"^Test Virtual Desktop: this host can have it .* its grace 3 s\.")), "VD: the host says the hook and its 3 s grace")
-        verdict(bool(h.all(r"^Virtual Desktop on for this run: .*Match the device")), "VD: --virtual-desktop's line, the device's size")
+        verdict(bool(h.all(r"^Virtual Desktop on for this run \(Resolution: Match the device, Refresh Rate: Match the device\): ")),
+                "VD: --virtual-desktop's line, the device's size and rate")
         # A: two steps (DELL, then the Virtual Desktop), its turn held (a line after 1 s), back (a line), a turn and back
         # within the settle (no line), a step away (its grace), back onto it (made again), a lock and unlock, off console.
         a, ra = client(h, out, "vd-a", 41, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",

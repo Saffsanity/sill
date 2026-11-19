@@ -186,8 +186,10 @@ func startHost() {
             if synthetic { print("Synthetic mode: pick Desktop on the device (or from a test client) to stream a test pattern.") }
             if virtualDisplay { print("Virtual display mode: a picked window streams from its own HiDPI display; Ctrl-C puts it back.") }
             if virtualDesktopFlag != nil {
-                print("Virtual Desktop on for this run: the Desktop's last stop, sized \(VirtualDesktopSize.words(config.virtualDesktopSize)), "
-                      + "\(VirtualDesktopSize.rateWords(config.virtualDesktopHz)); made while a device shows it, Ctrl-C moves its windows off it.")
+                // Its two choices as Sill for Mac's Settings › Displays names them.
+                print("Virtual Desktop on for this run (Resolution: \(VirtualDesktopSize.words(config.virtualDesktopSize)), Refresh Rate: "
+                      + "\(VirtualDesktopSize.rateWords(config.virtualDesktopHz))): the Desktop's last stop, made while a device shows it; "
+                      + "Ctrl-C moves its windows off it.")
             }
             print("\(c.windowCount) windows on screen. Advertising _sill._tcp on the local network.")
             if c.active == .none { print("Nothing is streaming yet: pick a window from the iOS app. Ctrl-C to stop.") }
