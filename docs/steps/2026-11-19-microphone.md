@@ -87,6 +87,15 @@ assessment's verdict): it gave this work kind 43's two types the other way and t
 - Not run: the harness photos of the row (Scripts/harness-photos/microphone.cases against main). They waited from
   03:57 behind another run's photos on the agents' simulator, whose first launch had not returned at 04:20, and were
   stopped; the next run's first job.
+- The photos, 2026-11-19 (photos-1119): still not taken, and the cause found. The run queued them after #414's and
+  #413's; #414's Duo photos hung at their first `simctl launch` at 04:48 and again at 05:04 (each stopped after 5
+  minutes, the simulator shut down, the slot freed), so these were not tried. The cause, in the Mac's log: at
+  01:53:43 an `lldb` asked for the right to debug a process (`system.privilege.taskport.debug`), and authd's request
+  has waited at its password step ever since (SecurityAgent up from that second: the "Developer Tools Access" dialog
+  on the Mac's screen). `taskgated`, through which a simulator's app launch goes (hundreds of its lines a minute in
+  the photos runs of 23:43 to 00:27, which worked), has logged nothing since 01:53:44, so every launch from 03:15 on
+  waited behind that dialog. Once it is answered (Cancel will do): `Scripts/harness-photos.sh
+  Scripts/harness-photos/microphone.cases --baseline origin/main`.
 
 **Proposed words for the release that ships it** (not published; for Noah):
 - What's New (iPhone and iPad): "Share Microphone (beta): your iPhone or iPad can be a microphone for your Mac.
