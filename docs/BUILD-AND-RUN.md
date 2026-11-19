@@ -547,4 +547,6 @@ gesture event a dry run would post, `Test input: magnify 0.05 (phase 2) at 756,4
 (phase 1) at 756,474` (phase 1 began, 2 changed, 4 ended; every event of a gesture where it began, the pointer
 moved there first), and the stats count `in.pinchPhase` and `in.pinchTimeout`; `sillclient.py`'s list line says
 `pinch=1`, and `--input='{"magnify":{"_0":"began","x":0.5,"y":0.5,"amount":0}}@2'` (or `"rotate"` with
-`"degrees"`) sends one, to a `--synthetic` host on this Mac only. Photos: `Scripts/harness-photos/pinch-duo.cases` and `pinch-ipad.cases`.
+`"degrees"`) sends one, to a `--synthetic` host on this Mac only. From the device, `-SillInputScript '<t> pinch 1.5'`
+(the picture's pinch through the stroke rule's own path) sends the Mac's pinch under `-Sill.pinchZoomsMac 1`, with
+`-SillLive 1` against such a host only (not yet run: it needs a live simulator). Photos: `Scripts/harness-photos/pinch-duo.cases` and `pinch-ipad.cases`.

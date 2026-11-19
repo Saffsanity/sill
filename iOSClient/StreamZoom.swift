@@ -395,9 +395,11 @@ extension StreamZoom {
         static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
         /// The pair's angle in the pane (radians; the pane's y runs down, so it grows clockwise on screen).
         static func angle(_ a: CGPoint, _ b: CGPoint) -> CGFloat { atan2(b.y - a.y, b.x - a.x) }
-        /// The turn from one angle to another, the shorter way round (-π to π).
+        /// The turn from one angle to another, the shorter way round (-π to π); none between angles that are not
+        /// numbers (never a touch's, and never a loop without end).
         static func turned(from: CGFloat, to: CGFloat) -> CGFloat {
             var d = to - from
+            guard d.isFinite else { return 0 }
             while d > .pi { d -= 2 * .pi }
             while d <= -.pi { d += 2 * .pi }
             return d

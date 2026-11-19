@@ -633,6 +633,10 @@ do {
     for k in 1...20 { back.moves(turnedTo(1 - CGFloat(k) * 2)) }
     check("Rotate on: the other way across ±180°: +40 (counterclockwise on screen), every step small",
           nearD(back.degrees, 40, 0.001) && back.rotate.allSatisfy { abs($0.1) < 20 })
+    // (Not an infinite angle here: were its guard gone, the check itself would never end.)
+    check("a turn between angles that are not numbers is none; a whole turn none; the short way round",
+          S.turned(from: 0, to: .nan) == 0 && S.turned(from: .nan, to: 1) == 0
+          && near(S.turned(from: 3, to: 3 + 2 * .pi), 0) && near(S.turned(from: 3.1, to: -3.1), 2 * .pi - 6.2))
 }
 
 do {

@@ -80,6 +80,7 @@ MUTANTS = [
      "return abs(turned(from: angle(from[0], from[1]), to: angle(to[0], to[1]))) * distance(to[0], to[1])"),
     ("M14 the Mac's pinch scrolls too", "var scrollsMac: Bool { owner == .mac || owner == .none }", "var scrollsMac: Bool { owner == .mac || owner == .none || owner == .macPinch }"),
     ("M15 a turn across ±180° the long way round", "            while d > .pi { d -= 2 * .pi }\n", ""),
+    ("M21 a turn between angles that are not numbers passed on", "            guard d.isFinite else { return 0 }\n", ""),
     ("M16 the turn sent with Rotate off", "            guard target.turns else { return }\n", ""),
     ("M17 the turn's catch-up lost", "macSteps.append(.rotate(.changed, degrees: Self.macDegrees(Self.turned(from: Self.angle(pairFrom[0], pairFrom[1]), to: angle))))",
      "macSteps.append(.rotate(.changed, degrees: 0))"),
