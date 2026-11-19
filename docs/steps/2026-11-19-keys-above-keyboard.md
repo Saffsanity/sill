@@ -106,6 +106,21 @@ checks run on each result):
   covers the key row upright (UIKit's frame includes it, so the rows lift over it), but it still repeats the key
   row's keys there.
 
-**Verified:** to come (the check and its mutants, run-all, the builds, CI, the harness photos).
+**Verified:**
+- `Tests/checks/phone-keyboard-lift`: 184 checks, 0 failed, among them a grid of 5,272,652 placements; **its
+  mutants: 44 of 44 caught** (this Mac, in the heavy lock, 571 s at b14d034b). Nothing else's patterns changed:
+  PhonePortraitLayout.swift is untouched, so `phone-portrait`, `tour` and `full-screen` (which compile it) keep
+  their mutants as they were.
+- `Tests/checks/run-all.sh` on this Mac at b14d034b: 75 of 75, "All passed" (661 s), `phone-portrait` 484,
+  `tour` 732,447, `key-strokes` 505, `repo-rules` 11 of 11.
+- CI's Build and check green on d15893c9 (run 44504467686) and on b14d034b (run 44508139153): `swift build -c
+  release`, run-all 75 of 75, the iOS app for the simulator with Xcode 27.1 `** BUILD SUCCEEDED **`, its only
+  warning main's own (StreamClient.swift:4527).
+- The trial merges above.
+- Harness photos: to come (waiting for slot A).
 
-**Untested, for Noah:** to come.
+**Untested, for Noah:** a real keyboard taller than Apple's on a device (a third-party one, Pinyin's or
+Japanese's candidates), the rows' animation beside the keyboard's, Larger Picture with a window Aa fitted to the
+room under a taller keyboard, the switch's trackpad band in use, VoiceOver with the thumbnails tucked away, a
+hardware keyboard (nothing should move), Display Zoom's 320 pt, and the Duo's cover on a real Duo: the pull
+request's numbered steps.
