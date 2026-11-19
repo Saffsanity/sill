@@ -18,8 +18,9 @@ The plan for this branch (the plan's §5.4, §7.5, §8.4, §9 and §10; the over
   that waits while the picture needs the link (`FileFlow.hostMaySend`: never ahead of a keyframe, at most one part in
   Sill's own queue), paced by the device's acknowledgements.
 - **Switches** (Noah's toggle rule; new behaviour off until turned on): on the device, Ask Before Receiving Files (on:
-  it asks), Save Photos and Videos to Photos (off); on the Mac, a switch for the device's Get Files under Share files
-  with devices. They sit where Settings is today and move into the whole-screen pane of #393 (`settings-pane`).
+  taking files unasked stays off until it is turned off), Save Photos and Videos to Photos (off); on the Mac, Share
+  files with devices covers both directions (see the defaults below). The device's sit where Settings is today and
+  move into the whole-screen pane of #393 (`settings-pane`).
 - **Never** shown on this Mac in a test: an Open panel (a TEST ONLY choice of files answers a pick on a test host),
   the simulator's photo library beyond what Scripts/harness-photos.sh does.
 
