@@ -83,7 +83,10 @@ assessment's verdict): it gave this work kind 43's two types the other way and t
   unpaired session, the hostile client and the setup cases as above); the mutants the first hold missed and the
   changed ones, all caught: microphone 3 of 3 (the codec's order now), mic-send 14 of 14, mic-host 2 of 2,
   away-quality 3 of 3; run-all, all 77 checks passed (747 s).
-- CI's "Build and check" passed on dadf58e9, 5284ab3b, a14df9f2 and b39bbb89.
+- CI's "Build and check" passed on dadf58e9, 5284ab3b, a14df9f2, b39bbb89 and 2d428f4a.
+- Not run: the harness photos of the row (Scripts/harness-photos/microphone.cases against main). They waited from
+  03:57 behind another run's photos on the agents' simulator, whose first launch had not returned at 04:20, and were
+  stopped; the next run's first job.
 
 **Proposed words for the release that ships it** (not published; for Noah):
 - What's New (iPhone and iPad): "Share Microphone (beta): your iPhone or iPad can be a microphone for your Mac.
