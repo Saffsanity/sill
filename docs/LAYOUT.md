@@ -15,11 +15,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LockedMac` (the device's words for a locked Mac: why, the drawer's and the
   panel's line, the cover over the stream and its "Unlocking…", checked with the
   host's LockPolicy) and image blob framing. `Viewport.swift` —
-  `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
+  `Viewport` (kind 9: the device's panel, Aa's scale and its rate, and from phase 2b its
+  `room`, `ViewportRoom`: the picture's room with Sill's controls hidden, which sizes the
+  Virtual Desktop),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
-  none, any other refused; what a device sends, `held`; and `whole`, a number
+  none, a room's sides as the panel's, any other refused; what a device sends, `held`; and `whole`, a number
   for a log line as Int() printed it, without its trap; pure,
   `Tests/checks/viewport-bounds`).
   (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
@@ -27,7 +29,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
-  `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
+  `HostSettingsChange`, `VirtualDesktopState` (phase 2b: the Virtual Desktop as one
+  connection sees it, `HostSettingsState.virtualDesktopState`, beside the settings'
+  `virtualDesktop` switch; its size's words "1218x800@2"), `SettingsChoices` (the Mac menu's values) and
   `QualityPreset` (Low, Efficient, Balanced, High, Pro, Ultra, Extreme). Remote access:
   `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
   `SignedMacInfo`, `PairRequest` (with pairing at home's methods `ask` and
@@ -59,7 +63,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   shown (the main display while locked; the choice by UUID for the session and
   30 s after), the next, the rate held to a stop's refresh rate, where input
   lands, the pointer's target, and the device's button (its label, dots or
-  "3/7", VoiceOver's words); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  "3/7", VoiceOver's words); from phase 2b the Virtual Desktop's stop, the last
+  (`candidates`' `virtualDesktop`, `virtualStop`, its choice by a fixed key,
+  `virtualNumber` for `WindowList.desktopVirtual`) and its button (`rectangle.dashed`,
+  "Virtual"); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
   `image` reserved for a later generation, a device's `stop`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
