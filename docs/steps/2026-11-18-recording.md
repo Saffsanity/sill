@@ -43,4 +43,32 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
 - **Settings** stay where #303 put them for now (the panel's Mac group). The plan's commit 7 moves the rows to the
   first group of This iPad (This iPhone), with the Stop row on top; when draft #393 (the whole-screen Settings pane)
   lands, they go into its device part and the Stop row into its header.
-- **Verified:** filled in below when the run's checks are done.
+- **Verified** (on c1d3b155, the head with all three):
+  - CI, run 44393534359 ("Build and check", 19 min 43 s): `swift build -c release` (Xcode 27.2), all 75 pure checks
+    (`compatibility` 177 checks, `recording-notice` 23, `lock-policy` 1,411 unchanged), and the iOS app for the
+    simulator (Xcode 27.1, `** BUILD SUCCEEDED **`) with only StreamClient's known capture warning: the merge and
+    StreamRecorder.swift add none. The merge commit's own run was cancelled by the next push; its iOS sources are
+    the head's but for ClientStats' new parameter, which has a default.
+  - On this Mac, in one hold of the heavy lock: the branch and the base (98f234d5) built from scratch, each with
+    only the known CaptureProbe warning, none new; `compatibility` with its mutants, 42 of 42 caught;
+    `recording-notice` with its mutants, 26 of 26 caught.
+  - G2 (loopback test hosts only: a synthetic SillHost and the bare SillMenuBar, both with SILL_TEST_LOOPBACK,
+    SILL_TEST_SOFTWARE_ENCODER, SILL_TEST_NO_ROUTER and SILL_TEST_NO_SCREEN, each under a minute), 13 of 13: an
+    iPad's lines at 2.16 s and 13.16 s (`--recording@2 --recording-off@13`); on a second connection six flips in a
+    second (3.0 to 4.0 s) made two lines, at 3.05 s and 13.11 s, the second "stopped recording the stream. (4 more
+    changes since the last line)"; a device that left while recording, "started" at 1.05 s and "left while
+    recording the stream." at its close, 5.06 s; six lines in all; every list `recordings=1`, a locked Mac's too
+    (`SILL_TEST_LOCKED_FILE`: "0 windows … locked=1 recordings=1"). The bare app (`-requirePairing NO`, a TLS
+    client): at 6 s its menu read "Test Pattern Mode / iPad is recording the stream. Not advertised; test clients
+    connect to port …" and "iPad (iPad14,1) — Recording · 0 fps · …"; at 15 s, after the stop, neither; its log
+    has the start line. Its defaults domain was put back as it was.
+  - Previews (`-SillRenderPreviews`), the base's twice and the branch's: the branch adds only the four
+    `card-recording*` pictures; menu.txt only the two samples' sections, its other 32 the base's; 314 of the 318
+    other files byte for byte the base's. The four others are Settings › General's two panes in each look, whose
+    "Running from" row shows each binary's own folder (the base's, longer, wraps onto a second line): not this
+    change.
+  - Not run here, and why: `Tests/checks/run-all.sh` ran on CI for this commit (above) rather than again in the
+    shared lock; `lock-policy`'s case for `recordings` (above); nothing on a device: the device sends no
+    `recording` yet (the plan's commit 6), so Noah has nothing to try from this group.
+- **Proposed words** for the site, What's New and the review notes: none yet; they come with the device's commits
+  (the plan's "Docs, site and App Store words", commit 9). The Mac's own words are above.
