@@ -47,15 +47,43 @@ assessment's verdict): it gave this work kind 43's two types the other way and t
   the microphone's mode, with such a change). AudioOutput always resets on an IO change (its route handler), so the
   device never meets it; the microphone's random runs leave that change out.
 
-**Verified (run 1).** Outside the heavy lock, each changed check through its own run.sh: `microphone` (1,287,372
-checks: 13,824 combinations of the device's inputs, the Mac's reducer at each edge, 3,000 random sessions of up to
-three devices and a Mac), `mic-host` (26), `mic-send` (50: the sender and the capture on the Mac with no audio
-device, taps at 16, 24 and 48 kHz, every click of the tone at its second ±2 frames), `audio-codec` (32, mono at
-64 kbps), `audio-playout` (254, 5,000 sound runs unchanged and 1,000 of the microphone's), `fence` (the microphone
-mode), `lock-policy` (1,465), `away-quality`, `compatibility` (169), `pointer-control` (161), `display-wake` (275),
-`repo-rules` (11 of 11). The host and Sill.app's sources type-check against freshly emitted modules; the iOS app
-type-checks for the simulator, Debug and Release, with only main's own weak-capture warning. The heavy hold's
-results (the release build, the live gates, the mutants) are below.
+**Verified (run 1).**
+- Outside the heavy lock, each changed check through its own run.sh: `microphone` (1,287,370 checks: all 13,824
+  combinations of the device's inputs, the Mac's reducer at each edge, 3,000 random sessions of up to three devices
+  with two windows each and a Mac: 11,071 packet messages taken, 254 takeovers, 204 moves while recording, 143 self-
+  healing ends), `mic-host` (28), `mic-send` (50: the sender and the capture on the Mac with no audio device, taps at
+  16, 24 and 48 kHz, every click of the tone at its second ±2 frames), `audio-codec` (32: mono at 64 kbps, the tone at
+  51.5 kbps), `audio-playout` (254: 5,000 sound runs unchanged, 1,000 of the microphone's mode; at home the delay holds
+  with no jump and nothing late, away one jump as the first 2 s end), `fence` (the microphone mode), `lock-policy`
+  (1,465), `away-quality`, `compatibility` (169), `pointer-control` (161), `display-wake` (275), `repo-rules` (11 of 11).
+  The host and Sill.app's sources type-check against freshly emitted modules; the iOS app type-checks for the
+  simulator, Debug and Release, with only main's own weak-capture warning.
+- The first heavy hold (5284ab3b, 02:26 to 03:34): `swift build -c release` in 66 s (its one warning main's, in
+  CaptureProbe); run-all, all 77 checks passed (775 s); the iOS app for the simulator (Debug, as CI) and for a device
+  (Release, unsigned), each with only main's warning; mutants: microphone 52 of 54, mic-send 13 of 14, mic-host 10 of
+  11, audio-codec 10 of 11, audio-playout 45 of 45, compatibility 40 of 40, and the changed ones of lock-policy (2 of
+  2), away-quality (3 of 4) and fence (2 of 2, every mode each). Each miss was a gap in a check or dead code: the
+  codec's order (the case could not tell the two orders apart), `Host.stands`' grace and the sender's flush at a
+  segment's start (both unreachable, removed), a sink value beginning "file" (refused now), a channel count the
+  decoder takes from the cookie (an equivalent mutant, dropped), a HostConfig built with the switch on (checked now).
+- The live gates (Scripts/mic-check/live.py, synthetic test hosts on loopback with the file sink, paired test
+  clients sending the tone's packets as a device's capture buffers send them): 35 verdicts; the first run's six
+  failures were the test client's and the gates' (it offered once where a device offers again when the Mac comes
+  back to taking one; states read from before the host's first word; steadiness judged against the median), all
+  fixed in the tooling, none in the product. Then: every click sent heard (11 of 11), 141 ms from capture to Sill
+  Microphone at the median, falling 2.1 ms a second from 150 to 131 ms as the playout's first cover gives way to the
+  measured one, no gap, no jump, nothing late (117 messages); a takeover (the first device told `another` with the
+  second's name, one line, both devices' clicks in turn); a lock at 5 s and the unlock at 9 s (no state while
+  locked, no click heard from the lock to the unlock's settle, a new recording after); an unpaired session (no offer
+  from a device-like client, a hostile claim refused with one line, nothing taken); a flood (refused with its line),
+  five malformed kind 48s dropped, eight recordings at once refused; Sill Microphone missing then set up, no app then
+  one (notReady, idle, inUse; the list 0 then 1); a host without the hook (no field, no state, no line).
+- The second heavy hold (224f5fa6, 03:34 to 03:57): the release build again (64 s); the live gates, 36 of 36 (every
+  click heard, the delay settling from 150 to 138 ms, no gap, jump or late packet; the takeover, the lock, the
+  unpaired session, the hostile client and the setup cases as above); the mutants the first hold missed and the
+  changed ones, all caught: microphone 3 of 3 (the codec's order now), mic-send 14 of 14, mic-host 2 of 2,
+  away-quality 3 of 3; run-all, all 77 checks passed (747 s).
+- CI's "Build and check" passed on dadf58e9, 5284ab3b, a14df9f2 and b39bbb89.
 
 **Proposed words for the release that ships it** (not published; for Noah):
 - What's New (iPhone and iPad): "Share Microphone (beta): your iPhone or iPad can be a microphone for your Mac.
