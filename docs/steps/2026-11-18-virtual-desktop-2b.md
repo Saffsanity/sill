@@ -206,5 +206,23 @@ a host that reported the switch and a host takes only from a paired session."
   commit (a text check, no build).
 - GitHub's CI on b6ceb227 (run 44505874693): every step of Build and check passed (the release build, every pure check,
   the iOS app, the CLI's two paths); its mutant jobs are skipped on pull requests.
-- Pending at the time of writing: the heavy lock's second turn (the release build here, the mutants of compatibility,
-  viewport-bounds, away-quality, desktop-displays and lock-policy's new one, run-all), then the live gates and H2.
+- The heavy lock's second turn (06:30–06:55, slot B, after 61 minutes in a queue of five agents' jobs), on a `git
+  archive` snapshot of b6ceb227: `swift build -c release` in the worktree in 58 s with no warning but CaptureProbe's
+  known one; `SillHost --internet` exits 2 with "--internet needs --remote.", `--print-reachability` exits 0;
+  compatibility 193 checks and 50 of 50 mutants caught; away-quality all passed, 58 of 58; desktop-displays 174 passed,
+  88 of 88; lock-policy's one new mutant caught by `module.mutate` alone (its 192 others' patterns found once by the text
+  check, as this run's rule for that check allows; their 47 minutes not spent); viewport-bounds 100 checks and 37 of 38:
+  R8 did not compile (its closure's type left to infer), fixed in 418cb9b5 and run again in a third turn (below). run-all
+  was not run in the lock: CI ran it on b6ceb227.
+- The third turn (06:55–06:57, slot B), on a snapshot of 418cb9b5: viewport-bounds 100 checks and 38 of 38 mutants
+  caught, R8 among them.
+- The live gates on b6ceb227's CLI (built in that turn), test hosts on 127.0.0.1 (the software encoder, no router, no
+  screen), outside the lock at load 6: `Scripts/desktop-check/live.py` 24 of 24 (the stops through `candidates`' new
+  shape); `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26 (LockPolicy.list's new
+  line); `Scripts/headless-check/live.py OUT all` 66 of 66.
+- H2 (`~/Downloads/sill-handoff/next/vd-2b/verify/h2.py`, each host's stdout masked and sorted): b6ceb227's CLI against
+  61a96d3c's (this branch's previous head, run 1's build kept for it), identical in all four modes (idle 7 distinct
+  lines, a test client 14, started locked 11, `--virtual-display` with a test client 17), so commits 4 to 7 add no line
+  on these paths; against main's eb48ac9f (`files/run2/SillHost-main-eb48ac9f`), identical idle, with a client and with
+  `--virtual-display`, and started locked the one difference #395's review round named: "Displays: N online, N active,
+  N asleep, N Sill's, N macOS's stand-in." (11 lines and 10).
