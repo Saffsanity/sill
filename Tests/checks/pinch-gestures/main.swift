@@ -27,7 +27,7 @@ let a = CGPoint(x: 300, y: 200), b = CGPoint(x: 640, y: 410), c = CGPoint(x: 900
 
 func str(_ p: Post) -> String { "\(p.kind.rawValue) \(p.phase.rawValue) \(p.value) at \(Int(p.at.x)),\(Int(p.at.y))" }
 func str(_ s: G.Step) -> String {
-    (s.movePointerTo.map { "move to \(Int($0.x)),\(Int($0.y)); " } ?? "") + s.posts.map(str).joined(separator: "; ")
+    (s.ending.map(str) + (s.movePointerTo.map { ["move to \(Int($0.x)),\(Int($0.y))"] } ?? []) + s.posts.map(str)).joined(separator: "; ")
 }
 
 // MARK: - One pinch
@@ -81,8 +81,8 @@ do {
     _ = g.apply(M, .began, value: 0, at: a, pointer: a)
     _ = g.apply(M, .changed, value: 0.3, at: a, pointer: a)
     let again = g.apply(M, .began, value: 0, at: b, pointer: a)
-    check(again == G.Step(movePointerTo: b, posts: [Post(M, .ended, 0, at: a), Post(M, .began, 0, at: b)]),
-          "a began while a pinch is open ends that one where it was, then begins the new one where it says: \(str(again))")
+    check(again == G.Step(ending: [Post(M, .ended, 0, at: a)], movePointerTo: b, posts: [Post(M, .began, 0, at: b)]),
+          "a began while a pinch is open ends that one where it was, then the pointer moves, then the new one begins where it says: \(str(again))")
     check(g.open == [M] && g.at == b, "one pinch open, at b")
 }
 
@@ -110,7 +110,7 @@ do {
     _ = g.apply(M, .began, value: 0, at: a, pointer: a)
     _ = g.apply(R, .began, value: 0, at: a, pointer: a)
     let turnAgain = g.apply(R, .began, value: 0, at: b, pointer: a)
-    check(turnAgain == G.Step(movePointerTo: nil, posts: [Post(R, .ended, 0, at: a), Post(R, .began, 0, at: a)]),
+    check(turnAgain == G.Step(ending: [Post(R, .ended, 0, at: a)], movePointerTo: nil, posts: [Post(R, .began, 0, at: a)]),
           "a turn's began over an open turn beside an open pinch ends and begins it again where the gesture is: \(str(turnAgain))")
     check(g.open == [M, R] && g.at == a, "both still open at a")
 }
@@ -168,6 +168,7 @@ struct Glue {
     var watchdogAt: Double? = nil
     var posted: [Post] = []
     var moves: [(at: CGPoint, kind: G.Kind, openBefore: Set<G.Kind>)] = []
+    var badEnding = 0
     mutating func tick(to t: Double) {
         if let w = watchdogAt, w <= t {
             now = w
@@ -180,6 +181,8 @@ struct Glue {
         tick(to: t)
         let before = g.open
         let step = g.apply(kind, phase, value: value, at: at, pointer: pointer)
+        if !step.ending.allSatisfy({ $0.phase == .ended && $0.kind == kind }) || step.ending.count > 1 { badEnding += 1 }
+        posted += step.ending
         if let to = step.movePointerTo { pointer = to; moves.append((to, kind, before)) }
         posted += step.posts
         watchdogAt = g.isOpen ? now + G.idleTimeout : nil
@@ -235,6 +238,7 @@ for _ in 0..<4_000 {
     }
     check(ok, "session \(sessions): \(why)")
     check(open.isEmpty, "session \(sessions): every began has its end")
+    check(glue.badEnding == 0, "session \(sessions): what a step ends first is one gesture of its own kind, ended")
     // The pointer moved only as a gesture began with none open, to that began's place.
     check(glue.moves.allSatisfy { $0.openBefore.isEmpty || $0.openBefore == [$0.kind] },
           "session \(sessions): the pointer moves only for a began with nothing else open (none, or only its own, which it ends first)")
@@ -250,6 +254,7 @@ for _ in 0..<4_000 {
     }
 }
 check(watchdogEnds > 100, "the random sessions left gestures open for the watchdog (\(watchdogEnds) of \(sessions))")
+check(G.Step.nothing.ending.isEmpty && G.Step.nothing.posts.isEmpty && G.Step.nothing.movePointerTo == nil, "nothing is nothing")
 print("random: \(sessions) sessions, \(postsSeen) posts, \(watchdogEnds) ended by the watchdog")
 
 print(failures == 0 ? "ok: \(checks) checks" : "\(failures) FAILED of \(checks)")

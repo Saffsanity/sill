@@ -202,7 +202,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   events and Spotlight ignored them), HID keys as KeyStrokes gives them, each
   device's keys let go when it leaves (and a cut-off device's buttons) and every
   key and button at the host's end, the check after each key's up, a button's
-  up with nowhere to land where the pointer is; the TEST ONLY input log),
+  up with nowhere to land where the pointer is; a device's two-finger pinch and
+  turn as the Mac's gesture events, PinchGestures's posts and its watchdog; the
+  TEST ONLY input log),
   `KeyStrokes` (a device's key as the
   device's keys let go when it leaves and every key and button at the host's
   end, the check after each key's up, a button's up with nowhere to land where
@@ -218,7 +220,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   only once the device is heard no earlier than `firstWord` (0.3 s) before it
   (a key only tapped whose up a stall holds back never repeats); `generation`, said
   in every window list as `keyRepeat`, so a device sends a hardware keyboard's
-  characters as keys; pure, `Tests/checks/key-repeat`), `KeyStrokes` (a device's key as the
+  characters as keys; pure, `Tests/checks/key-repeat`), `PinchGestures` (a device's
+  two-finger pinch and turn, `InputEvent.magnify` and `.rotate`, as the Mac's own
+  trackpad's magnify and rotate gestures, PR #261: the pointer where a gesture
+  begins, every event of it there, a began over an open one ending it, the values
+  bounded, the watchdog's second and the host's end ending what is open; `pinch`
+  in every window list (`Pinch.generation`); pure, `Tests/checks/pinch-gestures`),
+  `KeyStrokes` (a device's key as the
   Mac's: its virtual key, and the flags each event carries from the modifier
   keys the devices hold down, so a key's up leaves only what is held;
   `KeyUpCheck`, whether an up took its modifiers out of the HID state table;
@@ -810,6 +818,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   running while it shows, the pause, what ends it, the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
+  `PinchRouting` (who a two-finger pinch belongs to, PR #261 and its review: the picture's
+  zoom, the Mac's own pinch or nobody's, from fingers on the picture, a trackpad of Sill's
+  own or one connected to an iPad; the Settings panel's Pinch, Zoom Picture or Zoom on
+  ‹Mac›, and Rotate on ‹Mac›, their keys, defaults and words; `MacPinchSent`, what a
+  surface has open on the Mac; pure, `Tests/checks/pinch-routing`; pbxproj AC12/FC12;
+  StreamZoom.Stroke's `Target.mac` is its rule for fingers, the input view's
+  `pointerPinch` and `pointerRotation` take a connected trackpad's, and TrackpadSurface's
+  `pinchStroke` the on-screen trackpad's, at the pointer),
   `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
   Screen, the picture in the screen's room; the swipe in from the left edge, `EdgeSwipe` (a finger landing
   within max(24 pt, the left safe-area inset), judged after 8 pt: right and no steeper than 45°, let go by
@@ -1131,7 +1147,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`RIG_ONLY=reveal RIG_ORIENT=landscape`: the hidden strokes with the scene
   on its side, on an iPhone-idiom simulator); `RIG_TRACE=1` logs every
   recognizer's state (and the swipe in's trace). It compiles StreamProtocol
-  whole, and DuoPosture.swift, as the surfaces need.
+  whole, and DuoPosture.swift and PinchRouting.swift, as the surfaces need.
 - `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and
   turns the iPhone Duo simulator with Device Hub's own events (usage page
   0xFF61, usage 0x5B, an IOCFSerialize dictionary from

@@ -247,6 +247,7 @@ final class InputInjector {
     private func pinch(_ kind: PinchGestures.Kind, _ phase: PinchPhase, at location: CGPoint, value: Double) {
         Stats.shared.bump("in.pinchPhase")
         let step = pinches.apply(kind, phase, value: value, at: location, pointer: pointerNow())
+        for p in step.ending { postGesture(p) }
         if let to = step.movePointerTo { pointer(.move, at: to) }
         for p in step.posts { postGesture(p) }
         rearmPinchWatchdog()

@@ -43,9 +43,10 @@ package struct PinchGestures: Equatable, Sendable {
         }
     }
 
-    /// What one event of a device does: the pointer moved there first (nil: it stays), then these posted,
-    /// in order.
+    /// What one event of a device does, in order: `ending` posted first (a gesture of its kind left open, ended
+    /// where it was), then the pointer moved (nil: it stays), then `posts`.
     package struct Step: Equatable, Sendable {
+        package var ending: [Post] = []
         package var movePointerTo: CGPoint?
         package var posts: [Post]
         package static let nothing = Step(movePointerTo: nil, posts: [])
@@ -80,8 +81,8 @@ package struct PinchGestures: Equatable, Sendable {
         let value = min(max(raw, -bound), bound)
         switch phase {
         case .began:
-            var posts: [Post] = []
-            if open.contains(kind), let at { posts.append(Post(kind, .ended, 0, at: at)); open.remove(kind) }
+            var ending: [Post] = []
+            if open.contains(kind), let at { ending.append(Post(kind, .ended, 0, at: at)); open.remove(kind) }
             var move: CGPoint? = nil
             if at == nil || open.isEmpty {
                 // The first of the two: the gesture is where the device says, and the pointer goes there.
@@ -90,8 +91,7 @@ package struct PinchGestures: Equatable, Sendable {
             }
             let place = at ?? location
             open.insert(kind)
-            posts.append(Post(kind, .began, value, at: place))
-            return Step(movePointerTo: move, posts: posts)
+            return Step(ending: ending, movePointerTo: move, posts: [Post(kind, .began, value, at: place)])
         case .changed:
             guard open.contains(kind), let at else { return .nothing }
             return Step(movePointerTo: nil, posts: [Post(kind, .changed, value, at: at)])

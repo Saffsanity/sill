@@ -21,7 +21,10 @@ MUTANTS = [
     ("the place kept after the last end", P, "            if open.isEmpty { self.at = nil }\n", ""),
     # Order
     ("a began over an open one does not end it first", P,
-     "            if open.contains(kind), let at { posts.append(Post(kind, .ended, 0, at: at)); open.remove(kind) }\n", ""),
+     "            if open.contains(kind), let at { ending.append(Post(kind, .ended, 0, at: at)); open.remove(kind) }\n", ""),
+    ("the end of the one before posted after the pointer moved", P,
+     "            return Step(ending: ending, movePointerTo: move, posts: [Post(kind, .began, value, at: place)])",
+     "            return Step(ending: [], movePointerTo: move, posts: ending + [Post(kind, .began, value, at: place)])"),
     ("a change with none open goes", P, "            guard open.contains(kind), let at else { return .nothing }\n            return Step(movePointerTo: nil, posts: [Post(kind, .changed",
      "            guard let at = at ?? Optional(location) else { return .nothing }\n            return Step(movePointerTo: nil, posts: [Post(kind, .changed"),
     ("an end with none open goes", P, "            guard open.contains(kind), let at else { return .nothing }\n            open.remove(kind)",
