@@ -17,7 +17,7 @@ window picker tucked away while a keyboard is up part of the same change (the pr
   (phone-portrait's keyboard table, accepted in the portrait plan's open question 5), and the iPhone Duo's
   cover, whose key row ends 236 pt above the screen's foot, so any keyboard taller than that covered it.
 - **The fix: `PhoneKeyboardLift`** (iOSClient/PhoneKeyboardLift.swift, pure; `Tests/checks/phone-keyboard-lift`,
-  183 checks and 44 mutants; pbxproj A0B0/F0B0). From the keyboard's real top as UIKit reports it, only
+  184 checks and 44 mutants; pbxproj A0B0/F0B0). From the keyboard's real top as UIKit reports it, only
   while the person's own keyboard is up (`keyboardShown`: never the drawer's search field's, never a hardware
   keyboard's hold): while the keyboard would come closer than 10 pt to the key row, row 1, the thumbnails'
   row and the key row lift together by just that much (whole points), and the picture's frame keeps its
@@ -94,7 +94,7 @@ window picker tucked away while a keyboard is up part of the same change (the pr
 **Merges with the other drafts** (trial merges of this branch at 61a22f42, by `git merge` in a throwaway worktree; the pure
 checks run on each result):
 - **#397 (`ready-276`, Hold to Lock Modifiers), #410 (`ready-315`, Arrow Keys), #393 (`settings-pane`):** each merges
-  cleanly. On each result `phone-keyboard-lift` passes (183), and `key-strokes` (607), `phone-key-row` (159) and
+  cleanly. On each result `phone-keyboard-lift` passes (183 then; 184 now), and `key-strokes` (607), `phone-key-row` (159) and
   `settings-pane` (258) respectively. With #397 the phone's key row now really is on screen whenever
   `ModifierLock.keyRowOnScreen` says so (on main a tall keyboard covered it while a lock rode it unseen). With #410
   the scrolling strip lives inside the key row's rect, which the lift moves. With #393 the switch's rows land in

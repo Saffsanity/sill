@@ -141,6 +141,8 @@ do {
     let tall = K(l, glass: 678 - 361, tuck: true)
     check("the Duo's cover, the 301 pt keyboard with the harness's 60 pt over it, the switch on: lifted 63 (135 off)",
           tall.tucked && tall.lift == 63 && 317 - tall.keys.maxY == 10)
+    check("…its line, tucked and lifted at once",
+          tall.line(video: .zero) == "keys: the thumbnails tucked away, lifted 63 pt, the key row 263–307, 10 pt above the keyboard at 317, the picture 264×165 in a room of 366×165, the trackpad from 317")
 }
 
 // MARK: - Hide Thumbnails While Typing
