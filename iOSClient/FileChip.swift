@@ -68,34 +68,54 @@ struct FileChip: View {
         }
     }
 
+    /// The Mac's question: on one row where its words fit beside Decline and Accept, else (the iPhone Duo's cover,
+    /// a narrow Slide Over) the words above the buttons, whole, so the file's name is never cut away.
     private func incomingQuestion(_ i: IncomingFiles) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.doc")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Palette.muted)
-                .accessibilityHidden(true)
-            Text(DeviceFilesCopy.incomingTitle(i, mac: mac, device: StreamClient.deviceWord))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Palette.text)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .layoutPriority(-1)
-            Button(DeviceFilesCopy.decline) { client.declineIncoming() }
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .tint(Palette.muted)
-            Button(DeviceFilesCopy.accept) { client.acceptIncoming() }
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(Palette.accent)
+        let title = DeviceFilesCopy.incomingTitle(i, mac: mac, device: StreamClient.deviceWord)
+        let icon = Image(systemName: "arrow.down.doc")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Palette.muted)
+            .accessibilityHidden(true)
+        let words = Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Palette.text)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                icon
+                words.lineLimit(2).truncationMode(.middle).layoutPriority(-1)
+                incomingButtons
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 6)
+            .padding(.vertical, 6)
+            .chipBackground()
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    icon
+                    words.lineLimit(4).truncationMode(.middle).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) { incomingButtons }
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 10)
+            .chipBackground(corner: 20)
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 6)
-        .padding(.vertical, 6)
-        .chipBackground()
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private var incomingButtons: some View {
+        Button(DeviceFilesCopy.decline) { client.declineIncoming() }
+            .font(.footnote.weight(.semibold))
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(Palette.muted)
+        Button(DeviceFilesCopy.accept) { client.acceptIncoming() }
+            .font(.footnote.weight(.semibold))
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(Palette.accent)
     }
 
     private func incomingRunning(_ i: IncomingFiles) -> some View {
@@ -336,11 +356,18 @@ struct FileChip: View {
 }
 
 private extension View {
-    /// The clipboard chip's capsule, its edge and its shadow.
-    func chipBackground() -> some View {
-        background(Capsule(style: .continuous).fill(Palette.bar))
-            .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-            .shadow(color: .black.opacity(0.45), radius: 16, x: 0, y: 8)
+    /// The clipboard chip's capsule, its edge and its shadow; with `corner`, a rounded rectangle of that radius (a
+    /// chip of two rows, whose capsule's ends would cut into its words).
+    @ViewBuilder func chipBackground(corner: CGFloat? = nil) -> some View {
+        if let corner {
+            background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Palette.bar))
+                .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                .shadow(color: .black.opacity(0.45), radius: 16, x: 0, y: 8)
+        } else {
+            background(Capsule(style: .continuous).fill(Palette.bar))
+                .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                .shadow(color: .black.opacity(0.45), radius: 16, x: 0, y: 8)
+        }
     }
 }
 
