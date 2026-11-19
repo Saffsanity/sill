@@ -224,7 +224,7 @@ extension StreamClient {
         d.foreground = sceneInFront
         d.chosen = micChosen
         d.interrupted = micInterrupted
-        d.inputAvailable = MicrophoneCapture.source == .tone || AVAudioSession.sharedInstance().isInputAvailable
+        d.inputAvailable = !micInputFailed && (MicrophoneCapture.source == .tone || AVAudioSession.sharedInstance().isInputAvailable)
         #if DEBUG
         if MicrophoneHub.debugNoInput { d.inputAvailable = false }
         if MicrophoneHub.debugOtherWindow { d.chosen = false }
@@ -347,8 +347,29 @@ extension StreamClient {
         #endif
     }
 
-    /// The session's audio interruptions, for the microphone's pause. From init.
+    /// The session's audio interruptions, for the microphone's pause, and the voice engine's failure to start. From
+    /// init.
     func observeMicrophoneInterruptions() {
+        sound.onMicrophoneFailed = { [weak self] reason in
+            guard let self else { return }
+            #if DEBUG
+            print("mic: no microphone to record from (\(reason))")
+            #endif
+            self.micInputFailed = true
+            self.microphoneUpdate()
+        }
+        // The failure is tried again when the switch is turned on again, when Sill comes back to the front, or after an
+        // interruption ends.
+        NotificationCenter.default.addObserver(forName: MicrophoneSwitch.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.micInputFailed, MicrophoneSwitch.shared.on else { return }
+            self.micInputFailed = false
+            self.microphoneUpdate()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.micInputFailed else { return }
+            self.micInputFailed = false
+            self.microphoneUpdate()
+        }
         NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
@@ -360,6 +381,7 @@ extension StreamClient {
     func microphoneInterrupted(_ began: Bool) {
         guard micInterrupted != began else { return }
         micInterrupted = began
+        if !began { micInputFailed = false }
         #if DEBUG
         print(began ? "mic: paused (interruption)" : "mic: interruption over")
         #endif

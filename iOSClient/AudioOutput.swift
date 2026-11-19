@@ -41,6 +41,9 @@ final class AudioOutput {
 
     /// Headphones taken out (the route's old device unavailable): the client mutes and says so. Main thread.
     var onRouteMuted: (() -> Void)?
+    /// The microphone's voice engine would not start (no microphone, voice processing refused, the session's
+    /// recording category refused): the client pauses the microphone as if none were there. Main thread.
+    var onMicrophoneFailed: ((String) -> Void)?
 
     // On `queue`.
     private var model = AudioPlayout()
@@ -499,9 +502,16 @@ final class AudioOutput {
                   + "picture \(lag.map { Self.ms($0) } ?? "none") + 1 frame \(Self.ms(1 / streamFPS)))")
             #endif
         case .failure(let reason):
-            activationBlocked = true
-            updateSilence()
-            print("audio: no sound: \(reason)")
+            if micTap != nil {
+                // The microphone's start failed, not the sound's: the client stops the microphone (its tap goes),
+                // and the Mac's sound's next packet starts a plain engine, unblocked.
+                print("audio: the microphone's voice engine did not start: \(reason)")
+                DispatchQueue.main.async { [weak self] in self?.onMicrophoneFailed?(reason) }
+            } else {
+                activationBlocked = true
+                updateSilence()
+                print("audio: no sound: \(reason)")
+            }
         }
         engineBusyUntil = CACurrentMediaTime()
     }

@@ -975,6 +975,9 @@ final class StreamClient: ObservableObject {
     @Published var micInterrupted = false
     /// The microphone records and sends now.
     @Published var micRecording = false
+    /// The voice engine would not start (AudioOutput.onMicrophoneFailed): no microphone until Sill comes back to the
+    /// front or an interruption ends.
+    @Published var micInputFailed = false
     var micCapture: MicrophoneCapture?
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
     /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
