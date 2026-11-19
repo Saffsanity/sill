@@ -45,6 +45,12 @@ MUTANTS = [
     ("sessionPaired false by default", "HostSettings.swift", "                sessionPaired: Bool? = nil) {", "                sessionPaired: Bool? = false) {"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    # Recording the stream (#284): ClientStats' `recording` and the window list's `recordings`.
+    ("recording never kept", "Viewport.swift", "        self.recording = recording\n", "        self.recording = nil\n"),
+    ("recording true by default", "Viewport.swift", "                recording: Bool? = nil) {", "                recording: Bool? = true) {"),
+    ("recording false by default (a device not recording sends no key)", "Viewport.swift", "                recording: Bool? = nil) {",
+     "                recording: Bool? = false) {"),
+    ("recordings not on the wire", "Switcher.swift", "    public var recordings: Int?\n", "    public var recordings: Int? { get { nil } set {} }\n"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

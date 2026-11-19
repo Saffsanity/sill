@@ -1,0 +1,3 @@
+# Compiled as one module by ../module.py with main.swift; -package-name for the host's `package` access.
+flags: -package-name sill
+Sources/SillHost/RecordingNotice.swift

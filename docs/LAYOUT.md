@@ -4,9 +4,16 @@ Where everything is, file by file: CLAUDE.md's "Layout" until 2026-11-18, moved 
 Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-AND-RUN.md.
 
 - `Package.swift` — SwiftPM. Products: `StreamProtocol` (shared wire format,
-  iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
+  iOS + macOS), `SillAudio` (the sound's shared code, iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
   (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
   is a library target with no product, so the iOS project never sees it.
+- `Sources/SillAudio/` — the sound's code both apps link (AudioToolbox and Foundation only, public, nothing of
+  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; `Tests/checks/audio-codec`),
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time; the `audio-codec` check and the sound
+  harness's device compile it too), `AudioPacketizer` (`PCMChunk` in, `AudioBlock`s out: blocks, stamps and
+  segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the device's timing of the Mac's sound; pure,
+  `Tests/checks/audio-playout`); SillHostCore depends on it and the iOS project links its product (pbxproj
+  AA05, DA01).
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
@@ -17,13 +24,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   host's LockPolicy) and image blob framing. `Viewport.swift` —
   `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
-  packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
+  packets, which never traps, and `recording`, true while the device records the
+  stream, display only, #284), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
   none, any other refused; what a device sends, `held`; and `whole`, a number
   for a log line as Int() printed it, without its trap; pure,
   `Tests/checks/viewport-bounds`).
   (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
-  `gestures`, `clipboard`, `keyRepeat`; `WindowInfo`, `AppInfo`, `StreamSource`) and
+  `gestures`, `clipboard`, `keyRepeat`, `recordings` (1: its menu and log say that
+  a device records the stream, #284); `WindowInfo`, `AppInfo`, `StreamSource`) and
   image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
@@ -97,7 +106,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   keyframe request (kind 44) with `HEVCEncoder.requestKeyframe`, at most one a
   second per connection, never a restart (a synthetic host ignores the first n
   with the TEST ONLY SILL_TEST_KEYFRAME_IGNORE=<n>, as a Mac from before kind 44
-  ignores every one), and writes `HostStatus`),
+  ignores every one), shows a device recording the stream (#284: its
+  `ClientStats.recording` into its `HostStatus` device, the log's lines by
+  `RecordingNotice`, `recordings` in every window list), and writes `HostStatus`),
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
@@ -297,7 +308,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size; `reconciles`; `Restore`, the window that comes back; the lines; and
   `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
-  `lockedMidSwitch` and `lockDecision`), `StillCapture` (SyntheticCapture.swift:
+  `lockedMidSwitch` and `lockDecision`), `RecordingNotice` (#284,
+  docs/recording-plan.md: a device recording the stream, as the Mac says it;
+  `generation`, said in every window list as `recordings`, a locked Mac's too;
+  each connection's log lines from its device's `ClientStats.recording`,
+  "Recording: ‹device› started recording the stream." and its stop, at most one
+  every 10 s with the changes in between counted in the next, and "left while
+  recording" as the connection closes; a courtesy the host acts on nothing for;
+  pure, `Tests/checks/recording-notice`; the menu's words are StatusText's:
+  the headline's subtitle "‹iPad› is recording the stream." and the device's row
+  starting "Recording · ", the bare app's preview samples `recording` and
+  `recording-two`), `StillCapture` (SyntheticCapture.swift:
   a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
@@ -360,10 +381,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   lock; never run by a test),
   `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
   `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
-  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
-  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
-  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
-  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  click at each whole second of the stamps' clock; pure) and `AudioSourceRule`
+  (`AudioKey`, `AudioSourceRule`, `PCMLayout`, `AudioBufferTally`: the host's
+  rules around SillAudio's `AudioPacketizer` and `AudioEncoder`; pure,
+  `Tests/checks/audio-packetizer`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
   and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
@@ -564,7 +585,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
   and each second's frames with their kB (the encoder's output);
   `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
-  `--stop-read@T`, `--pairing-wanted@T`, `--keyframe@T` (kind 44); the remote door with `--tls
+  `--stop-read@T`, `--pairing-wanted@T`, `--keyframe@T` (kind 44), `--recording@T` and
+  `--recording-off@T` (its stats' `recording`, #284, a report at once; each list's `recordings=`,
+  `--expect=recordings=N`); the remote door with `--tls
   --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
   `--expect-tls-fail`, printing kinds 18, 20 and 22; pairing at home with
   `--pair-ask[=cable]`, `--then-code=FILE`, `--pair-hold=S`, `--pair-cancel`,
@@ -602,7 +625,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
   127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
-  harness's device: every kind 43 decoded with iOSClient/AudioDecoder.swift and
+  harness's device: every kind 43 decoded with Sources/SillAudio/AudioDecoder.swift and
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
@@ -621,7 +644,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/sillrelay.py` is a
+  black is measured. `Scripts/recording-check/` (docs/recording-plan.md, gate G3): the recording rig,
+  the device's recorder without a device. `build.sh` makes `recordcheck` (recordcheck.swift with
+  StreamProtocol, SillAudio's AudioDecoder, KeyframeRecovery, the three rules and StreamRecorder as one
+  module; refused if it links a VTCompressionSession symbol) and `moviecheck` (AVFoundation reading
+  only: the tracks, the edits, every picture's time and sync mark, the sound decoded to find the test
+  tone's clicks) into `.build/recording-check`; `run.sh [case …]` runs `run.py`'s ten cases on
+  synthetic test hosts on loopback (each under a minute: plain, still, still-sound, parts, oldmac-still,
+  oldmac-gaveup, oldmac-moving, kill, full, lock) and checks their gates. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -985,15 +1015,50 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   black where the video is; Disconnect waits up to 300 ms for a fresh keyframe
   first (kind 44, every Mac; one that skips it, Sill for Mac 0.5.1, costs that
   pause, its picture the keyframe kept).
-  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
-  AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
-  `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
+  `AudioOutput` (its queue, SillAudio's `AudioDecoder` and `AudioPlayout`, and the
   engine; no video frame handed to its queue before the session's first format, the last 32 kept
   for the guard) and `StreamClient+Audio` (this device's mute, `soundMuted`, the Settings panel's
-  Mute; `macHasSound`, whether it shows): pbxproj AA01–AA04; the host's `audio-codec` check and
-  the sound harness's device compile AudioDecoder too. The Settings panel (`HostSettingsPanel`)
+  Mute; `macHasSound`, whether it shows): pbxproj AA03–AA04, and AA05/DA01 for SillAudio's product
+  (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
+  Recording the stream (#284, docs/recording-plan.md; addhumal's #303 began it): `StreamRecorder`
+  (pbxproj AE90/FE90, #303's) records the stream as it came, never re-encoded, into a movie per
+  picture size in Documents/Sill Recordings, which Files shows as On My iPad › Sill › Sill Recordings
+  (both Info.plists' `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`): taps on `sill.net`
+  before the display (the pre-roll from "1", then every frame, parameter set and sound message, at most
+  32 MB of frames queued), its own queue `sill.recorder` carrying out `RecordingTimeline`'s actions
+  (AVAssetWriter, its own samples with deltas marked not sync, the Mac's sound through its own
+  AudioDecoder to AAC at 160 kbps, fragments every 4 s, each picture held until the next gives its duration and the
+  last until the part's end at the stop's time, the
+  writer's status, the light's numbers and space once a second); AVFoundation, CoreMedia and
+  AudioToolbox only, its folder, protection and free space from its caller, so the rig compiles it on
+  the Mac. `StreamClient+Recording` (A287/F287): Start (space first), the count, the keyframe ask at
+  "1" kept a second from every other kind 44 on the connection (`sendKeyframeRequest`,
+  `lastKeyframeAskAt`) or the picture recovery's awaited, the light, "Starting…"'s asks and give-up,
+  every ending (Stop, Cancel, the session's end in `tearDown`, the app or this window's scene to the
+  background, the device's lock, space, the writer), the finish in a background task, the note
+  (`recordingNote`, its own), `RecordingStatus` for the views, `recordingHoldsAwake` for
+  DeviceIdleTimer; StreamClient's `handle` and `receiveAudio` hand each message to `recordingTap`, the
+  kept keyframe carries its stamp and arrival, and `hostRecordings` is the Mac's
+  `WindowList.recordings`; ClientStatsReporter sends `recording` from the light until the movie is
+  closed. `RecordingLight` (A288/F288): the count and the light over both stream screens (Full Screen
+  too), `RecordingNoteView` in the clipboard chip's corner and on the connect screen. The Settings
+  panel: Start Recording (Cancel, Stop), Record Sound (`Sill.recordSound`, #303's key, on) and the
+  footnote as This iPad's first rows, and Stop pinned under the header while it records (into the
+  whole-screen pane's device part and header when draft #393 lands). DEBUG: `-SillRecording`,
+  `-SillRecordingNote`, `-SillRecordingSpace`, `-SillRecordFor S`, `-SillSettingsScroll recording`.
+  The recording's rules, pure (Foundation only) and checked together by `Tests/checks/recording`
+  with mutants: `RecordingPolicy` (what is offered, the count and the keyframe ask, where the movie
+  starts and the pre-roll, the picture's chain, parts and names, what ends it, space, the light, what
+  the Mac is told, and every sentence in `Copy`; A284/F284), `RecordingClock` (the movie's timeline
+  from the Mac's stamps: the floor, the anchor, the Mac clock's steps, the stop) with
+  `RecordingTimeline` (the recorder's order of things: parts, the chain, the clock and the sound
+  together, as actions StreamRecorder carries out; A285/F285) and `RecordedSound` (the movie's sound
+  track from the Mac's packets: segments, joins, gaps, overlaps, silence; A286/F286).
+  `SillDocuments` is the one owner of Documents, which Files shows (Sill Recordings,
+  `completeUnlessOpen`; the files work adds its folder there): no other file of the app names the
+  Documents directory, and `Tests/checks/recording` fails if one does (A289/F289).
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
@@ -1001,7 +1066,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it declares UserDefaults (CA92.1), `systemUptime` (35F9.1) and the active
   keyboards (54BD.1: `UITextInputMode.activeInputModes`, which decides whether ⌃Space is
   iPadOS's keyboard switch or the Mac's, #138; found by release-ios.sh's check on 2026-10-29,
-  which refuses an export App Store Connect would refuse, ITMS-91053), and any new use of a
+  which refuses an export App Store Connect would refuse, ITMS-91053) and the disk space (E174.1 and
+  85F4.1: the recording's space rule, `SillDocuments.availableCapacity`, #284), and any new use of a
   required-reason API (file dates, disk space, `mach_absolute_time`) must add its category
   and reason there before the next upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
@@ -1156,7 +1222,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Scripts/harness-photos.sh CASES [--commit REV] [--baseline REV] [--device duo|ipad] [--repo DIR]`
   builds each commit's committed tree once (cached by commit and Xcode build in
   `~/Library/Caches/SillAgents`, one shared DerivedData), boots one of them inside the heavy lock,
-  takes a photo per case (a name and launch arguments a line, `example.cases`), compares a baseline's
+  takes a photo per case (a name and launch arguments a line, `example.cases`; `recording.cases` the recording's), compares a baseline's
   pixel for pixel (`pixeldiff.swift`: how many pixels, by how much, where; a picture of the
   differences) and shuts it down. It refuses another name than "Sill agents …", any other booted
   simulator, a case without `-SillLayout` or with `-SillLive` or anything that dials or sends input,

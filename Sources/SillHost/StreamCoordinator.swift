@@ -251,6 +251,9 @@ package final class StreamCoordinator {
     /// A device asks once per interruption, again only when the keyframe has not come in 4 s or more,
     /// 2 s apart at least (KeyframeRecovery), and each costs a keyframe to every device.
     private var keyframeRequestAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// Each connected device's recording lines (#284, RecordingNotice): what the log last said of its
+    /// reports, at most a line every 10 s. Forgotten when its connection closes, after its last line.
+    private var recordingLines: [ObjectIdentifier: RecordingNotice.Lines] = [:]
     /// TEST ONLY. `SILL_TEST_KEYFRAME_IGNORE=<n>` on a --synthetic host: the first n keyframe requests
     /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
     /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
@@ -621,6 +624,11 @@ package final class StreamCoordinator {
                 // takes is never revoked.
                 self.releaseKeys(of: id)
                 self.revoked.remove(id)
+                // Its last recording line (RecordingNotice): that it left while recording, or a stop the
+                // log held back. Before it leaves the snapshot, which names it.
+                if var lines = self.recordingLines.removeValue(forKey: id), let line = lines.closed() {
+                    print(RecordingNotice.text(line, device: self.deviceName(connection)))
+                }
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
@@ -747,6 +755,8 @@ package final class StreamCoordinator {
             let id = ObjectIdentifier(connection)
             // The device's own words, cleaned before the menu, Settings or a log line shows them.
             let name = SafeText.label(stats.device)
+            // Whether it records the stream (#284): shown in the menu and the log, never acted on.
+            let recording = stats.recording == true
             Task { @MainActor in
                 self?.status.update {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
@@ -754,7 +764,9 @@ package final class StreamCoordinator {
                     $0.devices[i].fps = stats.fps
                     $0.devices[i].frameAgeMs = stats.frameAgeMs
                     $0.devices[i].rttMs = stats.rttMs
+                    $0.devices[i].recording = recording
                 }
+                self?.recordingReported(connection, recording)
                 // How long this device waits for a menu (the second's worst round trip; the median
                 // from an older device): a request whose turn comes later is not read.
                 self?.menus.clientStats(connection, rttMs: stats.rttMaxMs ?? stats.rttMs)
@@ -3582,6 +3594,9 @@ package final class StreamCoordinator {
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // This host shows a device's recording of the stream (#284) in its menu and its log, in every
+        // list (a locked Mac's too: LockPolicy.list keeps it), so the device's Settings can say so.
+        list.recordings = RecordingNotice.generation
         // The Desktop's stops (DesktopDisplays), with two or more: a device's button reads "Desktop 2" and
         // steps with kind 47, and VoiceOver names the stop. None from a synthetic host, whose Desktop is the
         // test pattern, but under SILL_TEST_DISPLAYS; none while locked or off console (LockPolicy.list).
@@ -3742,6 +3757,20 @@ package final class StreamCoordinator {
     /// "iPad (iPad14,1)" once the device has sent its stats, its address until then.
     private func deviceName(_ connection: NWConnection) -> String {
         status.snapshot.devices.first { $0.id == ObjectIdentifier(connection) }?.name ?? "\(connection.endpoint)"
+    }
+
+    /// A device's report of whether it records the stream (`ClientStats.recording`, #284): its line in the
+    /// log when that changes, at most one per connection every `RecordingNotice.lineSpacing` (the changes
+    /// in between counted in the next). Only for a device still connected: a report handled after its
+    /// connection closed starts nothing.
+    private func recordingReported(_ connection: NWConnection, _ recording: Bool) {
+        let id = ObjectIdentifier(connection)
+        guard status.snapshot.devices.contains(where: { $0.id == id }) else { return }
+        var lines = recordingLines[id] ?? RecordingNotice.Lines()
+        if let line = lines.report(recording: recording, at: ProcessInfo.processInfo.systemUptime) {
+            print(RecordingNotice.text(line, device: deviceName(connection)))
+        }
+        recordingLines[id] = lines
     }
 }
 

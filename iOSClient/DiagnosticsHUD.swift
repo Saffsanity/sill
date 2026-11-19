@@ -39,7 +39,10 @@ final class ClientStatsReporter: ObservableObject {
                                 frameAgeMaxMs: s.frameAge?.max ?? -1,
                                 rttMaxMs: s.rtt?.max ?? -1,
                                 audioBehindMs: s.soundBehindMs,
-                                audioLate: s.soundLate)
+                                audioLate: s.soundLate,
+                                // True from the light until the movie is closed, left out otherwise (#284): the Mac's
+                                // menu and log say this device records (RecordingNotice). Display only.
+                                recording: RecordingPolicy.recordingField(RecordingPolicy.reports(client.recording.phase)))
         client.send(.clientStats, payload: Wire.encode(stats))
     }
 

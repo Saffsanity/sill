@@ -25,6 +25,8 @@ python3 Scripts/sillclient.py PORT 5 none --pair-ask --then-code=$T/code --ident
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_STILL_AFTER=3 .build/release/SillHost --synthetic   # the Desktop still from 3 s on: a device's picture comes back only through its keyframe request
 python3 Scripts/sillclient.py PORT 8 desktop --keyframe@3   # kind 44: "Keyframe for …" on the host, and the summary's "keyframes at" shows the one it brought
+python3 Scripts/sillclient.py PORT 20 desktop --recording@2 --recording-off@13 --expect=recordings=1   # a device recording the stream (#284): the host's "Recording: sillclient started recording the stream." at 2 s and "… stopped …" at 13 s (at most a line every 10 s per connection, the changes between counted, one as it closes), recordings=1 in each list
+Scripts/recording-check/run.sh [case …]   # the recording rig (#284): StreamRecorder records a loopback test host's stream on this Mac (ten cases, about 6 minutes, inside the heavy lock; after swift build -c release); moviecheck reads every movie
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_STILL_AFTER=3 SILL_TEST_KEYFRAME_IGNORE=1 .build/release/SillHost --synthetic   # the first keyframe request ignored, as a Mac from before kind 44 ignores every one: the device asks again 4 s later
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_DESKTOP_FAIL=2 .build/release/SillHost --synthetic   # the first 2 Desktop starts fail, as ScreenCaptureKit's did on 2026-10-28 (1: the host's one more try streams; 2: a device asks again 10 s later)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
@@ -332,6 +334,14 @@ plays through the Mac's speakers, never in a gate) with `-SillSoundVolume 0`,
 console's "audio: …" lines say what happened (the format, the engine and its
 latencies, a line a second, each jump with its size and cause, and in manual
 rendering where each click of a synthetic host's test tone was heard),
+`-SillRecording count|starting|on|low` (the mock's recording of the stream, #284: the count, "Starting…",
+the light, the light low on space, over the picture and as the row pinned at the top of Settings; no
+recorder runs), `-SillRecordingNote saved|parts|left|ended|space|failed|gaveup|nospace` (the note after
+one, kept: over the stream, in Settings' top row, on the connect screen), `-SillSettingsScroll recording`
+(the panel at This iPad's recording rows), and live `-SillRecordFor S` (Start Recording 3 s after the
+stream screen shows, Stop S s after the light; the movie in the simulated device's Documents/Sill
+Recordings; the console's "recording: …" lines) and `-SillRecordingSpace <bytes>` (the free space the
+recording's space rule reads, in the normal app too),
 `-SillSettingsScript '<t> set K=V[,K=V] | suggestion | disconnect; …'` (a live
 session to a synthetic host on loopback: the panel's controls, the link
 callout's button and Disconnect, t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|

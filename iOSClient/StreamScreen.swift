@@ -161,7 +161,8 @@ final class DeviceIdleTimer {
             let front = window.windowScene?.activationState == .foregroundActive
             if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
             let used = DeviceIdlePolicy.lastUse(.init(input: client.lastPersonInputAt, control: client.lastActionAt,
-                                                      session: client.personSessionAt, front: entries[i].frontSince))
+                                                      session: client.personSessionAt, front: entries[i].frontSince,
+                                                      recording: client.recordingHoldsAwake(now: now)))
             windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
         }
         let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)
@@ -425,7 +426,19 @@ struct StreamScreen: View {
                 // Paste button and Dismiss take their touches over the stream's UIKit input view, and
                 // nothing else does (the frame around it is empty). Near the bar, off the link's line,
                 // inside the stream panel's corner; never while something is open over the stream.
-                if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
+                // A recording's note (#284) in the chip's corner; the chip waits while it shows.
+                if clipboardChipAllowed, let note = client.recordingNote, let panel = tourTargets[.stream] {
+                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
+                    let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
+                                                           : max(0, panel.width - 16)
+                    RecordingNoteView(note: note)
+                        .frame(maxWidth: widest, alignment: .trailing)
+                        .padding(8)
+                        .frame(width: panel.width, height: panel.height,
+                               alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
+                        .position(x: panel.midX, y: panel.midY)
+                        .transition(.opacity)
+                } else if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
                     let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
                     // Never over the Keyboard toggle in the pane's other bottom corner (#215).
                     let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
@@ -629,7 +642,7 @@ struct StreamScreen: View {
 
     /// The chip itself on screen, not its note in its place: its time runs only then.
     private var clipboardChipOnScreen: Bool {
-        clipboardChipAllowed && client.clipboardChip && client.clipboardNote == nil && tourTargets[.stream] != nil
+        clipboardChipAllowed && client.clipboardChip && client.clipboardNote == nil && client.recordingNote == nil && tourTargets[.stream] != nil
     }
 
     /// Runs LinkLine on the report and what is open, says the line once a spell, and looks again at
@@ -728,6 +741,13 @@ struct StreamScreen: View {
         let live = !client.mockDiscovery
         func after(_ seconds: Double, _ step: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
+        }
+        // `-SillRecordFor S` (#284): Start Recording 3 s in (as Record Sound says), then its count, stopped S s after
+        // the light.
+        let recordFor = defaults.double(forKey: "SillRecordFor")
+        if recordFor > 0, live {
+            after(3) { client.startRecording() }
+            after(3 + Double(RecordingPolicy.countFrom) + recordFor) { client.stopRecording(.stop) }
         }
         if defaults.bool(forKey: "SillKeyboard"), live {
             after(0.5) {
@@ -1824,6 +1844,8 @@ struct StreamScreen: View {
             .background(hidden ? Color.black : Palette.panel)
             // A locked Mac: its cover over the picture (LockedMac), under the link's line.
             .overlay { LockedMacShade(client: client) }
+            // A recording's count and light (#284), over the cover too: it records what the Mac sends.
+            .overlay { RecordingLight(client: client, linkLineShown: streamLine != nil) }
             .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
             // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
             .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName,

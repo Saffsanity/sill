@@ -39,13 +39,15 @@ extension StreamClient {
         UIAccessibility.post(notification: .announcement, argument: "Sound muted: headphones disconnected.")
     }
 
-    /// A kind 43 on the session's connection, handed to the sound's queue as it came. On `queue`.
+    /// A kind 43 on the session's connection, handed to the sound's queue as it came, and to a recording's own
+    /// decoder (StreamRecorder: Mute, the background and a call change nothing of what it records). On `queue`.
     func receiveAudio(_ header: StreamHeader, _ data: Data) {
         guard let message = AudioMessage.parse(data) else { return }
         switch message {
-        case .format(let f): sound.format(f)
+        case .format(let f): lastAudioFormat = f; sound.format(f)
         case .packets(let p): sound.packets(p, stamp: header.timestamp)
         }
+        recordingTap?.audio(message, stamp: header.timestamp)
     }
 
     /// For the sound's guard (rule 3): each frame's stamp, taken as it came, on the monotonic clock the

@@ -45,7 +45,7 @@ def device(name, suffix="device.txt"):
     d["fage"] = [num(r"frameAge p50 ([\d.–]+)"), num(r"frameAge p50 [\d.–]+ p95 ([\d.–]+)"), num(r"frameAge p50 [\d.–]+ p95 [\d.–]+ max ([\d.–]+)")]
     d["aage"] = [num(r"packetAge p50 ([\d.–]+)"), num(r"packetAge p50 [\d.–]+ p95 ([\d.–]+)"), num(r"packetAge p50 [\d.–]+ p95 [\d.–]+ max ([\d.–]+)")]
     d["closed"] = "closed the connection" in text
-    # The playout model on these arrivals (iOSClient/AudioPlayout.swift, with an ideal output).
+    # The playout model on these arrivals (Sources/SillAudio/AudioPlayout.swift, with an ideal output).
     for key in ("placed", "late", "lateAfter2", "jumps", "jumpsAfter3", "joins", "dups"):
         d["m_" + key] = num(r"model: .*?\b" + key + r"=(\d+)", int, None)
     for key in ("coverMax", "coverMaxAfter3", "needMax"):

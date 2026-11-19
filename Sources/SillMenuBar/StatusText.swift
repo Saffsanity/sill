@@ -68,7 +68,11 @@ enum StatusText {
     /// `now`: the clock the menu's items that last a while are judged by (fixed in the previews).
     static func present(snapshot s: HostStatusSnapshot, permissions: PermissionState,
                         startupError: String?, hasCoordinator: Bool, now: Date = Date()) -> StatusPresentation {
-        let (header, subtitle) = headline(s, permissions, startupError, hasCoordinator)
+        let (header, explanation) = headline(s, permissions, startupError, hasCoordinator)
+        // A device recording the stream (#284) is said first, whatever else the headline says (test
+        // pattern mode and Screen Recording off included): the one thing #284 asks the Mac to say.
+        let notes = [recordingSubtitle(s), explanation].compactMap { $0 }
+        let subtitle = notes.isEmpty ? nil : notes.joined(separator: " ")
 
         var attention: [StatusPresentation.Attention] = []
         if !permissions.screenRecording {
@@ -221,7 +225,9 @@ enum StatusText {
             // The off-console view (docs/off-console-plan.md): what the devices see is not this Mac's screen.
             if s.stream != nil { return ("Streaming to \(who)", s.offConsoleView ? offConsoleViewSubtitle : nil) }
             let connected = count == 1 ? (s.devices[0].name.map(shortName) ?? "Device") : "\(count) Devices"
-            return ("\(connected) Connected", s.offConsoleView ? offConsoleViewSubtitle : "Pick a window on the device to start streaming.")
+            // A device recording says so instead of "Pick a window…" (`present` puts it first).
+            let pick = recordingSubtitle(s) == nil ? "Pick a window on the device to start streaming." : nil
+            return ("\(connected) Connected", s.offConsoleView ? offConsoleViewSubtitle : pick)
         }
         if case .advertising(let name) = s.network {
             return ("Waiting for a Device", "Open Sill on your iPhone or iPad. This Mac appears as “\(name)”.")
@@ -231,6 +237,18 @@ enum StatusText {
 
     /// Under the header while the off-console view applies (HostStatusSnapshot.offConsoleView).
     static let offConsoleViewSubtitle = "Another user is on this Mac’s screen. Devices see this account, and can’t click or type in it."
+
+    /// Under the header while devices record the stream (#284; their reports, `Device.recording`):
+    /// "iPad is recording the stream.", "2 devices are recording the stream."; nil while none does.
+    /// A courtesy (RecordingNotice): Sill shows it and forbids nothing.
+    static func recordingSubtitle(_ s: HostStatusSnapshot) -> String? {
+        let recording = s.devices.filter(\.recording)
+        switch recording.count {
+        case 0: return nil
+        case 1: return "\(recording[0].name.map(shortName) ?? "A device") is recording the stream."
+        default: return "\(recording.count) devices are recording the stream."
+        }
+    }
 
     private static func isFailed(_ n: HostStatusSnapshot.Network) -> Bool {
         if case .failed = n { return true }
@@ -282,11 +300,13 @@ enum StatusText {
     /// (ScreenCaptureKit delivers only repaints), and a second can pass without a pong. While its
     /// link does not keep up (docs/remote-bundle-plan.md §6.6) the numbers give way to it, the frame
     /// age dropping out to keep the row short: "3 fps, the link can’t carry Pro · RTT 531 ms ·
-    /// through Tailscale", or "Nothing is getting through · through Tailscale".
+    /// through Tailscale", or "Nothing is getting through · through Tailscale". What the device is
+    /// doing comes first: "Recording · 118 fps · …" while it records the stream (#284).
     private static func deviceRow(_ d: HostStatusSnapshot.Device) -> StatusPresentation.Row {
         let name = d.name ?? d.endpoint
         let symbol = name.localizedCaseInsensitiveContains("iphone") ? "iphone" : "ipad"
         var parts: [String] = []
+        if d.recording { parts.append("Recording") }
         if let link = d.link {
             parts.append(linkWords(link, fps: d.fps, rttMs: d.rttMs))
         } else if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {

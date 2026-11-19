@@ -45,6 +45,14 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      displays and move its pointer). Each window list prints desktopDisplays=, desktopDisplay=
                      and names= when it says them; --expect=desktopDisplay=N (or none) and desktopDisplays=N
                      check the last list's at exit
+  --recording@T      from T seconds in, the stats (kind 12, implies --stats) say "recording": true, as a
+                     device's do while it records the stream (#284, docs/recording-plan.md); one report goes
+                     at once, then one a second. The host shows it in its menu and logs "Recording: …
+                     started recording the stream." (at most a line every 10 s per connection, the changes
+                     in between counted in the next, and one as the connection closes)
+  --recording-off@T  from T seconds in, the stats leave "recording" out again (one report at once). Each
+                     window list prints recordings= when it says it (1: the host shows a recording);
+                     --expect=recordings=N (or none) checks the last list's at exit
   --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
                      swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
   --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
@@ -181,10 +189,11 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 # The Desktop's stops (DesktopDisplays), from the last window list: a number, or none for a list without it.
-LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
+LIST_KEYS = {"desktopDisplay", "desktopDisplays", "recordings"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display",
+         "recording", "recording-off")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -506,12 +515,13 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|recording|recording-off)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "recording", "recording-off") and text:
+                raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -627,8 +637,9 @@ try:
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
-stats = "--stats" in flags or device is not None
+stats = "--stats" in flags or device is not None or any(e[2] in ("recording", "recording-off") for e in events)
 device = device if device is not None else "sillclient"
+recording_now = False   # --recording@T to --recording-off@T: the stats say "recording": true (#284)
 # The hello (kind 23), the first message of the session when asked for: a device from 2026-09-25 on.
 hello = None
 if hello_arg == "none":
@@ -793,6 +804,11 @@ aud_sec = 0; aud_total = 0; aud_epochs = []; aud_next = {}; aud_gaps = 0; aud_st
 aud_formats = 0; aud_orphans = 0
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
+def stats_message():
+    """Kind 12 as a device sends it once a second; with "recording": true while --recording is in force."""
+    body = {"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device, **({"recording": True} if recording_now else {})}
+    return msg(12, json.dumps(body).encode())
+
 def fire(e, now):
     global token
     _, _, name, text, parsed = e
@@ -818,6 +834,12 @@ def fire(e, now):
         s.sendall(msg(44)); print(f"  sent kind 44 (keyframe request) at {at}")
     elif name == "next-display":
         s.sendall(msg(47)); print(f"  sent kind 47 (next display) at {at}")
+    elif name in ("recording", "recording-off"):
+        global recording_now, nextstats
+        recording_now = name == "recording"
+        if pinging:
+            s.sendall(stats_message()); nextstats = now + 1
+        print(f"  sent stats recording={1 if recording_now else 0} at {at}" + ("" if pinging else " (not sent: not pinging)"))
     elif name == "fetch":
         mid, n, ftitle = parsed
         ftitle = ftitle if ftitle is not None else menu_titles.get(mid)
@@ -873,7 +895,7 @@ while time.time() - t0 < dur:
             s.sendall(msg(10, struct.pack(">d", now)))
             nextping = now + (min(0.25, ping_every) if any(a <= now - t0 < b for a, b in holds) else ping_every)
         if pinging and stats and now >= nextstats:
-            s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
+            s.sendall(stats_message()); nextstats = now + 1
     except OSError as e:
         print(f"send failed at {now - t0:.2f}s: {e}"); break
     if not reading:
@@ -934,7 +956,8 @@ while time.time() - t0 < dur:
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
                   + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
-                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else "")
+                  + (f" recordings={d['recordings']}" if "recordings" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
