@@ -856,7 +856,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   after 12, back at 200), the preview's cut, `RevealCut` (each layout's picture's place, from its own
   geometry with DuoPosture's split and PhonePortraitLayout), the pointer's dwell at the edge, when it is
   offered, when the controls come back by themselves, the shake (`Sill.shakeToShowControls`), the Settings
-  rows' place, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
+  rows' place, the hint, the room (and `hiddenRoom`, the same room measured while the controls show: the
+  viewport's `room` for the Mac's Virtual Desktop, phase 2b), the words; pure, `Tests/checks/full-screen`;
+  pbxproj A279/F279),
   `RevealEdgePan` (the swipe in's recognizer, a UIPanGestureRecognizer of Sill's on its window, only while
   hidden, which other recognizers wait for it, `EdgeRecognizers.waits` (never one that only watches,
   `WatchesTouchesOnly`), where a held stroke landed, `heldLanding`, for the picture's scroll, and a stroke
@@ -922,12 +924,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
   and the App Store address for a Mac's update notice, the App Store Connect
   record's since PR #27),
-  `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
-  (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
-  from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs; its last line this app's
-  version, `VersionLine`), `AwayCopy` (every
+  `MockCatalog` (harness data and the settings cases; the Virtual Desktop's `vdesk…`), `HostSettingsLedger`
+  (the Mac's settings with this device's unanswered picks, eight fields, the Virtual Desktop's only on a
+  session the Mac says is paired, rule 11; pure logic, checked with swiftc), `HostSettingsPanel` (the
+  Settings panel; the route line, Away from home, the away line in the header, the link's callout and its
+  button, the footnote, the slow-link callout for older Macs, the Virtual Desktop's switch after Virtual
+  Display's, from VirtualDesktopWords; its last line this app's version, `VersionLine`), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`

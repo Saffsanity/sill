@@ -25,8 +25,12 @@ func dec<T: Decodable>(_ t: T.Type, _ d: Data) -> T? { try? decoder.decode(t, fr
 /// Audio taken from a device as any switch is (Noah, 2026-10-27; the beta's hosts refused it:
 /// `Host.betaSound`), and Direct Wireless only from a paired session, on or off (2026-10-29, the
 /// security scan's finding 8; the hosts before took it from any session at home: `Host.anySession`).
-func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, paired: Bool = true) -> HostSettingsChange {
+/// The Virtual Desktop (phase 2b): only from a session the Mac says is paired (`vdPaired`; never "any session": a Mac with it
+/// always says), home or away; on only while it can make it (`virtualDesktopAvailable`), off always.
+func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, paired: Bool = true, vdPaired: Bool = true,
+              virtualDesktopAvailable: Bool = true) -> HostSettingsChange {
     var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: paired ? c.directWireless : nil, sendAudio: c.sendAudio)
+    if let v = c.virtualDesktop, vdPaired, !v || virtualDesktopAvailable { ok.virtualDesktop = v }
     if let v = c.maxFPS, SettingsChoices.maxFPS.contains(v) { ok.maxFPS = v }
     if let v = c.bitrate, SettingsChoices.bitrate.contains(v) { ok.bitrate = v }
     if let v = c.captureScale, SettingsChoices.captureScale.contains(v) { ok.captureScale = v }
@@ -227,6 +231,56 @@ do {   // the host's rule, and a device without rule 10 (older, or a test client
     check(l.receive(answer) == [.directWireless] && l.displayed?.directWireless == false,
           "an older device's pick from an unpaired session: refused, reported, and the switch goes back")
 }
+// The Virtual Desktop, the eighth field (phase 2b): optional (a host before 2b does not report it; `base` is one), and only
+// from a session the Mac says is paired (rule 11), home or away.
+do {   // rule 9: a host without it is never sent it
+    var l = SettingsLedger(); var paired = st(base); paired.sessionPaired = true; _ = l.receive(paired)
+    check(l.pick(HostSettingsChange(virtualDesktop: true), token: 1, now: 0) == nil && l.pending.isEmpty && l.displayed?.virtualDesktop == nil,
+          "rule 9: pick(virtualDesktop: true) against a host without it sends nothing and shows nothing")
+    let mixed = l.pick(HostSettingsChange(bitrate: 25_000_000, virtualDesktop: true), token: 2, now: 0)
+    check(mixed == HostSettingsChange(token: 2, bitrate: 25_000_000) && l.pending[.virtualDesktop] == nil, "rule 9: a two-field pick sends the other alone")
+    let old = #"{"settings":{"maxFPS":120,"bitrate":15000000,"captureScale":2,"prioritizeSpeed":false,"virtualDisplay":false,"directWireless":false,"sendAudio":false},"persistent":true,"virtualDisplayAvailable":true,"softwareEncoder":false,"sessionPaired":true}"#
+    let o = dec(HostSettingsState.self, Data(old.utf8))
+    check(o?.settings.virtualDesktop == nil && o?.virtualDesktopState == nil, "a state from before 2b decodes with both nil")
+}
+do {   // rule 11: only on a session the Mac says is paired; on at once and settled by its answer; refused, back
+    var vdBase = base; vdBase.virtualDesktop = false
+    var unpaired = st(vdBase); unpaired.sessionPaired = false
+    unpaired.virtualDesktopState = VirtualDesktopState(available: true, shown: false)
+    var u = SettingsLedger(); _ = u.receive(dec(HostSettingsState.self, enc(unpaired))!)
+    check(u.host?.takesVirtualDesktop == false && u.pick(HostSettingsChange(virtualDesktop: true), token: 1, now: 0) == nil && u.pending.isEmpty,
+          "rule 11: an unpaired session sends no Virtual Desktop pick")
+    var on = unpaired; on.settings.virtualDesktop = true
+    var uo = SettingsLedger(); _ = uo.receive(on)
+    check(uo.pick(HostSettingsChange(virtualDesktop: false), token: 1, now: 0) == nil && uo.displayed?.virtualDesktop == true,
+          "rule 11: nor off: the Mac refuses it both ways from an unpaired session")
+    var none = st(vdBase)
+    var n = SettingsLedger(); _ = n.receive(none)
+    check(n.host?.sessionPaired == nil && n.host?.takesVirtualDesktop == false && n.pick(HostSettingsChange(virtualDesktop: true), token: 1, now: 0) == nil,
+          "rule 11: a Mac that does not say a session is paired is sent none either (a Mac with the switch always says)")
+    none.sessionPaired = true
+    var l = SettingsLedger(); _ = l.receive(dec(HostSettingsState.self, enc(none))!)
+    let out = l.pick(HostSettingsChange(virtualDesktop: true), token: 3, now: 0)
+    check(out == HostSettingsChange(token: 3, virtualDesktop: true) && l.displayed?.virtualDesktop == true && l.pendingSince(.virtualDesktop) == 0,
+          "a paired session sends exactly its field, and it shows at once")
+    let wire = String(data: enc(out!), encoding: .utf8)
+    check(wire == #"{"token":3,"virtualDesktop":true}"# || wire == #"{"virtualDesktop":true,"token":3}"#, "on the wire: {token, virtualDesktop}")
+    var h = none; h.settings.virtualDesktop = true; h.answering = 3
+    check(l.receive(h).isEmpty && l.pending.isEmpty && l.displayed?.virtualDesktop == true, "its answer settles it on")
+    var r = SettingsLedger(); _ = r.receive(none)
+    _ = r.pick(HostSettingsChange(virtualDesktop: true), token: 1, now: 0)
+    var refusedState = none; refusedState.answering = 1
+    check(r.receive(refusedState) == [.virtualDesktop] && r.displayed?.virtualDesktop == false,
+          "refused (the Mac cannot make it now): back to off, and reported")
+    var x = SettingsLedger(); _ = x.receive(none)
+    _ = x.pick(HostSettingsChange(virtualDesktop: true), token: 1, now: 100)
+    check(!x.expire(now: 104, timeout: 4) && x.expire(now: 104.01, timeout: 4) && x.displayed?.virtualDesktop == false,
+          "unanswered: back to off just past the timeout")
+    check(accepted(HostSettingsChange(virtualDesktop: true), virtualDisplayAvailable: true, vdPaired: false) == HostSettingsChange()
+          && accepted(HostSettingsChange(virtualDesktop: true), virtualDisplayAvailable: true, virtualDesktopAvailable: false) == HostSettingsChange()
+          && accepted(HostSettingsChange(virtualDesktop: false), virtualDisplayAvailable: true, virtualDesktopAvailable: false) == HostSettingsChange(virtualDesktop: false),
+          "the model host: refused unpaired, on refused where it cannot be made, off always taken")
+}
 // Send Audio, the seventh field (optional: a host without sound does not report it; `base` is one).
 do {   // rule 9: a host without sound is never sent it
     var l = SettingsLedger(); _ = l.receive(st(base))
@@ -367,6 +421,10 @@ final class Host {
     /// nothing of pairing (no `sessionPaired`). Any other with Direct Wireless takes it only from a
     /// paired session and says which each one is.
     let anySession: Bool
+    /// A host with the Virtual Desktop (phase 2b): it reports the switch and its state, and takes it only from a paired
+    /// session, on only while it can make it (`vdAvailable`, which its status may change).
+    let vdHost: Bool
+    var vdAvailable = true
     var softwareEncoder = false
     var note: String?
     /// The devices (by name) whose keys are on the Mac's trust list: a door that lets any device in
@@ -388,14 +446,16 @@ final class Host {
     var answersQueued = 0
     var broadcasts = 0
 
-    init(target: StreamSettings, app: Bool, old: Bool, noSound: Bool, betaSound: Bool = false, anySession: Bool = false) {
+    init(target: StreamSettings, app: Bool, old: Bool, noSound: Bool, betaSound: Bool = false, anySession: Bool = false, vdHost: Bool = false) {
         self.target = target
         self.old = old
         self.noSound = noSound || old
         self.betaSound = betaSound && !(noSound || old)
         self.anySession = anySession || old
+        self.vdHost = vdHost && !(anySession || old)
         if old { self.target.directWireless = nil }
         if self.noSound { self.target.sendAudio = nil }
+        if !self.vdHost { self.target.virtualDesktop = nil }
         persistent = app
         virtualDisplayAvailable = app   // the CLI in this model runs without --virtual-display
         if !app { self.target.virtualDisplay = false; note = "Start SillHost with --virtual-display to use it." }
@@ -405,9 +465,11 @@ final class Host {
     func sessionPaired(_ conn: Int) -> Bool { owner[conn].map { trusted.contains($0) } ?? false }
 
     func state(for conn: Int, answering: Int? = nil) -> HostSettingsState {
-        HostSettingsState(settings: target, persistent: persistent, virtualDisplayAvailable: virtualDisplayAvailable,
-                          virtualDisplayNote: note, softwareEncoder: softwareEncoder, answering: answering,
-                          sessionPaired: anySession ? nil : sessionPaired(conn))
+        var s = HostSettingsState(settings: target, persistent: persistent, virtualDisplayAvailable: virtualDisplayAvailable,
+                                  virtualDisplayNote: note, softwareEncoder: softwareEncoder, answering: answering,
+                                  sessionPaired: anySession ? nil : sessionPaired(conn))
+        if vdHost { s.virtualDesktopState = VirtualDesktopState(available: vdAvailable, note: vdAvailable ? nil : "Needs Screen Recording.", shown: false) }
+        return s
     }
 
     /// The one publish point: after every change of the target, of the status snapshot or of the
@@ -444,7 +506,12 @@ final class Host {
         guard let change = dec(HostSettingsChange.self, payload) else { return }   // undecodable: dropped, no answer
         changesHandled += 1
         let paired = anySession || sessionPaired(conn)
-        var ok = accepted(change, virtualDisplayAvailable: virtualDisplayAvailable, paired: paired)
+        var ok = accepted(change, virtualDisplayAvailable: virtualDisplayAvailable, paired: paired, vdPaired: sessionPaired(conn),
+                          virtualDesktopAvailable: vdAvailable)
+        if !vdHost { ok.virtualDesktop = nil }   // a host before 2b: JSONDecoder dropped the unknown key
+        if vdHost, let v = change.virtualDesktop {
+            if !sessionPaired(conn) { vdRefusedUnpaired += 1 } else if ok.virtualDesktop == v { vdTaken += 1 } else { vdRefusedUnavailable += 1 }
+        }
         if old { ok.directWireless = nil }   // JSONDecoder dropped the unknown key
         if change.directWireless != nil, !old {
             if paired { if anySession { dwFromAnySession += 1 } else { dwFromPaired += 1 } } else { dwRefusedUnpaired += 1 }
@@ -464,7 +531,7 @@ final class Host {
         let named = Set(ok.fields)
         let t = HostSettingsChange(maxFPS: target.maxFPS, bitrate: target.bitrate, captureScale: target.captureScale,
                                    prioritizeSpeed: target.prioritizeSpeed, virtualDisplay: target.virtualDisplay,
-                                   directWireless: target.directWireless, sendAudio: target.sendAudio)
+                                   directWireless: target.directWireless, sendAudio: target.sendAudio, virtualDesktop: target.virtualDesktop)
         for f in SettingsField.allCases where !named.contains(f) && t.only(f).applied(to: before) != before {
             fail("field \(f) changed by a change that does not name it")
         }
@@ -483,6 +550,7 @@ final class Host {
         var change = change
         if old { change.directWireless = nil }   // an older Mac has no such control
         if noSound { change.sendAudio = nil }
+        if !vdHost { change.virtualDesktop = nil }   // nor this switch
         if old, let b = change.bitrate, [QualityPreset.low, .ultra, .extreme].map(\.rawValue).contains(b) { change.bitrate = nil }   // nor these items
         guard !change.isEmpty else { return }
         for f in change.fields { intended[f] = change.only(f) }
@@ -490,7 +558,8 @@ final class Host {
     }
 
     func statusChanged(rng: inout RNG) {          // HostStatus.update → onChange → publish
-        switch Int.random(in: 0..<3, using: &rng) {
+        switch Int.random(in: 0..<4, using: &rng) {
+        case 3: vdAvailable.toggle()                // Screen Recording, the console, the guard for #380
         case 0: softwareEncoder = true
         case 1: if virtualDisplayAvailable { note = ["Off for this session: the system removed the virtual display 3 times. Turn it off and on to try again.",
                                                      "The last window streamed where it is: needs Accessibility", nil].randomElement(using: &rng)! }
@@ -516,7 +585,8 @@ final class Device {
 
 func randomChange(_ rng: inout RNG, validOnly: Bool) -> HostSettingsChange {
     var c = HostSettingsChange()
-    switch Int.random(in: 0..<7, using: &rng) {
+    switch Int.random(in: 0..<8, using: &rng) {
+    case 7: c.virtualDesktop = Bool.random(using: &rng)
     case 6: c.sendAudio = Bool.random(using: &rng)
     case 5: c.directWireless = Bool.random(using: &rng)
     case 0: c.maxFPS = validOnly ? SettingsChoices.maxFPS.randomElement(using: &rng)! : [30, 60, 90, 120, 240].randomElement(using: &rng)!
@@ -536,14 +606,17 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     let noSound = old || Int.random(in: 0..<3, using: &rng) == 0
     let betaSound = !noSound && Int.random(in: 0..<4, using: &rng) == 0
     let anySession = !old && Int.random(in: 0..<4, using: &rng) == 0
+    let vdHost = !old && !anySession && Int.random(in: 0..<3, using: &rng) > 0
     let start = StreamSettings(maxFPS: 120, bitrate: [15_000_000, 12_000_000].randomElement(using: &rng)!,   // 12 = a Mac-side custom value
                                captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                               directWireless: Bool.random(using: &rng), sendAudio: Bool.random(using: &rng), virtualDesktop: nil)
-    let host = Host(target: start, app: app, old: old, noSound: noSound, betaSound: betaSound, anySession: anySession)
+                               directWireless: Bool.random(using: &rng), sendAudio: Bool.random(using: &rng),
+                               virtualDesktop: Bool.random(using: &rng))
+    let host = Host(target: start, app: app, old: old, noSound: noSound, betaSound: betaSound, anySession: anySession, vdHost: vdHost)
     var intentBase = start
     if !app { intentBase.virtualDisplay = false }
     if old { intentBase.directWireless = nil }
     if noSound { intentBase.sendAudio = nil }
+    if !host.vdHost { intentBase.virtualDesktop = nil }
     let devices = (0..<Int.random(in: 1...3, using: &rng)).map { Device(name: $0) }
     // Each device paired or not at the start (a door that lets any device in serves both).
     for d in devices where Int.random(in: 0..<3, using: &rng) > 0 { host.trusted.insert(d.name) }
@@ -622,6 +695,11 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         }
         // The panel disables the switch only when it is off and unavailable; turning it off is always offered.
         if want.virtualDisplay == true, d.ledger.host?.virtualDisplayAvailable != true { return }
+        // The Virtual Desktop's switch: off and disabled while the Mac says it cannot make it; turning it off always offered.
+        // Rule 11 (only a paired session) is the ledger's own, so the rule is what keeps the pick back.
+        if want.virtualDesktop == true, d.ledger.host?.virtualDesktopState?.available != true { return }
+        if want.virtualDesktop != nil, d.ledger.host?.settings.virtualDesktop != nil, d.ledger.host?.sessionPaired != true,
+           d.ledger.displayed.map({ want.only(.virtualDesktop).applied(to: $0) != $0 }) == true { rule11Held += 1 }
         // Its Direct Wireless switch is disabled on a session the Mac says is not paired too, but the
         // model leaves that to the ledger's rule 10, so the rule itself is what keeps the pick back.
         let blocked = want.directWireless != nil && d.ledger.host?.sessionPaired == false
@@ -636,6 +714,12 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         }
         if out.directWireless != nil, d.ledger.host?.sessionPaired == false {
             fail("rule 10: device \(d.name) sent directWireless on a session the Mac says is not paired (seed \(seed))")
+        }
+        if out.virtualDesktop != nil, d.ledger.host?.settings.virtualDesktop == nil {
+            fail("rule 9: device \(d.name) sent virtualDesktop to a host without it (seed \(seed))")
+        }
+        if out.virtualDesktop != nil, d.ledger.host?.sessionPaired != true {
+            fail("rule 11: device \(d.name) sent virtualDesktop on a session the Mac does not say is paired (seed \(seed))")
         }
         let touched = out.fields
         for f in touched { d.picks[f] = (out.only(f), out.token!, now) }
@@ -708,13 +792,16 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     for f in SettingsField.allCases {
         let want = host.intended[f]?.applied(to: intentBase) ?? intentBase
         if HostSettingsChange(maxFPS: want.maxFPS, bitrate: want.bitrate, captureScale: want.captureScale, prioritizeSpeed: want.prioritizeSpeed,
-                              virtualDisplay: want.virtualDisplay, directWireless: want.directWireless, sendAudio: want.sendAudio).only(f).applied(to: host.target) != host.target {
+                              virtualDisplay: want.virtualDisplay, directWireless: want.directWireless, sendAudio: want.sendAudio,
+                              virtualDesktop: want.virtualDesktop).only(f).applied(to: host.target) != host.target {
             fail("lost update: \(f) is not the last value anyone chose for it (seed \(seed))")
         }
     }
     if host.answersQueued != host.changesHandled { fail("answers \(host.answersQueued) != changes \(host.changesHandled)") }
     if old, host.target.directWireless != nil { fail("an older host ended up reporting directWireless (seed \(seed))") }
     if noSound, host.target.sendAudio != nil { fail("a host without sound ended up reporting sendAudio (seed \(seed))") }
+    if !host.vdHost, host.target.virtualDesktop != nil { fail("a host before 2b ended up reporting virtualDesktop (seed \(seed))") }
+    if host.vdHost { vdHostRuns += 1 }
     if old { oldHostRuns += 1 }
     if anySession { anySessionRuns += 1 }
     if noSound { noSoundRuns += 1 }
@@ -734,6 +821,11 @@ var rule10Held = 0
 var pairedDuringSession = 0
 var newAccepted = 0
 var newRefusedByOld = 0
+var vdHostRuns = 0
+var vdTaken = 0
+var vdRefusedUnpaired = 0
+var vdRefusedUnavailable = 0
+var rule11Held = 0
 let runs = CommandLine.arguments.count > 1 ? Int(CommandLine.arguments[1]) ?? 5_000 : 5_000
 var totals = (steps: 0, answers: 0, broadcasts: 0, expiries: 0, refusals: 0)
 for seed in 1...runs {
@@ -753,4 +845,11 @@ print("ok   Direct Wireless (2026-10-29): taken from a paired session \(dwFromPa
 if dwFromPaired == 0 || dwRefusedUnpaired == 0 || rule10Held == 0 || pairedDuringSession == 0 || dwFromAnySession == 0 {
     fail("the model lost a Direct Wireless case: paired \(dwFromPaired), refused \(dwRefusedUnpaired), rule 10 \(rule10Held), "
          + "paired during a session \(pairedDuringSession), from any session \(dwFromAnySession)")
+}
+print("ok   the Virtual Desktop (phase 2b): \(vdHostRuns) runs against a host with it; taken from a paired session \(vdTaken) times, refused from an "
+      + "unpaired one \(vdRefusedUnpaired) times (a test client's: rule 11 kept the ledger's \(rule11Held) picks from going) and refused where it "
+      + "could not be made \(vdRefusedUnavailable) times; every run converged")
+if vdHostRuns == 0 || vdTaken == 0 || vdRefusedUnpaired == 0 || rule11Held == 0 || vdRefusedUnavailable == 0 {
+    fail("the model lost a Virtual Desktop case: runs \(vdHostRuns), taken \(vdTaken), refused unpaired \(vdRefusedUnpaired), rule 11 \(rule11Held), "
+         + "refused unavailable \(vdRefusedUnavailable)")
 }

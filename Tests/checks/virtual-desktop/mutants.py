@@ -234,6 +234,11 @@ MUTANTS = [
     ("the API's problem unnamed", "words", "    public static func apiMissing(_ problem: String) -> String { \"Not available on this version of macOS: \\(problem)\" }",
      "    public static func apiMissing(_ problem: String) -> String { \"Not available on this version of macOS.\" }"),
     ("its name another", "words", "    public static let name = \"Virtual Desktop\"\n", "    public static let name = \"Virtual Display\"\n"),
+    ("the panel's size off too", "words", "        guard on, let size else { return what }\n", "        guard let size else { return what }\n"),
+    ("the panel's on and off swapped", "words", "        let what = on ? \"Tap Desktop", "        let what = !on ? \"Tap Desktop"),
+    ("the size's rate dropped", "words", "(hz.map { \" at \\($0) Hz\" } ?? \"\")", "\"\""),
+    ("the size turned", "words", "\"Its size: \\(widthPt) × \\(heightPt)\"", "\"Its size: \\(heightPt) × \\(widthPt)\""),
+    ("unpaired without the Mac", "words", "\"Only a device paired with \\(mac) can change this.\"", "\"Only a paired device can change this.\""),
     # DesktopWindowLedger: out and back (plan §7)
     ("the same area recomputed", "ledger", "        if from == to { return frame }\n", ""),
     ("the share unheld", "ledger", "let share = room > 0 ? min(max((p - a0) / room, 0), 1) : 0", "let share = room > 0 ? (p - a0) / room : 0"),

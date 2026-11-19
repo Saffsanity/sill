@@ -43,4 +43,24 @@ public enum VirtualDesktopWords {
         if offConsole { return Self.offConsole }
         return nil
     }
+
+    // MARK: A device's Settings panel (the Mac's group, after Virtual Display; #393's pane puts it in its Mac part)
+
+    /// The footnote under the switch: off, what it is and that turning it on shows it (open decision 12 (a)); on, how to
+    /// reach it and how long it stays; then its size and rate when the Mac says them (`size`: kind 16's
+    /// `VirtualDesktopState.size` as `VirtualDesktopState.parse` reads it; `hz`).
+    public static func panelFootnote(on: Bool, mac: String, size: (widthPt: Int, heightPt: Int)?, hz: Int?) -> String {
+        let what = on ? "Tap Desktop to step to it. It is here only while a device shows it."
+                      : "A desktop of its own for your devices, after \(mac)’s screens. Turning it on shows it."
+        guard on, let size else { return what }
+        return what + " " + sizeLine(widthPt: size.widthPt, heightPt: size.heightPt, hz: hz)
+    }
+
+    /// "Its size: 1218 × 800 at 60 Hz."
+    public static func sizeLine(widthPt: Int, heightPt: Int, hz: Int?) -> String {
+        "Its size: \(widthPt) × \(heightPt)" + (hz.map { " at \($0) Hz" } ?? "") + "."
+    }
+
+    /// The switch on a session the Mac does not say is paired: disabled, and why.
+    public static func unpaired(mac: String) -> String { "Only a device paired with \(mac) can change this." }
 }

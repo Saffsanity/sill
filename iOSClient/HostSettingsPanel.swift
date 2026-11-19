@@ -120,6 +120,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `vdesk`, to the Virtual Desktop's switch and its footnotes (phase 2b of docs/virtual-desktop-plan.md).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -131,6 +132,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "vdesk"?: return virtualDesktopID
         default: return nil
         }
         #else
@@ -144,6 +146,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let virtualDesktopID = "virtualDesktop"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -364,6 +367,32 @@ struct HostSettingsPanel: View {
                     Footnote(text: note, warning: true)
                 } else {
                     Footnote(text: "The window you pick moves onto an invisible display on \(mac) while it streams, so it keeps updating when covered.")
+                }
+                // The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md): a desktop of the Mac's own after its screens, the
+                // Desktop button's last stop, for every device. Set from a paired device alone, home or away (the ledger's rule
+                // 11), off and disabled while the Mac says it cannot make it (its note under it); turning it on shows it to this
+                // device at once. No row for a Mac without it. #393's whole-screen pane moves this row into its Mac part.
+                if let vdesk = shown.virtualDesktop {
+                    let vstate = state.virtualDesktopState
+                    let unavailable = vstate?.available == false && !vdesk
+                    let paired = state.takesVirtualDesktop
+                    Rows {
+                        Toggle(isOn: binding(vdesk) { HostSettingsChange(virtualDesktop: $0) }) {
+                            RowTitle(title: VirtualDesktopWords.name, since: client.settings.pendingSince(.virtualDesktop))
+                        }
+                        .disabled(!paired || unavailable)
+                        .accessibilityHint(!paired ? VirtualDesktopWords.unpaired(mac: mac) : unavailable ? (vstate?.note ?? "") : "")
+                        .rowFrame()
+                    }
+                    .id(Self.virtualDesktopID)
+                    if !paired {
+                        Footnote(text: VirtualDesktopWords.unpaired(mac: mac), warning: true)
+                    } else if let note = vstate?.note {
+                        Footnote(text: note, warning: true)
+                    }
+                    Footnote(text: VirtualDesktopWords.panelFootnote(on: vdesk, mac: mac,
+                                                                     size: vstate?.size.flatMap(VirtualDesktopState.parse).map { ($0.widthPt, $0.heightPt) },
+                                                                     hz: vstate?.hz))
                 }
                 Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment.")
                 // Send Audio (docs/audio-plan.md §7.7): after the closing footer, whose "the stream restarts"

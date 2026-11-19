@@ -41,6 +41,7 @@ swift run -c release SillHost --virtual-display --no-headless-display   # no dis
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
 python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
+Scripts/harness-photos.sh CASES   # with a case's `-SillDesktopDisplays 3,2` (stop 2 of 3; `-SillActive desktop` for the dots) or `3,3,v` (the last stop the Virtual Desktop: the dashed screen over "Virtual"), `-SillDesktopDisplayNames 'A|B|C'` names them
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
@@ -326,7 +327,11 @@ the Mac's sound's `-SillSound on|muted` (the mock Mac sends it, Send Audio on:
 Mute off or on; the mock plays nothing) and settings cases
 `sound|soundoff|soundnote|nosound` (the Send Audio switch on, off, on with the
 Mac's note, or a Mac without sound: the switch off and disabled, "Update
-Sill…", no Mute; `default` is Send Audio off with Mute), `-SillSettingsScroll
+Sill…", no Mute; `default` is Send Audio off with Mute), the Virtual Desktop's
+`vdesk|vdeskon|vdeskunpaired|vdeskunavailable` (its switch after Virtual Display's:
+off; on and shown, 1218 × 800 at 60 Hz; on a session the Mac does not say is paired,
+disabled; off where the Mac cannot make it, disabled with its note; `default` is a Mac
+before it, no row) with `-SillSettingsScroll vdesk` (the panel at its row), `-SillSettingsScroll
 sound|mute` (the panel at the Send Audio row, or at the Mute row under it), and in
 the normal app and under `-SillLive 1` `-SillSoundSink manual|device` (manual
 rendering, no output device: the simulator's default in every build; `device`

@@ -602,6 +602,15 @@ check(note(failure: "it never came up", held: true, off: true) == "Off for this 
       "then a make that failed this run")
 check(note(held: true, off: true) == "Off for now: Sill stopped while making a display, twice in a row.", "then the guard for #380")
 check(note(off: true) == "Not while another user is on this Mac’s screen.", "then the console")
+// A device's Settings panel (the Mac's group, after Virtual Display).
+check(Words.panelFootnote(on: false, mac: "Mac mini", size: (1218, 800), hz: 60)
+      == "A desktop of its own for your devices, after Mac mini’s screens. Turning it on shows it.", "the panel, off: what it is, no size")
+check(Words.panelFootnote(on: true, mac: "Mac mini", size: (1218, 800), hz: 60)
+      == "Tap Desktop to step to it. It is here only while a device shows it. Its size: 1218 × 800 at 60 Hz.", "on: how to reach it, its size and rate")
+check(Words.panelFootnote(on: true, mac: "Mac mini", size: nil, hz: 60) == "Tap Desktop to step to it. It is here only while a device shows it.",
+      "on with no size said: no size")
+check(Words.sizeLine(widthPt: 800, heightPt: 1218, hz: nil) == "Its size: 800 × 1218.", "a size with no rate")
+check(Words.unpaired(mac: "Mac mini") == "Only a device paired with Mac mini can change this.", "unpaired: why the switch is disabled")
 
 // 5,000 random sessions: devices showing it and stepping away, the switch flipped (a fifth of them as fast as a device
 // can, a fifth with the switch on and a device stepping onto it now and then), locks, user switches, monitors coming and going, macOS or the person making it the main display, the guard and

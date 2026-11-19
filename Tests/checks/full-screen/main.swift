@@ -466,6 +466,23 @@ check(FullScreenPolicy.room(size: CGSize(width: 466, height: 678), insets: I(bot
       == CGRect(x: 0, y: 0, width: 382, height: 678), "the Duo's cover upright: clear of the camera strip")
 check(FullScreenPolicy.room(size: CGSize(width: 10, height: 10), insets: I(top: 20, left: 20), choice: .safeArea).width == 0,
       "insets larger than the screen leave no room, never a negative one")
+// The same room measured while the controls show (phase 2b's `Viewport.room`): the reader keeps the top and the sides.
+check(FullScreenPolicy.hiddenRoom(reader: CGSize(width: 393, height: 793), readerInsets: I(top: 59), insets: I(top: 59, bottom: 34),
+                                  choice: .clearOfHousing)
+      == FullScreenPolicy.room(size: phoneUpright, insets: I(top: 59, bottom: 34), choice: .clearOfHousing),
+      "the room while shown: an iPhone upright, the reader under the island, the same room as hidden")
+check(FullScreenPolicy.hiddenRoom(reader: CGSize(width: 734, height: 393), readerInsets: I(left: 59, right: 59),
+                                  insets: I(left: 59, bottom: 21, right: 59), choice: .clearOfHousing)
+      == CGRect(x: 59, y: 0, width: 734, height: 393), "…sideways, the reader between the housing's sides: the same room as hidden")
+check(FullScreenPolicy.hiddenRoom(reader: phoneSideways, readerInsets: I(), insets: I(left: 59, bottom: 21, right: 59), choice: .clearOfHousing)
+      == FullScreenPolicy.room(size: phoneSideways, insets: I(left: 59, bottom: 21, right: 59), choice: .clearOfHousing),
+      "…hidden (the reader the whole screen, no insets of its own): the room itself")
+check(FullScreenPolicy.hiddenRoom(reader: CGSize(width: 669, height: 927), readerInsets: I(top: 24), insets: I(top: 24, bottom: 34),
+                                  choice: .clearOfHousing, topIsStatusBar: true, foldTop: 431.5)
+      == CGRect(x: 0, y: 0, width: 669, height: 455.5), "the Duo's laptop pose while shown: above the fold, the fold moved by the kept top")
+check(FullScreenPolicy.hiddenRoom(reader: CGSize(width: 1133, height: 724), readerInsets: I(top: 20), insets: I(top: 20, bottom: 20),
+                                  choice: .clearOfHousing, topIsStatusBar: true).size == CGSize(width: 1133, height: 744),
+      "an iPad mini with its status bar showing: its whole screen, 1133 × 744")
 
 // MARK: - The levels and the words
 

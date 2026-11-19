@@ -472,7 +472,8 @@ pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
 log shows input landing in each stop's own space. On the device,
 `-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
 harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
-them.
+them; `-SillDesktopDisplays 3,3,v` makes the last stop the Virtual Desktop
+(phase 2b), so the button shows its dashed screen over "Virtual".
 
 A Mac with no working screen (a MacBook with its lid closed and nothing
 attached, a Mac mini with no monitor; issues #61 and #298, addhumal's PR #200,
