@@ -53,9 +53,12 @@ MUTANTS = [
     # The words.
     ("P22 the footnote without the trackpad's sentence", " On a trackpad, it goes where the pointer is.", ""),
     ("P23 the update line for every Mac", "guard macTakesPinch else { return \"Update Sill on", "guard true else { return \"Update Sill on"),
-    ("P24 the segment's other name", 'static func zoomOnMacTitle(mac: String) -> String { "Zoom on \\(mac)" }',
+    ("P24 the segment's other name", 'static func zoomOnMacTitle(mac: String) -> String { "Zoom on \\(mac.count <= segmentNameLimit ? mac : "the Mac")" }',
      'static func zoomOnMacTitle(mac: String) -> String { "Zoom App" }'),
     ("P25 Rotate's words without its apps", "in apps that rotate, such as Preview, Photos and Maps.", "in apps."),
+    ("P31 a long Mac name kept in the segment", 'static func zoomOnMacTitle(mac: String) -> String { "Zoom on \\(mac.count <= segmentNameLimit ? mac : "the Mac")" }',
+     'static func zoomOnMacTitle(mac: String) -> String { "Zoom on \\(mac)" }'),
+    ("P32 the segment's limit 20", "static let segmentNameLimit = 12", "static let segmentNameLimit = 20"),
     ("P26 the picture's segment the PR's word", 'static let zoomPictureTitle = "Zoom Picture"', 'static let zoomPictureTitle = "Zoom Stream"'),
     # What a surface has open on the Mac (MacPinchSent).
     ("P27 a change reaches a gesture another source opened", "guard let o = open[kind], o.source == source else { return nil }",

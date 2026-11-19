@@ -118,6 +118,9 @@ check("Rotate on Mac shows under Zoom on Mac, for a Mac that takes the pinch, an
 check("the row's words: Pinch, Zoom Picture, Zoom on ‹Mac›, Rotate on ‹Mac›",
       R.title == "Pinch" && R.zoomPictureTitle == "Zoom Picture" && R.zoomOnMacTitle(mac: "Studio") == "Zoom on Studio"
       && R.rotateTitle(mac: "the Mac") == "Rotate on the Mac")
+check("the Mac's segment: its name up to 12 characters", R.segmentNameLimit == 12 && R.zoomOnMacTitle(mac: "MacBook Pros") == "Zoom on MacBook Pros")
+check("past 12, the Mac (a segmented control neither wraps nor shrinks)", R.zoomOnMacTitle(mac: "Noah’s MacBook Pro") == "Zoom on the Mac"
+      && R.zoomOnMacTitle(mac: "MacBook Pro 1") == "Zoom on the Mac")
 let footnote = R.footnote(mac: "Studio", device: "iPad", macTakesPinch: true)
 check("the footnote, the review's words: \(footnote)", footnote ==
       "Zoom Picture magnifies the picture on this iPad, up to 5×, and sends nothing. Zoom on Studio sends the pinch to the app under your fingers, as Studio’s trackpad would, so Maps, Safari or Preview zoom their own content. On a trackpad, it goes where the pointer is.")
