@@ -152,7 +152,8 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
                      FAIL (exit 1). A match that is not a pairing ends the run with exit 0
 A device's microphone (kind 48; docs/microphone-plan.md): the window list's line ends in microphone=N when
 the host says it, and each kind 16's line in mic=STATE (mic=- for none). As a device, this client sends:
-  --mic=FILE@T       from T, its offer with a claim (type 1, {"claim":true}), then while the last kind 16 says
+  --mic=FILE@T       from T, its offer (type 1, the first with {"claim":true}) while the last kind 16 takes one (none
+                     yet, idle, another or inUse) and again each time it comes back to one, then while it says
                      inUse a recording: a new epoch's format (type 1 with FILE's codec, cookie and priming), then
                      FILE's packets (Scripts/mic-check/tone.swift makes it) ten a message every 100 ms, the
                      first message's sample 0 on a whole second of this Mac's clock, each header stamped with its
@@ -842,6 +843,7 @@ aud_sec = 0; aud_total = 0; aud_epochs = []; aud_next = {}; aud_gaps = 0; aud_st
 aud_formats = 0; aud_orphans = 0
 # A device's microphone (kind 48): the offer, the recording's epoch and schedule, and what went.
 mic = None; mic_offered = False; mic_recording = False; mic_epoch = 0; mic_w0 = None; mic_next = 0
+mic_claim_owed = False; mic_offer_sent = False
 mic_flood = None       # (when the flood began, the message it began at)
 mic_msgs = 0; mic_pkts = 0; mic_epochs = []; mic_states = []
 def mic_state():
@@ -859,11 +861,19 @@ def mic_due(m):
     if mic_flood is not None and m >= mic_flood[1]: return mic_flood[0] + (m - mic_flood[1] + 1) * period / 3
     return mic_w0 + (m + 1) * period
 def mic_step(now):
-    """The recording: a kind 16 saying inUse starts one (a new epoch, its sample 0 on the next whole second), one
-    that does not stops it; each message goes once its sound is captured, stamped with its first packet's capture
-    time."""
-    global mic_recording, mic_epoch, mic_w0, mic_next, mic_msgs, mic_pkts
+    """As a device's link and capture: the offer goes while kind 16 takes one (none yet, idle, another, inUse), again
+    each time it comes back to taking one, with the claim the first time; a kind 16 saying inUse starts a recording
+    (a new epoch, its sample 0 on the next whole second), one that does not stops it; each message goes once its sound
+    is captured, stamped with its first packet's capture time."""
+    global mic_recording, mic_epoch, mic_w0, mic_next, mic_msgs, mic_pkts, mic_claim_owed, mic_offer_sent
     if mic is None or not mic_offered: return
+    takes = mic_state() in (None, "idle", "another", "inUse")
+    if takes and (not mic_offer_sent or mic_claim_owed):
+        mic_send(b"\x01" + json.dumps({"claim": True} if mic_claim_owed else {}).encode())
+        print(f"  sent mic offer{' (claim)' if mic_claim_owed else ''} at {now - t0:.3f}s")
+        mic_claim_owed = False; mic_offer_sent = True
+    elif not takes:
+        mic_offer_sent = False
     wanted = mic_state() == "inUse"
     if wanted and not mic_recording:
         mic_epoch += 1; mic_epochs.append(mic_epoch)
@@ -950,13 +960,13 @@ def fire(e, now):
     elif name in ("raw7", "raw15"):
         s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
     elif name == "mic":
-        global mic, mic_offered
-        mic = parsed; mic_offered = True
-        mic_send(b"\x01" + json.dumps({"claim": True}).encode())
-        print(f"  sent mic offer (claim) at {at}: {len(parsed['packets'])} packets of {parsed['fpp']} frames ready")
+        global mic, mic_offered, mic_claim_owed, mic_offer_sent
+        mic = parsed; mic_offered = True; mic_claim_owed = True; mic_offer_sent = False
+        print(f"  mic on at {at}: {len(parsed['packets'])} packets of {parsed['fpp']} frames ready")
+        mic_step(now)
     elif name == "mic-claim":
         mic_send(b"\x01" + json.dumps({"claim": True}).encode()); print(f"  sent mic offer (claim) at {at}")
-        if mic is not None: mic_offered = True
+        if mic is not None: mic_offered = True; mic_offer_sent = True
     elif name == "mic-end":
         global mic_recording
         mic_send(b"\x03"); mic_offered = False; mic_recording = False; print(f"  sent mic end at {at}")

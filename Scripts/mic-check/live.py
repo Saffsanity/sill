@@ -14,7 +14,7 @@ import os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-HOST = os.path.join(ROOT, ".build/release/SillHost")
+HOST = os.environ.get("MIC_HOST", os.path.join(ROOT, ".build/release/SillHost"))   # another tree's build, as it stands
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1"}
 verdicts = []
@@ -124,8 +124,21 @@ def named(device):
 
 
 def states(text):
-    """The client's microphone states in order, without repeats: [(seconds, state, device)]."""
-    return [(float(t), s, d) for t, s, d in re.findall(r"mic state at ([\d.]+)s: (\S+)(?: device=(\S+))?", text)]
+    """The client's microphone states in order, without repeats, from the first the host said (a kind 16 before the
+    receiver's word on a new session has none): [(seconds, state, device)]."""
+    found = [(float(t), s, d) for t, s, d in re.findall(r"mic state at ([\d.]+)s: (\S+)(?: device=(\S+))?", text)]
+    while found and found[0][1] == "none": found.pop(0)
+    return found
+
+
+def click_steps(host):
+    """The heard delays of each click in order (the analyzer's lines), and the largest change from one to the next
+    after each span's first 2 s, in ms."""
+    path = os.path.join(host.out, host.label + ".clicks.txt")
+    if not os.path.exists(path): return [], None
+    delays = [float(x) for x in re.findall(r"heard ([\d.]+) ms after its stamp", open(path).read())]
+    steps = [abs(b - a) for a, b in zip(delays[2:], delays[3:])]
+    return delays, max(steps) if steps else None
 
 
 def spans(text):
@@ -188,7 +201,9 @@ def case_live(out, tools):
         res, line = analyze(h, tools, sp)
         verdict(res is not None and res["found"] == res["expected"] and res["expected"] >= 9, f"every click sent was heard: {line}")
         verdict(res is not None and 90 <= res["median"] <= 200, f"the delay from capture to Sill Microphone, 90 to 200 ms: {res and res['median']} ms")
-        verdict(res is not None and res["spread"] <= 5, f"steady after the first 2 s, within ±5 ms: ±{res and res['spread']} ms")
+        delays, step = click_steps(h)
+        verdict(step is not None and step <= 3, f"steady: after the first 2 s, no click more than 3 ms from the one before it "
+                f"(the playout closes a difference a frame at a time): largest {step} ms over {delays}")
         verdict(res is not None and res["zeros"] == 0, f"no gap inside the sound: {res and res['zeros']} runs of silence")
         late = h.count("mic.late"); taken = h.count("mic.in")
         verdict(late == 0 and taken >= 100, f"the playout placed every packet message in time: {taken} taken, {late} late")
@@ -255,9 +270,12 @@ def case_unpaired(out, tools):
     h = Host(out, "unpaired", env={"SILL_TEST_REQUIRE_PAIRING": "0"})
     try:
         ident = os.path.join(out, "unpaired.guest.id")
+        # As a device, it offers nothing to a Mac that says unpaired; a client that claims anyway (--mic-claim) and
+        # sends packets (--raw48) is refused.
         text, code = client(h, "session", 6, "--tls", "--pin=none", "--stats", "--device=guest", f"--mic={tools}/tone.packets@1",
-                            "--expect-mic=unpaired", identity=ident)
+                            "--mic-claim@1.5", "--raw48=02000100000000010100" + "0180" + "aa" * 128 + "@2", "--expect-mic=unpaired", identity=ident)
         verdict(code == 0 and "EXPECT-MIC ok" in text, "kind 16 says unpaired")
+        verdict("sent mic offer at" not in text, "a device offers nothing to a Mac that says unpaired")
         verdict("paired=0" in text, "the session is unpaired (kind 16's sessionPaired)")
         h.next_tick()
         verdict(bool(h.all(r"^Microphone: refused from .*: it isn’t paired with this Mac\.$")), "one refusal line")
