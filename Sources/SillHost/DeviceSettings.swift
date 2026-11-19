@@ -16,7 +16,10 @@ extension HostConfig {
         return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
                               prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
                               directWireless: directWireless, sendAudio: sendAudio,
-                              virtualDesktop: nil)   // phase 2b's switch comes with HostConfig.virtualDesktop
+                              // The Virtual Desktop's switch is reported once the coordinator makes the display (phase
+                              // 2b's commit 8, which sends `virtualDesktop` here): until then no device shows a switch
+                              // that would do nothing, and a device sends it to no host that did not report it.
+                              virtualDesktop: nil)
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:
@@ -30,6 +33,7 @@ extension HostConfig {
         if let v = change.virtualDisplay { c.virtualDisplay = v }
         if let v = change.directWireless { c.directWireless = v }
         if let v = change.sendAudio { c.sendAudio = v }
+        if let v = change.virtualDesktop { c.virtualDesktop = v }
         return c
     }
 
@@ -60,7 +64,10 @@ extension HostConfig {
 /// Q8 as revised): it changes what the devices hear of the Mac, not who can reach it, and Sill.app
 /// saves it like a menu click, so it applies to every device; each device keeps its own mute, which
 /// is never sent. The beta's hosts (2026-10-20 to 27) refused it, and a device's switch went back.
-/// Share Clipboard stays the Mac's alone.
+/// The Virtual Desktop changes the Mac's screens (a display of Sill's own), so only a device the Mac's
+/// user paired sets it, as Direct Wireless, but from away too: using the Mac from afar with no monitor
+/// is a main reason to want one, and the remote door admits paired keys only (open decision 11 (a) of
+/// docs/virtual-desktop-plan.md as revised 2026-11-18). Share Clipboard stays the Mac's alone.
 enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed), and Direct
@@ -72,12 +79,14 @@ enum DeviceSettings {
     /// device in, with Require pairing off; the CLI's plain door, which sees no key) cannot widen who
     /// does, nor turn it off under the paired devices connected over it. Either refusal names the
     /// field, on or off. Send Audio either way from anywhere, as Prioritize Speed: a switch, nothing to
-    /// check. Refusal is per field: the rest of the same change still applies. The refused fields are
+    /// check. The Virtual Desktop from a paired session alone, home or away, on or off; on only where this
+    /// host can make it now (`virtualDesktopAvailable`: the private API, the AppKit loop, Screen Recording,
+    /// the console, the guard for #380), off always. Refusal is per field: the rest of the same change still applies. The refused fields are
     /// named for the log; the token is not carried (the handler answers with the request's own). Each
     /// field is copied by name, so one added to `HostSettingsChange` but not here is dropped without a
     /// refusal or a log line (StreamProtocol's HostSettings.swift lists every place a new setting goes).
     /// No defaults: the caller says where the change came from, so a new caller cannot leave it open.
-    static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool,
+    static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, virtualDesktopAvailable: Bool, fromRemote: Bool,
                          paired: Bool) -> (HostSettingsChange, refused: [String]) {
         var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)
         var refused: [String] = []
@@ -101,6 +110,15 @@ enum DeviceSettings {
         }
         if let v = c.virtualDisplay {
             if !v || virtualDisplayAvailable { ok.virtualDisplay = v } else { refused.append("virtual display (needs SillHost --virtual-display)") }
+        }
+        if let v = c.virtualDesktop {
+            if !paired {
+                refused.append("virtual desktop (only a paired device)")
+            } else if v, !virtualDesktopAvailable {
+                refused.append("virtual desktop (this Mac cannot make it now)")
+            } else {
+                ok.virtualDesktop = v
+            }
         }
         return (ok, refused)
     }

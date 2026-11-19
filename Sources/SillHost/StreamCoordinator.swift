@@ -1761,7 +1761,8 @@ package final class StreamCoordinator {
             // A connection whose route is not known (never: it is set before any message is
             // handled) counts as remote and unpaired, so nothing it sends can widen exposure. Paired:
             // its key on the trust list as the Mac's status has it now (`sessionPaired`).
-            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop,
+            // The Virtual Desktop: none made by this host until phase 2b's commit 8, so an "on" is refused as unavailable.
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop, virtualDesktopAvailable: false,
                                                         fromRemote: routes[id].map { $0.isRemote } ?? true,
                                                         paired: sessionPaired(id))
             if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }

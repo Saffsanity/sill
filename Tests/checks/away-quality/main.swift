@@ -94,7 +94,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, headlessDisplay: true)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, headlessDisplay: true, virtualDesktop: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -114,7 +114,7 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, headlessDisplay: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, headlessDisplay: true, virtualDesktop: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -136,13 +136,59 @@ do {
     check(!off.validated().headlessDisplay && standard.validated().headlessDisplay, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: false)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: false, virtualDesktop: false)
     check(!made.headlessDisplay, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
     check(!off.applying(all).headlessDisplay && !off.applyingAway(all).headlessDisplay
           && standard.applying(all).headlessDisplay && standard.applyingAway(all).headlessDisplay,
           "a device's change never moves it, at home or away")
+}
+
+// The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18): off in `standard` and `app` (Noah,
+// 2026-11-11), named in the log's line, kept by `validated`, laid by a device's change at home and away (one value for the
+// Mac), taken only from a paired session, home or away (open decision 11 (a)), on only where this host can make it now,
+// off always; not reported to devices before the coordinator makes it (phase 2b's commit 8).
+do {
+    check(!standard.virtualDesktop && !HostConfig.app.virtualDesktop, "standard and app: the Virtual Desktop off")
+    var on = standard
+    on.virtualDesktop = true
+    eq(standard.changes(to: on), "virtual desktop off → on", "changes: the Virtual Desktop's switch")
+    eq(on.changes(to: standard), "virtual desktop on → off", "changes: and back")
+    check(on.validated().virtualDesktop && !standard.validated().virtualDesktop, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, headlessDisplay: true,
+                          virtualDesktop: true)
+    check(made.virtualDesktop, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
+    check(standard.applying(HostSettingsChange(virtualDesktop: true)).virtualDesktop && !on.applying(HostSettingsChange(virtualDesktop: false)).virtualDesktop,
+          "a device's change lays it, on and off")
+    check(standard.applyingAway(HostSettingsChange(virtualDesktop: true)).virtualDesktop
+          && !on.applyingAway(HostSettingsChange(virtualDesktop: false)).virtualDesktop, "…from away too: one value for the Mac")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(on.applying(all).virtualDesktop && on.applyingAway(all).virtualDesktop && !standard.applying(all).virtualDesktop
+          && !standard.applyingAway(all).virtualDesktop, "a change without it leaves it as it was")
+    check(standard.streamSettings(away: false).virtualDesktop == nil && on.streamSettings(away: true).virtualDesktop == nil,
+          "not reported to devices before the coordinator makes it, so no device shows a switch that does nothing")
+    let unpairedWords = "virtual desktop (only a paired device)", cannotWords = "virtual desktop (this Mac cannot make it now)"
+    for remote in [false, true] {
+        for paired in [false, true] {
+            for available in [false, true] {
+                for vd in [nil, true, false] as [Bool?] {
+                    let change = HostSettingsChange(token: 9, maxFPS: 60, sendAudio: true, virtualDesktop: vd)
+                    let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, virtualDesktopAvailable: available,
+                                                                fromRemote: remote, paired: paired)
+                    let context = "\(remote ? "from afar" : "at home"), \(paired ? "paired" : "unpaired"), \(available ? "can make it" : "cannot"), "
+                        + "the Virtual Desktop \(vd.map { $0 ? "on" : "off" } ?? "absent")"
+                    let takes = vd != nil && paired && (vd == false || available)
+                    eq(ok.virtualDesktop, takes ? vd : nil, "accepted \(context): \(takes ? "taken" : "not taken")")
+                    eq(refused, vd == nil || takes ? [] : [paired ? cannotWords : unpairedWords], "accepted \(context): what is refused")
+                    check(ok.maxFPS == 60 && ok.sendAudio == true && ok.token == nil, "accepted \(context): the rest of the change, whoever sent it")
+                }
+            }
+        }
+    }
 }
 
 // Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual
@@ -215,10 +261,10 @@ do {
 do {
     // The whitelist is the same whichever pair the change lands on.
     let change = HostSettingsChange(bitrate: 12_000_000, captureScale: 1.5, directWireless: true)
-    let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: true, paired: true)
+    let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, virtualDesktopAvailable: true, fromRemote: true, paired: true)
     check(ok.bitrate == nil && ok.captureScale == nil && ok.directWireless == nil, "accepted: a hand-set bitrate, 1.5 and Direct Wireless from afar are refused")
     eq(refused.count, 3, "accepted: three refusals named")
-    let (fine, none) = DeviceSettings.accepted(HostSettingsChange(bitrate: 150_000_000, captureScale: 1), virtualDisplayAvailable: false, fromRemote: true, paired: true)
+    let (fine, none) = DeviceSettings.accepted(HostSettingsChange(bitrate: 150_000_000, captureScale: 1), virtualDisplayAvailable: false, virtualDesktopAvailable: false, fromRemote: true, paired: true)
     check(fine.bitrate == 150_000_000 && fine.captureScale == 1 && none.isEmpty, "accepted: every preset and both scales from afar")
 }
 
@@ -233,7 +279,7 @@ do {
     for (remote, paired) in [(false, true), (false, false), (true, true)] {
         for on in [false, true] {
             let change = HostSettingsChange(token: 4, maxFPS: 60, prioritizeSpeed: true, sendAudio: on)
-            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: remote, paired: paired)
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, virtualDesktopAvailable: true, fromRemote: remote, paired: paired)
             check(ok.sendAudio == on && ok.maxFPS == 60 && ok.prioritizeSpeed == true,
                   "accepted: Send Audio \(on ? "on" : "off") from \(remote ? "afar" : paired ? "home" : "home, unpaired") applied, with the rest of the change")
             check(refused.isEmpty, "accepted: …and nothing refused (\(refused))")
@@ -245,7 +291,7 @@ do {
                   "\(remote ? "applyingAway" : "applying"): Send Audio \(on ? "on" : "off") lands on the shared value, neither quality pair")
         }
     }
-    let (alone, none) = DeviceSettings.accepted(HostSettingsChange(token: 5, sendAudio: true), virtualDisplayAvailable: false, fromRemote: true, paired: true)
+    let (alone, none) = DeviceSettings.accepted(HostSettingsChange(token: 5, sendAudio: true), virtualDisplayAvailable: false, virtualDesktopAvailable: false, fromRemote: true, paired: true)
     check(alone == HostSettingsChange(sendAudio: true) && none.isEmpty, "accepted: a change of Send Audio alone is that change, without the token, from afar too")
     var on = standard
     on.sendAudio = true
@@ -282,7 +328,7 @@ do {
             for dw in [nil, true, false] as [Bool?] {
                 let change = HostSettingsChange(token: 7, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true,
                                                 virtualDisplay: false, directWireless: dw, sendAudio: true)
-                let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: remote, paired: paired)
+                let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, virtualDesktopAvailable: true, fromRemote: remote, paired: paired)
                 let context = "\(remote ? "from afar" : "at home"), \(paired ? "paired" : "unpaired"), Direct Wireless \(dw.map { $0 ? "on" : "off" } ?? "absent")"
                 let takes = dw != nil && !remote && paired
                 eq(ok.directWireless, takes ? dw : nil, "accepted \(context): Direct Wireless \(takes ? "taken" : "not taken")")

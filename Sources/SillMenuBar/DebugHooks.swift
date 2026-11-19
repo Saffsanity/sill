@@ -16,7 +16,7 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, offConsoleView, headlessDisplay,
+///                                              shareClipboard, offConsoleView, headlessDisplay, virtualDesktop,
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -372,6 +372,7 @@ enum DebugHooks {
         case "shareClipboard": config.shareClipboard = flag
         case "offConsoleView": config.offConsoleView = flag
         case "headlessDisplay": config.headlessDisplay = flag
+        case "virtualDesktop": config.virtualDesktop = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag

@@ -88,12 +88,21 @@ package struct HostConfig: Equatable, Sendable {
     /// (`StreamCoordinator.adopt`): off removes Sill's display now, on asks again for a Desktop that streams with no
     /// screen.
     package var headlessDisplay: Bool
+    /// The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18; #281, #91): a display of Sill's
+    /// own after the Mac's screens, the Desktop's last stop, by default the size and refresh rate of the device that shows
+    /// it (Noah, 2026-11-18: "should default to resolution and refresh of client device"), there only while a device shows
+    /// it and 30 s after (VirtualDesktopLife). Off in both `standard` and `app` (Noah, 2026-11-11: off by default; the
+    /// overview of 2026-11-18: a switch that changes the Mac's screens starts off). Set from the Mac (Sill.app's key
+    /// `virtualDesktop`) and from a paired device's Settings panel, home or away (`DeviceSettings.accepted`, then `applying`
+    /// or `applyingAway`: open decision 11); never from an unpaired session. Applied at once, never by a restart of the
+    /// pipeline (absent from `restartNeeded`).
+    package var virtualDesktop: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
                  internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 headlessDisplay: Bool) {
+                 headlessDisplay: Bool, virtualDesktop: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -110,6 +119,7 @@ package struct HostConfig: Equatable, Sendable {
         self.sendAudio = sendAudio
         self.offConsoleView = offConsoleView
         self.headlessDisplay = headlessDisplay
+        self.virtualDesktop = virtualDesktop
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -122,13 +132,14 @@ package struct HostConfig: Equatable, Sendable {
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
     /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too.
     /// Send Audio off here; Sill.app's is on since 2026-10-27
-    /// (`app`). A Mac with no screen's display on in both (Noah on #61); without the AppKit loop none is made.
+    /// (`app`). A Mac with no screen's display on in both (Noah on #61); without the AppKit loop none is made. The
+    /// Virtual Desktop off in both (Noah, 2026-11-11).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
-                                             offConsoleView: false, headlessDisplay: true)
+                                             offConsoleView: false, headlessDisplay: true, virtualDesktop: false)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -166,7 +177,7 @@ package struct HostConfig: Equatable, Sendable {
     /// per 60 fps, Retina → points, away bitrate 4 → 15 Mbps per 60 fps, away points → Retina, speed
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
     /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
-    /// send audio off → on, headless display on → off".
+    /// send audio off → on, headless display on → off, virtual desktop off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -187,6 +198,7 @@ package struct HostConfig: Equatable, Sendable {
         if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
         if offConsoleView != new.offConsoleView { parts.append("off-console view \(onOff(offConsoleView)) → \(onOff(new.offConsoleView))") }
         if headlessDisplay != new.headlessDisplay { parts.append("headless display \(onOff(headlessDisplay)) → \(onOff(new.headlessDisplay))") }
+        if virtualDesktop != new.virtualDesktop { parts.append("virtual desktop \(onOff(virtualDesktop)) → \(onOff(new.virtualDesktop))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 
