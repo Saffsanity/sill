@@ -845,7 +845,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
-  in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
+  in StreamScreen.swift take it, issue #113), `TouchHold` (the picture's touch and hold in Direct Touch, issue
+  #178, PR #292: a right click at once, as before, or with this device's Hold, Then Drag on, `Sill.holdThenDrag`,
+  off unless turned on, never sent, a right click at the lift, or a drag with the left button from where it was
+  pressed once it moves past 8 pt; a cancel lets the button up; the switch's words; pure,
+  `Tests/checks/touch-hold`; InputOverlay's long press feeds it, `StreamClient.holdThenDragOn` as each hold
+  begins; the Settings panel's row before Reverse Scrolling; pbxproj A178/F178), `VersionLabel` (this app's version and build as its bundle says
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
@@ -1121,7 +1126,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   app, driven with synthesized touches (`TouchSynth`, private UIKit calls, test
   only, never in the app), every event logged; `run.sh [--rev REV] [--switch
   off] NAME` builds and runs it on a simulator of its own
-  (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
+  (`SILL_TOUCHRIG_SIM`; `RIG_ONLY=hold` the picture's touch and hold alone, #178,
+  with `RIG_HOLD=drag` Hold, Then Drag on, #292, else off as on a fresh install,
+  so H7 holds the picture's hold to main's), `compare.py` judges a run against the surfaces
   before, and a stroke made right after a gesture against the same stroke
   made fresh; `compare.py --all` every stroke against main's, and, where the
   sources have full screen's RevealEdgePan (on the rig's window),

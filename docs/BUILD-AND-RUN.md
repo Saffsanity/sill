@@ -43,6 +43,7 @@ SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TES
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
+RIG_ONLY=hold RIG_HOLD=drag Tests/touchrig/run.sh hold   # the picture's touch and hold alone with Hold, Then Drag on (#292): a right click at the lift, or a drag once it moves; without RIG_HOLD the switch is off, as on a fresh install: a right click at the hold, as before
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Tests/checks/list.sh                    # every check and what it checks, from each folder's README.md (no table is kept by hand)
@@ -365,7 +366,10 @@ switch at those seconds), `-Sill.pictureInPicture 1` (its Picture in Picture on 
 the panel at it; live, `-SillPiPStartAt <s>` starts it as iOS does as Sill leaves, `-SillPiPPauseAt
 <s>[,<s>…]` the window's pause and play, `-SillPiPLockAt <s>` the device's lock, `-SillPiPSession
 active|inactive` the audio session held or not; `xcrun simctl launch UDID com.apple.Preferences` sends
-Sill away, the console's `pip:` lines say what happened), `-SillVoiceOver 1` (that group as with VoiceOver on:
+Sill away, the console's `pip:` lines say what happened), `-Sill.holdThenDrag 1` (its Hold, Then Drag on for one
+run, PR #292, in the normal app too: a finger held on the picture and then moved drags with the left button,
+one lifted where it was pressed right-clicks at the lift, and the tour's picture card says so; off, the
+default, the hold right-clicks at once; `-SillSettingsScroll holddrag` the panel at its switch), `-SillVoiceOver 1` (that group as with VoiceOver on:
 its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
 iPad…'s overlay; `-SillOverlayLine asking|shown|openonmac|locked|noanswer` the
 line its ask's answer sets; under `-SillLive 1` it opens over the live session
