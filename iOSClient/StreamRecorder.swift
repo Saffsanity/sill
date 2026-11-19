@@ -258,8 +258,8 @@ final class StreamRecorder: @unchecked Sendable {
         let audio: AVAssetWriterInput?
         let format: CMVideoFormatDescription
         var lastTicks: Int64?
-        /// The newest picture, held back until the next one or the part's end gives its duration; its size.
-        var held: (sample: CMSampleBuffer, ticks: Int64, bytes: Int)?
+        /// The newest picture, held back until the next one or the part's end gives its duration.
+        var held: (data: Data, ticks: Int64, isKeyframe: Bool)?
         var heldLeft: [Float] = []
         var heldRight: [Float] = []
         /// The sound track's frames so far.
@@ -344,14 +344,13 @@ final class StreamRecorder: @unchecked Sendable {
     /// next frame gives it its duration (`release`). False when it cannot be written: its sample could not be made,
     /// or the picture held before it was not written and it is a delta that depends on it.
     private func write(_ data: Data, isKeyframe: Bool, at: Double) -> Bool {
-        guard let part, failure == nil else { return false }
+        guard let part, failure == nil, !data.isEmpty else { return false }
         var ticks = RecordingClock.ticks(at + RecordingTimeline<Data>.sourceBase)
         if let last = part.lastTicks, ticks <= last { ticks = last + 1 }
-        guard let sample = Self.sample(data, format: part.format, ticks: ticks, isKeyframe: isKeyframe) else { return false }
         let before = release(part, until: ticks)
         part.lastTicks = ticks
         guard before || isKeyframe else { return false }
-        part.held = (sample, ticks, data.count)
+        part.held = (data, ticks, isKeyframe)
         return true
     }
 
@@ -361,19 +360,14 @@ final class StreamRecorder: @unchecked Sendable {
     private func release(_ part: Part, until ticks: Int64) -> Bool {
         guard let held = part.held else { return true }
         part.held = nil
-        var timing = CMSampleTimingInfo(duration: CMTime(value: max(1, ticks - held.ticks), timescale: RecordingClock.videoTimescale),
-                                        presentationTimeStamp: CMTime(value: held.ticks, timescale: RecordingClock.videoTimescale),
-                                        decodeTimeStamp: .invalid)
-        var timed: CMSampleBuffer?
         guard part.video.isReadyForMoreMediaData,
-              CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: held.sample, sampleTimingEntryCount: 1,
-                                                   sampleTimingArray: &timing, sampleBufferOut: &timed) == noErr,
-              let timed else { return false }
-        guard part.video.append(timed) else {
+              let sample = Self.sample(held.data, format: part.format, ticks: held.ticks, duration: max(1, ticks - held.ticks),
+                                       isKeyframe: held.isKeyframe) else { return false }
+        guard part.video.append(sample) else {
             if part.writer.status == .failed { fail(reason(part.writer.error)) }
             return false
         }
-        frameBytes += Int64(held.bytes)
+        frameBytes += Int64(held.data.count)
         return true
     }
 
@@ -566,10 +560,10 @@ final class StreamRecorder: @unchecked Sendable {
         return status == noErr ? desc : nil
     }
 
-    /// One frame's sample: its bytes copied, its time, no decode time (no B-frames), no duration (the next
-    /// sample's time gives it, the session's end the last one's); a delta marked not sync and depending on others
-    /// (samples are sync unless marked, and the mark is written into the movie).
-    static func sample(_ data: Data, format: CMVideoFormatDescription, ticks: Int64, isKeyframe: Bool) -> CMSampleBuffer? {
+    /// One frame's sample: its bytes copied, its time and duration (ticks of the picture's timescale), no decode
+    /// time (no B-frames); a delta marked not sync and depending on others (samples are sync unless marked, and
+    /// the mark is written into the movie).
+    static func sample(_ data: Data, format: CMVideoFormatDescription, ticks: Int64, duration: Int64, isKeyframe: Bool) -> CMSampleBuffer? {
         let count = data.count
         var block: CMBlockBuffer?
         guard count > 0,
@@ -580,7 +574,7 @@ final class StreamRecorder: @unchecked Sendable {
               data.withUnsafeBytes({ CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block,
                                                                   offsetIntoDestination: 0, dataLength: count) }) == noErr
         else { return nil }
-        var timing = CMSampleTimingInfo(duration: .invalid,
+        var timing = CMSampleTimingInfo(duration: CMTime(value: duration, timescale: RecordingClock.videoTimescale),
                                         presentationTimeStamp: CMTime(value: ticks, timescale: RecordingClock.videoTimescale),
                                         decodeTimeStamp: .invalid)
         var size = count
