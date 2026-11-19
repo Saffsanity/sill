@@ -182,6 +182,7 @@ enum DeviceFilesCopy {
     /// The chip's first line for a transfer from the Mac.
     static func incomingTitle(_ i: IncomingFiles, mac: String, device: String) -> String {
         switch i.phase {
+        case .picking: return "Choose files on \(mac)"
         case .asking: return "\(mac) wants to send you \(what(i.names)) (\(FilesCopy.size(i.total)))."
         case .receiving: return "Receiving \(what(i.names)) from \(mac)"
         case .done(let kept):
@@ -233,16 +234,22 @@ enum DeviceFilesCopy {
     /// What VoiceOver is told as a transfer from the Mac is offered, starts, ends or stops.
     static func incomingAnnouncement(_ i: IncomingFiles, mac: String, device: String) -> String? {
         switch i.phase {
+        case .picking: return "Choose files on \(mac)."
         case .asking: return "\(mac) wants to send you \(what(i.names))."
         case .receiving: return "Receiving \(what(i.names)) from \(mac)."
         case .done, .stopped: return incomingEndShown(i) ? incomingTitle(i, mac: mac, device: device) : nil
         }
     }
 
+    /// How long the end of a transfer from the Mac stays on the chip: longer than one to it, for Show and Save to
+    /// Photos.
+    static let incomingResultLifetime = 12.0
+
     static let accept = "Accept"
     static let decline = "Decline"
     static let show = "Show"
     static let cancelReceivingSpoken = "Cancel receiving"
+    static let cancelPickSpoken = "Stop asking for files"
 
     /// Save to Photos, for the kept files that are photos or videos: "Save to Photos", "Save 3 to Photos".
     static func saveToPhotos(count: Int) -> String { count == 1 ? "Save to Photos" : "Save \(count) to Photos" }
@@ -269,7 +276,7 @@ enum DeviceFilesCopy {
     enum Chip: Equatable { case none, outgoing, incoming }
 
     static func chip(out: OutgoingFiles?, incoming: IncomingFiles?) -> Chip {
-        if let i = incoming, case .asking = i.phase { return .incoming }
+        if let i = incoming, i.phase == .asking || i.phase == .picking { return .incoming }
         if let o = out, !o.isOver { return .outgoing }
         if let i = incoming, !i.isOver { return .incoming }
         let shownIn = incoming.flatMap { incomingEndShown($0) ? $0 : nil }
@@ -292,6 +299,9 @@ enum DeviceFilesCopy {
 /// change). Pure, so the words above are checked with it.
 struct IncomingFiles: Equatable {
     enum Phase: Equatable {
+        /// This device's Get Files asked the Mac, whose Open panel is up: its answer (files, or nothing chosen)
+        /// is awaited.
+        case picking
         /// Offered by the Mac's person, not asked for here, and Ask Before Receiving Files is on: Accept or
         /// Decline (the Mac's minute runs).
         case asking
@@ -314,11 +324,13 @@ struct IncomingFiles: Equatable {
     var since: Double
     /// The files answer this device's own Get Files.
     let asked: Bool
+    /// Where kept files go: Documents › From ‹Mac› (SillDocuments), for Show and Save to Photos.
+    var folder: URL?
 
     var isOver: Bool {
         switch phase {
         case .done, .stopped: return true
-        case .asking, .receiving: return false
+        case .picking, .asking, .receiving: return false
         }
     }
 

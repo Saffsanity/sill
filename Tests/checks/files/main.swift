@@ -826,10 +826,16 @@ for (name, photo) in [("IMG_1204.HEIC", true), ("a.heic", true), ("clip.mov", tr
                       ("doc.pdf", false), ("a.zip", false), ("noext", false), ("heic", false), (".heic", false)] {
     eq(DC.isPhotoOrVideo(name), photo, "a photo or a video by its extension: \(name)")
 }
+let goingOutEarly = OutgoingFiles(serial: 1, phase: .sending, names: ["a"], total: 1, acked: 0, since: 0)
 func inc(_ phase: IncomingFiles.Phase, names: [String] = ["IMG_1204.heic"], total: UInt64 = 2_400_000, written: UInt64 = 0, since: Double = 0,
          asked: Bool = false) -> IncomingFiles {
     IncomingFiles(serial: 1, phase: phase, names: names, total: total, written: written, since: since, asked: asked)
 }
+eq(DC.incomingTitle(inc(.picking, names: [], total: 0), mac: "Mac mini", device: "iPad"), "Choose files on Mac mini", "Get Files waiting for the Mac's panel")
+eq(DC.incomingAnnouncement(inc(.picking, names: [], total: 0), mac: "Mac mini", device: "iPad"), "Choose files on Mac mini.", "and so announced")
+check(IncomingFiles.holdsMoves(inc(.picking)) && !inc(.picking).isOver, "a pick waiting holds the moves, and is not over")
+eq(DC.chip(out: goingOutEarly, incoming: inc(.picking)), .incoming, "a pick waiting over a transfer to the Mac")
+eq(DC.incomingTitle(inc(stop("nothingChosen", byPeer: true)), mac: "Mac mini", device: "iPad"), "No files were chosen on Mac mini.", "nothing chosen")
 eq(DC.incomingTitle(inc(.asking), mac: "Mac mini", device: "iPad"), "Mac mini wants to send you “IMG_1204.heic” (2.4 MB).", "the question")
 eq(DC.incomingTitle(inc(.asking, names: ["a", "b", "c"], total: 3), mac: "Mac mini", device: "iPad"), "Mac mini wants to send you 3 files (3 bytes).", "three")
 eq(DC.incomingTitle(inc(.receiving), mac: "Mac mini", device: "iPad"), "Receiving “IMG_1204.heic” from Mac mini", "receiving")

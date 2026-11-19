@@ -67,5 +67,12 @@
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- Files from the Mac (docs/files-plan.md §8.4): Sill's Documents shows in the Files app as On My iPad › Sill,
+	     where they land in From ‹Mac› (SillDocuments); the recordings of #284 share this change. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<!-- Save to Photos (PhotoSaver): add-only access, never read access, asked the first time. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Sill saves photos and videos from your Mac to your library.</string>
 </dict>
 </plist>
