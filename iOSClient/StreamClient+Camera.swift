@@ -20,10 +20,9 @@ struct CameraSessionState {
     var demand: CameraDemand?
     /// What iOS says of the camera besides the switch (CameraPolicy.Device).
     var device = CameraPolicy.Device()
-    /// The pressure the format follows: up at once, back down a step every `CameraPolicy.thermalRecovery`.
-    var pressure = CameraPolicy.Pressure.nominal
-    var pressureNow = CameraPolicy.Pressure.nominal
-    var pressureStep: DispatchWorkItem?
+    /// The pressure the format follows (CameraPolicy.Heat), and the wake for its next step down.
+    var heat = CameraPolicy.Heat()
+    var heatStep: DispatchWorkItem?
     /// The capture asked for, and the stop that waits a moment (a move, the Mac changing its mind).
     var request: CameraCapture.Request?
     var stopWork: DispatchWorkItem?
@@ -150,7 +149,7 @@ extension StreamClient {
         hostCamera = nil
         cameraState = nil
         cameraSession.stopWork?.cancel()
-        cameraSession.pressureStep?.cancel()
+        cameraSession.heatStep?.cancel()
         let kept = (cameraSession.askedAccess, cameraSession.lastUseAt)
         cameraSession = CameraSessionState()
         cameraSession.askedAccess = kept.0
@@ -173,7 +172,7 @@ extension StreamClient {
         s.device.hasCamera = Self.cameraSourceIsPattern || CameraCapture.camera(at: position) != nil
         s.device.front = sceneInFront && !shownOnlyInPictureInPicture
         s.device.scanner = CodeScanner.live > 0
-        s.device.pressure = s.pressure
+        s.device.pressure = s.heat.followed
         if !s.device.front { s.device.busy = false; s.device.multitasking = false }   // iOS says again once Sill is back
         // The offer (CameraPolicy.offerStep): said when new on this connection or changed, `claim` once after the switch
         // went on, `stop` when the person turned the switch off while the Mac takes the camera.
@@ -202,7 +201,7 @@ extension StreamClient {
             s.stopWork = nil
             let away = remoteRoute != nil
             let device = Self.cameraSourceIsPattern ? nil : CameraCapture.camera(at: position)
-            let f = CameraPolicy.format(demand: s.demand, upright: false, away: away, pressure: s.pressure) { w, h, fps in
+            let f = CameraPolicy.format(demand: s.demand, upright: false, away: away, pressure: s.heat.followed) { w, h, fps in
                 Self.cameraSourceIsPattern || CameraCapture.supports(device, width: w, height: h, fps: fps)
             }
             let request = CameraCapture.Request(position: position, width: f.width, height: f.height, fps: f.fps)
@@ -292,25 +291,26 @@ extension StreamClient {
         updateCamera(why: "the camera: \(event)")
     }
 
-    /// The system's pressure: a rise is taken at once, a fall a step at a time, `thermalRecovery` apart.
+    /// The system's pressure (CameraPolicy.Heat): a rise is taken at once (`cameraEvent` decides again), a fall a step
+    /// at a time.
     private func pressureChanged(_ p: CameraPolicy.Pressure) {
-        cameraSession.pressureNow = p
-        cameraSession.pressureStep?.cancel()
-        cameraSession.pressureStep = nil
-        if p >= cameraSession.pressure {
-            cameraSession.pressure = p
-            return
-        }
+        _ = cameraSession.heat.read(p, at: ProcessInfo.processInfo.systemUptime)
+        wakeForHeatStep()
+    }
+
+    /// Wakes when the heat's next step down is due, takes it, decides again, and waits for the one after.
+    private func wakeForHeatStep() {
+        cameraSession.heatStep?.cancel()
+        cameraSession.heatStep = nil
+        guard let due = cameraSession.heat.nextStep else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            let s = self.cameraSession
-            guard s.pressureNow < s.pressure, let lower = CameraPolicy.Pressure(rawValue: s.pressure.rawValue - 1) else { return }
-            self.cameraSession.pressure = max(lower, s.pressureNow)
-            self.updateCamera(why: "the pressure fell")
-            self.pressureChanged(s.pressureNow)
+            self.cameraSession.heatStep = nil
+            if self.cameraSession.heat.step(at: ProcessInfo.processInfo.systemUptime) { self.updateCamera(why: "the pressure fell") }
+            self.wakeForHeatStep()
         }
-        cameraSession.pressureStep = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + CameraPolicy.thermalRecovery, execute: work)
+        cameraSession.heatStep = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, due - ProcessInfo.processInfo.systemUptime), execute: work)
     }
 
     /// A second of the stream: its numbers for ClientStats, and the person's use while it ran (DeviceIdlePolicy).

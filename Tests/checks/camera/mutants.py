@@ -55,6 +55,15 @@ M = [
     ("no floor", F, "            let floor = max(300_000, target / 5)", "            let floor = 300_000"),
     ("steps up every second", F, "        static let upEvery: Double = 5", "        static let upEvery: Double = 1"),
     ("steps up past the target", F, "                current = min(target, current + max(1, target / 10))", "                current = current + max(1, target / 10)"),
+    # The heat (CameraPolicy.Heat).
+    ("a fall taken at once", F, "            guard p < followed else {", "            guard p < followed, false else {"),
+    ("a rise waits", F, "                let rose = p != followed\n                followed = p\n", "                let rose = p != followed\n                followed = max(followed, min(p, .fair))\n"),
+    ("a reading under restarts the clock", F, "            if underSince == nil { underSince = now }", "            underSince = now"),
+    ("the clock kept when the reading comes back", F, "                followed = p\n                underSince = nil\n", "                followed = p\n"),
+    ("a step before it is due", F, "guard let due = nextStep, now >= due, let lower", "guard let due = nextStep, now + 1 >= due, let lower"),
+    ("down to the reading at once", F, "            followed = lower\n", "            followed = reading\n"),
+    ("the next step from the fall's start", F, "            underSince = reading < followed ? now : nil", "            underSince = reading < followed ? underSince : nil"),
+    ("steps under the reading", F, "            underSince = reading < followed ? now : nil", "            underSince = now"),
     # Keyframes, the chip.
     ("a demand's keyframe every time", F, "        return now - (lastDemandedAt ?? -.infinity) >= 1", "        return true"),
     ("a periodic keyframe", F, "        guard demanded else { return false }", "        guard demanded else { return true }"),

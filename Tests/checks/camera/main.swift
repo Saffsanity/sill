@@ -144,6 +144,80 @@ check(fmt(CameraDemand(width: 1920, height: 1080, fps: 30), p: .critical) == "12
 check(fmt(CameraDemand(width: 640, height: 360, fps: 10), p: .critical) == "640x360@10", "a slower demand stays slower")
 check(P.maxRate(.nominal) == 30 && P.maxRate(.serious) == 20 && P.maxRate(.critical) == 15 && P.thermalRecovery == 30, "the heat's steps")
 
+// MARK: - The heat: a rise at once, a fall a step at a time
+
+do {
+    var h = P.Heat()
+    check(h.followed == .nominal && h.reading == .nominal && h.nextStep == nil, "the heat starts nominal, no step due")
+    check(h.read(.critical, at: 10) && h.followed == .critical && h.nextStep == nil, "a rise: at once")
+    check(!h.read(.critical, at: 11) && h.followed == .critical && h.nextStep == nil, "the same reading: nothing")
+    check(!h.read(.nominal, at: 20) && h.followed == .critical && h.nextStep == 50, "a fall: nothing yet, the first step 30 s after the reading went under")
+    check(!h.read(.fair, at: 40) && h.followed == .critical && h.nextStep == 50, "a reading that changes while still under: the clock runs on")
+    check(!h.step(at: 49.5) && h.followed == .critical, "no step before it is due")
+    check(h.step(at: 50) && h.followed == .serious && h.nextStep == 80, "a step down when due, one level, the next 30 s after it")
+    check(!h.step(at: 50) && h.followed == .serious, "one step at a time")
+    check(h.step(at: 95) && h.followed == .fair && h.nextStep == nil, "a late wake: one step, down to the reading, then nothing due")
+    check(!h.step(at: 500) && h.followed == .fair, "never under the reading")
+    check(h.read(.serious, at: 510) && h.followed == .serious, "a rise again: at once")
+    check(!h.read(.nominal, at: 520) && h.nextStep == 550, "a fall again, its own clock")
+    check(h.step(at: 600) && h.followed == .fair && h.nextStep == 630, "woken late: one step, the next 30 s after it, not at once")
+    check(!h.read(.fair, at: 610) && h.followed == .fair && h.nextStep == nil, "back to what it follows: the fall's clock cleared")
+    check(!h.read(.nominal, at: 620) && h.nextStep == 650, "a new fall: its clock from its own start")
+    check(P.pause(state: inUse, device: P.Device(pressure: h.followed)) == nil, "what it follows is what the pause reads")
+}
+// 2,000 random lives of iOS's readings, woken at `nextStep` as StreamClient+Camera is: never under the reading, a rise
+// at once, a step one level and only after the reading stayed under that level the whole 30 s before it, steps at
+// least 30 s apart, and, once the readings stop, down to the last one, a step at a time.
+do {
+    var seed: UInt64 = 0x4EA7
+    func rnd(_ n: Int) -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) % UInt64(n)) }
+    var lives = 0, stepsTaken = 0, risesTaken = 0, bad: [String] = []
+    for _ in 0..<2000 {
+        var h = P.Heat()
+        var readings: [(at: Double, p: P.Pressure)] = [(0, .nominal)]
+        var lastStep = -Double.infinity
+        var t = 0.0
+        func wake(until end: Double) {
+            while let due = h.nextStep, due <= end {
+                let before = h.followed
+                guard h.step(at: due) else { bad.append("a due step not taken at \(due)"); return }
+                stepsTaken += 1
+                if h.followed.rawValue != before.rawValue - 1 { bad.append("a step of more than one level") }
+                if due - lastStep < P.thermalRecovery { bad.append("two steps \(due - lastStep) s apart") }
+                // The reading in effect at every instant of the 30 s before the step was under the level it left.
+                let inEffect = readings.last(where: { $0.at <= due - P.thermalRecovery })
+                if (inEffect.map { $0.p >= before } ?? false) || readings.contains(where: { $0.at > due - P.thermalRecovery && $0.at <= due && $0.p >= before }) {
+                    bad.append("a step down at \(due) while the reading was not under \(before) for 30 s")
+                }
+                if h.followed < h.reading { bad.append("under the reading") }
+                lastStep = due
+            }
+        }
+        for _ in 0..<(5 + rnd(40)) {
+            let next = t + Double(rnd(4) == 0 ? rnd(200) : rnd(40)) + 0.5
+            wake(until: next)
+            t = next
+            let p = P.Pressure(rawValue: rnd(5))!
+            let before = h.followed
+            let rose = h.read(p, at: t)
+            readings.append((t, p))
+            if rose != (p > before) { bad.append("read said \(rose) for \(before) to \(p)") }
+            if rose { risesTaken += 1 }
+            if p > before && h.followed != p { bad.append("a rise not taken at once") }
+            if h.followed < p { bad.append("under the reading") }
+        }
+        // The readings stop: it comes down to the last, a step every 30 s.
+        let levels = h.followed.rawValue - h.reading.rawValue
+        let quietFrom = t
+        wake(until: t + 1_000_000)
+        if h.followed != h.reading || h.nextStep != nil { bad.append("not down to the last reading") }
+        if levels > 0 && lastStep > quietFrom + Double(levels) * P.thermalRecovery + 0.001 { bad.append("too slow down: \(lastStep - quietFrom) s for \(levels)") }
+        lives += 1
+    }
+    check(bad.isEmpty, "2,000 random lives of the heat: \(bad.count) faults, the first \(bad.first ?? "")")
+    check(stepsTaken > 1_000 && risesTaken > 1_000, "the random lives stepped (\(stepsTaken)) and rose (\(risesTaken))")
+}
+
 // MARK: - The bitrate and its steps
 
 check(P.bitrate(width: 1280, height: 720, fps: 30, away: false, ceiling: nil) == 2_500_000, "720p30 at home: 2.5 Mbit/s")

@@ -168,6 +168,46 @@ enum CameraPolicy {
     /// How long the pressure must have fallen before the format steps back up.
     static let thermalRecovery: Double = 30
 
+    /// The pressure the format follows (`format`, `maxRate`, the pause): iOS's reading at once when it rises; when it
+    /// falls, a step at a time, the first `thermalRecovery` after the reading went under what the format follows, each
+    /// next as long after the step before, so a device cooling down comes back a step at a time, and a reading that
+    /// changes while still under holds nothing back. StreamClient+Camera reads iOS's each reading into it and wakes at
+    /// `nextStep`.
+    struct Heat: Equatable {
+        /// What the format follows.
+        private(set) var followed: Pressure = .nominal
+        /// iOS's last reading.
+        private(set) var reading: Pressure = .nominal
+        /// Since when the reading has stayed under `followed`, or since its last step down; nil while it is not under.
+        private(set) var underSince: Double?
+
+        init() {}
+
+        /// iOS's reading at `now`; true when what the format follows changed (a rise, taken at once).
+        mutating func read(_ p: Pressure, at now: Double) -> Bool {
+            reading = p
+            guard p < followed else {
+                let rose = p != followed
+                followed = p
+                underSince = nil
+                return rose
+            }
+            if underSince == nil { underSince = now }
+            return false
+        }
+
+        /// When the next step down is due; nil while none is.
+        var nextStep: Double? { underSince.map { $0 + CameraPolicy.thermalRecovery } }
+
+        /// At `now`: one step down when it is due; true when it stepped.
+        mutating func step(at now: Double) -> Bool {
+            guard let due = nextStep, now >= due, let lower = Pressure(rawValue: followed.rawValue - 1) else { return false }
+            followed = lower
+            underSince = reading < followed ? now : nil
+            return true
+        }
+    }
+
     /// The encoder's target: 2.5 Mbit/s for 1280×720 at 30 fps at home, 1.2 away; 4 for 1920×1080 at home;
     /// by area and rate between, at least 300 kbit/s; never over the demand's ceiling.
     static func bitrate(width: Int, height: Int, fps: Int, away: Bool, ceiling: Int?) -> Int {
