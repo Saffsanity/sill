@@ -269,6 +269,9 @@ the SE as the classic 216. (This plan first assumed keyboards with a suggestions
 260, which put row 3 under the keyboard on the mini and the SE.) Measured on 2026-10-14
 (docs/larger-picture-plan.md, Results): the SE's keyboard is 233 pt, so its key row is 24 pt under
 it, not 7; the 12 and 13 mini's is 310 (row 3 14 pt clear); the 15 Pro's 301, as taken.
+Since 2026-11-19 no keyboard covers the key row (PhoneKeyboardLift, docs/steps/2026-11-19-keys-above-keyboard.md):
+while one would come within 10 pt of it, row 1, the thumbnails and the key row lift by as much, the
+picture's frame smaller at its shape above them; the table below is the layout's, before any lift.
 
 | Phone | Keyboard's top | Row 1 ends | Row 2 ends | Row 3 ends |
 |---|---|---|---|---|
@@ -472,6 +475,7 @@ mini.
    keyboard; the mini's, and the 15 Pro's by a point, under a keyboard with a candidate bar).
    Default: **accepted:** row 1 is always clear, and a latch set before the keyboard comes up still
    works. The alternative puts the keys above the strip there, against Noah's order.
+   Answered on 2026-11-19 (a promise, asked for by mail): the rows lift above any keyboard (PhoneKeyboardLift).
 6. **The picture's height.** Default: **whole points, rounded down,** so the pane is never taller
    than 16:10 and the rows sit on whole points; a 16:10 picture shows sub-point side bars at most.
 

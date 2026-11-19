@@ -1,0 +1,78 @@
+**The modifier keys above any keyboard on an iPhone held upright (2026-11-19, branch `keys-above-keyboard` from main at eb48ac9, a draft pull request for Noah).**
+Asked for by mail: on an iPhone held upright a taller keyboard covered the key row. Noah's answer (10-30 and
+11-16) promised a way to keep the modifiers reachable with any keyboard, and called the idea of leaving the
+window picker tucked away while a keyboard is up part of the same change (the promises inventory's row 20,
+`~/Downloads/sill-handoff/next/promises/INVENTORY.md`). Device only: no wire change, nothing on the Mac.
+
+- **The cause.** On a phone held upright the stream screen ignores the keyboard (StreamScreen's
+  `.ignoresSafeArea(edges: .bottom)` takes the keyboard's region with the bottom edge), and every row of
+  `PhonePortraitLayout` is a function of the screen's size alone, or, with Larger Picture, of the screen and
+  `keyboardHeight(for:)`, a table of Apple's own keyboards as measured on the iOS 27 simulators (233, 301,
+  310, 320 pt). Nothing on a phone read the keyboard that actually came up: `KeyboardFrameMonitor` publishes
+  its real frame, but only the Duo's inner display used it (#215). So the key row sat where Apple's keyboard
+  leaves it clear: 56 pt above it on an 18 Pro in the standard arrangement, exactly 10 pt above the estimate
+  with Larger Picture. A keyboard taller than that covered it, and ctrl, opt, cmd and shift with it: a
+  third-party keyboard with a bar of its own, an input method's candidates (44 pt more), Display Zoom's and a
+  future iPhone's keyboards. Two places were covered even with Apple's own: an iPhone SE's key row by 24 pt
+  (phone-portrait's keyboard table, accepted in the portrait plan's open question 5), and the iPhone Duo's
+  cover, whose key row ends 236 pt above the screen's foot, so any keyboard taller than that covered it.
+- **The fix: `PhoneKeyboardLift`** (iOSClient/PhoneKeyboardLift.swift, pure; `Tests/checks/phone-keyboard-lift`,
+  183 checks and 44 mutants; pbxproj A0B0/F0B0). From the keyboard's real top as UIKit reports it, only
+  while the person's own keyboard is up (`keyboardShown`: never the drawer's search field's, never a hardware
+  keyboard's hold): while the keyboard would come closer than 10 pt to the key row, row 1, the thumbnails'
+  row and the key row lift together by just that much (whole points), and the picture's frame keeps its
+  shape in the room left above them, centred across. The viewport stays the layout's picture, so the Mac
+  resizes nothing; the lift is at most the picture's height. A keyboard that leaves the key row clear moves
+  nothing, so every iPhone with Apple's keyboard is as on main but the SE (lifted 34 pt: the picture 304×190
+  instead of 359×224 while the keyboard is up). The trackpad runs from 10 pt under the moved key row; the
+  drawer follows row 1 (it can be open with the keyboard up); the dim is everything but row 1. No switch:
+  it is a fix.
+- **Hide Thumbnails While Typing**, the new behaviour, a switch, off unless turned on
+  (`Sill.hideThumbnailsWhileTyping`): while a keyboard is up the thumbnails' row (the strip and the Menus
+  button at its end) is tucked away and the key row takes its place, 16 pt under row 1's buttons as Larger
+  Picture has it, so more of the trackpad shows above the keyboard (118 pt on an 18 Pro against 46) and a
+  tall keyboard needs a smaller lift, or none (the Duo's cover under a 301 pt keyboard: 3 pt instead of 75).
+  A thumbnail's lights close as the row tucks away. Larger Picture's arrangement has no thumbnails' row, so
+  the switch changes nothing there. Place on this base: the Settings panel's This iPhone, right after Larger
+  Picture (both are about the thumbnails' row held upright), on every iPhone and the iPhone Duo (its cover),
+  never on an iPad. **It moves into the whole-screen Settings pane's device part (draft #393, `settings-pane`)
+  with This iPhone's rows.**
+- **The views.** PortraitStreamScreen reads the keyboard's frame (`phoneGlass`) and the switch, builds the
+  lift over the layout and places the picture's frame, row 1, the strip (tucked: `TuckedAway`, out of sight,
+  touch and VoiceOver, the same view), the key row, the trackpad, the drawer and the dim from it; the rows
+  animate with the keyboard (0.25 s ease out). Full screen and the swipe in's preview never lift. DEBUG: the
+  console's `keys: …` line at each change (`keys: lifted 34 pt, the key row 10 pt above the keyboard at
+  414, the picture 304×190 in a room of 359×190, the trackpad from 414`), and the `keyboard: up, …` line now
+  measures the placed rows.
+- **The harness's tall keyboard:** `-SillTallKeyboard N` gives the stream's input view an input accessory
+  view N pt tall, labelled as a stand-in, so UIKit's keyboard is really N pt taller and reports it (a
+  simulator cannot install a third-party keyboard). DEBUG only. `-Sill.hideThumbnailsWhileTyping 1` turns
+  the switch on for one run; `-SillSettingsScroll typing` scrolls Settings to it.
+- **Community work on the same ground** (Noah's build-on rule): PR #383 (an accessory bar over every
+  software keyboard, a bottom shortcut bar, custom shortcuts) and issue #371 (keys and trackpad on demand in
+  the Duo's landscape). Not built on #383, for these reasons, read in its code: upright, where this fault is,
+  the key row is already there, so the bar shows the same keys twice, and it makes the keyboard 44 pt taller,
+  which Larger Picture's estimate does not know, so it covers the key row itself; its latch lives in the
+  input view and the stream screen resets it on every update, so the bar and the key row disagree; a locked
+  modifier reaches only the bar's own keys, never typed text; its bottom bar sits under every layout with no
+  switch, which moves every approved phone rect; and it conflicts with #397 (`ready-276`) in StreamScreen,
+  PortraitStreamScreen and the checks' README. The review of 2026-11-18 (`next/feature-requests/
+  pr-evaluations/keys.md`, "#383") reached the same verdict: redo its ideas, credited, in the per-app keys
+  work, where an accessory bar for layouts without a key row (sideways, #371's need) belongs. #371 is not
+  touched here: it asks for the key row sideways, a layout change of its own.
+
+**Defaults taken, for Noah to confirm**
+- The fix lifts the rows and shrinks the picture's frame (at its shape) rather than covering the picture's
+  foot with them: what is typed into stays in view. The other way is a one-line change in `frame(video:)`.
+- The lift is live, with the keyboard, never learned: Larger Picture's estimate stays the room the Mac fits
+  windows to, and only while a taller keyboard is up does the frame get smaller. (The Larger Picture plan's
+  open question 3 had "learn the tallest keyboard and move the layout once" as its alternative.)
+- Hide Thumbnails While Typing is off; the Menus button goes with the thumbnails (it is in their row);
+  bringing it into row 1 instead would move the Keyboard button under the finger as the keyboard comes up.
+- Its place: This iPhone, after Larger Picture, on the Duo too.
+
+**Merges with the other drafts (trial merges, see the pull request):** to come.
+
+**Verified:** to come (the check and its mutants, run-all, the builds, CI, the harness photos).
+
+**Untested, for Noah:** to come.
