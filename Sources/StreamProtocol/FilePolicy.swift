@@ -82,6 +82,30 @@ public enum FilePolicy {
         return sending ? .busy : .yes
     }
 
+    /// What the device's Get Files from ‹Mac›… row says (docs/files-plan.md §9): hidden unless the Mac gives
+    /// files (`files` at `gives` or more: a Mac that only takes them, its switch off, an older Mac, the CLI and a
+    /// locked Mac show no such row), `notPaired`, `busy` while a transfer from the Mac to this device runs or is
+    /// asked about, or `yes`. The same reading shows the receiving switches (Ask Before Receiving Files, Save
+    /// Photos and Videos to Photos), which matter only where a Mac gives files.
+    public static func deviceGets(connected: Bool, hostFiles: Int?, locked: Bool, sessionPaired: Bool?,
+                                  receiving: Bool) -> Offering {
+        guard connected, !locked, let files = hostFiles, files >= gives else { return .hidden }
+        guard sessionPaired == true else { return .notPaired }
+        return receiving ? .busy : .yes
+    }
+
+    /// Whether the Mac's offer answers this device's own pick, so it is taken without asking: it says
+    /// `asked`, it names the transfer the device's `pick` chose, and it came within the Open panel's time
+    /// (`panelLimit`, and `pickSlack` for the crossing) of that pick. Any other offer that says `asked` is asked
+    /// about like the Mac's unasked ones: a Mac's word alone never skips the device's question.
+    public static func askedFor(_ offer: Offer, pick: UInt32?, pickedAt: Double?, now: Double) -> Bool {
+        guard offer.asked, let pick, offer.transfer == pick, let at = pickedAt else { return false }
+        return now - at <= panelLimit + pickSlack
+    }
+
+    /// What a pick's answer may take beyond the panel's own time: the crossing and the reading of sizes.
+    public static let pickSlack = 30.0
+
     // MARK: The Mac answers a device's offer
 
     /// The Mac's answer to a device's offer, first failing wins: Share files with devices off; the session's
@@ -127,12 +151,13 @@ public enum FilePolicy {
     }
 
     /// Another incoming transfer running: `busy`; over `maxFiles` or `maxBytes`: `tooMany`, `tooBig`; files
-    /// this device asked for (`asked`): accept; Ask Before Receiving Files on: ask; else accept.
-    public static func deviceAnswers(_ offer: Offer, receiving: Bool, askBefore: Bool) -> DeviceAnswer {
+    /// this device asked for (`askedFor`, the device's own judgement of the offer's `asked`): accept; Ask Before
+    /// Receiving Files on: ask; else accept.
+    public static func deviceAnswers(_ offer: Offer, receiving: Bool, askBefore: Bool, askedFor: Bool) -> DeviceAnswer {
         if receiving { return .refuse(.busy) }
         if offer.files.count > maxFiles { return .refuse(.tooMany) }
         if offer.total > maxBytes { return .refuse(.tooBig) }
-        if offer.asked { return .accept }
+        if askedFor { return .accept }
         return askBefore ? .ask : .accept
     }
 
@@ -290,10 +315,20 @@ public enum FileFlow {
 
     /// The Mac's own sends to a device: only while its connection holds no more than `idleBytes` of what it
     /// was handed (`pendingBytes`), and never while the device waits for a keyframe or one is still on its
-    /// way to it, so a frame never queues behind more than one part and a keyframe never waits for one.
-    public static func hostMaySend(pendingBytes: Int, needsKeyframe: Bool, keyframesInFlight: Int) -> Bool {
-        pendingBytes <= idleBytes && !needsKeyframe && keyframesInFlight == 0
+    /// way to it, so a frame never queues behind more than one part and a keyframe never waits for one. A
+    /// device waits for a keyframe from its connect until the first comes, and nothing streams at all while
+    /// no source is picked: so the wait holds files only while the picture moves (`sinceFrame`, the seconds
+    /// since the Mac last sent any device a frame, under `keyframeWait`; nil: none since the stream began).
+    public static func hostMaySend(pendingBytes: Int, needsKeyframe: Bool, keyframesInFlight: Int, sinceFrame: Double?) -> Bool {
+        guard pendingBytes <= idleBytes, keyframesInFlight == 0 else { return false }
+        guard needsKeyframe, let since = sinceFrame else { return true }
+        return since >= keyframeWait
     }
+
+    /// How long without a frame to any device before a device's wait for a keyframe no longer holds the Mac's
+    /// files: a moving picture sends frames many times a second, and an asked keyframe comes within 50 ms
+    /// even of a window that shows still (HEVCEncoder.requestKeyframe).
+    public static let keyframeWait = 1.0
 }
 
 // MARK: - The ledger: a transfer at its receiver
