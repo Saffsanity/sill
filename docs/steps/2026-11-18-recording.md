@@ -164,3 +164,15 @@ docs/recording-plan.md (its review of #303, the assessment, is in the handoff fo
     Recording saves the Mac's picture (and, with Send Audio on, its sound) as a movie in Files › On My iPad › Sill ›
     Sill Recordings, after a 3-second count. A red light shows while it records; Sill for Mac's menu says a device
     records."
+- **Found by the rig's first run, fixed in the same run:**
+  - A still window recorded a movie 0.067 s long: AVAssetWriter gives a last sample without a duration one frame's
+    time, not the session's end, and that sample was the pre-roll's keyframe, before 0:00 (a keyframe written at
+    0:00 itself, the older Mac's still case, did last to the end). The plan's fallback is built: each picture is held
+    back until the next one, or the part's end, gives its duration, its sample made then with that duration (not a
+    copy with new timing, which Core Media does not promise keeps the not-sync mark).
+  - The test tone's clicks: AVAssetWriter's AAC keeps the sound sample-exact. Every click of the plain case lay
+    0.09 ms from its whole second of the Mac's clock (moviecheck's first click finder was wrong; read again).
+  - A recording killed 9 s in kept 7.96 s in its fragments; a still window from an older Mac started from its kept
+    keyframe and lasted the 9 s; Starting… against an older Mac asked at 5.0, 9.2 and 13.3 s and gave up with no
+    movie; the space rule stopped a recording 10 s in, its movie whole; a locked Mac's placeholder made a movie of
+    its own between the Desktop's two; the Desktop stepping to another size made "(2)".
