@@ -3,9 +3,10 @@ import CoreGraphics
 // DuoPosture (iOSClient/DuoPosture.swift) on its own: the iPhone Duo's posture and the layout rules
 // that follow from it (docs/iphone-duo-plan.md). What the iOS 27.1 simulator reported, pose by pose,
 // as the inputs; the fold's band; the laptop pose's split at the real fold and open flat's at the
-// picture's shape; the book pose's bar (the right group, the strip, the Settings panel) clear of the
-// fold; a card, the connect column and the pairing overlay on one page; the inferred rules exactly
-// as before iOS 27.1; the harness's stand-in against the device's numbers. Compiled with the file as
+// picture's shape; the book pose's bar (the right group, the strip) clear of the fold (Settings, a
+// panel under the bar until 2026-11-18, keeps off it by itself now: Tests/checks/settings-pane); a card,
+// the connect column and the pairing overlay on one page; the inferred rules exactly as before iOS
+// 27.1; the harness's stand-in against the device's numbers. Compiled with the file as
 // it is:
 //   swiftc -O iOSClient/DuoPosture.swift Tests/checks/duo/main.swift -o .build/checks/duo/check
 var failures = 0, checks = 0
@@ -163,8 +164,8 @@ check(DuoPosture.paneAspect(video: size(1920, 0), fitsWindowToPane: false) == 1.
 // MARK: - The book pose's bar (approved (a))
 
 func bar(_ w: CGFloat, _ fold: FoldInfo, regular: Bool = true, buttons: Int = 5) -> DuoPosture.BookBar {
-    regular ? DuoPosture.bookBar(width: w, fold: fold, padding: 22, gap: 12, buttonWidth: 66, compactButtonWidth: 64, buttons: buttons, panelWidth: 360)
-            : DuoPosture.bookBar(width: w, fold: fold, padding: 14, gap: 12, buttonWidth: 64, compactButtonWidth: 64, buttons: buttons, panelWidth: 340)
+    regular ? DuoPosture.bookBar(width: w, fold: fold, padding: 22, gap: 12, buttonWidth: 66, compactButtonWidth: 64, buttons: buttons)
+            : DuoPosture.bookBar(width: w, fold: fold, padding: 14, gap: 12, buttonWidth: 64, compactButtonWidth: 64, buttons: buttons)
 }
 func groupStart(_ w: CGFloat, _ b: DuoPosture.BookBar, padding: CGFloat = 22, buttons: Int = 5) -> CGFloat {
     w - padding - CGFloat(buttons) * b.buttonWidth - CGFloat(buttons - 1) * b.gap
@@ -172,11 +173,11 @@ func groupStart(_ w: CGFloat, _ b: DuoPosture.BookBar, padding: CGFloat = 22, bu
 // At 951 pt the regular group begins at 551, 55.5 pt past the fold: it keeps its size; the strip
 // ends 12 pt short of the fold.
 let b951 = bar(951, .known(bookFold))
-check(b951 == DuoPosture.BookBar(buttonWidth: 66, gap: 12, stripWidth: 343.5, panelWidth: 360, clears: true), "951: \(b951)")
+check(b951 == DuoPosture.BookBar(buttonWidth: 66, gap: 12, stripWidth: 343.5, clears: true), "951: \(b951)")
 check(groupStart(951, b951) == 551 && 22 + 66 + 12 + b951.stripWidth! + 12 == 455.5, "951: the group at 551, the strip to 443.5")
 // The status bar shown (867 pt): the compact width, then a 7 pt gap: Menus at 497.
 let b867 = bar(867, .known(bookFold))
-check(b867 == DuoPosture.BookBar(buttonWidth: 64, gap: 7, stripWidth: 355.5, panelWidth: 349.5, clears: true), "867: \(b867)")
+check(b867 == DuoPosture.BookBar(buttonWidth: 64, gap: 7, stripWidth: 355.5, clears: true), "867: \(b867)")
 check(groupStart(867, b867) == 497, "867: Menus clears the fold")
 // The approved step alone, where it is enough (885.5 to 895.5 pt).
 let b890 = bar(890, .known(bookFold))
@@ -184,12 +185,12 @@ check(b890.buttonWidth == 64 && b890.gap == 12 && groupStart(890, b890) == 500 &
 let b880 = bar(880, .known(bookFold))
 check(b880.buttonWidth == 64 && b880.gap == 10 && groupStart(880, b880) == 498 && b880.clears, "880: compact, then 10 pt gaps: \(b880)")
 // Nothing to clear: the bar as before.
-let unchanged = DuoPosture.BookBar(buttonWidth: 66, gap: 12, stripWidth: nil, panelWidth: 360, clears: true)
+let unchanged = DuoPosture.BookBar(buttonWidth: 66, gap: 12, stripWidth: nil, clears: true)
 check(bar(951, .inferred) == unchanged && bar(951, .known(nil)) == unchanged, "no fold: as before")
 check(bar(669, .known(laptopFold)) == unchanged, "a fold across: not the book pose's bar")
 check(bar(951, .known(rect(100, 300, 600, 40))) == unchanged, "a fold across, however placed: not the book pose's bar")
 check(bar(951, .known(rect(10, 0, 40, 669))) == unchanged && bar(951, .known(rect(915, 0, 40, 669))) == unchanged, "a fold at the bar's ends: as before")
-check(bar(594, .known(nil), regular: false) == DuoPosture.BookBar(buttonWidth: 64, gap: 12, stripWidth: nil, panelWidth: 340, clears: true), "the cover on its side: as before")
+check(bar(594, .known(nil), regular: false) == DuoPosture.BookBar(buttonWidth: 64, gap: 12, stripWidth: nil, clears: true), "the cover on its side: as before")
 // Too narrow for any step: the strip still ends short of the fold, and it says so.
 let b700 = bar(700, .known(rect(330, 0, 40, 500)))
 check(b700.buttonWidth == 64 && b700.gap == 6 && !b700.clears && 22 + 64 + 6 + b700.stripWidth! + 6 == 330, "700: \(b700)")
@@ -211,8 +212,6 @@ for w in stride(from: CGFloat(700), through: 1400, by: 1) {
             check((regularStart >= band.maxX) == (b.buttonWidth == 66 && b.gap == 12), "\(w) \(buttons): the regular group kept iff it clears")
             check(b.stripWidth! >= 0 && 22 + b.buttonWidth + b.gap + b.stripWidth! + b.gap <= band.minX + 0.001, "\(w): the strip ends short of the fold")
             check(b.stripWidth == 0 || 22 + b.buttonWidth + b.gap + b.stripWidth! + b.gap == band.minX, "\(w): the strip reaches the fold's edge less a gap")
-            check(b.panelWidth <= 360 && (b.panelWidth == 0 || w - 22 - b.panelWidth >= band.maxX - 0.001), "\(w): the panel past the fold")
-            check(b.panelWidth == min(360, w - 22 - band.maxX), "\(w): the panel as wide as it may be")
         }
     }
 }
