@@ -68,6 +68,9 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's Hold to Lock Modifiers (#268; ModifierLock.switchKey): off unless turned on, read by the
+    /// key row's modifier caps (a hold locks), never sent; turned off, the stream screen lets every lock go.
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = ModifierLock.defaultOn
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
@@ -120,6 +123,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `keys`, to the Keys group's title, over Hold to Lock Modifiers and its footnote (#268).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -131,6 +135,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "keys"?: return keysGroupID
         default: return nil
         }
         #else
@@ -138,6 +143,7 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let keysGroupID = "keys"
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
@@ -479,7 +485,7 @@ struct HostSettingsPanel: View {
 
     /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
     /// whatever the Mac is (while settings load, and for a Mac without them). It sends nothing. It
-    /// comes after This iPad's gestures, under their footnote, so it needs no space of its own above
+    /// comes after This iPad's Keys, under their footnote, so it needs no space of its own above
     /// it even while the Mac's settings load.
     @ViewBuilder private var tour: some View {
         Rows {
@@ -677,7 +683,8 @@ struct HostSettingsPanel: View {
     /// with Paste on ‹Mac› Right Away (whether a Paste also presses ⌘V there) and Paste on ‹Mac› (the
     /// system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
-    /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
+    /// gestures, and what each does when the Mac takes them, then Keys (Hold to Lock Modifiers, #268;
+    /// Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
@@ -780,6 +787,29 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        keys
+    }
+
+    /// Keys, this device's key row (#268): Hold to Lock Modifiers, off unless turned on, with what a hold
+    /// does under it (ModifierLock.Copy). Its own group under This iPad, after the gestures: the whole-screen
+    /// Settings (branch settings-pane) puts it there, before Full Screen, with the key row's other switches
+    /// to come. For every Mac: the lock is this device's own, and the Mac sees only the keys it sends.
+    @ViewBuilder private var keys: some View {
+        Text(ModifierLock.Copy.group)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 6)
+            .accessibilityAddTraits(.isHeader)
+            .id(Self.keysGroupID)
+        Rows {
+            Toggle(isOn: $holdToLock) {
+                Text(ModifierLock.Copy.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: ModifierLock.Copy.footnote)
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every

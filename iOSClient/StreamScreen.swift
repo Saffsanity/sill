@@ -202,8 +202,16 @@ struct StreamScreen: View {
     @State private var drawerOpen = false
     @State private var keyboardShown = false
     /// Modifiers held down by the portrait key row until the next key, character or click uses
-    /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
+    /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut: while no key row is on
+    /// screen to show it (on its side, full screen) nothing carries it, and upright again the row shows it
+    /// as it was (ModifierLock.carried, #268).
     @State private var latched: KeyModifiers = []
+    /// The part of `latched` a use does not spend: a modifier locked by a long press on its cap
+    /// (ModifierLock, with Hold to Lock Modifiers on). Lives here with `latched`, for the same reason.
+    @State private var locked: KeyModifiers = []
+    /// Hold to Lock Modifiers (Settings › This iPad › Keys; ModifierLock.switchKey): turned off, every lock
+    /// is let go (ModifierLock.switchedOff).
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = ModifierLock.defaultOn
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
     /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
@@ -356,6 +364,23 @@ struct StreamScreen: View {
         _chrome = State(initialValue: debug.startHidden ? .hidden : .shown)
         _reveal = State(initialValue: debug.startHidden ? debug.reveal : nil)
         _hintShown = State(initialValue: debug.startHidden && debug.hint != .off)
+        // `-SillLocked cmd` and `-SillLatched shift`: the key row's modifiers as a hold and a tap leave them,
+        // so a photo shows a lock and a latch (the harness never touches a cap).
+        let keys = Self.debugModifiers
+        _latched = State(initialValue: keys.latched.union(keys.locked))
+        _locked = State(initialValue: keys.locked)
+    }
+
+    /// DEBUG `-SillLatched` and `-SillLocked`: the modifiers each names (ctrl, opt, cmd and shift, comma
+    /// separated, the caps' own words), latched for their one use and locked (a lock is latched too).
+    private static var debugModifiers: (latched: KeyModifiers, locked: KeyModifiers) {
+        let caps: [String: KeyModifiers] = ["ctrl": .control, "opt": .option, "cmd": .command, "shift": .shift]
+        func read(_ key: String) -> KeyModifiers {
+            (UserDefaults.standard.string(forKey: key) ?? "").split(separator: ",").reduce(into: KeyModifiers()) { set, word in
+                if let flag = caps[word.trimmingCharacters(in: .whitespaces).lowercased()] { set.insert(flag) }
+            }
+        }
+        return (read("SillLatched"), read("SillLocked"))
     }
     #endif
 
@@ -563,6 +588,11 @@ struct StreamScreen: View {
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        // Hold to Lock Modifiers turned off (Settings): every lock on the key row is let go, as a tap on its
+        // cap lets it go; a modifier only latched stays for its one use (ModifierLock.switchedOff, #268).
+        .onChange(of: holdToLock) { _, on in
+            if !on { (latched, locked) = ModifierLock.switchedOff(latched: latched, locked: locked) }
+        }
         // Full screen: the interface comes back by itself whenever something needs it (FullScreenPolicy.mustShow).
         // Shake to Show Controls turned on or off (Settings): Shake to Undo follows while hidden.
         .onChange(of: shakeShowsControls) { _, _ in applyShakeToUndo() }
@@ -1765,7 +1795,7 @@ struct StreamScreen: View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
                              keyboardShown: $keyboardShown,
                              textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                             latched: $latched, overlay: overlay,
+                             latched: $latched, locked: $locked, overlay: overlay,
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              menusOpened: menusOpened, menusClosed: menusClosed,
@@ -1800,7 +1830,10 @@ struct StreamScreen: View {
     }
 
     private func liveContentArea(bar: BarMetrics, screen: CGSize, hidden: Bool, room: CGRect) -> some View {
-        ZStack(alignment: .topLeading) {
+        // A layout on its side has no key row, so nothing typed or clicked in it carries what the portrait
+        // row latched or locked (ModifierLock.carried, #268).
+        let keys = ModifierLock.keyRowOnScreen(upright: false, controlsHidden: hidden, rowDisplaced: false)
+        return ZStack(alignment: .topLeading) {
             Color.black
 
             ZStack {
@@ -1813,8 +1846,9 @@ struct StreamScreen: View {
                              setOwnPointer: { client.setOwnPointer($0, from: $1) },
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
-                             latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] },
+                             latchedModifiers: ModifierLock.carried(latched, keyRowOnScreen: keys),
+                             lockedModifiers: ModifierLock.carried(locked, keyRowOnScreen: keys),
+                             onModifiersConsumed: { latched = ModifierLock.spent(locked: locked) },
                              sendGesture: { client.sendGesture($0, fingers: $1) },
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },

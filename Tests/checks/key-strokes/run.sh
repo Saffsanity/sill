@@ -8,7 +8,9 @@
 # table through some ups; and input with nowhere to land (DroppedInput), of which only the up of a key
 # or a button the Mac has down still goes.
 # KeyChords (iOSClient): what the device sends, a shortcut with its modifiers' own keys around it and
-# a hardware key's up after its down, which leaves nothing held on this Mac or on one from before.
+# a hardware key's up after its down, which leaves nothing held on this Mac or on one from before; and
+# the key row's modifiers (ModifierLock, ModifierHold, #268): a tap latches, a hold locks, and nothing
+# rides a key, a character or a click while no key row is on screen to show it.
 # Scenarios with the exact events, and random sessions against the model's invariant and the check's.
 # Compiled with StreamProtocol's sources as one module (build.sh).
 #   Tests/checks/key-strokes/run.sh             compile and run the check

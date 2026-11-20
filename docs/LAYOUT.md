@@ -772,7 +772,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the key row and the trackpad, at the inner display's size and, for an iPad
   window narrower than 600 pt, the compact one with the key row in two lines;
   and a phone held upright, from `PhonePortraitLayout`; the key row's two sets,
-  twelve and six), `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
+  twelve and six; its modifier caps' hold to lock and their timers, and the
+  picture's input view given the key row's modifiers only while a key row is
+  on screen, ModifierLock), `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
   an iPhone, as rects from the stream screen's size: the picture's fixed 16:10
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
@@ -863,7 +865,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   decided at the down by `KeyTyping` (`characterUsages`; a letter with Caps Lock
   on carries Shift, `carried`), and Esc's key command sent once beside
   pressesBegan; `HeldCap`, the portrait key row's esc, tab and arrows down from
-  a finger's touch to its release, so the Mac repeats them (#162); pure,
+  a finger's touch to its release, so the Mac repeats them (#162); `ModifierLock`,
+  the key row's modifier caps (#268, PR #276): a tap latches one for one use,
+  and with Hold to Lock Modifiers on (`switchKey`, `Sill.holdToLockModifiers`,
+  off unless turned on: Settings › This iPad › Keys) a finger held a second
+  locks it until it is tapped again; what is latched or locked rides a key, a
+  character or a click only while a key row is on screen to show it
+  (`keyRowOnScreen`, `carried`: none on the device's side, in full screen or
+  under the laptop pose's Keyboard toggle, where it is set aside, not
+  forgotten); `used`, what the input view and the trackpad spend; the switch
+  turned off lets every lock go (`switchedOff`); the words, `Copy`;
+  `ModifierHold`, each cap's hold under a finger on its own (its timer, and
+  whether the action at its lift is a tap); pure,
   `Tests/checks/key-strokes` with the
   host's KeyStrokes), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
@@ -917,7 +930,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
   from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs; its last line this app's
+  the footnote, the slow-link callout for older Macs; This iPad's Keys group,
+  Hold to Lock Modifiers (#268); its last line this app's
   version, `VersionLine`), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
