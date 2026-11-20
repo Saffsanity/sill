@@ -89,7 +89,10 @@ Sill has layouts of its own.
   your Mac has for them.
   Pinch the picture to zoom it, up to 5×, around the point between your
   fingers; two fingers move a zoomed picture, and a pinch all the way out
-  shows the whole picture again.
+  shows the whole picture again. Touch Mode, in the settings panel, makes the
+  whole picture your Mac's trackpad instead: drag to move the pointer, tap to
+  click, tap with two fingers to right-click, and drag two fingers to scroll;
+  Apple Pencil still clicks where it touches.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes

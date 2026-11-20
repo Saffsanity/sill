@@ -196,6 +196,8 @@ struct TourFeatures: Equatable {
     var sound: Bool
     /// The Settings panel offers Larger Picture here: an iPhone without a hinge, where it is larger.
     var largerPicture: Bool
+    /// This device's Touch Mode is Trackpad (#178): the picture is a trackpad, over direct touch.
+    var trackpadMode = false
 }
 
 struct TourCopy: Equatable {
@@ -581,6 +583,22 @@ enum TourPolicy {
         let mac = mac.isEmpty ? "your Mac" : mac
         let iPad = device == "iPad"
         switch t {
+        case .touch where features.trackpadMode:
+            // Trackpad mode (TouchMode, #178): the whole picture is a trackpad, so its card says what the
+            // trackpad does there, and the pinch, which zooms nothing while the trackpad lies over the picture,
+            // has no row. On an iPad the Apple Pencil still clicks and drags where it touches (TouchMode.taker:
+            // only a finger is the trackpad's). The two taps share a row, so an iPad's card keeps to six.
+            var direct = features
+            direct.trackpadMode = false
+            let touch = copy(.touch, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: firstOfRun,
+                             keysOnItsSide: keysOnItsSide, thumbnails: thumbnails, features: direct)
+            var rows = [row("hand.point.up.left", [strong("Drag"), plain(" to move the pointer.")]),
+                        row("hand.tap", [strong("Tap"), plain(" to click where the pointer is, or "), strong("tap with two fingers"), plain(" to right-click.")]),
+                        row("hand.draw", [strong("Touch and hold"), plain(", "), strong("then drag"), plain(", to move a window or select text.")]),
+                        row("scroll", [strong("Drag with two fingers"), plain(" to scroll.")])]
+            if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" still clicks and drags where it touches.")])) }
+            rows += touch.rows.filter { $0.symbol == "hand.raised.fingers.spread" }
+            return TourCopy(title: "The Picture Is a Trackpad", subtitle: touch.subtitle, rows: rows, hint: touch.hint)
         case .touch:
             var rows = [row("hand.tap", [strong("Tap"), plain(" to click.")]),
                         row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),

@@ -46,6 +46,7 @@ SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TE
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
+RIG_ONLY=pad Tests/touchrig/run.sh pad && Tests/touchrig/compare.py --pad .build/touchrig/pad.log   # Trackpad mode's pad over the picture at the left edge, full screen's swipe in listening and not (#178)
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Tests/checks/list.sh                    # every check and what it checks, from each folder's README.md (no table is kept by hand)
 Scripts/steps.sh new | list | find 349  # the step files (docs/steps): this branch's, the newest first, a pull request's
@@ -353,7 +354,13 @@ remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
-to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
+to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper;
+`touch` to its Touch Mode row, #178),
+`-Sill.touchMode trackpad` (the device's Touch Mode at Trackpad for one run, in the
+normal app too: the whole picture is the Mac's trackpad in every layout, the on-screen
+trackpad's surface laid over it, which hands the Pencil and iPadOS's pointer on to
+the picture; this device's own arrow shows; the tour's picture card is "The Picture
+Is a Trackpad"; anything else is Direct Touch),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
 run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s

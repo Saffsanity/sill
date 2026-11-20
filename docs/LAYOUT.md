@@ -811,7 +811,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   Mac's caret may move (`forgetTyped`, from `StreamClient.onCaretMayMove`, before
   it goes out: a pick, a launch, a window's button and a menu item follow the
   queued input, `sendAfterInput`), and what came before a Return or a Tab it types
-  made final (`TextComposition.fence`), what was typed kept;
+  made final (`TextComposition.fence`), what was typed kept; in Trackpad mode (#178)
+  the Pencil's touches and a connected trackpad's clicks the pad over the picture
+  hands on, taken where they point as its own (`takePointerTouch`);
   `InputOverlayProxy`, who holds
   the keyboard, carrying out `HardwareKeyboardPolicy`; `HardwareKeyboardMonitor`,
   GameController's keyboard), `TextComposition` (what the input view holds for
@@ -866,9 +868,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   a finger's touch to its release, so the Mac repeats them (#162); pure,
   `Tests/checks/key-strokes` with the
   host's KeyStrokes), `TrackpadView` (the relative pad: its
-  cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
-  `verticalSpan`, a phone's width ÷ 1.6; its two-finger scroll and coast in
-  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test), `StreamZoom` (pinch to zoom on
+  cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers,
+  `WatchesTouchesOnly`; `verticalSpan`, a phone's width ÷ 1.6; its two-finger scroll and coast in
+  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test; in Trackpad mode, #178, the
+  same pad laid over the picture, `overPicture`: its recognizers take fingers alone, it hands the Apple
+  Pencil's touches and a connected trackpad's or mouse's clicks on to the picture's input view
+  (`pointerTouch`) and lets their hover, scrolls and pinch through to it (`point(inside:with:)`), all by
+  `TouchMode.taker`, and a stroke full screen's swipe in held carries its travel, `heldLanding`), `StreamZoom` (pinch to zoom on
   the picture, 1× to 5× around the point between the fingers, Photos-like, and `StreamZoom.Stroke`, which two
   fingers belong to; pure, `Tests/checks/stream-zoom`; `StreamZoomModel` and `ZoomedStreamView` in
   HEVCDisplayView.swift scale the picture inside the pane's clip; StrokeObserver's `onTouch` feeds it; every
@@ -917,7 +923,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
   from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs; its last line this app's
+  the footnote, the slow-link callout for older Macs; This iPad's Touch Mode,
+  Direct Touch | Trackpad, before Reverse Scrolling (#178, `TouchMode`); its last line this app's
   version, `VersionLine`), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
@@ -957,7 +964,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   arrow while the Mac or another device moved it last, this device's own only
   for the portrait trackpad; a kind 26's freshness; the network queue's feed
   with a hand-over's carry-over; the key row keeping what shows; the portrait
-  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301),
+  pad's cursor; `TouchMode` (Touch Mode, #178: Direct Touch or the whole picture as
+  the Mac's trackpad, `Sill.touchMode`, never sent; the pad's arrow in every layout
+  in Trackpad mode, `showsPointer`; who takes what lands on the picture there,
+  `taker`: a finger the pad, the Pencil, a connected trackpad's clicks, hover and
+  scrolls and a pinch the picture; the Settings panel's words); pure,
+  `Tests/checks/pointer-presence`; pbxproj A301/F301),
   `TrackpadGestures` (which stroke on the glass goes silent and which arms,
   the gesture decided as one of its three fingers lifts, and whether it goes
   to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701) and, in
@@ -1159,7 +1171,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   controls shown, every stroke main's exactly; hidden, a swipe in from the
   band brings them and sends nothing, anything else goes on whole and in order
   (`RIG_ONLY=reveal RIG_ORIENT=landscape`: the hidden strokes with the scene
-  on its side, on an iPhone-idiom simulator); `RIG_TRACE=1` logs every
+  on its side, on an iPhone-idiom simulator); `RIG_ONLY=pad` and `compare.py --pad
+  NEW.log`: Trackpad mode's pad laid over the picture (#178) at the left edge, the
+  swipe in listening and not: a swipe in sends nothing, every other stroke what it
+  sends unheld (its pointer's travel too), the pad still answers after a stroke the
+  swipe in held, and nothing reaches the picture under it; `RIG_TRACE=1` logs every
   recognizer's state (and the swipe in's trace). It compiles StreamProtocol
   whole, and DuoPosture.swift, as the surfaces need.
 - `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and

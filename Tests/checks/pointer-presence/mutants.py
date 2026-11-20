@@ -58,14 +58,32 @@ MUTANTS = [
     ("a stroke ignores the anchor", "        if let anchor { cursor = Self.clamped(anchor) }\n", ""),
     ("the pad's cursor unclamped", "cursor = Self.clamped(CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy))",
      "cursor = CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy)"),
+    # TouchMode (issue #178)
+    ("TouchMode defaults to trackpad", "raw.flatMap(TouchMode.init(rawValue:)) ?? .direct", "raw.flatMap(TouchMode.init(rawValue:)) ?? .trackpad"),
+    ("TouchMode read without its case", "raw.flatMap(TouchMode.init(rawValue:)) ?? .direct", "raw.flatMap { TouchMode(rawValue: $0.lowercased()) } ?? .direct"),
+    ("TouchMode.showsPointer ignores trackpad mode in landscape", "isPortrait || mode == .trackpad", "isPortrait"),
+    ("TouchMode.showsPointer ignores portrait in direct mode", "isPortrait || mode == .trackpad", "mode == .trackpad"),
+    # Who takes what lands on the picture in Trackpad mode (the review's decision 4)
+    ("the Pencil kept by the trackpad over the picture", "arrival == .finger ? .trackpad : .picture", "arrival == .finger || arrival == .pencil ? .trackpad : .picture"),
+    ("a connected trackpad's click kept by the trackpad", "arrival == .finger ? .trackpad : .picture", "arrival == .finger || arrival == .pointerClick ? .trackpad : .picture"),
+    ("the pointer's hover kept by the trackpad", "arrival == .finger ? .trackpad : .picture", "arrival == .finger || arrival == .hover ? .trackpad : .picture"),
+    ("the pointer's scroll kept by the trackpad", "arrival == .finger ? .trackpad : .picture", "arrival == .finger || arrival == .scroll ? .trackpad : .picture"),
+    ("a trackpad's pinch kept by the trackpad", "arrival == .finger ? .trackpad : .picture", "arrival == .finger || arrival == .transform ? .trackpad : .picture"),
+    ("a finger handed on to the picture", "arrival == .finger ? .trackpad : .picture", "arrival == .pencil ? .trackpad : .picture"),
+    # The Settings panel's words
+    ("the footnote's iPad sentence on an iPhone", '(device == "iPad" ? " The Apple Pencil', '(device != "" ? " The Apple Pencil'),
+    ("the footnote's iPad sentence on no device", '(device == "iPad" ? " The Apple Pencil', '(device == "iPadOS" ? " The Apple Pencil'),
+    ("the footnote without the pinch", '            + " In Trackpad mode, a pinch doesn’t zoom the picture."\n', ""),
+    ("the footnote without the Mac's name", "works as \\(mac)’s trackpad", "works as the Mac’s trackpad"),
+    ("the footnote's two-finger tap left out", "tap to click, tap with two fingers to right-click, touch", "tap to click, touch"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
-    src = open(F).read()
+    src = open(F, encoding="utf-8").read()
     if src.count(old) != 1:
         print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)"); continue
     with tempfile.TemporaryDirectory() as t:
-        mf = os.path.join(t, "PointerPresence.swift"); open(mf, "w").write(src.replace(old, new, 1))
+        mf = os.path.join(t, "PointerPresence.swift"); open(mf, "w", encoding="utf-8").write(src.replace(old, new, 1))
         exe = os.path.join(t, "c")
         b = subprocess.run(["swiftc", "-O", mf, os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
         if b.returncode != 0 or not os.path.exists(exe):

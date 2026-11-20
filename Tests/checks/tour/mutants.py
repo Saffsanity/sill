@@ -78,12 +78,13 @@ MUTANTS = [
     ("the halves' grown card standing on its targets", "let y = layout == .phone ? max(top, above - h) : top", "let y = max(top, above - h)"),
     ("a phone's card under a smaller room", "if h <= room || (room > above - top && room >= minimumRoom) {", "if h <= room || room >= minimumRoom {"),
     # The words.
-    ("the Pencil row on iPhone", "if iPad { rows.append(row(\"applepencil\"", "if true { rows.append(row(\"applepencil\""),
+    ("the Pencil row on iPhone", "if iPad { rows.append(row(\"applepencil\", [strong(\"Apple Pencil\"), plain(\" works as a mouse.",
+     "if true { rows.append(row(\"applepencil\", [strong(\"Apple Pencil\"), plain(\" works as a mouse."),
     ("the upright row in portrait", "if layout == .landscape {\n                let turn = keysOnItsSide", "if true {\n                let turn = keysOnItsSide"),
     ("a gesture word in a VoiceOver row", "if voiceOver {\n                rows = [row(\"hand.point.up.left\"", "if false {\n                rows = [row(\"hand.point.up.left\""),
     ("the trackpad's rows under VoiceOver", "if !voiceOver {\n                rows.append(row(\"cursorarrow.click.2\"", "if true {\n                rows.append(row(\"cursorarrow.click.2\""),
     ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? subtitle : nil", "subtitle: subtitle"),
-    ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
+    ("one word of the copy changed", "strong(\"Drag\"), plain(\" to scroll.\")", "strong(\"Drag\"), plain(\" to scroll it.\")"),
     ("no Keyboard row on a phone's bar card", "if layout != .portrait {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")",
      "if layout == .landscape {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")"),
     ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
@@ -156,6 +157,21 @@ MUTANTS = [
     ("the swipe row unmarked", 'and sideways between Spaces.")], new: true))', 'and sideways between Spaces.")]))'),
     ("the Menus row unmarked", 'you’re using on \\(mac).")], new: true))', 'you’re using on \\(mac).")]))'),
     ("the hardware keyboard's bar row unmarked", 'strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))', 'strong("Keyboard"), plain(" then brings up the keyboard bar.")]))'),
+    # Trackpad mode's picture card (#178).
+    ("Trackpad mode's card never shown", "case .touch where features.trackpadMode:", "case .touch where false:"),
+    ("Trackpad mode's card without the swipe row", '            rows += touch.rows.filter { $0.symbol == "hand.raised.fingers.spread" }\n', ""),
+    ("Trackpad mode's card with direct touch's pinch row", 'rows += touch.rows.filter { $0.symbol == "hand.raised.fingers.spread" }',
+     'rows += touch.rows.filter { $0.symbol == "hand.raised.fingers.spread" || $0.symbol == "plus.magnifyingglass" }'),
+    ("Trackpad mode's card keeps direct touch's title", 'title: "The Picture Is a Trackpad"', 'title: touch.title'),
+    ("Trackpad mode's card without the Pencil on an iPad", 'if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" still clicks',
+     'if false { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" still clicks'),
+    ("Trackpad mode's Pencil row on an iPhone too", 'if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" still clicks',
+     'if true { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" still clicks'),
+    ("Trackpad mode's two-finger tap left out", 'plain(" to click where the pointer is, or "), strong("tap with two fingers"), plain(" to right-click.")',
+     'plain(" to click where the pointer is.")'),
+    ("Trackpad mode's taps in two rows (seven on an iPad)",
+     'row("hand.tap", [strong("Tap"), plain(" to click where the pointer is, or "), strong("tap with two fingers"), plain(" to right-click.")]),',
+     'row("hand.tap", [strong("Tap"), plain(" to click where the pointer is.")]), row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" to right-click.")]),'),
 ]
 # Larger Picture only while a window streams (Noah, 2026-10-15): the rule is PhonePortraitLayout's
 # (compiled into this check), and the tour's targets, words and places follow it. Each of these

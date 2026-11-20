@@ -3,6 +3,15 @@
 
 usage: compare.py BASE.log NEW.log [OFF.log]
        compare.py --all BASE.log NEW.log     every stroke both logs have but the EDGE ones: the same events
+       compare.py --pad NEW.log              Trackpad mode (TouchMode, #178), within the one log: the trackpad laid over
+                                             the picture (PADOVER), against the left edge. PADOVER REVEAL strokes (the
+                                             swipe in listening, a swipe in from the band) bring the controls and send
+                                             nothing; PADOVER REVEALOFF strokes (listening, anything else) send what their
+                                             PADOVER ON twin (nothing listening) sends, places included: each starts at
+                                             the frame's middle, so a held stroke's pointer must carry its travel, and the
+                                             strokes after one the swipe in held must still be answered (the pad's finger
+                                             counter, made to wait, kept it from resetting); and the picture under the pad
+                                             sends nothing in any of them
        compare.py --edge BASE.log NEW.log    full screen at the left edge (docs/full-screen-plan.md): EDGE ON strokes
                                              (the controls shown, nothing of full screen's listening) send exactly
                                              what main's surfaces send; EDGE REVEAL strokes (hidden, a swipe in from
@@ -41,8 +50,8 @@ def normal(events):
     paces them)."""
     out, coasting = [], False
     for e in events:
-        if e.startswith("[touch]") or e.startswith("[edge]") or e.startswith("[measure]"): continue
-        if re.match(r"\s*\[[TOWB]\.", e): continue      # RIG_TRACE's recognizer states, not events
+        if e.startswith("[touch]") or e.startswith("[edge]") or e.startswith("[measure]") or e.startswith("[pad]"): continue
+        if re.match(r"\s*\[[TOWBP]\.", e): continue     # RIG_TRACE's recognizer states, not events
         who, _, what = e.partition(" send ")
         who = who.strip()
         if not what:
@@ -191,7 +200,7 @@ def edge_main(base, new):
 
 def all_main(base, new):
     fails = checks = 0
-    titles = [t for t in base if t in new and " EDGE " not in t]
+    titles = [t for t in base if t in new and " EDGE " not in t and not t.startswith("PADOVER ")]
     for t in titles:
         a, b = sends(base[t]), sends(new[t])
         checks += 1
@@ -202,12 +211,51 @@ def all_main(base, new):
                 if x != y: print(f"       main's: {x}\n       now:    {y}")
         else:
             print(f"ok   {t} ({len(b)})")
-    missing = [t for t in base if t not in new and " EDGE " not in t]
+    missing = [t for t in base if t not in new and " EDGE " not in t and not t.startswith("PADOVER ")]
     for t in missing: print(f"FAIL {t}: not in the new log")
     print(f"{checks} strokes compared, {fails} differ, {len(missing)} missing")
     sys.exit(1 if fails or missing or checks == 0 else 0)
 
+def pad_main(log):
+    """Trackpad mode's pad over the picture (PADOVER strokes), judged within one log."""
+    fails = checks = 0
+    def check(ok, what):
+        nonlocal fails, checks
+        checks += 1
+        if not ok: fails += 1
+        print(("ok   " if ok else "FAIL ") + what)
+    def differ(a, b):
+        for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):
+            print(f"       unheld: {x}\n       held:   {y}")
+    titles = [t for t in log if t.startswith("PADOVER ")]
+    shown = [t for t in titles if t.startswith("PADOVER ON ")]
+    hidden = [t for t in titles if t.startswith("PADOVER REVEAL")]
+    check(len(shown) >= 12 and len(hidden) >= 15, f"the PADOVER strokes ran ({len(shown)} shown, {len(hidden)} hidden)")
+    # The one hidden stroke whose twin is another stroke: after a swipe in, which sends nothing, a tap and a drag.
+    twins = {"PADOVER REVEALOFF after a swipe in: a tap and a drag right in the middle": "PADOVER ON a tap and a drag right in the middle"}
+    for t in titles:
+        events = log[t]
+        sent = normal(events)
+        began = any(e.strip().startswith("[edge] reveal began") for e in events)
+        check(not any(e.startswith("overlay ") for e in sent), f"{t}: nothing reaches the picture under the pad")
+        if t.startswith("PADOVER ON "):
+            check(not began and any(e.startswith("padover ") for e in sent), f"{t}: the pad's events ({len(sent)})")
+        elif t.startswith("PADOVER REVEAL "):
+            ended = any(e.strip().startswith("[edge] reveal ended") for e in events)
+            check(began and ended and not sent, f"{t}: the swipe in, nothing sent")
+            for e in sent: print(f"       sent: {e}")
+        else:
+            twin = twins.get(t, "PADOVER ON " + t[len("PADOVER REVEALOFF "):])
+            a, b = collapsed(log.get(twin, [])), collapsed(events)
+            ok = twin in log and len(a) > 0 and same(a, b) and (began == (t in twins))
+            check(ok, f"{t}: what the same stroke sends unheld, its places too ({len(b)})")
+            if not ok: differ(a, b)
+    print(f"{checks} checks, {fails} failed")
+    sys.exit(1 if fails or checks == 0 else 0)
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--pad":
+        pad_main(load(sys.argv[2]))
     if len(sys.argv) == 4 and sys.argv[1] in ("--edge", "--all"):
         base, new = load(sys.argv[2]), load(sys.argv[3])
         (edge_main if sys.argv[1] == "--edge" else all_main)(base, new)

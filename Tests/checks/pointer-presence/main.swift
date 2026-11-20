@@ -503,5 +503,49 @@ do {
     check(pad3.cursor == pt(0.50, 0.40), "rest: another device driving on, the finger's move goes on from its latest position")
 }
 
+// MARK: TouchMode (issue #178: Direct Touch, or the whole picture as the Mac's trackpad)
+
+check(TouchMode.defaultsKey == "Sill.touchMode", "TouchMode defaults key")
+check(TouchMode.allCases == [.direct, .trackpad], "TouchMode cases")
+check(TouchMode.direct.rawValue == "direct" && TouchMode.trackpad.rawValue == "trackpad", "what Sill.touchMode holds (`-Sill.touchMode trackpad`)")
+check(TouchMode.direct.title == "Direct Touch" && TouchMode.trackpad.title == "Trackpad", "TouchMode titles")
+check(TouchMode.stored(nil) == .direct && TouchMode.stored("unknown") == .direct && TouchMode.stored("") == .direct
+      && TouchMode.stored("Trackpad") == .direct && TouchMode.stored("direct") == .direct && TouchMode.stored("trackpad") == .trackpad,
+      "TouchMode.stored: Trackpad only for \"trackpad\"; nothing, or anything else, is Direct Touch")
+check(TouchMode.showsPointer(isPortrait: true, mode: .direct) == true
+      && TouchMode.showsPointer(isPortrait: false, mode: .direct) == false
+      && TouchMode.showsPointer(isPortrait: false, mode: .trackpad) == true
+      && TouchMode.showsPointer(isPortrait: true, mode: .trackpad) == true,
+      "TouchMode.showsPointer: the trackpad's arrow in the laptop layouts, and in every layout in Trackpad mode")
+// What the sprite then shows: the picture's trackpad's own pointer in every layout, as the on-screen one's in
+// portrait (StreamScreen hands `showsPointer` to `PointerPresence.portrait`); Direct Touch sideways hides it.
+for (portrait, mode, shows) in [(false, TouchMode.trackpad, true), (true, .trackpad, true), (true, .direct, true), (false, .direct, false)] {
+    let p = presence(.here, own: ownAt, origin: .trackpad, portrait: TouchMode.showsPointer(isPortrait: portrait, mode: mode))
+    check((p.sprite(now: 0) == ownAt) == shows, "the trackpad's pointer with \(mode) \(portrait ? "upright" : "sideways"): \(shows ? "shown" : "hidden")")
+    // The Pencil and a finger elsewhere hide it, as in Direct Touch.
+    check(presence(.here, own: ownAt, origin: .pencil, portrait: TouchMode.showsPointer(isPortrait: portrait, mode: mode)).sprite(now: 0) == nil,
+          "the Pencil's pointer with \(mode): hidden (Q2)")
+}
+
+// Who takes what lands on the picture in Trackpad mode (the review's decision 4): a finger is the trackpad's;
+// the Apple Pencil and a connected trackpad's or mouse's click, hover and scroll, and a trackpad's pinch or
+// rotation, are the picture's own, as in Direct Touch.
+check(TouchMode.Arrival.allCases == [.finger, .pencil, .pointerClick, .hover, .scroll, .transform], "every arrival")
+check(TouchMode.taker(.finger) == .trackpad, "a finger: the trackpad's")
+for arrival in [TouchMode.Arrival.pencil, .pointerClick, .hover, .scroll, .transform] {
+    check(TouchMode.taker(arrival) == .picture, "\(arrival): the picture's, where it points")
+}
+check(TouchMode.Arrival.allCases.filter { TouchMode.taker($0) == .trackpad } == [.finger], "only a finger is the trackpad's")
+
+// The Settings panel's words under Touch Mode (the review's, 2026-11-18), for an iPad and an iPhone.
+let touchWords = "Direct Touch: tap what you want to click. Trackpad: the whole picture works as Mac mini’s trackpad. Drag to move the pointer, tap to click, tap with two fingers to right-click, touch and hold then drag to drag, and drag two fingers to scroll."
+let noPinch = " In Trackpad mode, a pinch doesn’t zoom the picture."
+let pencilAndTrackpad = " The Apple Pencil and a connected trackpad still click where they point."
+check(TouchMode.footnote(mac: "Mac mini", device: "iPad") == touchWords + noPinch + pencilAndTrackpad, "the footnote on an iPad: \(TouchMode.footnote(mac: "Mac mini", device: "iPad"))")
+check(TouchMode.footnote(mac: "Mac mini", device: "iPhone") == touchWords + noPinch, "the footnote on an iPhone: no Pencil, no connected trackpad")
+check(TouchMode.footnote(mac: "the Mac", device: "iPhone").contains("works as the Mac’s trackpad."), "the panel's “the Mac” fallback")
+check(TouchMode.footnote(mac: "Studio", device: "iPad").contains("as Studio’s trackpad") && !TouchMode.footnote(mac: "Studio", device: "iPad").contains("Mac mini"),
+      "the Mac's own name")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

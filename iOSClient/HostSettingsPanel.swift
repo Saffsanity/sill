@@ -82,6 +82,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's Touch Mode on the picture (`TouchMode`, issue #178): Direct Touch unless Trackpad is chosen,
+    /// read by the stream screens at once, never sent.
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// This device's hold before a thumbnail's lights (issue #113, ThumbnailHold): 0.5 s unless changed,
     /// read by every bar's thumbnails at once, never sent. Read for its changes; the length through
     /// `ThumbnailHold.seconds(stored:)`, which takes `-Sill.thumbnailHold 0.3`'s string too.
@@ -120,6 +123,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `touch`, to Touch Mode's row and its footnote (#178).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -131,6 +135,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "touch"?: return touchModeRowID
         default: return nil
         }
         #else
@@ -140,6 +145,7 @@ struct HostSettingsPanel: View {
     private static let gesturesGroupID = "thisDevice"
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
+    private static let touchModeRowID = "touchMode"
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
@@ -670,14 +676,14 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
-    /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
-    /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
-    /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
-    /// with Paste on ‹Mac› Right Away (whether a Paste also presses ⌘V there) and Paste on ‹Mac› (the
-    /// system's Paste control) under it while on, then Reverse Scrolling (for
-    /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
-    /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
+    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an
+    /// iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard, with
+    /// Paste on ‹Mac› Right Away (whether a Paste also presses ⌘V there) and Paste on ‹Mac› (the system's
+    /// Paste control) under it while on, then Touch Mode (#178: Direct Touch, or the picture as the Mac's
+    /// trackpad), then Reverse Scrolling (for every Mac: it only turns this device's own deltas around), then
+    /// how long a thumbnail is held for its window's lights (for every Mac: the thumbnails are this
+    /// device's), then its switch for three-finger gestures, and what each does when the Mac takes them
+    /// (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
@@ -750,6 +756,25 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        // Touch Mode (issue #178, TouchMode): Direct Touch or the whole picture as the Mac's trackpad, this device's
+        // own, never sent; first of the rows about touch (Reverse Scrolling, the thumbnails' hold, the gestures), the
+        // group the review of 2026-11-18 proposes as Touch and Zoom in the whole-screen Settings pane. The control
+        // shows what the stream screens do with what is stored (TouchMode.stored: anything but "trackpad" is Direct
+        // Touch), so a stray value never leaves it with no segment chosen.
+        Rows {
+            AdaptiveRow(title: "Touch Mode", since: nil) {
+                Picker("Touch Mode", selection: Binding(get: { TouchMode.stored(touchModeRaw) },
+                                                        set: { touchModeRaw = $0.rawValue })) {
+                    ForEach(TouchMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+        .id(Self.touchModeRowID)
+        Footnote(text: TouchMode.footnote(mac: mac, device: device))
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)
