@@ -358,7 +358,10 @@ to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls step
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
 run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
 for one run, in the normal app too; the console's `thumbnails: hold 0.3 s` when a bar
-first reads it and at each change), `-Sill.largerPicture 1` (its Larger Picture on for one run,
+first reads it and at each change), `-Sill.followPointer 1` (its Follow the Pointer on for one
+run, in the normal app too: with the picture zoomed, the portrait trackpad's pointer moves it near
+the pane's edges and the pad's travel is divided by the zoom; StreamZoom.FollowPointer, PR #327;
+`-SillSettingsScroll follow` the panel at its switch), `-Sill.largerPicture 1` (its Larger Picture on for one run,
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
 the console's `larger picture: …` line says what the rule made of it;
 `-SillVideoSize WxH` the mock's frame, `-SillLargerPictureToggle <s>[,<s>…]` the

@@ -90,6 +90,9 @@ struct HostSettingsPanel: View {
         _ = storedThumbnailHold
         return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
     }
+    /// This device's switch for Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off
+    /// unless turned on, read by the on-screen trackpad at each move of its pointer, never sent.
+    @AppStorage(StreamZoom.FollowPointer.key) private var followPointer = StreamZoom.FollowPointer.defaultOn
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
@@ -114,6 +117,7 @@ struct HostSettingsPanel: View {
     /// under it; `reverse`, to Reverse Scrolling's switch, so a photo of the panel in the lower half shows
     /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
+    /// `follow`, to Follow the Pointer's switch and its footnote (PR #327).
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
@@ -127,6 +131,7 @@ struct HostSettingsPanel: View {
         case "sound"?: return sendAudioID
         case "mute"?: return muteID
         case "reverse"?: return reverseScrollRowID
+        case "follow"?: return followPointerRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
@@ -141,6 +146,7 @@ struct HostSettingsPanel: View {
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
+    private static let followPointerRowID = "followPointer"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
@@ -682,7 +688,9 @@ struct HostSettingsPanel: View {
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
-    /// streams).
+    /// streams). Follow the Pointer (`StreamZoom.FollowPointer`, PR #327) comes right after Reverse
+    /// Scrolling, for every Mac too: it changes only how this device's trackpad moves its pointer, and the
+    /// zoomed picture with it.
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
@@ -758,6 +766,18 @@ struct HostSettingsPanel: View {
         }
         .id(Self.reverseScrollRowID)
         Footnote(text: Self.reverseScrollFooter(device: device))
+        // Follow the Pointer (PR #327, issue #311; StreamZoom.FollowPointer): off unless turned on, on every
+        // device (the on-screen trackpad shows wherever a portrait layout does: a phone or the iPhone Duo
+        // upright, an iPad's narrow window). Beside Reverse Scrolling, the other row about the trackpad and
+        // the picture; the review of 2026-11-18 puts both in the whole-screen pane's Touch and Zoom group.
+        Rows {
+            Toggle(isOn: $followPointer) {
+                Text(StreamZoom.FollowPointer.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.followPointerRowID)
+        Footnote(text: StreamZoom.FollowPointer.footnote)
         // How long a thumbnail is held before its window's lights show and it can be dragged (issue #113;
         // Noah, 2026-10-29).
         Rows {

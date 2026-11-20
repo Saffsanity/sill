@@ -1,5 +1,7 @@
 """Mutants of StreamZoom.swift (iOSClient): each changes it in one place and must make the check (main.swift)
-fail. Z1-Z7 are the pull request's own (#196, addhumal), on the zoom's arithmetic. usage: mutants.py"""
+fail. Z1-Z7 are the pull request's own (#196, addhumal), on the zoom's arithmetic; F1-F5 #327's own (wedi-dev),
+on the trackpad's follow; F6-F8 and P1-P11 its review's (2026-11-18): the follow's band and edges, and Follow the
+Pointer, the switch over the follow and the pad's slower pointer. usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
@@ -28,6 +30,34 @@ MUTANTS = [
     ("Z14 another pane keeps the offset as it was (another point at the middle)", "offset.width * size.width / pane.width", "offset.width"),
     ("Z15 the visible part as big as the pane", "return CGRect(x: origin.x, y: origin.y, width: size.width / s, height: size.height / s)",
      "return CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height)"),
+    # The trackpad's edge follow.
+    ("F1 no horizontal follow", "offset.width + shift(at.x, span: pane.width)", "offset.width"),
+    ("F2 no vertical follow", "offset.height + shift(at.y, span: pane.height)", "offset.height"),
+    ("F3 small panes lose their middle", "let edge = min(44, span / 4)", "let edge: CGFloat = 44"),
+    ("F4 follow ignores the letterbox origin", "videoRect.minY + point.y * videoRect.height", "point.y * videoRect.height"),
+    ("F5 follow ignores the frame's fitted width", "videoRect.minX + point.x * videoRect.width", "videoRect.minX + point.x * pane.width"),
+    ("F6 the band a fixed 22 pt (the pointer kept closer to the edge)", "let edge = min(44, span / 4)", "let edge = min(22, span / 4)"),
+    ("F7 follow moves the pointer to the band's far side", "return min(span - edge, max(edge, at)) - at", "return span - edge - at"),
+    ("F8 follow past the picture's edge across (the pane uncovered)",
+     "offset = CGSize(width: min(maxX, max(-maxX, offset.width + shift(at.x, span: pane.width))),",
+     "offset = CGSize(width: offset.width + shift(at.x, span: pane.width),"),
+    # Follow the Pointer, the switch over the follow and the pad's step (the review of 2026-11-18).
+    ("P1 Follow the Pointer on by default", "static let defaultOn = false", "static let defaultOn = true"),
+    ("P2 another key (-Sill.followPointer 1 does nothing)", "static let key = \"Sill.followPointer\"", "static let key = \"Sill.followThePointer\""),
+    ("P3 the panel's switch ignored", "case let flag as Bool: return flag", "case let flag as Bool: return flag && defaultOn"),
+    ("P4 a launch argument's string read as YES alone", "case let text as String: return NSString(string: text).boolValue",
+     "case let text as String: return text == \"YES\""),
+    ("P5 on, the pad's step not undone by the zoom (the pointer faster on screen)", "on ? zoom.unzoomedDelta(step) : step", "step"),
+    ("P6 off, the pad's step undone anyway (the slower pointer for everyone)", "on ? zoom.unzoomedDelta(step) : step", "zoom.unzoomedDelta(step)"),
+    ("P7 the picture follows with the switch off", "static func follows(zoom: StreamZoom, on: Bool) -> Bool { on && zoom.isZoomed }",
+     "static func follows(zoom: StreamZoom, on: Bool) -> Bool { zoom.isZoomed }"),
+    ("P8 the picture never follows", "static func follows(zoom: StreamZoom, on: Bool) -> Bool { on && zoom.isZoomed }",
+     "static func follows(zoom: StreamZoom, on: Bool) -> Bool { false }"),
+    ("P9 the picture follows at 1× too", "static func follows(zoom: StreamZoom, on: Bool) -> Bool { on && zoom.isZoomed }",
+     "static func follows(zoom: StreamZoom, on: Bool) -> Bool { on }"),
+    ("P10 the switch's other name", "static let title = \"Follow the Pointer\"", "static let title = \"Follow Pointer\""),
+    ("P11 the words without the slower pointer", "and the trackpad moves the pointer more slowly the further you zoom in.",
+     "and the trackpad moves the pointer as before."),
     # The stroke.
     ("S1 two fingers on a zoomed picture not the picture's at once", "            if owner == .undecided, zoom.isZoomed { owner = .picture }\n", ""),
     ("S2 the pan's start always the Mac's (a pinch whose midpoint moved scrolls)",

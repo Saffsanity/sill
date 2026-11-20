@@ -96,6 +96,10 @@ Sill has layouts of its own.
   up; the Desktop keeps the usual layout. With the virtual display (on unless
   you turn it off in Sill for Mac), your Mac makes a window fill the taller
   picture; with it off, once you set the window's text size with Aa.
+  With Follow the Pointer on, in the settings panel, moving the pointer with
+  the trackpad near an edge of a zoomed picture moves the picture to keep it in
+  view, and zooming in slows the trackpad’s pointer movement in proportion, for
+  finer control.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill pastes what you copied on your device where your Mac's cursor is (with

@@ -219,6 +219,7 @@ struct ContentView: View {
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
+///   `-SillSettingsScroll follow` at its Follow the Pointer switch and its footnote (PR #327).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
 ///   switch and its footnote (#291).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),

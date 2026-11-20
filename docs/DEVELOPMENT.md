@@ -977,6 +977,23 @@ the other layout, Split View or a fold keeps the zoom on the same point of the
 picture; another window or the Desktop gives the whole picture again.
 `iOSClient/StreamZoom.swift` is the rule, checked in `Tests/checks/stream-zoom`.
 
+Follow the Pointer, in the Settings panel's This iPad group (This iPhone on a
+phone; PR #327 by wedi-dev, for issue #311), is off unless turned on
+(`Sill.followPointer`, `StreamZoom.FollowPointer`), the device's own, never sent
+to the Mac. On, while the picture is zoomed, the portrait trackpad's pointer
+moves it: a pointer within 44 pt of the pane's edge (a quarter of a small pane)
+moves the picture just far enough to bring it back inside, stopping at the
+picture's own edges, and the pad's travel is divided by the zoom, so the pointer
+moves as far on screen at 5× as at 1× (a held button's drag too; the pad's
+two-finger scroll is the same either way). Off, both are as before: the picture
+moves only under two fingers, and the pad moves the pointer as far across the
+frame at any zoom. Nothing else moves the picture by itself: a finger on it, the
+Pencil, the iPad's own pointer and the Mac's pointer (kind 26) never do. The
+portrait stream screen gives every trackpad on it the picture's zoom and follow
+(`TrackpadFollow`, in the environment), which `TrackpadSurface.moveCursor` reads
+at each move and follows only with the switch on: the upright pad today, and a
+pad laid over the picture the same way once that one can zoom.
+
 ## Picture in Picture
 
 Settings › This iPad (This iPhone) › Picture in Picture (issue #291, off by
@@ -2387,6 +2404,12 @@ simulator:
   and `SILL_TEST_POINTER_PATH` prints each scroll's deltas, so the switch shows
   in their sign: the drag's and the pad's turn around, the trackpad's and the
   wheel's never.
+- `-Sill.followPointer 1` turns the device's Follow the Pointer on for one run
+  (in the normal app too), and `-SillSettingsScroll follow` opens the Settings
+  panel at its switch. Following itself needs the portrait trackpad's pointer to
+  move over a zoomed picture (`-SillZoom`), which the pad's DEBUG input script
+  does only in a session with a test host on this Mac (`-SillLive 1` or
+  `-SillConnect`, then `-SillInputScript '3 pad 120,0'`).
 - `-Sill.thumbnailHold 0.3` holds the thumbnails' hold at 0.3 s for one run
   (in the normal app too; the stepper's changes are saved for the next run,
   this one keeps 0.3), and `-SillSettingsScroll hold` opens the Settings panel
