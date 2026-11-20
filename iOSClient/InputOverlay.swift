@@ -117,6 +117,24 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private let strokes = StrokeObserver()
     /// The finger pan, for where a scroll that a stroke's silence closes ends.
     private weak var scrollPan: UIPanGestureRecognizer?
+    /// Whether this session's Mac takes a two-finger pinch and turn (`StreamClient.hostPinch`, the window
+    /// list's `pinch`): Pinch's Zoom on ‹Mac› sends them only to a Mac that does (PinchRouting); on any other
+    /// the picture zooms as before. Asked as each stroke begins and as a trackpad's pinch begins.
+    var macTakesPinch: () -> Bool = { false }
+    /// A trackpad connected to an iPad pinching and turning over the picture (iPadOS's transform events, at its
+    /// pointer): the Mac's pinch and turn under Zoom on ‹Mac› (`handlePointerPinch`, `handlePointerRotation`).
+    /// They take no touch at all (`gestureRecognizer(_:shouldReceive:)`), so a click of that trackpad and the
+    /// Apple Pencil are never held back or cancelled by them. Fingers have no recognizer of their own for a
+    /// pinch: the stroke rule decides them (StreamZoom.Stroke, `zoomTouch`).
+    private weak var pointerPinch: UIPinchGestureRecognizer?
+    private weak var pointerRotation: UIRotationGestureRecognizer?
+    /// The Mac's pinch and turn this view has open, and where (a frame fraction): from a stroke of fingers
+    /// (`stroke`, at the place the stroke rule gives) or a connected trackpad (`pointer`, where its pointer was
+    /// as it began). Each gesture's began went out, its ended not yet.
+    private var macPinch = MacPinchSent()
+    /// The trackpad's pinch scale and turn at the last event sent, so each event carries only its own change.
+    private var pointerPinchLast: CGFloat = 1
+    private var pointerRotationLast: CGFloat = 0
     /// The iPad's trackpad (two fingers) or a Magic Mouse, and a mouse's wheel: scroll events over the
     /// picture, which carry no touch (`handleTrackpadScroll`, `handleWheel`).
     private weak var trackpadScroll: UIPanGestureRecognizer?
@@ -197,11 +215,31 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             if mask == .continuous { trackpadScroll = scroll } else { wheelScroll = scroll }
         }
 
+        // A trackpad connected to an iPad pinching or turning over the picture: the Mac's own pinch and turn,
+        // at the pointer, under Pinch's Zoom on ‹Mac› (PinchRouting; Rotate on ‹Mac› for the turn), and nothing
+        // otherwise, as before. iPadOS hands them over as transform events, which only a recognizer allowing
+        // `.indirectPointer` gets; neither takes a touch (`gestureRecognizer(_:shouldReceive:)`), nor would
+        // cancel or delay one it saw, so a click of that trackpad stays the pointer's (`touchesBegan`) and the
+        // Pencil's touches reach this view whole, as "every finger recognizer is direct-touch only" keeps them.
+        let pointerPinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePointerPinch))
+        let pointerRotation = UIRotationGestureRecognizer(target: self, action: #selector(handlePointerRotation))
+        for recognizer in [pointerPinch, pointerRotation] as [UIGestureRecognizer] {
+            recognizer.allowedTouchTypes = pointerOnly
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = self
+            addGestureRecognizer(recognizer)
+        }
+        self.pointerPinch = pointerPinch
+        self.pointerRotation = pointerRotation
+
         // Three fingers or more: a gesture for the Mac, never a click, a right click or a scroll
         // (StrokeObserver, TrackpadGestures). It only watches: it takes no touch from the
         // recognizers above and delays none. Two fingers that pinch, and any two on a zoomed picture,
         // are the picture's (StreamZoom.Stroke, from the same touches): no recognizer of their own, so
-        // nothing of theirs can begin, end or scroll the Mac behind the rule's back.
+        // nothing of theirs can begin, end or scroll the Mac behind the rule's back. Under Pinch's Zoom on
+        // ‹Mac› the same rule makes them the Mac's own pinch, and its turn with Rotate on ‹Mac› (`zoomTouch`).
         scrollPan = pan
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
@@ -313,12 +351,14 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard !strokes.silent else { return }
         if gesture.state == .began {
             zoomStroke.panBegan()
+            sendMacSteps()
             fingerScroll = zoomStroke.scrollsMac
         } else if gesture.state == .ended, !fingerScroll, !scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
             // UIKit let the pan go only at the lift (full screen's swipe in held it there,
             // EdgeRecognizers.releasedAtLift) and ended it without a begin: it begins here, so its end carries the
             // travel (`scrollChanged`).
             zoomStroke.panBegan()
+            sendMacSteps()
             fingerScroll = zoomStroke.scrollsMac
             if fingerScroll {
                 scroll(.began, at: gesture.location(in: self), translation: .zero, velocity: .zero, from: .finger)
@@ -353,13 +393,15 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     /// Every direct touch on the picture, from the stroke observer: who the stroke belongs to, and while
     /// it is the picture's, its pinch, in this view's points (StreamZoom.Stroke). Before there is a
-    /// picture the stroke is judged as ever but nothing zooms.
+    /// picture the stroke is judged as ever but nothing zooms. Under Pinch's Zoom on ‹Mac›, for a Mac that
+    /// takes it (PinchRouting, read as the stroke's first finger lands), a pinch is the Mac's instead, by
+    /// the same rule: its steps go out as the Mac's pinch and turn (`sendMacSteps`), and nothing zooms.
     private func zoomTouch(_ touch: StrokeObserver.Touch) {
         var z = zoom
         var changed = false
         switch touch {
         case .down(let id, let point):
-            zoomStroke.down(id, at: point, zoom: z)
+            zoomStroke.down(id, at: point, zoom: z, target: fingerTarget())
         case .moved(let moves):
             if videoRect.isEmpty {
                 var scratch = z
@@ -371,6 +413,44 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             changed = zoomStroke.up(id, zoom: &z)
         }
         if changed { zoom = z }
+        sendMacSteps()
+    }
+
+    /// What a stroke's pinch is for, as its first finger lands: the picture's zoom, or under Zoom on ‹Mac› for a
+    /// Mac that takes it, the Mac's own pinch, and its turn with Rotate on ‹Mac› (PinchRouting).
+    private func fingerTarget() -> StreamZoom.Stroke.Target {
+        let zoomOnMac = PinchRouting.zoomOnMacStored, takes = macTakesPinch()
+        guard PinchRouting.owner(.fingers, zoomOnMac: zoomOnMac, macTakesPinch: takes) == .mac else { return .picture }
+        return .mac(turns: PinchRouting.turns(.fingers, zoomOnMac: zoomOnMac, rotate: PinchRouting.rotateStored, macTakesPinch: takes))
+    }
+
+    /// The Mac's pinch and turn from the stroke's last step (StreamZoom.Stroke.macSteps), at the stroke's place:
+    /// the point where the fingers landed, as a frame fraction fixed as the first gesture opens. Before there is
+    /// a picture nothing goes, and an end goes only for a gesture whose began did.
+    private func sendMacSteps() {
+        for step in zoomStroke.macSteps {
+            switch step {
+            case .magnify(let phase, let amount): sendMac(.magnify, phase, amount, from: .stroke)
+            case .rotate(let phase, let degrees): sendMac(.rotate, phase, degrees, from: .stroke)
+            }
+        }
+    }
+
+    /// One event of the Mac's pinch or turn, from a stroke of fingers or a connected trackpad, through
+    /// `macPinch` (MacPinchSent.event): a began only with a place on the picture (the stroke's, or the pointer's
+    /// `point`), a change or an end only while its began is out, every event of one gesture at its began's place.
+    /// The first to begin stops a coasting flick and hands this device the pointer, as a scroll does.
+    private func sendMac(_ kind: MacPinchSent.Kind, _ phase: StreamZoom.Stroke.MacStep.Phase, _ value: Double,
+                         from source: MacPinchSent.Source, at point: CGPoint? = nil) {
+        // Only to a Mac that takes the pinch (the window list's `pinch`): one that stopped taking it (another
+        // session) is sent nothing more of what was open.
+        guard macTakesPinch() else { macPinch.forget(); return }
+        let wasOpen = macPinch.isOpen
+        guard let event = macPinch.event(kind, phase, value, from: source, at: { [self] in
+            (point ?? zoomStroke.macAt).flatMap { normalized($0, clamped: true) }
+        }) else { return }
+        if phase == .began, !wasOpen { momentum.stop(); setOwnPointer(nil, .none) }
+        send(event)
     }
 
     /// The iPad's trackpad (two fingers) or a Magic Mouse over the picture: the finger pan's path, at
@@ -493,6 +573,47 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         send(.scroll(x: p.x, y: p.y, dx: Double(dx) * scrollFactor, dy: Double(dy) * scrollFactor))
     }
 
+    // MARK: A connected trackpad's pinch and turn
+
+    /// A trackpad connected to an iPad pinching over the picture: under Zoom on ‹Mac›, for a Mac that takes it
+    /// (`gestureRecognizerShouldBegin`), the Mac's own pinch where iPadOS's pointer is as it begins, each event
+    /// the scale's change since the last. Its end, or a cancel, ends it.
+    @objc private func handlePointerPinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            pointerPinchLast = gesture.scale
+            sendMac(.magnify, .began, 0, from: .pointer, at: gesture.location(in: self))
+        case .changed:
+            let scale = gesture.scale
+            guard scale > 0, pointerPinchLast > 0, scale.isFinite else { return }
+            let amount = Double(scale / pointerPinchLast - 1)
+            pointerPinchLast = scale
+            guard amount != 0 else { return }
+            sendMac(.magnify, .changed, amount, from: .pointer)
+        default:
+            sendMac(.magnify, .ended, 0, from: .pointer)
+        }
+    }
+
+    /// The same trackpad turning, with Rotate on ‹Mac› as well: the Mac's turn, counterclockwise positive as the
+    /// Mac shows it (UIKit's rotation grows clockwise on screen).
+    @objc private func handlePointerRotation(_ gesture: UIRotationGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            pointerRotationLast = gesture.rotation
+            sendMac(.rotate, .began, 0, from: .pointer, at: gesture.location(in: self))
+        case .changed:
+            let rotation = gesture.rotation
+            guard rotation.isFinite else { return }
+            let turn = rotation - pointerRotationLast
+            pointerRotationLast = rotation
+            guard turn != 0 else { return }
+            sendMac(.rotate, .changed, StreamZoom.Stroke.macDegrees(turn), from: .pointer)
+        default:
+            sendMac(.rotate, .ended, 0, from: .pointer)
+        }
+    }
+
     // MARK: Which recognizer may scroll
 
     /// One scroll at a time: none of the finger pan, the trackpad's and the wheel's begins while
@@ -502,13 +623,24 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         if gestureRecognizer === scrollPan || gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll {
             return !scrollGestureOpen
         }
+        // A connected trackpad's pinch and turn: the Mac's under Zoom on ‹Mac› (Rotate on ‹Mac› for the turn), for a
+        // Mac that takes them, and never while a scroll is open (a trackpad's two fingers scroll or pinch, as on a
+        // Mac). Under Zoom Picture they go nowhere, as before (PinchRouting).
+        if gestureRecognizer === pointerPinch || gestureRecognizer === pointerRotation {
+            let zoomOnMac = PinchRouting.zoomOnMacStored, takes = macTakesPinch()
+            let mine = gestureRecognizer === pointerPinch
+                ? PinchRouting.owner(.pointer, zoomOnMac: zoomOnMac, macTakesPinch: takes) == .mac
+                : PinchRouting.turns(.pointer, zoomOnMac: zoomOnMac, rotate: PinchRouting.rotateStored, macTakesPinch: takes)
+            return mine && !scrollGestureOpen
+        }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    /// The pointer's scrolls take scroll events only: no touch at all (UIKit asks this for touches, not
-    /// for scroll events).
+    /// The pointer's scrolls take scroll events only, and a connected trackpad's pinch and turn transform events
+    /// only: no touch at all (UIKit asks this for touches, not for those events).
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !(gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll)
+        !(gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll
+          || gestureRecognizer === pointerPinch || gestureRecognizer === pointerRotation)
     }
 
     /// The pointer's scrolls and its hover run together: the pointer rests over the picture while two
@@ -516,6 +648,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         let scrolls = [trackpadScroll, wheelScroll].compactMap { $0 }
+        // A connected trackpad's pinch and turn run together, one hand's gesture, with the pointer's hover too.
+        let transforms = [pointerPinch, pointerRotation].compactMap { $0 } as [UIGestureRecognizer]
+        if transforms.contains(where: { $0 === gestureRecognizer }) {
+            return transforms.contains { $0 === other } || other === hover
+        }
+        if transforms.contains(where: { $0 === other }) { return gestureRecognizer === hover }
         return (scrolls.contains { $0 === gestureRecognizer } && other === hover)
             || (scrolls.contains { $0 === other } && gestureRecognizer === hover)
     }
@@ -529,6 +667,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         fingerScroll = false
         var z = zoom
         if zoomStroke.silenced(zoom: &z) { zoom = z }
+        sendMacSteps()
         guard scrollGestureOpen else { return }
         scrollGestureOpen = false
         let p = scrollPan.flatMap { normalized($0.location(in: self), clamped: true) } ?? (x: 0.5, y: 0.5)
@@ -2061,6 +2200,9 @@ struct InputOverlay: UIViewRepresentable {
     /// Whether the session's Mac repeats a held key (`StreamClient.hostKeyRepeat`); see
     /// `InputOverlayView.macRepeatsKeys`.
     var macRepeatsKeys: () -> Bool = { false }
+    /// Whether the session's Mac takes a two-finger pinch and turn (`StreamClient.hostPinch`); see
+    /// `InputOverlayView.macTakesPinch`. Before `readZoom`, so the stream screens' calls end as they did.
+    var macTakesPinch: () -> Bool = { false }
     /// The picture's zoom, kept by the stream screen (its StreamZoomModel, which ZoomedStreamView draws):
     /// read for every touch, written while two fingers pinch or move the picture. Nil keeps it in the
     /// view.
@@ -2083,6 +2225,7 @@ struct InputOverlay: UIViewRepresentable {
         uiView.macRepeatsKeys = macRepeatsKeys
         uiView.readZoom = readZoom
         uiView.writeZoom = writeZoom
+        uiView.macTakesPinch = macTakesPinch
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -2091,6 +2234,38 @@ struct InputOverlay: UIViewRepresentable {
             // (a teardown, say), and writing the binding there is a "modifying state during
             // view update" warning waiting to happen.
             DispatchQueue.main.async { isKeyboardShown = shown }
+        }
+    }
+}
+
+// MARK: - The Mac's pinch and turn, as they go out
+
+extension MacPinchSent {
+    /// One step of the Mac's pinch or turn from `source` (PinchRouting's MacPinchSent, which keeps what is open), as
+    /// the wire's event (`InputEvent.magnify`, `.rotate`), or nil when nothing goes: a began needs a place (a frame
+    /// fraction, from `place`: nil when there is nowhere, and then nothing goes) unless `source` has a gesture open,
+    /// whose place it joins; a change or an end goes only while its began is out, at its place. For the picture's
+    /// input view and for a trackpad of Sill's own alike.
+    mutating func event(_ kind: Kind, _ phase: StreamZoom.Stroke.MacStep.Phase, _ value: Double, from source: Source,
+                        at place: () -> (x: Double, y: Double)?) -> InputEvent? {
+        let at: (x: Double, y: Double)
+        switch phase {
+        case .began:
+            guard let p = self.place(source) ?? place() else { return nil }
+            at = p
+            began(kind, source, at: p)
+        case .changed:
+            guard let p = self.at(kind, source) else { return nil }
+            at = p
+        case .ended:
+            guard let p = self.at(kind, source) else { return nil }
+            at = p
+            ended(kind)
+        }
+        let wire: PinchPhase = phase == .began ? .began : phase == .changed ? .changed : .ended
+        switch kind {
+        case .magnify: return .magnify(wire, x: at.x, y: at.y, amount: value)
+        case .rotate: return .rotate(wire, x: at.x, y: at.y, degrees: value)
         }
     }
 }

@@ -82,7 +82,9 @@ device keeps working with Macs from the first public build on, or each says why
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
   `InputEvent` case, scroll phase or window command goes only to a host that said it takes it (a
   kind or a field only newer hosts send), and a gesture ends with a scroll phase the first build
-  knows.
+  knows. So a two-finger pinch and turn (`InputEvent.magnify` and `.rotate` with their `PinchPhase`,
+  PR #261) go only to a host whose window list says `pinch` 1 or more, and a device whose Mac does not
+  say it zooms its picture instead; they join the list above once a public build carries them.
 - A device is refused, never served wrong. A host that can no longer serve older devices raises
   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
   before anything else. A device from 2026-09-25 on that receives it shows the host's message word

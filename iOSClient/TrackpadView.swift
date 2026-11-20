@@ -107,6 +107,7 @@ struct TrackpadView: UIViewRepresentable {
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
+        uiView.macTakesPinch = context.environment.macTakesPinch
     }
 }
 
@@ -155,6 +156,18 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private var cursor: CGPoint { pad.cursor }
     /// Counts the fingers on the pad for `onFingers`, whatever the other recognizers take.
     private let fingerCounter = FingerCounter(target: nil, action: nil)
+    /// Whether this session's Mac takes a two-finger pinch and turn (the stream screen's say, `macTakesPinch` in
+    /// the environment): under Pinch's Zoom on ‹Mac› the pad's pinch goes to it, where the pointer is (PinchRouting).
+    var macTakesPinch = false
+    /// Two fingers on the pad under Zoom on ‹Mac›: the picture's one rule decides whether they scroll, as ever, or
+    /// pinch, and with Rotate on ‹Mac› turn, on the Mac where the pointer is (StreamZoom.Stroke, `Target.mac`;
+    /// `pinchTouch`). Under Zoom Picture its answer is never asked, and two fingers scroll as before.
+    private var pinchStroke = StreamZoom.Stroke()
+    /// What the pad's pinch and turn have open on the Mac, where the pointer was as they began (MacPinchSent).
+    private var pinchSent = MacPinchSent()
+    /// The stroke under way sent the Mac a pinch or a turn: its two fingers' lift is no right click
+    /// (`handleTwoFingerTap`). Cleared as the next stroke's first finger lands.
+    private var pinchedThisStroke = false
 
     /// How far the pointer travels for a full swipe across the pad. The client does not know the
     /// Mac's size, so a real trackpad's pt-for-pt acceleration is not available to copy; 1.25
@@ -257,6 +270,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         // (StrokeObserver, TrackpadGestures). It only watches, as the counter does; no stroke goes
         // silent while the press-and-hold drag holds the button, which must still come up.
         strokes.holding = { [weak self] in self?.dragging ?? false }
+        // Every finger of a stroke, for whether two of them pinch for the Mac (`pinchTouch`).
+        strokes.onTouch = { [weak self] touch in self?.pinchTouch(touch) }
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in self?.gestureDecided(gesture, fingers: fingers) }
         addGestureRecognizer(strokes)
@@ -346,7 +361,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             panTouches = gesture.numberOfTouches
             if panTouches >= 2 {
                 lastTranslation = .zero
-                beginScroll()
+                twoFingersBegan()
             } else {
                 // The pan has already held back its ~10 pt of hysteresis. Rebase past it, and if
                 // this stroke is the pan's to drive, move by it now instead of as a jump on the
@@ -364,7 +379,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 panTouches = gesture.numberOfTouches
                 lastTranslation = translation
                 if panTouches >= 2, !scrolling {
-                    beginScroll()
+                    twoFingersBegan()
                 } else if panTouches < 2, scrolling {
                     // Fingers rarely lift together, so this is usually the flick's lift-off.
                     endScroll(momentumVelocity: scrollVelocity)
@@ -377,7 +392,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             if panTouches >= 2 { scrollVelocity = gesture.velocity(in: self) }
             guard dx != 0 || dy != 0 else { return }
             if panTouches >= 2 {
-                scroll(dx: dx, dy: dy)
+                // Two fingers the Mac's pinch scroll nothing (`twoFingersBegan`).
+                if scrolling { scroll(dx: dx, dy: dy) }
             } else if !trackerDriving {
                 moveCursor(dx: dx, dy: dy)
             }
@@ -488,7 +504,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 
     /// Two fingers is the right button, the way a Mac trackpad's secondary click works.
     @objc private func handleTwoFingerTap() {
-        guard !strokes.silent else { return }
+        guard !strokes.silent, !pinchedThisStroke else { return }
         click(down: .rightDown, up: .rightUp)
     }
 
@@ -525,6 +541,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// `chordTravel`); nothing else of the stroke goes out but its gesture.
     private func strokeSilenced() {
         if scrolling { endScroll(momentumVelocity: nil) }
+        // A pinch or turn the stroke had open on the Mac ends where it is.
+        var none = StreamZoom()
+        pinchStroke.silenced(zoom: &none)
+        sendPadPinch()
     }
 
     /// The stroke's gesture, decided as one of its three fingers lifts: to the Mac, with a light tick
@@ -532,6 +552,70 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// gesture is not a keystroke.
     private func gestureDecided(_ gesture: TrackpadGestures.Gesture, fingers: Int) {
         if sendGesture(gesture, fingers) { clickHaptic.impactOccurred(intensity: 0.7) }
+    }
+
+    // MARK: - A pinch for the Mac
+
+    /// Every finger of a stroke, from the stroke observer, to the picture's one rule (`pinchStroke`), with the pad's
+    /// own points: the pad zooms no picture, so the rule only says whether two fingers scroll or pinch for the Mac.
+    /// What a pinch is for is taken as the stroke's first finger lands (`padTarget`).
+    private func pinchTouch(_ touch: StrokeObserver.Touch) {
+        var none = StreamZoom()
+        switch touch {
+        case .down(let id, let point):
+            if pinchStroke.fingers == 0 { pinchedThisStroke = false }
+            pinchStroke.down(id, at: point, zoom: none, target: padTarget())
+        case .moved(let moves): pinchStroke.moved(moves, zoom: &none, in: bounds.size)
+        case .up(let id), .cancelled(let id): pinchStroke.up(id, zoom: &none)
+        }
+        sendPadPinch()
+    }
+
+    /// The Mac's own pinch, and its turn with Rotate on ‹Mac›, under Zoom on ‹Mac› for a Mac that takes it
+    /// (PinchRouting, `.pad`); otherwise `.picture`, which the pad never asks about: its two fingers scroll.
+    private func padTarget() -> StreamZoom.Stroke.Target {
+        let zoomOnMac = PinchRouting.zoomOnMacStored
+        guard PinchRouting.owner(.pad, zoomOnMac: zoomOnMac, macTakesPinch: macTakesPinch) == .mac else { return .picture }
+        return .mac(turns: PinchRouting.turns(.pad, zoomOnMac: zoomOnMac, rotate: PinchRouting.rotateStored, macTakesPinch: macTakesPinch))
+    }
+
+    /// The pan saw two fingers: the Mac's scroll, as ever, unless the stroke is the Mac's pinch, which the rule
+    /// decides as the pan begins if it has not already (a pinch's spacing, or turn, more than its midpoint moved);
+    /// a pinch scrolls nothing, and the pointer stays where it is.
+    private func twoFingersBegan() {
+        if pinchStroke.target != .picture {
+            pinchStroke.panBegan()
+            sendPadPinch()
+            guard pinchStroke.scrollsMac else { trackSuspended = true; return }
+        }
+        beginScroll()
+    }
+
+    /// The rule's last steps, out to the Mac as its pinch and turn where the pointer is (`cursor`, caught up as each
+    /// begins: MacPinchSent.event), as the Mac's own trackpad has them. The first to begin stops a coast, as a new
+    /// scroll does, and shows this device's pointer there.
+    private func sendPadPinch() {
+        guard !pinchStroke.macSteps.isEmpty else { return }
+        guard macTakesPinch else { pinchSent.forget(); return }
+        for step in pinchStroke.macSteps {
+            let wasOpen = pinchSent.isOpen
+            let here: () -> (x: Double, y: Double)? = { [self] in
+                catchUp()
+                return (Double(cursor.x), Double(cursor.y))
+            }
+            let event: InputEvent?
+            switch step {
+            case .magnify(let phase, let amount): event = pinchSent.event(.magnify, phase, amount, from: .stroke, at: here)
+            case .rotate(let phase, let degrees): event = pinchSent.event(.rotate, phase, degrees, from: .stroke, at: here)
+            }
+            guard let event else { continue }
+            if !wasOpen {
+                momentum.stop()
+                setPointer(cursor)
+            }
+            pinchedThisStroke = true
+            send(event)
+        }
     }
 
     /// The click itself carries no position beyond the cursor and no modifiers: pointer events have
@@ -760,3 +844,19 @@ extension TrackpadSurface {
     }
 }
 #endif
+
+// MARK: - Whether the Mac takes a pinch
+
+/// Whether this session's Mac takes a two-finger pinch and turn (`StreamClient.hostPinch`, the window list's `pinch`;
+/// PinchRouting), as the stream screen says it to every trackpad under it, the upright pad and Trackpad mode's over
+/// the picture alike (`TrackpadView` hands it to its surface at each update). False without one.
+private struct MacTakesPinchKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var macTakesPinch: Bool {
+        get { self[MacTakesPinchKey.self] }
+        set { self[MacTakesPinchKey.self] = newValue }
+    }
+}

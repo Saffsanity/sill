@@ -1013,6 +1013,43 @@ docs/picture-in-picture-plan.md has the plan, what Apple documents and does not,
 the open questions and the device tests. Its console lines (DEBUG) start with
 `pip:`.
 
+## A pinch and a turn for the Mac
+
+Settings › This iPad (This iPhone) › Pinch (issue #260, PR #261 by mrandika, and
+its review of 2026-11-18): Zoom Picture, the default, is the pinch zoom above,
+and nothing goes to the Mac. Zoom on ‹Mac› sends a pinch to the Mac as its own
+trackpad's magnify gesture, so Maps, Safari or Preview zoom their own content:
+fingers on the picture at the point where they landed (the Mac's pointer goes
+there first, as apps zoom about it), two fingers on the on-screen trackpad and
+a trackpad connected to an iPad where the pointer is. Rotate on ‹Mac›, a switch
+under it, off unless turned on, sends two fingers turning as the Mac's rotate
+gesture too (Preview, Photos, Maps). Both are the device's own, never sent.
+Under Zoom on ‹Mac› the picture never zooms; a zoom made before is undone as the
+choice changes. Who a stroke of fingers belongs to is the pinch zoom's one rule:
+two fingers scroll unless they pinch (or, with the turn on, turn) first, and a
+stroke is the Mac's scroll or its pinch, never both. A connected trackpad's pinch
+and turn are iPadOS's transform events, which carry no touch, so its clicks and
+the Apple Pencil are never held back by them.
+
+The Mac gets `InputEvent.magnify` and `InputEvent.rotate` (kind 8) only when its
+window list says `pinch` 1 or more; a Mac before it shows the row dimmed, the
+picture zooming there whatever is stored, with "Update Sill on ‹Mac› to send
+pinches to its apps." On the Mac each is the window server's gesture event (type
+29; subtype 8 with the magnification in field 113, subtype 5 with the degrees in
+field 114; the phase in field 132), private numbers that AppKit reads: the
+magnify's were tried on macOS 27.2 by the PR's author, the rotate's wait for a
+device test. A gesture left open (a device that dropped off) ends after a
+second, and at the host's end.
+
+`iOSClient/PinchRouting.swift` (who a pinch belongs to, the switches, the rows'
+words, `MacPinchSent`) is checked in `Tests/checks/pinch-routing`; the stroke's
+rule for the Mac (`StreamZoom.Stroke.Target.mac`) in `Tests/checks/stream-zoom`;
+the Mac's side, `Sources/SillHost/PinchGestures.swift`, in
+`Tests/checks/pinch-gestures`. `-Sill.pinchZoomsMac 1` and `-Sill.rotateOnMac 1`
+set the switches for one run, `-SillSettingsScroll pinch` opens the panel at
+them, and a synthetic host's input log (`SILL_TEST_INPUT_LOG=1`) prints each
+gesture event it would post: `Test input: magnify 0.05 (phase 2) at 756,474`.
+
 ## A hardware keyboard and trackpad on the device
 
 With a keyboard attached to the iPhone or iPad (a Magic Keyboard, a Smart

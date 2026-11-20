@@ -578,6 +578,42 @@ do {
           ScrollDirection.Source.allCases.allSatisfy { s in [false, true].allSatisfy { abs(ScrollDirection.factor(s, reversed: $0)) == 1 } })
 }
 
+// MARK: - A two-finger pinch and turn (#261): InputEvent.magnify and .rotate, PinchPhase, WindowList.pinch
+
+for (phase, amount) in [(PinchPhase.began, 0.0), (.changed, 0.05), (.changed, -0.2), (.ended, 0.0)] {
+    let event = InputEvent.magnify(phase, x: 0.25, y: 0.75, amount: amount)
+    check("magnify \(phase.rawValue) \(amount) round-trips", Wire.decode(InputEvent.self, from: Wire.encode(event)) == event)
+}
+for (phase, degrees) in [(PinchPhase.began, 0.0), (.changed, 4.5), (.changed, -12.25), (.ended, 0.0)] {
+    let event = InputEvent.rotate(phase, x: 0.5, y: 0.125, degrees: degrees)
+    check("rotate \(phase.rawValue) \(degrees) round-trips", Wire.decode(InputEvent.self, from: Wire.encode(event)) == event)
+}
+check("magnify: kind 8 carries it as JSON a host decodes",
+      Wire.decode(InputEvent.self, from: Data(#"{"magnify":{"_0":"changed","x":0.5,"y":0.5,"amount":0.05}}"#.utf8))
+        == .magnify(.changed, x: 0.5, y: 0.5, amount: 0.05))
+check("rotate: kind 8 carries it as JSON a host decodes",
+      Wire.decode(InputEvent.self, from: Data(#"{"rotate":{"_0":"began","x":0.25,"y":1,"degrees":-3}}"#.utf8))
+        == .rotate(.began, x: 0.25, y: 1, degrees: -3))
+check("magnify and rotate: the JSON's keys are the floor's names (magnify, rotate, _0, x, y, amount, degrees)",
+      String(decoding: Wire.encode(InputEvent.magnify(.ended, x: 0, y: 0, amount: 0)), as: UTF8.self).hasPrefix(#"{"magnify":{"#)
+      && String(decoding: Wire.encode(InputEvent.rotate(.ended, x: 0, y: 0, degrees: 0)), as: UTF8.self).hasPrefix(#"{"rotate":{"#)
+      && ["\"_0\":\"ended\"", "\"x\":0", "\"y\":0", "\"degrees\":0"].allSatisfy { String(decoding: Wire.encode(InputEvent.rotate(.ended, x: 0, y: 0, degrees: 0)), as: UTF8.self).contains($0) }
+      && String(decoding: Wire.encode(InputEvent.magnify(.ended, x: 0, y: 0, amount: 0)), as: UTF8.self).contains("\"amount\":0"))
+check("a phase a device does not send is refused whole", Wire.decode(InputEvent.self, from: Data(#"{"rotate":{"_0":"cancelled","x":0.5,"y":0.5,"degrees":1}}"#.utf8)) == nil
+      && Wire.decode(InputEvent.self, from: Data(#"{"magnify":{"_0":"momentumBegan","x":0.5,"y":0.5,"amount":0}}"#.utf8)) == nil)
+check("PinchPhase: began, changed, ended, as NSEvent's gestures", [PinchPhase.began, .changed, .ended].map(\.rawValue) == ["began", "changed", "ended"])
+check("magnify and rotate: other events are untouched",
+      Wire.decode(InputEvent.self, from: Wire.encode(InputEvent.scroll(x: 0.1, y: 0.2, dx: 0.3, dy: 0.4)))
+        == .scroll(x: 0.1, y: 0.2, dx: 0.3, dy: 0.4))
+var pinchList = WindowList(macName: "Mac", windows: [], active: .desktop)
+check("pinch: a window list without it says nil (a host before it), and has no key for it", pinchList.pinch == nil
+      && Wire.decode(WindowList.self, from: Wire.encode(pinchList))?.pinch == nil
+      && !String(decoding: Wire.encode(pinchList), as: UTF8.self).contains("pinch"))
+pinchList.pinch = Pinch.generation
+check("pinch: a window list carries the generation as \"pinch\"", Wire.decode(WindowList.self, from: Wire.encode(pinchList))?.pinch == 1
+      && String(decoding: Wire.encode(pinchList), as: UTF8.self).contains(#""pinch":1"#))
+check("pinch: generation 1 is both gestures", Pinch.generation == 1)
+
 // MARK: - Aa's detents (issue #179): Off is a detent of its own, and leaving it for a scale or back is a fit
 check("text scale: with Off offered the ruler is Off, 0.5, 0.75, 1, 1.25, 1.5", TextScale.detents(offered: true) == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
 check("text scale: without Off (the virtual display) it is the five scales", TextScale.detents(offered: false) == [0.5, 0.75, 1.0, 1.25, 1.5])

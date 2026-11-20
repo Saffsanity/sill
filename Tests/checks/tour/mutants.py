@@ -153,6 +153,12 @@ MUTANTS = [
     ("VoiceOver reads a New row without its mark", "?? all.map(\\.text).joined())", "?? spans.map(\\.text).joined())"),
     ("the pinch row unmarked", 'one finger still taps, holds and drags on \\(mac).")], new: true))', 'one finger still taps, holds and drags on \\(mac).")]))'),
     ("the pinch row on iPad only", PINCH, "if iPad { " + PINCH + " }"),
+    # Pinch's Zoom on ‹Mac› and Rotate on ‹Mac› (PR #261).
+    ("the Mac's pinch row never shown", "            if features.pinchOnMac {\n", "            if false {\n"),
+    ("the turn's words without Rotate on Mac", 'rows.append(row("plus.magnifyingglass", features.rotateOnMac', 'rows.append(row("plus.magnifyingglass", features.pinchOnMac'),
+    ("the Mac's pinch row unmarked", 'on \\(mac), as its trackpad would.")], new: true))', 'on \\(mac), as its trackpad would.")]))'),
+    ("the Mac's pinch row says the picture's words", 'plain(" to zoom what’s under your fingers on \\(mac), as its trackpad would.")',
+     'plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on \\(mac).")'),
     ("the swipe row unmarked", 'and sideways between Spaces.")], new: true))', 'and sideways between Spaces.")]))'),
     ("the Menus row unmarked", 'you’re using on \\(mac).")], new: true))', 'you’re using on \\(mac).")]))'),
     ("the hardware keyboard's bar row unmarked", 'strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))', 'strong("Keyboard"), plain(" then brings up the keyboard bar.")]))'),
