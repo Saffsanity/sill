@@ -1,0 +1,88 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.30,0.55,1.00,1.0",
+      "display-p3:0.12,0.22,0.70,1.0"
+    ]
+  },
+  "groups": [
+    {
+      "name": "Window",
+      "layers": [
+        {
+          "name": "window",
+          "image-name": "window.svg",
+          "glass": false
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "Phone",
+      "layers": [
+        {
+          "name": "island",
+          "image-name": "island.svg",
+          "glass": false
+        },
+        {
+          "name": "phone",
+          "image-name": "phone.svg",
+          "glass": true
+        },
+        {
+          "name": "phone-screen",
+          "image-name": "phone-screen.svg",
+          "glass": false
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.2
+      }
+    },
+    {
+      "name": "Mac",
+      "layers": [
+        {
+          "name": "slot",
+          "image-name": "slot.svg",
+          "glass": false
+        },
+        {
+          "name": "mac",
+          "image-name": "mac.svg",
+          "glass": true
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}
