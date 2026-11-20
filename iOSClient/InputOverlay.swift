@@ -1022,30 +1022,87 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         return command
     }
 
-    /// This view takes Esc: it is first responder (it holds the keyboard), and no EscapeKey is on screen
-    /// in its window (the tour, the pairing overlay, the Settings panel, whose Esc closes them). Only its
-    /// own window's: Settings open in another Sill window, behind this one, never sees a key pressed
-    /// here. A leaf view is in the responder chain only while it is first responder, so this says again
-    /// what the chain does.
+    /// Key commands for the `⌘` shortcuts of `ForwardedKeys.shortcutCommandKeys` (`⌘W`, `⌘C`, `⌘V`, `⌘X`,
+    /// `⌘Z`, `⌘A`, `⌘F`, `⌘,` and the rest), each with the eight combinations of ⇧, ⌃ and ⌥, asking for
+    /// priority over the focus and text-editing systems: on a Mac running the iPad app, whose own menu bar
+    /// may take them before `pressesBegan` (issue #129; `claimsShortcuts`). Sent once through
+    /// `ForwardedKeys.commanded`, whichever channel delivers the press. No title: in no menu and no list
+    /// of shortcuts. No automatic localization or mirroring: a command fires only for the character it
+    /// names, the one `shortcutCommandKeys` gives a key for, never for another key UIKit would move it to
+    /// on a layout without that character.
+    private static let shortcutCommands: [UIKeyCommand] = ForwardedKeys.shortcutCommandKeys.flatMap { entry in
+        (0..<8).map { mask in
+            var flags: UIKeyModifierFlags = [.command]
+            for (bit, flag) in [UIKeyModifierFlags.shift, .control, .alternate].enumerated() where mask & (1 << bit) != 0 {
+                flags.insert(flag)
+            }
+            let command = UIKeyCommand(input: entry.input, modifierFlags: flags,
+                                       action: #selector(InputOverlayView.shortcutKeyCommand(_:)))
+            command.wantsPriorityOverSystemBehavior = true
+            command.allowsAutomaticLocalization = false
+            command.allowsAutomaticMirroring = false
+            return command
+        }
+    }
+
+    /// Whether this view claims the `⌘` shortcuts with key commands (`shortcutCommands`): on a Mac running
+    /// the iPad app. On an iPad they reach `pressesBegan` as they are (docs/menu-bar-plan.md, "Why the
+    /// device never registers the Mac's shortcuts as key commands"), which keeps the key pressed and the
+    /// Mac's own repeat for a held one. DEBUG `-SillMacKeyCommands 0|1` says so for a run instead, so a Mac
+    /// can show which channel takes each shortcut with them and without them (the `hwkey:` lines).
+    private static let claimsShortcuts: Bool = {
+        #if DEBUG
+        let said = UserDefaults.standard.string(forKey: "SillMacKeyCommands")
+        let claims = said.map { $0 == "1" } ?? ProcessInfo.processInfo.isiOSAppOnMac
+        print("keyboard: the ⌘ shortcuts' key commands " + (claims ? "on" : "off")
+              + (ProcessInfo.processInfo.isiOSAppOnMac ? " (a Mac running the iPad app)" : " (not a Mac)")
+              + (said != nil ? ", as -SillMacKeyCommands says" : ""))
+        return claims
+        #else
+        return ProcessInfo.processInfo.isiOSAppOnMac
+        #endif
+    }()
+
+    /// This view takes Esc and priority `⌘` shortcuts: it is first responder (it holds the keyboard), and
+    /// no EscapeKey is on screen in its window (the tour, the pairing overlay, the Settings panel, whose
+    /// Esc closes them). Only its own window's: Settings open in another Sill window, behind this one,
+    /// never sees a key pressed here. A leaf view is in the responder chain only while it is first
+    /// responder, so this says again what the chain does.
     private var takesEscape: Bool { isFirstResponder && !composition.isComposing && !EscapeKey.onScreen(in: window) }
 
     override var keyCommands: [UIKeyCommand]? {
         guard takesEscape else { return super.keyCommands }
-        return (super.keyCommands ?? []) + Self.escapeCommands
+        return (super.keyCommands ?? []) + Self.escapeCommands + (Self.claimsShortcuts ? Self.shortcutCommands : [])
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(InputOverlayView.escapeKeyCommand(_:)) { return takesEscape }
+        if action == #selector(InputOverlayView.escapeKeyCommand(_:))
+            || action == #selector(InputOverlayView.shortcutKeyCommand(_:)) {
+            return takesEscape
+        }
         return super.canPerformAction(action, withSender: sender)
     }
 
     /// Esc to the Mac, down and up at once with the command's modifiers, through `ForwardedKeys` as a
     /// pressed key goes; nothing when its press came first (its own up follows).
     @objc private func escapeKeyCommand(_ command: UIKeyCommand) {
+        sendKeyCommand(usage: HIDKey.escape, modifiers: UInt64(command.modifierFlags.rawValue))
+    }
+
+    /// A `⌘` shortcut to the Mac (#129), down and up at once with the command's modifiers, as the key a US
+    /// keyboard types its character with (`ForwardedKeys.shortcutCommandKeys`), through `ForwardedKeys` as
+    /// a pressed key goes; nothing when its press came first (its own key, and its own up, follow).
+    @objc private func shortcutKeyCommand(_ command: UIKeyCommand) {
+        guard let usage = ForwardedKeys.shortcutUsage(forInput: command.input) else { return }
+        sendKeyCommand(usage: usage, modifiers: UInt64(command.modifierFlags.rawValue),
+                       via: "keyCommand \"\(command.input ?? "")\"")
+    }
+
+    /// A key command's key to the Mac, down and up at once; `via`, the channel the `hwkey:` line names.
+    private func sendKeyCommand(usage: UInt16, modifiers: UInt64, via channel: String = "keyCommand") {
         guard takesEscape else { return }
-        let modifiers = UInt64(command.modifierFlags.rawValue)
-        let events = forwarded.commanded(HIDKey.escape, modifiers: modifiers, at: ProcessInfo.processInfo.systemUptime)
-        Self.hwkey(HIDKey.escape, down: true, via: "keyCommand", modifiers: modifiers,
+        let events = forwarded.commanded(usage, modifiers: modifiers, at: ProcessInfo.processInfo.systemUptime)
+        Self.hwkey(usage, down: true, via: channel, modifiers: modifiers,
                    to: events.isEmpty ? "already down through pressesBegan" : "to the Mac")
         guard !events.isEmpty else { return }
         setOwnPointer(nil, .none)
@@ -1555,7 +1612,9 @@ final class HardwareKeyboardMonitor: ObservableObject {
     @Published private(set) var attached: Bool
 
     private init() {
-        attached = Self.override ?? (GCKeyboard.coalesced != nil)
+        attached = HardwareKeyboardPolicy.isAttached(coalesced: GCKeyboard.coalesced != nil,
+                                                     isiOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
+                                                     override: Self.override)
         let center = NotificationCenter.default
         center.addObserver(forName: .GCKeyboardDidConnect, object: nil, queue: .main) { [weak self] _ in self?.connected(true) }
         center.addObserver(forName: .GCKeyboardDidDisconnect, object: nil, queue: .main) { [weak self] _ in self?.connected(false) }
@@ -1570,8 +1629,11 @@ final class HardwareKeyboardMonitor: ObservableObject {
               + (Self.override.map { " (-SillHardwareKeyboard \($0 ? 1 : 0) keeps it \($0 ? "attached" : "gone"))" } ?? ""))
         if now { installProbe() }
         #endif
-        guard Self.override == nil, now != attached else { return }
-        attached = now
+        let effective = HardwareKeyboardPolicy.isAttached(coalesced: now,
+                                                          isiOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
+                                                          override: Self.override)
+        guard effective != attached else { return }
+        attached = effective
     }
 
     private static var override: Bool? {

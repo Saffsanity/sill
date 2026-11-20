@@ -1,25 +1,17 @@
 import Foundation
 import StreamProtocol
 
-// The keys this device sends for a shortcut: the Spotlight key's ⌘Space, the portrait key row's keys
-// with whatever is latched (held down from the touch to the release: `HeldCap`), a latched ⌘, ⌃ or ⌥
-// on the software keyboard (a latched shift with its return or tab too), the modifiers the portrait
-// trackpad holds down around a click or a drag, and a hardware keyboard's keys (Esc also through a key
-// command, sent once whichever channel iPadOS uses; the letters, digits and the rest too while the Mac types
-// them: `KeyTyping`). One place, so each goes out the way a keyboard sends it: a shortcut's modifiers pressed
-// with their own keys around it, and every key's up after its down (2026-09-27, the stuck command
-// after Spotlight). A shortcut sent as one key down and up carrying its modifiers left them set on
-// every Mac from before that fix, which posted the up as it came, and the next click there was a
-// ⌘-click.
 // The keys this device sends for a shortcut: the Spotlight key's ⌘Space, the clipboard's ⌘V after a
-// Paste (paste right away), the portrait key row's keys with whatever is latched, a latched ⌘, ⌃ or
-// ⌥ on the software keyboard (a latched shift with its return or tab too), the modifiers the portrait
-// trackpad holds down around a click or a drag, and a hardware keyboard's keys (Esc also through a
-// key command, sent once whichever channel iPadOS uses). One place, so each goes out the way a
-// keyboard sends it: a shortcut's modifiers pressed with their own keys around it, and every key's up
-// after its down (2026-09-27, the stuck command after Spotlight). A shortcut sent as one key down and
-// up carrying its modifiers left them set on every Mac from before that fix, which posted the up as
-// it came, and the next click there was a ⌘-click.
+// Paste (paste right away), the portrait key row's keys with whatever is latched (held down from the
+// touch to the release: `HeldCap`), a latched ⌘, ⌃ or ⌥ on the software keyboard (a latched shift with
+// its return or tab too), the modifiers the portrait trackpad holds down around a click or a drag, and a
+// hardware keyboard's keys (Esc also through a key command, and on a Mac running the iPad app the ⌘
+// shortcuts too, #129, each sent once whichever channel UIKit uses; the letters, digits and the rest too
+// while the Mac types them: `KeyTyping`). One place, so each goes out the way a keyboard sends it: a
+// shortcut's modifiers pressed with their own keys around it, and every key's up after its down
+// (2026-09-27, the stuck command after Spotlight). A shortcut sent as one key down and up carrying its
+// modifiers left them set on every Mac from before that fix, which posted the up as it came, and the
+// next click there was a ⌘-click.
 //
 // Pure: Foundation, StreamProtocol and TextComposition.swift's KeyTyping only, checked with swiftc beside
 // the host's KeyStrokes (Tests/checks/key-strokes), which is what the Mac makes of these events.
@@ -181,7 +173,8 @@ struct HeldCap {
 }
 
 /// A hardware keyboard's keys on their way to the Mac (InputOverlayView's pressesBegan, pressesEnded
-/// and pressesCancelled, and its Esc key commands: `commanded`, `pressed`, `released`). A key goes to
+/// and pressesCancelled, and its key commands, Esc's and, on a Mac running the iPad app, the ⌘
+/// shortcuts': `commanded`, `pressed`, `released`). A key goes to
 /// the Mac as a key, or to the text system, when it goes down (by its usage, the modifier flags and who
 /// types the characters then: `goesAsKey`, `KeyTyping`), and its up follows the same way whatever the
 /// modifier flags or the typing say by then. Judged again at the release, as before, a key held while ⌘
@@ -234,6 +227,38 @@ struct ForwardedKeys {
 
     /// The letters A to Z, by their keys' places (HID usages 0x04 to 0x1D).
     static let letterUsages: ClosedRange<UInt16> = 0x04...0x1D
+
+    /// The `⌘` shortcuts InputOverlayView claims with key commands on a Mac running the iPad app (issue
+    /// #129: `⌘W`, `⌘C`, `⌘V`, `⌘X`, `⌘Z`, `⌘A`, `⌘F`, `⌘G`, `⌘H`, `⌘M`, `⌘N`, `⌘O`, `⌘P`, `⌘R`, `⌘S`,
+    /// `⌘T`, `⌘B`, `⌘I`, `⌘U`, `⌘,`, `⌘/`, `⌘[`, `⌘]`, `⌘-`, `⌘=`, `⌘0`, ``⌘` ``, each also with ⇧, ⌃
+    /// and ⌥), as the Mac's own menu bar there may take them before `pressesBegan`: each command's
+    /// `input` (lowercase, as UIKit names a key command's character) and the key a US keyboard types it
+    /// with, its HID usage, which is what goes to the Mac. Never ⌘Q: it quits Sill on this Mac.
+    ///
+    /// A key command names a character, not a key, and its action is told nothing of the key pressed.
+    /// So where this Mac's layout types the character with another key than a US keyboard does
+    /// (AZERTY's A, Z, W and M; QWERTZ's Z), the streamed Mac gets the US keyboard's key, which its own
+    /// layout may read as another character: with AZERTY on both Macs ⌘A arrives as ⌘Q. A key that
+    /// reaches `pressesBegan` goes as the key pressed (its usage), as on an iPad. Which of the three
+    /// takes each shortcut on a Mac (these commands, the menu bar, `pressesBegan`) is for a Mac to show
+    /// (docs/steps/2026-11-18-pr263-ready.md).
+    static let shortcutCommandKeys: [(input: String, usage: UInt16)] = [
+        ("a", 0x04), ("b", 0x05), ("c", 0x06), ("f", 0x09), ("g", 0x0A), ("h", 0x0B),
+        ("i", 0x0C), ("m", 0x10), ("n", 0x11), ("o", 0x12), ("p", 0x13), ("r", 0x15),
+        ("s", 0x16), ("t", 0x17), ("u", 0x18), ("v", 0x19), ("w", 0x1A), ("x", 0x1B),
+        ("z", 0x1D), ("0", 0x27), ("-", 0x2D), ("=", 0x2E), ("[", 0x2F), ("]", 0x30),
+        ("`", 0x35), (",", 0x36), ("/", 0x38),
+    ]
+
+    private static let shortcutUsagesByInput: [String: UInt16] = Dictionary(
+        uniqueKeysWithValues: shortcutCommandKeys.map { ($0.input, $0.usage) }
+    )
+
+    /// The HID usage for a shortcut `UIKeyCommand`'s `input` string (case-insensitive), or nil.
+    static func shortcutUsage(forInput input: String?) -> UInt16? {
+        guard let key = input?.lowercased(), !key.isEmpty else { return nil }
+        return shortcutUsagesByInput[key]
+    }
 
     /// Whether a key pressed with these modifiers goes to the Mac as a key rather than to the text
     /// system: one of `keyUsages`, return or tab with shift held (`shiftedKeyUsages`), any key
@@ -303,10 +328,11 @@ struct ForwardedKeys {
         return ups
     }
 
-    // MARK: A key command's key (Esc)
+    // MARK: A key command's key (Esc, and the ⌘ shortcuts on a Mac)
 
     // iPadOS can keep a hardware Escape from pressesBegan (#67), so InputOverlayView also has key
-    // commands for it, asking for priority over the text system. A key command has no up, so its key
+    // commands for it, asking for priority over the text system; on a Mac running the iPad app it has
+    // them for the ⌘ shortcuts too (`shortcutCommandKeys`, #129). A key command has no up, so its key
     // goes down and up at once. A device that hands the same press to both must not send it twice:
     // the press came first (its down is in `down`), and the command sends nothing; or the command came
     // first, and the press, no later than the command, is swallowed with its up.
@@ -323,8 +349,8 @@ struct ForwardedKeys {
 
     /// A key command for `usage`, fired at `time` (systemUptime) with its modifiers: the key's down and
     /// up as `began` and `ended` make them. Nothing when the key is down on the Mac already: its press
-    /// came first, and that press's own up follows. A key command's key (Esc) is a key whoever types the
-    /// characters (`keyUsages`).
+    /// came first, and that press's own up follows. A key command's key is a key whoever types the
+    /// characters: Esc is one of `keyUsages`, and a ⌘ shortcut's key goes down with ⌘.
     mutating func commanded(_ usage: UInt16, modifiers: UInt64, at time: Double) -> [InputEvent] {
         guard !down.contains(usage), let press = began(usage, modifiers: modifiers, typing: .text) else { return [] }
         commandedAt[usage] = time

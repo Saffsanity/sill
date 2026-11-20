@@ -1036,6 +1036,19 @@ automatic hold is not yours, so the first-run tour still shows to someone with
 a keyboard. `iOSClient/HardwareKeyboardPolicy.swift` is the rule, checked in
 `Tests/checks/hardware-keyboard`; docs/hardware-keyboard-plan.md has the rest.
 
+The iPad app on a Mac with Apple silicon (#129) counts as having a keyboard
+attached from its launch (`HardwareKeyboardPolicy.isAttached`), so the stream
+takes the keyboard there as it does on an iPad with one. There the input view
+also claims ⌘W, ⌘C, ⌘V, ⌘X, ⌘Z, ⌘A and the other shortcuts of
+`ForwardedKeys.shortcutCommandKeys` (each with ⇧, ⌃ and ⌥, never ⌘Q) with key
+commands, in case the Mac's own menu bar takes them before `pressesBegan`: a
+key command names a character, so the shortcut goes to the Mac as the key a US
+keyboard types that character with, and on a layout that types it with another
+key (AZERTY, QWERTZ) the Mac reads another shortcut. Which takes each shortcut
+on a Mac (the key commands, the menu bar or `pressesBegan`) is for a Debug build
+there to show: the `hwkey:` lines, with the key commands and without them
+(`-SillMacKeyCommands 0`); docs/steps/2026-11-18-pr263-ready.md has what to try.
+
 Esc reaches the Mac from `pressesBegan`, as every other key, and also through key
 commands for Esc with each combination of ⌃, ⌥, ⇧ and ⌘ that ask for priority
 over iPadOS's text and focus systems, since an iPad has been seen keeping a
@@ -2263,7 +2276,9 @@ simulator:
   prints `keyboard: …` for what the rule does and `hwkey: …` for every key.
   `-SillKeyProbe 1` adds GameController's own view of each key,
   `-SillEscViaCommand 1` hands Esc on from `pressesBegan` so its key commands
-  take it, and `-SillTurnAt 6,12` turns an iPhone's scene at those seconds.
+  take it, `-SillMacKeyCommands 0` or `1` turns the ⌘ shortcuts' key commands
+  off or on (on by default only on a Mac running the iPad app, #129), and
+  `-SillTurnAt 6,12` turns an iPhone's scene at those seconds.
 - `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: the portrait
   key row taps cmd, esc, shift and ctrl and the trackpad strokes, taps and
   scrolls, through their own code, once; in every layout the stream's input

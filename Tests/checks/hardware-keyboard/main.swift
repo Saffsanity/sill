@@ -541,5 +541,32 @@ do {
     check("10,000 random scrolls (\(events) later events): at the pointer, UIKit's own total, each reading sent as it came", bad == 0)
 }
 
+// MARK: - Running the iPad app on a Mac (ProcessInfo.processInfo.isiOSAppOnMac, #129)
+
+check("isAttached: on a Mac (isiOSAppOnMac), attached even before GameController reports a keyboard",
+      P.isAttached(coalesced: false, isiOSAppOnMac: true, override: nil))
+check("isAttached: on an iPad or iPhone, follows GameController's coalesced keyboard",
+      !P.isAttached(coalesced: false, isiOSAppOnMac: false, override: nil)
+        && P.isAttached(coalesced: true, isiOSAppOnMac: false, override: nil))
+check("isAttached: DEBUG -SillHardwareKeyboard override wins on both iPad and Mac",
+      !P.isAttached(coalesced: true, isiOSAppOnMac: true, override: false)
+        && P.isAttached(coalesced: false, isiOSAppOnMac: false, override: true))
+// Every case: GameController's keyboard or none, a Mac or not, and the override's three states.
+do {
+    var wrong: [String] = []
+    for coalesced in [false, true] {
+        for onMac in [false, true] {
+            for override in [Bool?.none, false, true] {
+                let want = override ?? (coalesced || onMac)
+                if P.isAttached(coalesced: coalesced, isiOSAppOnMac: onMac, override: override) != want {
+                    wrong.append("coalesced \(coalesced), Mac \(onMac), override \(override.map { $0 ? "1" : "0" } ?? "none")")
+                }
+            }
+        }
+    }
+    check("isAttached, all 12 cases: the override if set, else a keyboard or a Mac" + (wrong.isEmpty ? "" : ": " + wrong.joined(separator: "; ")),
+          wrong.isEmpty)
+}
+
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)

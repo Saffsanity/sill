@@ -515,8 +515,10 @@ keyboard by itself there (an empty input view: nothing drawn); `-SillHardwareKey
 pressesBegan (none): to the Mac` (or `keyCommand`) for every hardware key the input
 view sees; `-SillKeyProbe 1` adds GameController's own view of each key,
 `-SillEscViaCommand 1` hands Esc on from pressesBegan so its key commands take it,
-and `-SillTurnAt <s>[,<s>…]` turns an iPhone's scene mid-session (iPadOS's windowing
-refuses). `Tests/keyrig` presses real keys (and holds them, `wait:S`) and turns a
+`-SillMacKeyCommands 0|1` turns the ⌘ shortcuts' key commands off or on for a run
+(on by default only on a Mac running the iPad app, #129; `keyboard: the ⌘ shortcuts'
+key commands …` says which), and `-SillTurnAt <s>[,<s>…]` turns an iPhone's scene
+mid-session (iPadOS's windowing refuses). `Tests/keyrig` presses real keys (and holds them, `wait:S`) and turns a
 wheel inside the simulator; after its keys UIKit there counts a hardware keyboard,
 so a fresh simulator is the one that shows the software keyboard. Each hardware
 key's down line ends in who types its characters (`; the Mac types: en-US`, `;
