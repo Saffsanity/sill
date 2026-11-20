@@ -93,6 +93,8 @@ struct HostSettingsPanel: View {
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// Pasted Text Is Secret (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›").
+    @AppStorage(StreamClient.pasteSecretKey) private var pasteSecret = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -129,6 +131,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "secret"?: return clipboardSecretID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
         default: return nil
@@ -143,6 +146,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let clipboardSecretID = "clipboardSecret"
     private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
@@ -739,9 +743,19 @@ struct HostSettingsPanel: View {
                     .padding(.vertical, 6)          // a long Mac name takes two lines
                     .rowFrame()
                     RowDivider()
+                    // Pasted Text Is Secret: a Paste's text is a secret on the Mac.
+                    Toggle(isOn: $pasteSecret) {
+                        Text(ClipboardPolicy.Copy.secretSwitchTitle).foregroundStyle(Palette.text)
+                    }
+                    .rowFrame()
+                    .id(Self.clipboardSecretID)
+                    RowDivider()
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
                         .id(Self.clipboardRowsID)
                 }
+                RowDivider()
+                // Type on ‹Mac›: typing, which needs no clipboard on the Mac.
+                ClipboardTypeRow(client: client, title: ClipboardPolicy.Copy.typeTitle(mac: mac))
             }
             if clipboardOn, let note = client.clipboardNote {
                 Footnote(text: note.text, warning: note.warning, top: 6)
@@ -749,6 +763,9 @@ struct HostSettingsPanel: View {
                     .accessibilityHidden(true)      // announced as it came
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
+            if clipboardOn && pasteSecret {
+                Footnote(text: ClipboardPolicy.Copy.secretFootnote(mac: mac, device: device), top: 4)
+            }
         }
         Rows {
             Toggle(isOn: $reverseScroll) {
@@ -1183,6 +1200,30 @@ private struct ClipboardPasteRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
                 ClipboardPasteButton(client: client)
+            }
+            .padding(.vertical, 8)
+        }
+        .id(typeSize)
+        .rowFrame()
+    }
+}
+
+/// "Type on ‹Mac›" with its Type button (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›"), laid
+/// out as ClipboardPasteRow.
+private struct ClipboardTypeRow: View {
+    @ObservedObject var client: StreamClient
+    let title: String
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text(title).foregroundStyle(Palette.text)
+                Spacer(minLength: 8)
+                ClipboardTypeButton(client: client)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
+                ClipboardTypeButton(client: client)
             }
             .padding(.vertical, 8)
         }

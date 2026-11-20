@@ -51,6 +51,7 @@ struct ClipboardChip: View {
             .accessibilityLabel(ClipboardPolicy.Copy.chipSpoken(mac: mac, device: StreamClient.deviceWord, rightAway: pasteRightAway))
             .accessibilityAddTraits(.isStaticText)
             ClipboardPasteButton(client: client)
+            ClipboardTypeButton(client: client, compact: true)
             Button(action: { client.dismissClipboardChip() }) {
                 Image(systemName: "xmark")
                     .font(.footnote.weight(.semibold))
@@ -110,5 +111,33 @@ struct ClipboardPasteButton: View {
         .tint(Palette.accent)
         .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
                                                           device: StreamClient.deviceWord, rightAway: pasteRightAway))
+    }
+}
+
+/// Type on ‹Mac› (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›"): this device's copied text
+/// typed where the Mac's cursor is (StreamClient.typeClipboard), for a field that refuses a paste. A
+/// button of Sill's own, not the system's Paste control, so iOS asks "Allow Paste?" at the tap unless
+/// Sill is allowed in Settings › Sill › Paste from Other Apps. `compact`: the chip's, the text cursor
+/// alone (the key row's keyboard symbol already means "show the keyboard").
+struct ClipboardTypeButton: View {
+    @ObservedObject var client: StreamClient
+    var compact = false
+    private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
+    var body: some View {
+        Button(action: { client.typeClipboard() }) {
+            if compact {
+                Image(systemName: "character.cursor.ibeam")
+                    .font(.footnote.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            } else {
+                Label("Type", systemImage: "character.cursor.ibeam")
+            }
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .tint(Palette.accent)
+        .accessibilityLabel(ClipboardPolicy.Copy.typeTitle(mac: mac))
+        .accessibilityHint(ClipboardPolicy.Copy.typeHint(mac: mac, device: StreamClient.deviceWord))
     }
 }

@@ -26,9 +26,16 @@ public struct Clipboard: Codable, Hashable, Sendable {
     /// Device → host: true, this device's Share Clipboard went off; the host sends it nothing more
     /// until its next kind 32. Never from a host.
     public var stop: Bool?
+    /// Either way: true, the text is a secret (a password, a one-time code): the receiver keeps it out
+    /// of clipboard history and clears it soon (ClipboardPolicy.secretLifetime). From the Mac when the
+    /// copy carried a password manager's marker (`ClipboardPolicy.secretMarkers`); from a device while
+    /// its Pasted Text Is Secret is on. Left out when false, so a peer that never heard of it sees the
+    /// same JSON as before, and one that never sends it is unaffected (docs/clipboard-plan.md, "Secrets
+    /// and Type on ‹Mac›").
+    public var secret: Bool?
 
-    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil) {
-        self.text = text; self.image = image; self.stop = stop
+    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil, secret: Bool? = nil) {
+        self.text = text; self.image = image; self.stop = stop; self.secret = secret
     }
 
     /// The most text either way: 256 KB of UTF-8 (262,144 bytes). The whole message's JSON also
