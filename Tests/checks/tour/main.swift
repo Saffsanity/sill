@@ -1035,6 +1035,40 @@ check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the pi
       "the Mac's name in the pinch row")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")
+// Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, off unless turned on (the
+// right click, as before), on the drag beside it; the same symbol and place, never "New:", read whole; nothing
+// else on any card changes with it, in every layout, on either device, under VoiceOver or not, for all 128.
+let T2drag = "Touch and hold to right-click, or hold, then drag, to move a window or select text."
+let holdDrag = with { $0.holdThenDrag = true }
+check(!allOn.holdThenDrag && !allOff.holdThenDrag && everyFeatures.allSatisfy { !$0.holdThenDrag }, "Hold, Then Drag off unless turned on")
+check(texts(words(.touch, L, features: holdDrag)) == [T1, T2drag, T3, T4, T5, T6], "Hold, Then Drag on: the drag in the hold's row: \(texts(words(.touch, L, features: holdDrag)))")
+check(words(.touch, L, features: holdDrag).rows[1].spans == [TourSpan(text: "Touch and hold", strong: true),
+                                                             TourSpan(text: " to right-click, or hold, then drag, to move a window or select text.", strong: false)],
+      "Hold, Then Drag on: the control's name semibold, as off")
+check(texts(words(.touch, F, device: "iPhone", features: with(allOff) { $0.holdThenDrag = true })) == [T1, T2drag, T3, T5], "Hold, Then Drag on, on a phone with nothing else on")
+for f in everyFeatures {
+    let on = with(f) { $0.holdThenDrag = true }
+    for layout in [L, P, F] {
+        for device in ["iPad", "iPhone"] {
+            let label = "\(layout) \(device) \(f)"
+            let before = words(.touch, layout, device: device, first: true, features: f), after = words(.touch, layout, device: device, first: true, features: on)
+            check(before.rows[1].text == T2 && after.rows[1].text == T2drag, "the hold's row follows Hold, Then Drag: \(label)")
+            check(after.rows[1].symbol == before.rows[1].symbol && !after.rows[1].isNew && after.rows[1].spoken == T2drag,
+                  "the drag's row: the hold's symbol, no New, read whole: \(label)")
+            var same = after
+            same.rows[1] = before.rows[1]
+            check(same == before, "nothing else on the picture's card changes with it: \(label)")
+            for voiceOver in [false, true] {
+                for step in TourPolicy.steps(layout, voiceOver: voiceOver) where step != .touch {
+                    check(words(step, layout, device: device, voiceOver: voiceOver, first: true, features: on)
+                          == words(step, layout, device: device, voiceOver: voiceOver, first: true, features: f),
+                          "no other card changes with Hold, Then Drag: \(step) vo \(voiceOver) \(label)")
+                }
+            }
+        }
+    }
+}
+check(TourPolicy.steps(L, voiceOver: true).allSatisfy { $0 != .touch }, "under VoiceOver no picture card, so no hold's row of either form")
 for f in everyFeatures {
     check(words(.touch, L, features: f).rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "the swipe row follows the gestures: \(f)")
 }

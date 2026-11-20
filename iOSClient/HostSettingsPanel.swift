@@ -79,6 +79,9 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on
+    /// (`TouchHold.defaultOn`), read by the picture's input view as each hold begins, never sent.
+    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -130,6 +133,7 @@ struct HostSettingsPanel: View {
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
+        case "holddrag"?: return holdThenDragRowID
         case "fullscreen"?: return fullScreenRowID
         default: return nil
         }
@@ -139,6 +143,8 @@ struct HostSettingsPanel: View {
     }
     private static let gesturesGroupID = "thisDevice"
     private static let sendAudioID = "sendAudio"
+    /// DEBUG `-SillSettingsScroll holddrag`: Hold, Then Drag's switch and its footnote (#292).
+    private static let holdThenDragRowID = "holdThenDrag"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
@@ -679,6 +685,9 @@ struct HostSettingsPanel: View {
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
     /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
+    /// Hold, Then Drag (`TouchHold`, #292) comes right before Reverse Scrolling, the first of the rows about
+    /// touch, for every Mac: it changes only what a finger held on the picture sends, a drag being the
+    /// left button's down, moves and up, which every Sill for Mac takes.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
@@ -750,6 +759,18 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        // Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on, this device's own, never sent.
+        // The first of the rows about touch; under Touch Mode's Direct Touch once #222's row is here (in Trackpad
+        // mode the pad over the picture takes the fingers, and has its own hold, then drag), and in the
+        // whole-screen Settings pane's Touch and Zoom group once #393 is.
+        Rows {
+            Toggle(isOn: $holdThenDrag) {
+                Text(TouchHold.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.holdThenDragRowID)
+        Footnote(text: TouchHold.footnote)
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)

@@ -84,6 +84,9 @@ Sill has layouts of its own.
   your device: you compose and choose there, and what you choose is typed on
   your Mac. Dictation types on your Mac too. Reverse Scrolling, in the settings
   panel, turns a finger's scroll and the on-screen trackpad's the other way.
+  A finger held on the picture right-clicks; with Hold, Then Drag on, in the
+  settings panel, a finger held a moment and then moved drags what's under it,
+  a window, a slider or a selection, and one lifted without moving right-clicks.
   Three fingers swipe and pinch as on a Mac's trackpad: Mission Control, App
   Exposé, the Spaces, Apps and Show Desktop, through the keyboard shortcuts
   your Mac has for them.

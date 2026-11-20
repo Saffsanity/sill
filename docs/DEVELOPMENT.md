@@ -951,11 +951,31 @@ own long press is (it was a fixed 1.5 s). It is the device's own
 with every Sill for Mac. Every bar's thumbnails (sideways, an iPad's window bar
 upright, a phone's row 2) take a change at once, the drag's start with it; the
 drag's own rules (12 pt before the hold is a scroll of the strip, 8 pt after
-it lifts the thumbnail) and the picture's long press (a right click, 0.45 s)
-do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
+it lifts the thumbnail) and the picture's long press (a right click, or with
+Hold, Then Drag on a right click or a drag, 0.45 s) do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
 seconds", adjustable: a swipe up or down is a tenth.
 `iOSClient/ThumbnailHold.swift` is the rule, checked in
 `Tests/checks/thumbnail-hold`.
+
+## Holding on the picture
+
+A finger held on the picture for 0.45 s right-clicks there, at once. With Hold,
+Then Drag on, in the Settings panel's This iPad group (This iPhone on a phone;
+issue #178, PR #292 by addhumal), it is the Mac's right button or its left
+instead. Lifted where it was pressed (within 8 pt), it right-clicks there, at
+the lift; moved on past 8 pt, it presses the left button where it was pressed
+and drags to where it lifts, so a window, a slider or a selection moves under
+the finger. A tap still clicks and a finger that moves before the hold still
+scrolls; a three-finger stroke or a cancel mid-drag lets the button up and
+clicks nothing. The switch is off unless turned on (`Sill.holdThenDrag`,
+`TouchHold.defaultOn`), because it moves everyone's right click from the hold
+to the lift; it is the device's own, never sent to the Mac, read as each hold
+begins, and the tour's picture card says the drag only while it is on. No wire
+change: the drag is the left button's down, moves and up, as the Pencil's, which
+every Sill for Mac takes. `iOSClient/TouchHold.swift` is the rule, the switch
+with it, checked in `Tests/checks/touch-hold`; `RIG_ONLY=hold RIG_HOLD=drag
+Tests/touchrig/run.sh NAME` drives the real overlay with synthesized touches
+(without `RIG_HOLD`, the switch off: the right click at the hold, as before).
 
 ## Pinch zoom
 
@@ -963,7 +983,7 @@ Two fingers on the picture zoom it as a photo zooms in Photos (issue #65): sprea
 them and the picture grows about the point between them, up to 5×, and moves
 with them, the point under the fingers staying under them. On a zoomed picture
 any two fingers move it and pinch it, and one finger is still the Mac's (a tap
-clicks, a hold right-clicks, a drag scrolls), landing on what shows under it, as
+clicks, a hold right-clicks, or drags with Hold, Then Drag on, a drag scrolls), landing on what shows under it, as
 the Pencil, a hover and the iPad's own pointer do. On the whole picture two
 fingers scroll the Mac as before, unless they pinch first (their spacing changes
 12 pt, and more than the point between them moves). A slight pinch out leaves
@@ -2392,6 +2412,12 @@ simulator:
   this one keeps 0.3), and `-SillSettingsScroll hold` opens the Settings panel
   at its stepper. The console says `thumbnails: hold 0.3 s` when a bar's
   thumbnails first read the length and at each change.
+- `-Sill.holdThenDrag 1` turns the device's Hold, Then Drag on for one run (in
+  the normal app too; PR #292), `-SillSettingsScroll holddrag` opens the
+  Settings panel at its switch, and with `-SillTourState fresh -SillTour touch`
+  the tour's picture card shows the drag in the hold's row. The hold itself is a
+  finger's, which no launch argument makes: the touch rig's `RIG_ONLY=hold
+  RIG_HOLD=drag` drives the real overlay instead.
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and

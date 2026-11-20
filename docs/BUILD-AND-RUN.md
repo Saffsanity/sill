@@ -68,6 +68,7 @@ Scripts/menu-check/run.sh               # the menus' reader and mirror against S
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
+RIG_ONLY=hold RIG_HOLD=drag Tests/touchrig/run.sh hold   # the picture's touch and hold alone with Hold, Then Drag on (#292): a right click at the lift, or a drag once it moves; without RIG_HOLD the switch is off, as on a fresh install: a right click at the hold, as before
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
@@ -367,7 +368,10 @@ switch at those seconds), `-Sill.pictureInPicture 1` (its Picture in Picture on 
 the panel at it; live, `-SillPiPStartAt <s>` starts it as iOS does as Sill leaves, `-SillPiPPauseAt
 <s>[,<s>…]` the window's pause and play, `-SillPiPLockAt <s>` the device's lock, `-SillPiPSession
 active|inactive` the audio session held or not; `xcrun simctl launch UDID com.apple.Preferences` sends
-Sill away, the console's `pip:` lines say what happened), `-SillVoiceOver 1` (that group as with VoiceOver on:
+Sill away, the console's `pip:` lines say what happened), `-Sill.holdThenDrag 1` (its Hold, Then Drag on for one
+run, PR #292, in the normal app too: a finger held on the picture and then moved drags with the left button,
+one lifted where it was pressed right-clicks at the lift, and the tour's picture card says so; off, the
+default, the hold right-clicks at once; `-SillSettingsScroll holddrag` the panel at its switch), `-SillVoiceOver 1` (that group as with VoiceOver on:
 its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
 iPad…'s overlay; `-SillOverlayLine asking|shown|openonmac|locked|noanswer` the
 line its ask's answer sets; under `-SillLive 1` it opens over the live session
