@@ -111,6 +111,12 @@ package final class StreamCoordinator {
     /// PrivacyPolicy.locksForReal) locks; the CLI's, the bare SillMenuBar binary's and a test host's lock nothing and
     /// put no display to sleep: they say what they would do.
     private let privacy: PrivacyLock
+    /// Darken this Mac's screen while a device uses it (PrivacyScreen, DarkenPolicy; docs/privacy-mode-plan.md, part 2):
+    /// the registered sessions away and at home (at a connect before the wake, rule 5), the switches (at once, from
+    /// `setTarget`), the lock's reading, a paired device's input at the locked screen and a quit go to it. Only Sill.app's
+    /// own would darken (DarkenPolicy.darkensForReal, the lock's rule), and it waits for the probe G0; the CLI's, the
+    /// bare SillMenuBar binary's and a test host's draw nothing, watch nothing and lock nothing: they say what they would.
+    private let darken: PrivacyScreen
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
     private var stageLosses = 0
@@ -443,6 +449,9 @@ package final class StreamCoordinator {
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
                               testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                               status: status, gate: SessionLock.shared.gate)
+        darken = PrivacyScreen(config: config, real: DarkenPolicy.darkensForReal(synthetic: synthetic, bundled: !testHooks),
+                               testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                               status: status, gate: SessionLock.shared.gate)
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
             if let identity = remote.identity {
@@ -587,6 +596,9 @@ package final class StreamCoordinator {
                 }
                 // Home or away before its catalog: its settings state says which quality it sets.
                 self.routesChanged(joined: id, endpoint: "\(connection.endpoint)")
+                // Darken this Mac's screen (rule 5): a session that darkens has the black up now, in this turn, before
+                // the wake below lights a sleeping panel, so the panel lights up black.
+                self.darkenSessions()
                 // A sleeping display gives black frames: the session's start wakes it, as a key would
                 // (not at a locked Mac, which streams none of it: DisplayWake's gate in `deviceActive`).
                 if !cut { self.deviceActive(.connect, connection) }
@@ -645,6 +657,8 @@ package final class StreamCoordinator {
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
+                // Darken this Mac's screen: the last session that darkens leaving starts its wait.
+                self.darkenSessions()
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate. The restart takes
                 // the flip too (select's commit), so a device that leaves costs one.
                 if self.active != .none, self.catalog.clientCount > 1, self.streamRate(for: self.active) != self.fps {
@@ -877,6 +891,8 @@ package final class StreamCoordinator {
         if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
         // Lock this Mac when the last device leaves: a test host's hooks, and one line, only when on.
         for line in privacy.startLines { print(line) }
+        // Darken this Mac's screen: a test host's hooks, and one line, only when on.
+        for line in darken.startLines { print(line) }
         checkFirewall()                                         // at launch, beside the listener's own check
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
@@ -978,6 +994,8 @@ package final class StreamCoordinator {
         }
         // Lock this Mac when the last device leaves and its two switches, at once too: off ends a wait under way now.
         privacy.switched(on: new.lockAfterSession, sleeps: new.lockSleepsDisplay, onlyAway: new.lockOnlyAfterAway)
+        // Darken this Mac's screen, at once too: off lifts the black now.
+        darken.switched(new)
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -1019,6 +1037,13 @@ package final class StreamCoordinator {
         }
         status.update { $0.away = awayWanted && !routes.isEmpty }   // publishes (status.onChange)
         return flipped
+    }
+
+    /// Darken this Mac's screen (PrivacyScreen): the registered sessions now, away from home and at home, those the
+    /// Mac no longer serves (`revoked`) left out.
+    private func darkenSessions() {
+        let live = routes.filter { !revoked.contains($0.key) }.values
+        darken.sessions(away: live.filter(\.isAway).count, home: live.filter { !$0.isAway }.count)
     }
 
     /// The flip waits for `id`'s first viewport, which carries its rate, so the two go in one
@@ -1221,7 +1246,9 @@ package final class StreamCoordinator {
         let reading = LockPolicy.restrictive(arrived, lockReading)
         switch lockDecision(message, input: input, from: sender, arrived: arrived) {
         case .take:
-            break
+            // Darken this Mac's screen (rule 8): a paired device's input taken at the locked screen makes the unlock
+            // that follows the device's, so the screen stays dark; an unlock with none is the Mac's own.
+            if reading == .screenLocked, input != nil { darken.deviceInputAtLockedScreen(deviceName(connection)) }
         case .letGo:
             if let input { deliver(input, in: .null, from: sender) }
             return
@@ -1478,7 +1505,10 @@ package final class StreamCoordinator {
         if case .connect = event { guard allowed.wakeOnConnect else { return } } else { guard allowed.wakeOnActivity else { return } }
         switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
         case .nothing: break
-        case .count: Stats.shared.bump(DisplayWake.dryKey)
+        case .count:
+            Stats.shared.bump(DisplayWake.dryKey)
+            // TEST ONLY (SILL_TEST_PRIVACY_LOG): stamped beside the dry curtain's line, so rule 5's order shows.
+            if case .connect = event { darken.testLog("\(DisplayWake.dryKey) for \(deviceName(connection))") }
         // The line reads the display the devices are shown: the Desktop's stop, else the main display.
         case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity,
                                                              display: active == .desktop && !placeholderStreams ? desktopStreamDisplay : nil)
@@ -1538,6 +1568,8 @@ package final class StreamCoordinator {
     private func lockChanged() async {
         // A lock Sill asked for (Lock this Mac when the last device leaves) is confirmed by the reading's change.
         privacy.readingChanged()
+        // Darken this Mac's screen: a lock, the device's unlock or the Mac's own (taken back, rule 8).
+        darken.readingChanged()
         let now = lockReading
         guard lockGate.established else { return }
         let was = lockActedOn, wasView = lockActedView
@@ -3155,6 +3187,7 @@ package final class StreamCoordinator {
     /// by liveness.
     package func shutdownForExit() {
         privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
+        darken.quit()        // and its screen is lit at once
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
@@ -3170,6 +3203,7 @@ package final class StreamCoordinator {
     /// --synthetic host with --lock-after-session has one).
     package func releaseKeysForExit() {
         privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
+        darken.quit()        // and its screen is lit at once
         injector.releaseAll()
         restoreFits(keeping: nil)
     }
@@ -3178,6 +3212,7 @@ package final class StreamCoordinator {
     /// makes it wait): Lock this Mac when the last device leaves locks nothing from here on, as at a signal.
     package func quitBegins() {
         privacy.quit()
+        darken.quit()
     }
 
     /// Settings › Devices opened: Lock this Mac when the last device leaves looks again at whether this Mac has a

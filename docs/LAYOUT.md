@@ -408,6 +408,16 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   again by the Mac's own setting); the coordinator's `handle` forwards every
   message to the rule (`deviceActive`), and `parameterSetsSent` its stream
   changes.
+  Darken this Mac's screen (docs/privacy-mode-plan.md, part 2): `DarkenPolicy` (which sessions darken, the
+  dark and its raise before the wake, the wait and the hold for the lock, under
+  the lock screen, a key on the dark Mac, taken back, the switches, the
+  watchdog's decisions, the screens, who darkens: only Sill.app itself, the
+  lock's rule; the words; pure, `Tests/checks/darken`, which also runs it
+  beside the lock's rule with part 1's switches and each session's route)
+  and `PrivacyScreen` (main actor: the rule's state and tick; its seams
+  `Curtain` and `LocalInput`, the dry run's `DryCurtain` and a test host's
+  `FileInput` everywhere but in Sill.app itself, and nothing in Sill.app
+  until the probe G0 fills them).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
@@ -638,7 +648,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   every window), frames before, during and after, fourteen steps (its app
   stopped with SIGSTOP at a fit and at a stop among them); the front app must
   not change. It needs Accessibility, Screen Recording and an unlocked screen,
-  and exits 2 saying which is missing. `Scripts/lock-check/` (TEST ONLY;
+  and exits 2 saying which is missing. `Scripts/privacy-probe/run.sh [REPORT]`
+  (TEST ONLY, G0 of docs/privacy-mode-plan.md; Noah's to run, never an agent's:
+  it darkens the screens in spells of at most 10 s, each under a hard 12 s kill)
+  measures what Sill's black windows would do: covered windows still drawing,
+  what shows in front of them, a killed or stopped process, Sill's own input
+  told apart, black on every screen; `--build-only` compiles it and runs
+  nothing. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST ONLY) runs
+  darkening's dry run on synthetic test hosts on loopback. `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to
   another user, the unlock's settle, the flap and a start while locked, with the

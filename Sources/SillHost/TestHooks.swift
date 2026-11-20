@@ -26,6 +26,9 @@ enum TestHooks {
         // Lock this Mac when the last device leaves (PrivacyPolicy.testHooks): the wait, the displays a password could
         // be typed at, and a lock call that answers as on a macOS without it. A test host locks nothing anyway.
         "SILL_TEST_PRIVACY_GRACE", "SILL_TEST_PRIVACY_DISPLAYS", "SILL_TEST_PRIVACY_NO_SYMBOL",
+        // Darken this Mac's screen (DarkenPolicy.testHooks): the Mac's own input from a file, and the dry curtain's lines
+        // stamped. A test host draws nothing and watches nothing anyway.
+        "SILL_TEST_PRIVACY_INPUT", "SILL_TEST_PRIVACY_LOG",
     ]
 
     /// One line for each such variable set on a host that does not honour them; nothing on a test

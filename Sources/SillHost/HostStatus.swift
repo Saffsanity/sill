@@ -147,6 +147,9 @@ package struct HostStatusSnapshot: Equatable {
     /// Lock this Mac when the last device leaves (PrivacyLock; docs/privacy-mode-plan.md, part 1): Settings › Devices'
     /// warning under the switch, and whether a wait runs, for Sill.app's App Nap hold.
     package var privacyLock = PrivacyLockStatus()
+    /// Darken this Mac's screen (PrivacyScreen; docs/privacy-mode-plan.md, part 2): its black windows are up. Sill.app's
+    /// App Nap hold will read it once Sill.app can darken (after the probe G0), so the wait's ticks keep their time.
+    package var privacyDark = false
 
     /// The Mac's sound as the menu's card and Settings show it.
     package struct Audio: Equatable {

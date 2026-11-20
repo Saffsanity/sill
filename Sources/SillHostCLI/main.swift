@@ -75,6 +75,32 @@ if let lockFlag = CommandLine.arguments.first(where: { $0 == "--lock-after-sessi
     }
 }
 
+// `SillHost --darken=away|any [--darken-keys=lock|pass]`, with --synthetic only: Darken this Mac's screen for this run, as a
+// test host's dry run (docs/privacy-mode-plan.md, part 2): while a device away from home (away) or any device (any) is
+// connected, and 30 s after, the host says it would darken this Mac's displays, and draws nothing; a key or click on the
+// Mac (SILL_TEST_PRIVACY_INPUT on a test host) would lock it, or with --darken-keys=pass only show the hint. SillHost has
+// no window to darken a screen with; without --synthetic this run ignores both with one line each. Without them the
+// output is what it always was.
+if let raw = CommandLine.arguments.first(where: { $0 == "--darken" || $0.hasPrefix("--darken=") }) {
+    let value = raw.hasPrefix("--darken=") ? String(raw.dropFirst("--darken=".count)) : ""
+    if !synthetic {
+        print("\(raw) ignored: SillHost takes it only with --synthetic, where it darkens nothing and says what it would do.")
+    } else if let scope = HostConfig.Darken(rawValue: value), scope != .off {
+        config.darkenScreen = scope
+    } else {
+        print("\(raw) ignored: --darken=away (while a device away from home is connected) or --darken=any (while any is).")
+    }
+}
+if let raw = CommandLine.arguments.first(where: { $0.hasPrefix("--darken-keys") }) {
+    if !synthetic {
+        print("\(raw) ignored: SillHost takes it only with --synthetic, where it darkens nothing and says what it would do.")
+    } else if raw == "--darken-keys=lock" || raw == "--darken-keys=pass" {
+        config.darkenKeysLock = raw == "--darken-keys=lock"
+    } else {
+        print("\(raw) ignored: --darken-keys=lock (a key on the dark Mac locks it) or --darken-keys=pass (it reaches the app).")
+    }
+}
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
