@@ -64,6 +64,15 @@ extension StreamClient {
         return defaults.object(forKey: pasteRightAwayKey) == nil || defaults.bool(forKey: pasteRightAwayKey)
     }
 
+    /// This device's switch, Pasted Text Is Secret (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›";
+    /// the Settings panel's This iPad group, under Share Clipboard): on unless turned off. With it on, a Paste's kind 32
+    /// says `secret`, so the Mac keeps the text out of its clipboard history and clears it after
+    /// ClipboardPolicy.secretLifetime. The device's own preference, read at each Paste.
+    static let pasteSecretKey = "Sill.pasteSecret"
+    static var pasteSecretOn: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: pasteSecretKey) == nil || defaults.bool(forKey: pasteSecretKey)
+    }
     /// How long after the receipt ⌘V goes: ClipboardPolicy.pasteDelay. DEBUG `-SillPasteDelay <s>`
     /// another (0: right behind the receipt), for the race docs/clipboard-plan.md measures.
     static var pasteDelay: Double {
@@ -186,8 +195,10 @@ extension StreamClient {
         let board = UIPasteboard.general
         guard let text = ClipboardPolicy.deviceWrites(payload, switchOn: Self.clipboardOn, hostClipboard: hostClipboard,
                                                       lastSent: clipboardSent, changeCount: board.changeCount) else { return }
+        // A password the Mac marked (ClipboardPolicy.marksSecret) leaves this clipboard in 90 s, not 10 minutes.
+        let expiry = ClipboardPolicy.deviceExpiry(secret: ClipboardPolicy.isSecret(payload))
         board.setItems([[UTType.utf8PlainText.identifier: text]],
-                       options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(ClipboardPolicy.deviceExpiry)])
+                       options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(expiry)])
         clipboardHandled = board.changeCount
         hideClipboardChip()
         #if DEBUG
@@ -302,7 +313,8 @@ extension StreamClient {
     /// sent to the Mac, with its receipt to wait for, or "too long".
     func sendClipboard(_ strings: [String]) {
         let mac = macName.isEmpty ? "the Mac" : macName
-        switch ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn) {
+        switch ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn,
+                                           secret: Self.pasteSecretOn) {
         case .send(let payload):
             send(.clipboard, payload: payload)
             // Its receipt: a ping after it through the same door, whose pong says the Mac has read it.
@@ -410,6 +422,43 @@ extension StreamClient {
         print("clipboard: no receipt in time: did not reach the Mac")
         #endif
         lookAtClipboard(why: "a Paste did not reach the Mac")
+    }
+
+    // MARK: Type on the Mac (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›")
+
+    /// Type on ‹Mac›: the text on this device's clipboard typed where the Mac's cursor is, a key at a
+    /// time, as the software keyboard types (InputEvent.text), for a field that refuses a paste (a
+    /// password field, a bank's code field). Nothing goes on the Mac's clipboard. Read on the person's
+    /// tap with UIPasteboard, so iOS asks "Allow Paste?" unless Sill is allowed in Settings › Sill ›
+    /// Paste from Other Apps; never read by itself. Read off the main thread: iOS's alert holds the read
+    /// until it is answered, and the stream must not stop meanwhile. The text is held only for this call.
+    func typeClipboard() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let strings = UIPasteboard.general.strings ?? []
+            let count = UIPasteboard.general.changeCount
+            DispatchQueue.main.async { self?.typeClipboard(strings, changeCount: count) }
+        }
+    }
+
+    private func typeClipboard(_ strings: [String], changeCount: Int) {
+        let mac = macName.isEmpty ? "the Mac" : macName
+        switch ClipboardPolicy.deviceTypes(strings, connected: connected, streaming: active != .none, tourShows: inputPaused) {
+        case .type(let text):
+            sendInput(.text(text))
+            clipboardHandled = changeCount
+            hideClipboardChip()
+            showClipboardNote(ClipboardPolicy.Copy.typed(mac: mac), spoken: ClipboardPolicy.Copy.typed(mac: mac), warning: false)
+            if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            #if DEBUG
+            print("clipboard: typed \(text.utf8.count) bytes on the Mac")
+            #endif
+        case .tooLong:
+            showClipboardNote(ClipboardPolicy.Copy.tooLongToType(mac: mac), spoken: ClipboardPolicy.Copy.tooLongToType(mac: mac), warning: true)
+        case .notTypable:
+            showClipboardNote(ClipboardPolicy.Copy.notTypable, spoken: ClipboardPolicy.Copy.notTypable, warning: true)
+        case .nothing:
+            break
+        }
     }
 
     func showClipboardNote(_ text: String, spoken: String, warning: Bool) {
