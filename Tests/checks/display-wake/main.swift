@@ -8,8 +8,8 @@
 //   Tests/checks/display-wake/run.sh   (build.sh compiles the three files with this one)
 //
 // What it checks: the constants; which of a device's messages are a person at it, every kind there
-// is (a connect, kinds 7, 8, 15, 25, 28; never 6, 9, 17, 21, 27, 32, 44, nor any other, nor input that
-// does not decode), every input event; the device's own move to a new frame's middle (a bare pointer
+// is (a connect, kinds 7, 8, 15, 25, 28, 45, 47; never 6, 9, 17, 21, 27, 32, 44, 50, nor any other, nor input that
+// does not decode, nor an Apple Pencil's leave), every input event; the device's own move to a new frame's middle (a bare pointer
 // move under 2 s after the host's stream restart or new frame size; at 2 s a person's again), the
 // latest change counting, a clock set back ending the window; the interval (a connect every time,
 // the rest only 5 s or more after the last declaration, at exactly 5 s too, what was held off or was
@@ -22,7 +22,8 @@
 // each device's own and each button's, the display read only for a press, the 5 s grace from the
 // first press held back, a gap of 5 s or a clock set back starting afresh, a press on an awake display
 // ending the run, a device that left forgotten; a press held back declaring at once, whatever the
-// interval; the TEST ONLY display, SILL_TEST_DISPLAY_ASLEEP); then 20,000 random sessions against the
+// interval; the TEST ONLY display, SILL_TEST_DISPLAY_ASLEEP; an Apple Pencil's down held back the same way,
+// `pass(pen:)`, its tip a button of its own); then 20,000 random sessions against the
 // rule's invariants, 20,000 against Report's and 20,000 against the waking click's:
 //   I1 every connect declares (a test host: counts);
 //   I2 two declarations by anything but a connect are never under 5 s apart, unless the clock went back;
@@ -102,25 +103,35 @@ eq(W.userActiveVariable, "SILL_TEST_USER_ACTIVE", "the TEST ONLY variable's name
 // MARK: - Whose each message is: every kind there is
 
 /// The kinds that are a person at the device, written out: the rule's table must be exactly this.
-let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture,
+let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture, 45: .input,
                                         47: .nextDisplay]   // only the Desktop button sends 47 (docs/virtual-desktop-plan.md §1)
 var kinds = 0
 let fresh = W(testHost: false)
 for raw in 0...255 {
     guard let kind = Kind(rawValue: UInt8(raw)) else { continue }
     kinds += 1
-    eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
+    eq(fresh.activity(msg(kind, kind == .input || kind == .pen ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
 // A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 34, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+eq(kinds, 36, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
                     (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
-                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request")] as [(UInt8, String)] {
+                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request"),
+                    (50, "the cursor's kind, which only a host sends")] as [(UInt8, String)] {
     let kind = Kind(rawValue: raw)!
     eq(fresh.activity(msg(kind), at: 100), nil, "never kind \(raw), \(what)")
     eq(fresh.activity(msg(kind, tap), at: 100), nil, "never kind \(raw), whatever input rides with it")
 }
 eq(fresh.activity(msg(.input), at: 100), nil, "input that does not decode: nothing")
+// An Apple Pencil (kind 45) comes with the pointer event it amounts to (PenTablet.pointerEvent): none
+// for its leave, which a device also sends by itself as its surface goes, nor for one that does not
+// decode. Every other is a person's, its hover too, even right after a stream change.
+eq(fresh.activity(msg(.pen), at: 100), nil, "a Pencil's leave, or a message of it that does not decode: nothing")
+for (e, what) in [(tap, "its down"), (move, "its hover or stroke"), (recentred, "a hover at the frame's middle"),
+                  (InputEvent.pointer(.leftUp, x: 0.3, y: 0.4), "its up")] {
+    eq(fresh.activity(msg(.pen, e), at: 100), .input, "a Pencil's \(what): a person's")
+}
+eq(run([(nil, 0), (msg(.pen, recentred), 0.5)]), [.declare(.input)], "a Pencil's hover 0.5 s after a stream change: a person's, never the device's own move")
 eq(fresh.activity(.connect, at: 100), .connect, "a connect")
 do {
     var w = W(testHost: false)
@@ -511,6 +522,70 @@ do {
     eq(out, [heldPress(0.25, 0.75), heldRelease, heldPress(0.25, 0.75), heldRelease], "a double click on a sleeping display: nothing clicked")
 }
 
+// The waking Pencil (kind 45, `pass(pen:)`): its tip is a button of its own. A down on a sleeping display is
+// held back as a press is, a move to its spot without pressure going instead, and its up or cancel too; the
+// stroke's moves between go as they are (the Mac's pen tip is up: they move the pointer, they draw nothing).
+func penMessage(_ phase: String, _ x: Double = 0.25, _ y: Double = 0.75, p: Double? = 0.4) -> PenInput {
+    phase == PenInput.leave ? PenInput(phase: phase) : PenInput(phase: phase, samples: [PenSample(x: x, y: y, p: p, alt: 1, az: 0.5, t: 8)])
+}
+let penGoes = { (i: PenInput) in W.PassedPen(input: i, waking: false) }
+let penHeldDown = { (x: Double, y: Double) in
+    W.PassedPen(input: PenInput(phase: PenInput.move, samples: [PenSample(x: x, y: y, alt: 1, az: 0.5, t: 8)]), waking: true)
+}
+let penHeldUp = W.PassedPen(input: nil, waking: false)
+do {
+    var w = W(testHost: false)
+    var asked = 0
+    func pass(_ i: PenInput, _ d: ObjectIdentifier = devA, at t: TimeInterval, asleep: Bool) -> W.PassedPen {
+        w.pass(pen: i, from: d, at: t, asleep: { asked += 1; return asleep })
+    }
+    eq(pass(penMessage(PenInput.hover), at: 0, asleep: true), penGoes(penMessage(PenInput.hover)), "a hover over a sleeping display: goes on as it came")
+    eq(asked, 0, "and the display is not read for it")
+    eq(pass(penMessage(PenInput.down), at: 0.1, asleep: true), penHeldDown(0.25, 0.75),
+       "a Pencil's down on a sleeping display: held back, a move to its spot without pressure, waking")
+    eq(w.heldBack[devA], [.pen], "the tip held back for its up")
+    eq(asked, 1, "the display read once, for the down")
+    let move = PenInput(phase: PenInput.move, samples: [PenSample(x: 0.3, y: 0.7, p: 0.5, t: 12), PenSample(x: 0.31, y: 0.7, p: 0.6, t: 16)])
+    eq(pass(move, at: 0.12, asleep: true), penGoes(move), "the stroke's moves go as they are: the Mac's tip is up, so they draw nothing")
+    eq(pass(penMessage(PenInput.up), at: 0.3, asleep: false), penHeldUp, "its up, the display awake by then: held back too")
+    eq(w.heldBack[devA], nil, "nothing held once the up came")
+    eq(pass(penMessage(PenInput.down), at: 1, asleep: false), penGoes(penMessage(PenInput.down)), "the next down, the display awake: goes on")
+    eq(pass(penMessage(PenInput.up), at: 1.1, asleep: true), penGoes(penMessage(PenInput.up)), "and its up, even with the display asleep again")
+    eq(pass(penMessage(PenInput.down), at: 2, asleep: true).waking, true, "a down held back again")
+    eq(pass(penMessage(PenInput.cancel), at: 2.1, asleep: true), penHeldUp, "a cancel in place of its up: held back")
+    eq(pass(PenInput(phase: PenInput.cancel), at: 2.2, asleep: true), penGoes(PenInput(phase: PenInput.cancel)),
+       "a cancel with no down held back goes on (the Mac lets its own pen go)")
+    asked = 0
+    eq(pass(penMessage(PenInput.leave), at: 3, asleep: true), penGoes(penMessage(PenInput.leave)), "a leave goes on as it came")
+    eq(pass(penMessage("squeeze"), at: 3, asleep: true), penGoes(penMessage("squeeze")), "a phase this build does not know: as it came, for the Mac to skip")
+    eq(asked, 0, "the display read for none of them")
+}
+do {
+    // The tip and the mouse's left button are two: a finger's click between a held-back down and its up
+    // (Ignore Fingers While Drawing off) neither takes the Pencil's hold nor is taken for it.
+    var w = W(testHost: false)
+    _ = w.pass(pen: penMessage(PenInput.down), from: devA, at: 0, asleep: { true })
+    eq(w.pass(downL, from: devA, at: 6, asleep: { false }), goesOn(downL), "a finger's press once the display reads awake: goes on")
+    eq(w.pass(upL, from: devA, at: 6.1, asleep: { false }), goesOn(upL), "its release goes on")
+    eq(w.pass(pen: penMessage(PenInput.up), from: devA, at: 6.2, asleep: { false }), penHeldUp, "the Pencil's up still held back")
+    _ = w.pass(downL, from: devA, at: 20, asleep: { true })
+    eq(w.pass(pen: penMessage(PenInput.up), from: devA, at: 20.1, asleep: { true }), penGoes(penMessage(PenInput.up)),
+       "a finger's press held back: a Pencil's up is not its release")
+    eq(w.pass(upL, from: devA, at: 20.2, asleep: { true }), heldRelease, "the finger's release is")
+}
+do {
+    // One grace for the display: a finger's press and a Pencil's down count in one run, and a device that
+    // left is forgotten, its Pencil's hold with it.
+    var w = W(testHost: false)
+    _ = w.pass(downL, from: devA, at: 0, asleep: { true })
+    eq(w.pass(pen: penMessage(PenInput.down), from: devB, at: 3, asleep: { true }).waking, true, "a Pencil's down 3 s into the run: held back")
+    eq(w.pass(pen: penMessage(PenInput.down), from: devB, at: 5.5, asleep: { true }), penGoes(penMessage(PenInput.down)),
+       "5.5 s in: goes on (the display is taken for one a press does not wake)")
+    w.forget(devB)
+    eq(w.heldBack[devB], nil, "a device that left: its Pencil's hold forgotten")
+}
+eq(run([(.connect, 0), (.wakingPress, 1)]), [.declare(.connect), .declare(.wakingPress)], "a Pencil's held-back down declares at once, as a press")
+
 // A press held back declares at once, whatever the interval.
 eq(fresh.activity(.wakingPress, at: 100), .wakingPress, "a press held back: a person's")
 eq(run([(person, 0), (.wakingPress, 0.5), (.wakingPress, 0.6), (person, 1)]),
@@ -570,6 +645,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
     case .message(let kind, let input):
         switch kind.rawValue {
         case 7, 15, 25, 28, 47: return true
+        case 45: return input != nil                // an Apple Pencil with a place; never its leave
         case 8:
             guard let input else { return false }
             if case .pointer(.move, _, _) = input, let c = lastChange, now >= c, now - c < two { return false }
@@ -578,7 +654,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
         }
     }
 }
-let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28, 47].contains($0.rawValue) }
+let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28, 45, 47].contains($0.rawValue) }
 var steps = 0, declared = 0, counted = 0, heldOff = 0, clockBacks = 0, streamed = 0, own = 0, ownMoves = 0, changes = 0, wakingPresses = 0
 for session in 0..<20_000 {
     let testHost = rng.below(4) == 0
@@ -624,6 +700,7 @@ for session in 0..<20_000 {
         case ..<26: event = msg(.input)
         case ..<29: event = msg(.launchApp)
         case ..<35: event = msg([Kind.windowCommand, .pressMenuItem, .gesture, .nextDisplay][rng.below(4)])
+        case ..<39: event = msg(.pen, rng.below(4) == 0 ? nil : [tap, move, recentred][rng.below(3)])
         case ..<65: event = msg(.input, rng.below(3) == 0 ? recentred : move)
         case ..<69: event = .wakingPress
         default: event = msg(.input, events[rng.below(events.count)].0)
@@ -794,7 +871,7 @@ check(violations.isEmpty && wokeLines > 5_000 && sharedWakes > 500 && declaredLi
 //   P6 the display is read once for each press, and for nothing else.
 violations = [:]; firstViolation = [:]
 let grace: TimeInterval = 5
-var pressCount = 0, heldPresses = 0, graceOver = 0, heldReleases = 0, otherInput = 0, sleeps = 0
+var pressCount = 0, heldPresses = 0, graceOver = 0, heldReleases = 0, otherInput = 0, sleeps = 0, penPresses = 0
 let others: [InputEvent] = [move, .scroll(x: 0.2, y: 0.3, dx: 0.01, dy: 0), .scrollGesture(.ended, x: 0.2, y: 0.3), .text("é"), shift,
                             .key(hidUsage: 4, down: false, modifiers: 0)]
 for session in 0..<20_000 {
@@ -812,10 +889,68 @@ for session in 0..<20_000 {
         if rng.below(10) == 0 { asleep.toggle(); if asleep { sleeps += 1 }; continue }
         let d = rng.below(devices.count)
         // The device's next input: a press of a button it does not hold, the release of one it holds,
-        // or other input.
-        let button: W.Button = rng.below(3) == 0 ? .right : .left
+        // or other input; a quarter of it its Apple Pencil's (kind 45), whose tip is a button of its own.
+        let button: W.Button = [W.Button.left, .left, .right, .pen][rng.below(4)]
         let holds = down[d]?[button] == true
         let pick = rng.below(10)
+        if button == .pen {
+            let (x, y) = (rng.unit(), rng.unit())
+            let input: PenInput
+            if pick < 5 {
+                input = holds ? (rng.below(4) == 0 ? PenInput(phase: PenInput.cancel, samples: rng.below(2) == 0 ? nil : [PenSample(x: x, y: y)])
+                                                   : PenInput(phase: PenInput.up, samples: [PenSample(x: x, y: y, t: 40)]))
+                              : PenInput(phase: PenInput.down, samples: [PenSample(x: x, y: y, p: rng.unit(), alt: 1, az: 0.3)])
+            } else {
+                input = [PenInput(phase: PenInput.hover, samples: [PenSample(x: x, y: y)]), PenInput(phase: PenInput.leave),
+                         PenInput(phase: PenInput.move, samples: [PenSample(x: x, y: y, p: 0.5, t: 20)])][rng.below(3)]
+            }
+            var reads = 0
+            let readAsleep = asleep
+            let out = w.pass(pen: input, from: ids[d], at: now, asleep: { reads += 1; return readAsleep })
+            let detail = "session \(session) device \(d) at \(now) (asleep \(asleep)): pen \(input.phase) -> \(out)"
+            if input.phase == PenInput.down {
+                pressCount += 1; penPresses += 1
+                down[d, default: [:]][.pen] = true
+                if reads != 1 { violated("P6 a Pencil's down read the display \(reads) times", detail) }
+                let heldDown = W.PassedPen(input: PenInput(phase: PenInput.move, samples: input.samples.map { $0.map { var s = $0; s.p = nil; return s } }),
+                                           waking: true)
+                if !asleep {
+                    run = nil
+                    if out != W.PassedPen(input: input, waking: false) { violated("P3 a Pencil's down on an awake display changed", detail) }
+                } else {
+                    if let r = run, now >= r.last, now - r.last < grace { run = (r.first, now) } else { run = (now, now) }
+                    if now - run!.first >= grace {
+                        graceOver += 1
+                        if out != W.PassedPen(input: input, waking: false) { violated("P4 a Pencil's down past the grace held back", detail) }
+                    } else {
+                        heldPresses += 1
+                        if out != heldDown { violated("P4 a Pencil's down on a sleeping display not held back as a move without pressure", detail) }
+                    }
+                }
+                if out.input == input {
+                    if mac[d]?[.pen] == true { violated("P1 a Pencil's down reached the Mac with its tip down", detail) }
+                    mac[d, default: [:]][.pen] = true
+                }
+            } else if input.phase == PenInput.up || input.phase == PenInput.cancel {
+                down[d]?[.pen] = false
+                if reads != 0 { violated("P6 a Pencil's up read the display", detail) }
+                if out.waking { violated("P5 a Pencil's up waking", detail) }
+                if out.input == input {
+                    if mac[d]?[.pen] != true { violated("P1 a Pencil's up reached the Mac with no down of its own there", detail) }
+                    mac[d]?[.pen] = false
+                } else if out.input == nil {
+                    heldReleases += 1
+                    if mac[d]?[.pen] == true { violated("P2 the up of a Pencil's down that reached the Mac held back", detail) }
+                } else {
+                    violated("P5 a Pencil's up changed into something else", detail)
+                }
+            } else {
+                otherInput += 1
+                if out != W.PassedPen(input: input, waking: false) { violated("P5 a Pencil's hover, move or leave changed", detail) }
+                if reads != 0 { violated("P6 the display read for a Pencil's hover, move or leave", detail) }
+            }
+            continue
+        }
         let event: InputEvent
         if pick < 5 {
             let (x, y) = (rng.unit(), rng.unit())
@@ -874,6 +1009,14 @@ for session in 0..<20_000 {
     // The devices let go of every button they hold: each release reaches the Mac exactly when its press did.
     for (d, buttons) in down {
         for (button, holds) in buttons where holds {
+            if button == .pen {
+                let up = PenInput(phase: PenInput.up, samples: [PenSample(x: 0.5, y: 0.5)])
+                let out = w.pass(pen: up, from: ids[d], at: now + 0.1, asleep: { true })
+                let reached = out.input == up
+                if reached != (mac[d]?[.pen] == true) { violated("P2 a Pencil's up at the end that disagrees with its down", "session \(session) device \(d): \(out)") }
+                if reached { mac[d]?[.pen] = false }
+                continue
+            }
             let up: InputEvent = .pointer(button == .left ? .leftUp : .rightUp, x: 0.5, y: 0.5)
             let out = w.pass(up, from: ids[d], at: now + 0.1, asleep: { true })
             let reached = out.event == up
@@ -887,8 +1030,9 @@ for session in 0..<20_000 {
 for (what, count) in violations.sorted(by: { $0.key < $1.key }) {
     check(false, "\(what): \(count) times; first: \(firstViolation[what] ?? "")")
 }
-check(violations.isEmpty && heldPresses > 50_000 && graceOver > 2_000 && heldReleases > 30_000 && otherInput > 200_000 && sleeps > 40_000,
-      "20,000 random sessions of the waking click, \(pressCount) presses (\(heldPresses) held back, \(graceOver) past the grace), "
+check(violations.isEmpty && heldPresses > 50_000 && graceOver > 2_000 && heldReleases > 30_000 && otherInput > 200_000 && sleeps > 40_000
+      && penPresses > 30_000,
+      "20,000 random sessions of the waking click, \(pressCount) presses (\(penPresses) a Pencil's down; \(heldPresses) held back, \(graceOver) past the grace), "
       + "\(heldReleases) releases held back, \(otherInput) other input, \(sleeps) sleeps: every invariant")
 
 print(failures == 0 ? "ok: \(passes) checks" : "FAILED: \(failures) of \(passes + failures) checks")

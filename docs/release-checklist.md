@@ -129,7 +129,10 @@ serves the root or `/docs`, never `/site`. So:
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
   and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
-  without it). None is open since 0.6.2: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
+  without it). One is open: the Apple Pencil's (issue #81, PR #175: privacy.html's stroke and Pencil
+  items), between `<!-- Pencil` and `<!-- /Pencil -->`, whose perl line is below, and after it
+  `grep -n -i pencil ../sill-site/*.html` prints only the lines that were there before (index.html's
+  intro, terms.html's trademarks). Before it, 0.6.0 (2026-11-02) shipped the words of the Clipboard,
   Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing window,
   Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
   and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
@@ -166,6 +169,7 @@ serves the root or `/docs`, never `/site`. So:
 ```
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
 rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # when the site changes
+perl -0pi -e 's/[ \t]*<!-- Pencil:.*?<!-- \/Pencil -->\n//gs' ../sill-site/*.html   # only before the Apple Pencil's release
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 

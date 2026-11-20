@@ -17,7 +17,8 @@ device keeps working with Macs from the first public build on, or each says why
   header; kinds 0–28, 32 and 44 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
   Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and Clipboard;
   44, a device's keyframe request after its picture was interrupted, empty, which a host from
-  before skips; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
+  before skips; 45, an Apple Pencil's, and 50, the cursor's kind, with Pen.swift's JSON, once a
+  public build carries them, below; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
   below), inside `sill/1` at both doors (19 and 20 on their own `sill-pair/1` connection, the
   next bullet); the ping echo; a viewport (kind 9) within `ViewportBounds`, each side 1 to
   16384 points and a text scale 0.25 to 4 or none: every device build's is, a host from
@@ -65,7 +66,16 @@ device keeps working with Macs from the first public build on, or each says why
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps
   within (a device drops a message past them whole): a format at most 4 KB, a packets message at
   most 16 KB (`AudioMessage.parse`), so a host that batches packets never puts more than 16 KB in
-  one message.
+  one message; an
+  Apple Pencil as a pen (kind 45, Pen.swift; PR #175), once a public build carries it: it goes only
+  to a host whose window list says `pencil` 1 or more, as the phases `hover`, `down`, `move`, `up`,
+  `cancel` and `leave` with at most 32 samples (`PenInput.checked()` is what a host acts on), each
+  sample's `t` the milliseconds since its stroke's down (none on the down or a hover; the host's
+  stroke clock times the stroke by it, never after now), and a later generation says 2; kind 26's
+  `seen` counts every input message the host read on that connection, kinds 8 and 45 (SessionLink's
+  `inputsOnSession` counts the same on the device); kind 50 (Viewport.swift's CursorKind,
+  `standard`; 46 when it was written, now the camera's) goes just before the kind 14 it describes,
+  and a device that gets none takes the cursor as standard.
 - Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
   a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions

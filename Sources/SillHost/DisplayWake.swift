@@ -11,10 +11,12 @@ import StreamProtocol
 /// - A device's session connecting declares at once, every connection: the wake.
 /// - What a person does to the Mac from the device declares when the last declaration is `interval`
 ///   or more ago: an app opened (kind 7), input (kind 8), a window's button (15), a menu item chosen
-///   (25), a trackpad gesture (28), the Desktop stepped to the Mac's next display (47: only the Desktop
-///   button sends it, never the device by itself; docs/virtual-desktop-plan.md §1). So a stream of
-///   input declares at most once every 5 s and keeps the display on as local input would, while a
-///   device that sends nothing lets it sleep.
+///   (25), a trackpad gesture (28), an Apple Pencil's hover, stroke or tip on the stream (45, one that
+///   decodes and has a place: never its leave, which a device also sends by itself as its surface goes),
+///   the Desktop stepped to the Mac's next display (47: only the Desktop button sends it, never the
+///   device by itself; docs/virtual-desktop-plan.md §1). So a stream of input declares at most once
+///   every 5 s and keeps the display on as local input would, while a device that sends nothing lets
+///   it sleep.
 /// - Never a pick (kind 6): the device asks for the Desktop by itself (on a connection's first list,
 ///   when the Mac stopped the Desktop it streamed, when the watched window closed) and picks again
 ///   what it watched after a move, with nobody at it; a person's pick is followed by their input.
@@ -26,7 +28,9 @@ import StreamProtocol
 /// - A left or right press on a display that reads asleep is held back (`pass`, PR #228), and so is
 ///   its release: the pointer moves there instead, and the press declares at once whatever the
 ///   interval (`Event.wakingPress`). A tap on a black picture then clicks nothing out of sight; it
-///   only wakes the display, as the PR has a click on a sleeping display at the Mac do.
+///   only wakes the display, as the PR has a click on a sleeping display at the Mac do. An Apple
+///   Pencil's tip landing there is held back the same way (`pass(pen:)`), with its lift, so a stroke on
+///   the black picture draws nothing either.
 /// - A test host (`--synthetic`: it does not advertise, as `InputInjector.dryRun`) declares nothing:
 ///   it counts what it would declare (`dryKey` in the stats line), and the Mac's display is never
 ///   touched.
@@ -42,7 +46,8 @@ struct DisplayWake {
         /// A device's session connected: the coordinator's client-connected path, once per connection.
         case connect
         /// A message from a device's session, every one that reaches the coordinator, with its input
-        /// event when it is kind 8 and decodes (nil otherwise).
+        /// event when it is kind 8 and decodes, or the pointer event a kind 45 that decodes amounts to
+        /// (PenTablet.pointerEvent: none for a leave); nil otherwise.
         case message(StreamMessageKind, InputEvent?)
         /// A device's left or right press that `pass` held back because the display it lands on read
         /// asleep: it declares at once, as a connect does, whatever the interval.
@@ -54,7 +59,8 @@ struct DisplayWake {
         case connect
         /// Kind 7: an app opened from the device's Apps list (its first window is then picked for it).
         case launch
-        /// Kind 8: a touch, a key, text, a scroll, a pointer move.
+        /// Kind 8: a touch, a key, text, a scroll, a pointer move; and kind 45, an Apple Pencil's hover,
+        /// stroke or tip.
         case input
         /// Kind 15: a window's close, minimize or full-screen button, from the bar's long press.
         case windowButton
@@ -131,6 +137,12 @@ struct DisplayWake {
                     return nil                           // the device's own move to the new frame's middle
                 }
                 return .input
+            case .pen:
+                // An Apple Pencil on the stream (kind 45): a person, as kind 8, whenever it has a place. A
+                // leave has none: the device sends it as its Pencil goes out of range, and also by itself
+                // as its surface goes (a rotation, a pick), with nobody at it. One that does not decode
+                // acts on nothing.
+                return input == nil ? nil : .input
             case .windowCommand: return .windowButton
             case .pressMenuItem: return .menuItem
             case .gesture: return .gesture
@@ -158,8 +170,9 @@ struct DisplayWake {
     /// between presses starts afresh (the display may have woken and slept again since).
     static let wakeGrace: TimeInterval = 5
 
-    /// A device's mouse button.
-    enum Button: Hashable { case left, right }
+    /// A device's button: the mouse's left and right, and its Apple Pencil's tip (kind 45), a button of
+    /// its own on the Mac (PenTablet: its down goes whoever holds the left button, its up is its own).
+    enum Button: Hashable { case left, right, pen }
 
     /// What `pass` makes of an input event.
     struct Passed: Equatable {
@@ -190,10 +203,57 @@ struct DisplayWake {
                        asleep: () -> Bool) -> Passed {
         guard case .pointer(let action, let x, let y) = event, action != .move else { return Passed(event: event, waking: false) }
         let button: Button = action == .leftDown || action == .leftUp ? .left : .right
-        if action == .leftUp || action == .rightUp {
-            guard heldBack[device]?.contains(button) == true else { return Passed(event: event, waking: false) }
+        switch hold(button, pressed: action == .leftDown || action == .rightDown, by: device, at: now, asleep: asleep) {
+        case .goes: return Passed(event: event, waking: false)
+        case .release: return Passed(event: nil, waking: false)
+        case .press: return Passed(event: .pointer(.move, x: x, y: y), waking: true)
+        }
+    }
+
+    /// What `pass(pen:)` makes of an Apple Pencil's message (kind 45).
+    struct PassedPen: Equatable {
+        /// What goes on to the Mac: the message as it came, a held-back down as a move to its spot, or nil.
+        let input: PenInput?
+        /// A down held back on a display that read asleep: it wakes the display (`Event.wakingPress`).
+        let waking: Bool
+    }
+
+    /// A device's Apple Pencil message on its way to the Mac, as `pass` takes kind 8's: the tip is a
+    /// button of its own (`Button.pen`). A down on a display that reads asleep (`asleep`, asked only for
+    /// a down) is held back: a move to its spot goes instead, without its pressure (the Mac takes a pen's
+    /// move with its tip up as a hover's, PenTablet), and it wakes the display (`waking`). Its up, or the
+    /// cancel in its place, is held back too, whenever it comes, and the stroke's moves between them go as
+    /// they are: with the Mac's pen tip up they move the pointer and draw nothing. The presses' grace is
+    /// the display's, so a finger's press and a Pencil's down on one sleeping display count in one run.
+    /// A hover, a move and a leave go on as they are, and `asleep` is not asked for them.
+    mutating func pass(pen input: PenInput, from device: ObjectIdentifier, at now: TimeInterval,
+                       asleep: () -> Bool) -> PassedPen {
+        let pressed: Bool
+        switch input.phase {
+        case PenInput.down: pressed = true
+        case PenInput.up, PenInput.cancel: pressed = false
+        default: return PassedPen(input: input, waking: false)
+        }
+        switch hold(.pen, pressed: pressed, by: device, at: now, asleep: asleep) {
+        case .goes: return PassedPen(input: input, waking: false)
+        case .release: return PassedPen(input: nil, waking: false)
+        case .press:
+            let spot = input.samples.map { $0.map { sample -> PenSample in var s = sample; s.p = nil; return s } }
+            return PassedPen(input: PenInput(phase: PenInput.move, samples: spot), waking: true)
+        }
+    }
+
+    /// What becomes of a press or a release of `button`: it goes on, or it is held back, a press waking.
+    private enum Hold { case goes, press, release }
+
+    /// The rule both `pass`es share: a release (`pressed` false) is held back exactly when that device's
+    /// press of that button was; a press on a display that reads asleep is held back within the grace.
+    private mutating func hold(_ button: Button, pressed: Bool, by device: ObjectIdentifier, at now: TimeInterval,
+                               asleep: () -> Bool) -> Hold {
+        if !pressed {
+            guard heldBack[device]?.contains(button) == true else { return .goes }
             letGo(button, of: device)
-            return Passed(event: nil, waking: false)
+            return .release
         }
         if asleep() {
             var run = asleepPresses ?? (now, now)
@@ -202,13 +262,13 @@ struct DisplayWake {
             asleepPresses = run
             if now - run.first < Self.wakeGrace {
                 heldBack[device, default: []].insert(button)
-                return Passed(event: .pointer(.move, x: x, y: y), waking: true)
+                return .press
             }
         } else {
             asleepPresses = nil
         }
         letGo(button, of: device)            // this press goes on: one of that button held back before is over
-        return Passed(event: event, waking: false)
+        return .goes
     }
 
     /// A device left: its presses held back are forgotten.
