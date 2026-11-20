@@ -206,6 +206,7 @@ struct StreamScreen: View {
     @State private var latched: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
+    @State private var typingKeyboardTop: CGFloat?
     /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
     /// been asked to fit (the control shows 1× for it). Up here, like `latched`, so it survives
     /// rotation and both layouts share it.
@@ -558,6 +559,10 @@ struct StreamScreen: View {
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
         .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            typingKeyboardTop = frame.height > 0 && frame.minY < UIScreen.main.bounds.height ? frame.minY : nil
+        }
         .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
@@ -1877,6 +1882,18 @@ struct StreamScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            GeometryReader { geo in
+                if keyboardShown, let top = typingKeyboardTop {
+                    let overlap = max(0, geo.frame(in: .global).maxY - top)
+                    StreamTypingEditorPanel(proxy: overlay)
+                        .frame(height: 88)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, overlap + 6)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+        }
     }
 }
 

@@ -624,7 +624,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// `type TEXT`: the on-screen keyboard's typing, as it hands this view its text (`insertText`): typed
     /// text for the Mac whoever types a hardware keyboard's characters (KeyTyping is for presses only).
     func scriptType(_ text: String) {
-        insertText(text)
+        if let editor = keyboardProxy?.editor, editor.isFirstResponder {
+            editor.insertText(text)
+        } else {
+            insertText(text)
+        }
     }
 
     /// `esc [MODS]`: Esc as its key command reaches this view, only while it takes Esc (it holds the
@@ -775,12 +779,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
 
     @objc var keyboardType: UIKeyboardType = .default
-    @objc var autocorrectionType: UITextAutocorrectionType = .no
+    @objc var autocorrectionType: UITextAutocorrectionType = .yes
     @objc var autocapitalizationType: UITextAutocapitalizationType = .none
     @objc var smartQuotesType: UITextSmartQuotesType = .no
     @objc var smartDashesType: UITextSmartDashesType = .no
-    @objc var spellCheckingType: UITextSpellCheckingType = .no
-    @objc var inlinePredictionType: UITextInlinePredictionType = .no
+    @objc var spellCheckingType: UITextSpellCheckingType = .yes
+    @objc var inlinePredictionType: UITextInlinePredictionType = .default
     // Nor any of iPadOS's newer helpers that rewrite text already typed: what this view remembers is the
     // Mac's (TextComposition), and a rewrite of it would go out as backspaces and retyping there. Only an
     // input method or dictation revises it.
@@ -873,6 +877,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             }
         }
         showComposition()
+        keyboardProxy?.refreshEditor()
         if composition.wantsTrim, !trimQueued {
             trimQueued = true
             DispatchQueue.main.async { [weak self] in
@@ -927,6 +932,31 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard !latchedModifiers.isEmpty else { return }
         latchedModifiers = []
         onModifiersConsumed?()
+    }
+
+    fileprivate var typingDocument: String { composition.document }
+
+    fileprivate func editorChanged(_ text: String) {
+        let outputs = composition.replace(NSRange(location: 0, length: composition.length), with: text)
+        if !outputs.isEmpty {
+            setOwnPointer(nil, .none)
+            typed(outputs)
+            consumeLatch()
+        } else {
+            keyboardProxy?.refreshEditor()
+        }
+    }
+
+    fileprivate func editorMayChange(_ range: NSRange, text: String) -> Bool {
+        if !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1 {
+            insertText(text)
+            return false
+        }
+        if latchedModifiers.contains(.shift), text == "\n" || text == "\t" {
+            insertText(text)
+            return false
+        }
+        return composition.refusal(range, with: text) == nil
     }
 
     // MARK: Who holds the keyboard (InputOverlayProxy, HardwareKeyboardPolicy)
@@ -1027,7 +1057,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// own window's: Settings open in another Sill window, behind this one, never sees a key pressed
     /// here. A leaf view is in the responder chain only while it is first responder, so this says again
     /// what the chain does.
-    private var takesEscape: Bool { isFirstResponder && !composition.isComposing && !EscapeKey.onScreen(in: window) }
+    private var takesEscape: Bool {
+        (isFirstResponder || keyboardProxy?.editor?.isFirstResponder == true)
+            && !composition.isComposing && !EscapeKey.onScreen(in: window)
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         guard takesEscape else { return super.keyCommands }
@@ -1459,6 +1492,8 @@ final class InputOverlayProxy {
     /// The current input view: the one the layout on screen made last. Another's events (a rotation's
     /// old view resigning on its way out) change nothing here.
     weak var view: InputOverlayView?
+    fileprivate weak var editor: StreamTypingEditor?
+    private var transferringKeyboard = false
     /// The rule, and what it was told.
     private(set) var policy = HardwareKeyboardPolicy(attached: HardwareKeyboardMonitor.shared.attached)
     /// The person's own keyboard came up or went: the Keyboard button lights, the tour counts it.
@@ -1484,7 +1519,46 @@ final class InputOverlayProxy {
     /// source changed: what an input method is still composing goes to the Mac first, as it stands, and
     /// the input view forgets what it remembers of what was typed (#138, `forgetTyped`), so a correction
     /// dictation makes later never backspaces where the caret is now.
-    func caretMayHaveMoved() { view?.forgetTyped() }
+    func caretMayHaveMoved() {
+        editor?.commitDraft()
+        view?.forgetTyped()
+        refreshEditor()
+    }
+
+    fileprivate func attachEditor(_ editor: StreamTypingEditor) {
+        self.editor = editor
+        editor.proxy = self
+        editor.input = view
+        refreshEditor()
+        DispatchQueue.main.async { [weak self, weak editor] in
+            guard let self, let editor, self.editor === editor, self.policy.isOwn, editor.window != nil else { return }
+            self.transferringKeyboard = true
+            _ = editor.becomeFirstResponder()
+            self.transferringKeyboard = false
+        }
+    }
+
+    fileprivate func detachEditor(_ editor: StreamTypingEditor) {
+        guard self.editor === editor else { return }
+        editor.commitDraft()
+        let held = editor.isFirstResponder
+        transferringKeyboard = true
+        _ = editor.resignFirstResponder()
+        self.editor = nil
+        transferringKeyboard = false
+        if held, policy.isOwn { view?.take(automatic: false) }
+    }
+
+    fileprivate func refreshEditor() {
+        guard let editor, editor.markedTextRange == nil, let text = view?.typingDocument, editor.text != text else { return }
+        editor.text = text
+        editor.selectedRange = NSRange(location: text.utf16.count, length: 0)
+    }
+
+    fileprivate func editorResigned() {
+        guard !transferringKeyboard, let view else { return }
+        resigned(view)
+    }
 
     // From the view (only the current one counts)
 
@@ -1513,7 +1587,7 @@ final class InputOverlayProxy {
     }
 
     func resigned(_ view: InputOverlayView) {
-        guard view === self.view else { return }
+        guard view === self.view, !transferringKeyboard else { return }
         change("let go of the keyboard") { $0.resigned(); return [] }
     }
 
@@ -1533,16 +1607,104 @@ final class InputOverlayProxy {
         #endif
         for action in actions {
             switch action {
-            case .take(let automatic): view?.take(automatic: automatic)
+            case .take(let automatic):
+                if !automatic, let editor, editor.window != nil {
+                    transferringKeyboard = true
+                    _ = editor.becomeFirstResponder()
+                    transferringKeyboard = false
+                } else {
+                    view?.take(automatic: automatic)
+                }
             case .makeOwn: view?.setHoldsForHardwareKeyboard(false)
-            case .makeAutomatic: view?.setHoldsForHardwareKeyboard(true)
-            case .letGo: if view?.isFirstResponder == true { _ = view?.resignFirstResponder() }
+            case .makeAutomatic:
+                if editor?.isFirstResponder == true {
+                    transferringKeyboard = true
+                    _ = editor?.resignFirstResponder()
+                    view?.take(automatic: true)
+                    transferringKeyboard = false
+                } else {
+                    view?.setHoldsForHardwareKeyboard(true)
+                }
+            case .letGo:
+                if editor?.isFirstResponder == true { _ = editor?.resignFirstResponder() }
+                if view?.isFirstResponder == true { _ = view?.resignFirstResponder() }
             }
         }
         if policy.isOwn != reportedOwn {
             reportedOwn = policy.isOwn
             onOwnChange?(reportedOwn)
         }
+    }
+}
+
+/// A native editing surface for the software keyboard in landscape. Only the text typed in this
+/// session is editable. TextComposition keeps corrections from crossing a submitted Return or Tab.
+fileprivate final class StreamTypingEditor: UITextView, UITextViewDelegate {
+    weak var proxy: InputOverlayProxy?
+    weak var input: InputOverlayView?
+
+    init() {
+        super.init(frame: .zero, textContainer: nil)
+        delegate = self
+        font = .preferredFont(forTextStyle: .body)
+        adjustsFontForContentSizeCategory = true
+        textColor = .label
+        backgroundColor = .secondarySystemBackground
+        layer.cornerRadius = 12
+        textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        autocorrectionType = .yes
+        spellCheckingType = .yes
+        autocapitalizationType = .none
+        smartQuotesType = .no
+        smartDashesType = .no
+        accessibilityLabel = "Text being typed on the Mac"
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
+
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        guard proxy?.view === input else { return false }
+        if markedTextRange != nil { return true }
+        return input?.editorMayChange(range, text: text) ?? false
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        guard markedTextRange == nil, proxy?.view === input else { return }
+        input?.editorChanged(text)
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        if let input { proxy?.became(input, automatic: false) }
+    }
+
+    func textViewDidEndEditing(_ textView: UITextView) {
+        commitDraft()
+        proxy?.editorResigned()
+    }
+
+    func commitDraft() {
+        guard proxy?.view === input else { return }
+        if markedTextRange != nil { unmarkText() }
+        input?.editorChanged(text)
+    }
+}
+
+struct StreamTypingEditorPanel: UIViewRepresentable {
+    let proxy: InputOverlayProxy
+
+    func makeUIView(context: Context) -> UITextView {
+        let editor = StreamTypingEditor()
+        proxy.attachEditor(editor)
+        return editor
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: ()) {
+        guard let editor = uiView as? StreamTypingEditor else { return }
+        editor.proxy?.detachEditor(editor)
     }
 }
 
