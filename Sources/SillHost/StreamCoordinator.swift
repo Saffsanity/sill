@@ -524,6 +524,14 @@ package final class StreamCoordinator {
         audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
         audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
         audio.onStatus = { [weak self] _ in self?.showAudio() }
+        // A sound that failed or ended by itself, due to be tried again (issue #365): what it should be of
+        // now, from the source, the display and the lock as they are (`audioKey`), never the key it had. Not
+        // during a switch, whose end asks anyway (`active`'s didSet, set on every path of `select`), and
+        // whose stage may have just taken the display that sound was built on away.
+        audio.onRetry = { [weak self] in
+            guard let self, !self.switching else { return }
+            self.audioFollow()
+        }
         server.onAudioListenersChanged = { [weak self] count in
             Task { @MainActor in
                 guard let self else { return }
@@ -2991,12 +2999,13 @@ package final class StreamCoordinator {
     // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
     //
     // One function decides what the sound is of, from Send Audio, the devices that play it, the
-    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
-    // stream through the picture's restarts and starts another for another source. It runs in
-    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
-    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
-    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
-    // server keeps each device's codec and epoch.
+    // source, the display an app's sound is built on, the lock and whether Sill is quitting, and hands
+    // it to the pipeline, which keeps the same app's stream through the picture's restarts (on the same
+    // display) and starts another for another source. It runs in `active`'s didSet (set on every path
+    // of `select`, once the picture has started, or to none), when the count of devices that play it
+    // changes, in `adopt` when Send Audio changed outside a select, when the pipeline's own retry is
+    // due outside a select (`onRetry`, issue #365), and at quit. The sound adds no device → host kind
+    // and no per-connection state here: the server keeps each device's codec and epoch.
 
     /// What the sound should be of now, and why none when none: the log's reason.
     private func audioKey() -> (AudioKey, String) {
@@ -3028,8 +3037,20 @@ package final class StreamCoordinator {
             guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
             let name = NSRunningApplication(processIdentifier: pid)?.localizedName
                 ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
-            return (.app(pid: pid, name: SafeText.label(name)), "")
+            return (.app(pid: pid, display: appAudioDisplay?.displayID ?? 0, name: SafeText.label(name)), "")
         }
+    }
+
+    /// The display an app's sound filter is built on (issue #365): Sill's virtual display while the
+    /// streamed window is staged there (the app may have no window on the main display, and when Sill's
+    /// display appears or goes a filter on the main display can fail or end with -3815), else the main
+    /// display.
+    private var appAudioDisplay: SCDisplay? {
+        if case .window(let id) = active, virtualDisplay, stage.isStaged, stage.placement?.windowID == id,
+           let d = stage.scDisplay {
+            return d
+        }
+        return catalog.mainDisplay
     }
 
     /// Hands the pipeline what the sound should be of now.
@@ -3040,9 +3061,9 @@ package final class StreamCoordinator {
         }
     }
 
-    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
-    /// main display whatever stop the Desktop shows (sound does not depend on the display: an app on the
-    /// virtual display or another monitor is heard the same), so a step to another stop keeps the sound
+    /// The source for `key`: ScreenCaptureKit's sound of one app (on Sill's virtual display while its
+    /// window is staged there, else on the main display: `appAudioDisplay`), or of every app but Sill's
+    /// on the main display whatever stop the Desktop shows, so a step to another stop keeps the sound
     /// running (DesktopDisplays); or a synthetic host's test tone.
     private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
         switch key {
@@ -3059,11 +3080,13 @@ package final class StreamCoordinator {
                 filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
-        case .app(let pid, let name):
-            guard let display = catalog.mainDisplay else { return .failed("no display to capture from") }
+        case .app(let pid, let displayID, let name):
+            // The display the key names while it is still Sill's, else the one `appAudioDisplay` gives now.
+            guard let display = (stage.scDisplay.flatMap { $0.displayID == displayID ? $0 : nil }) ?? appAudioDisplay else { return .failed("no display to capture from") }
+            let onStage = display.displayID == stage.scDisplay?.displayID ? " on virtual display \(display.displayID)" : ""
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it)\(onStage).")
         }
     }
 
