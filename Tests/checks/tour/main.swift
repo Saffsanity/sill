@@ -1038,6 +1038,18 @@ check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Ma
 for f in everyFeatures {
     check(words(.touch, L, features: f).rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "the swipe row follows the gestures: \(f)")
 }
+// Trackpad mode (#178): the picture is a trackpad, so its card says what a trackpad does there, and
+// nothing of direct touch (no Pencil, no pinch: the trackpad covers the picture).
+let R1 = "Drag to move the pointer.", R2 = "Tap to click where the pointer is.", R3 = "Tap with two fingers to right-click."
+let R4 = "Touch and hold, then drag, to move a window or select text.", R5 = "Drag with two fingers to scroll."
+let trackpadMode = with { $0.trackpadMode = true }
+let touchTrackpad = words(.touch, L, features: trackpadMode)
+check(touchTrackpad.title == "The Picture Is a Trackpad" && touchTrackpad.subtitle == "What you do here happens on Mac mini.", "trackpad mode: title and subtitle")
+check(texts(touchTrackpad) == [R1, R2, R3, R4, R5, T6], "trackpad mode on iPad: \(texts(touchTrackpad))")
+check(texts(words(.touch, P, device: "iPhone", features: trackpadMode)) == [R1, R2, R3, R4, R5, T6], "trackpad mode on iPhone, upright: the same rows")
+check(texts(words(.touch, L, features: with(trackpadMode) { $0.gestures = false })) == [R1, R2, R3, R4, R5], "trackpad mode, the gestures off: no swipe row")
+check(touchTrackpad.hint == touchPad.hint, "trackpad mode: the same hint")
+check(!allOn.trackpadMode && !allOff.trackpadMode, "Direct Touch unless Trackpad mode is chosen")
 
 // The bar's card: Windows (and Menus), the Virtual Display row with Aa in it, the Keyboard button and a
 // hardware keyboard where the bar has the button.

@@ -278,6 +278,8 @@ struct StreamScreen: View {
     /// This device's Larger Picture switch (the Settings panel's This iPhone; docs/larger-picture-plan.md).
     /// It acts only while a window streams (`largerPictureNow`).
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178): Direct Touch by default.
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// Larger Picture as it was in effect when the Settings panel opened (`largerPictureNow`), which
     /// the arrangement keeps until the panel closes; nil while it is closed. The panel hangs under row
     /// 1, which the arrangement moves by the picture's growth (157 pt on an 18 Pro Max), so a change
@@ -396,11 +398,12 @@ struct StreamScreen: View {
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
-                // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. Full screen
-                // has no trackpad, so none of its arrow either.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait && !hidden, initial: true) { _, portrait in
-                    client.setPointerLayout(portrait: portrait)
+                // The pointer sprite follows the layout and touch mode: the trackpad's arrow shows in
+                // the laptop layout (unless full screen hides the trackpad) or when Trackpad mode is chosen
+                // (#178), and a rotation or mode change re-renders it at once; the Mac's arrow stays.
+                .onChange(of: TouchMode.showsPointer(isPortrait: DuoLayout.of(geo.size).isPortrait && !hidden,
+                                                     mode: TouchMode.stored(touchModeRaw)), initial: true) { _, show in
+                    client.setPointerLayout(portrait: show)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
                 // is told when it first shows (ClipboardPolicy.chipCounts).
@@ -540,6 +543,8 @@ struct StreamScreen: View {
             runLaunchArguments()
             #endif
         }
+        // Trackpad mode lies over the picture, so no pinch could undo a zoom made before it (#178).
+        .onChange(of: touchModeRaw) { _, _ in zoom.reset() }
         .onChange(of: client.active) { _, source in
             // Another source, whoever picked it: the whole picture again (a new frame size of the same
             // source keeps the zoom where it is on the pane).
@@ -1474,7 +1479,8 @@ struct StreamScreen: View {
                      clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
                      pasteRightAway: StreamClient.pasteRightAwayOn,
                      sound: client.macHasSound,
-                     largerPicture: offersLarger)
+                     largerPicture: offersLarger,
+                     trackpadMode: TouchMode.stored(touchModeRaw) == .trackpad)
     }
 
     #if DEBUG
@@ -1484,7 +1490,7 @@ struct StreamScreen: View {
         func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
         let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
                     has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
-                    has(f.largerPicture, "Larger Picture")]
+                    has(f.largerPicture, "Larger Picture"), has(f.trackpadMode, "Trackpad mode")]
         return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
             + what.joined(separator: ", ")
     }
@@ -1819,6 +1825,16 @@ struct StreamScreen: View {
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },
                              writeZoom: { [zoom] in zoom.set($0) })
+                if TouchMode.stored(touchModeRaw) == .trackpad {
+                    TrackpadView(send: { client.sendInput($0) },
+                                 setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                                 feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                                 onFingers: { client.trackpadFingers($0) },
+                                 latched: latched,
+                                 onModifiersConsumed: { latched = [] },
+                                 verticalSpan: nil,
+                                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                }
             }
             // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
             .background(hidden ? Color.black : Palette.panel)
