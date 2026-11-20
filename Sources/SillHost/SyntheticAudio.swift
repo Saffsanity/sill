@@ -14,8 +14,11 @@ import Foundation
 /// TEST ONLY, read once, honoured wherever this source runs (a synthetic host, the harness), which
 /// no device finds: `SILL_TEST_AUDIO_CHUNK=1024` makes 1024-frame chunks every 21.3 ms (the 512-frame
 /// packets, headless); `SILL_TEST_AUDIO_PAUSE=S@T[,S@T…]` makes nothing for S seconds from T seconds
-/// after the tone starts, then goes on from where the clock is (a gap: a new segment). Each prints one
-/// line as the tone starts; a value that does not parse is ignored with one line.
+/// after the tone starts, then goes on from where the clock is (a gap: a new segment);
+/// `SILL_TEST_AUDIO_END=S[,S…]` ends the n-th start of a tone in this process by itself S seconds after
+/// it starts, as the system stops a capture (0: that start fails, as "Start stream fail" does), and the
+/// starts after the list run on: the pipeline's own retry, headless (issue #365). Each prints one line
+/// as the tone starts; a value that does not parse is ignored with one line.
 final class SyntheticAudio: AudioSource, @unchecked Sendable {   // its state is confined to `queue`
     var onPCM: ((PCMChunk) -> Void)?
     var onStopped: ((String) -> Void)?
@@ -26,7 +29,12 @@ final class SyntheticAudio: AudioSource, @unchecked Sendable {   // its state is
     private let pitch: Double
     private let chunkFrames: Int
     private let pauses: [(at: Double, seconds: Double)]
+    /// SILL_TEST_AUDIO_END's seconds, one for each start of a tone in this process, in order.
+    private let ends: [Double]
     private let testLines: [String]
+    /// The starts of a tone in this process so far, for SILL_TEST_AUDIO_END.
+    private static let startsLock = NSLock()
+    private static var starts = 0
     // On `queue`.
     private var timer: DispatchSourceTimer?
     private var tone: TestTone?
@@ -34,6 +42,12 @@ final class SyntheticAudio: AudioSource, @unchecked Sendable {   // its state is
     private var startHost = 0.0
     private var nextFrame = 0
     private var pausing = false
+    private var endAfter: Double?
+
+    /// SILL_TEST_AUDIO_END's refusal of a start.
+    private struct Refused: AudioSourceFailure {
+        let description = "the test tone was refused at its start (TEST ONLY: SILL_TEST_AUDIO_END)"
+    }
 
     /// `queue`: the pipeline's, where the chunks are delivered. `pitch`: 440 Hz, or another for a
     /// second source in the harness.
@@ -67,15 +81,37 @@ final class SyntheticAudio: AudioSource, @unchecked Sendable {   // its state is
             }
         }
         self.pauses = pauses.map { (at: $0.0, seconds: $0.1) }
+        var ends: [Double] = []
+        if let raw = env["SILL_TEST_AUDIO_END"], !raw.isEmpty {
+            let parsed = raw.split(separator: ",").map { Double($0).flatMap { $0 >= 0 && $0.isFinite ? $0 : nil } }
+            if parsed.isEmpty || parsed.contains(where: { $0 == nil }) {
+                lines.append("SILL_TEST_AUDIO_END=\(raw) ignored: S[,S…], seconds, 0 for a start that fails.")
+            } else {
+                ends = parsed.compactMap { $0 }
+            }
+        }
+        self.ends = ends
         testLines = lines
     }
 
     private static func seconds(_ s: Double) -> String { s == s.rounded() ? "\(Int(s))" : "\(s)" }
 
+    /// This start's number among the starts of a tone in this process, from 1.
+    private static func countStart() -> Int { startsLock.withLock { starts += 1; return starts } }
+
     func start() async throws {
+        let n = Self.countStart()
+        let end = n <= ends.count ? ends[n - 1] : nil
+        if end == 0 {
+            for line in testLines { print(line) }
+            print("Test audio: start \(n) of the tone fails (SILL_TEST_AUDIO_END).")
+            throw Refused()
+        }
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             queue.async { [self] in
                 for line in testLines { print(line) }
+                if let end { print("Test audio: start \(n) of the tone ends by itself after \(Self.seconds(end)) s (SILL_TEST_AUDIO_END).") }
+                endAfter = end
                 // The host time ↔ wall clock mapping, taken once: frame 0 is now on both.
                 let host = HostClock.now()
                 let wall = Date().timeIntervalSince1970
@@ -107,11 +143,19 @@ final class SyntheticAudio: AudioSource, @unchecked Sendable {   // its state is
         }
     }
 
-    /// On `queue`: every chunk whose last frame the clock has passed, unless a pause holds them.
+    /// On `queue`: every chunk whose last frame the clock has passed, unless a pause holds them, or
+    /// the tone's end (SILL_TEST_AUDIO_END): no chunk from then on, and the pipeline told once.
     private func tick() {
         guard let tone else { return }
         let now = HostClock.now()
         let since = now - startHost
+        if let endAfter, since >= endAfter {
+            timer?.cancel()
+            timer = nil
+            self.tone = nil
+            onStopped?("the test tone ended by itself after \(Self.seconds(endAfter)) s (TEST ONLY: SILL_TEST_AUDIO_END)")
+            return
+        }
         if pauses.contains(where: { since >= $0.at && since < $0.at + $0.seconds }) {
             pausing = true
             return

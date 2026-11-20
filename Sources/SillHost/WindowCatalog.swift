@@ -188,6 +188,19 @@ final class WindowCatalog {
                               width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
+    /// A window's identity and frame for spotting a macOS native tab switch (#366).
+    static func tab(_ w: SCWindow) -> CatalogWindows.Tab {
+        CatalogWindows.Tab(id: w.windowID, pid: w.owningApplication?.processID ?? -1,
+                           x: Double(w.frame.origin.x), y: Double(w.frame.origin.y),
+                           width: Double(w.frame.width), height: Double(w.frame.height))
+    }
+
+    /// The last look's windows, and the native tab switches still to follow (`oldID -> newID`, #366):
+    /// each while its new tab is on the screen and its old window off it, or streams (CatalogWindows.
+    /// mergedSwaps). The coordinator takes the streamed window's (`followTabSwap`).
+    private var lastTabs: [CatalogWindows.Tab] = []
+    var tabSwaps: [CGWindowID: CGWindowID] = [:]
+
     /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
     private var leftOutNamed: Set<String> = []
 
@@ -302,6 +315,11 @@ final class WindowCatalog {
     private func startPolling() {
         guard started, pollTask == nil else { return }
         thumbStamps = [:]
+        // A look from before a spell with no device is none to judge a tab switch by: anything happened
+        // meanwhile (a tab moved out and another shown where it was read as a switch, #368's review), so
+        // the first look after it sees none. The switches held from before are judged by that look
+        // (CatalogWindows.mergedSwaps), as at every look.
+        lastTabs = []
         pollTask = Task { @MainActor [weak self] in await self?.pollLoop() }
     }
 
@@ -346,13 +364,23 @@ final class WindowCatalog {
         let startedAt = ContinuousClock.now
         guard !Self.screenless else { return }      // TEST ONLY: ScreenCaptureKit never asked
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
-        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
-        // poll, and only then. Fetched before the sequence check so its await cannot let an older
-        // refresh overwrite a newer one.
+        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
+        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
+        let plain = content.windows.map(Self.plain)
+        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        let currentTabs = visible.map(Self.tab)
+        let onScreen = Set(currentTabs.map(\.id))
+        let swaps = CatalogWindows.tabSwaps(from: lastTabs, to: currentTabs)
+        // The staged window, if the on-screen list dropped it without another tab of its window taking its
+        // place, in this look or one the coordinator has not followed yet (#366): one extra
+        // SCShareableContent call per poll, and only then. Fetched before the sequence check so its await
+        // cannot let an older refresh overwrite a newer one.
         var pinned: SCWindow? = nil
         var captureContent = content
         var captureReadSucceeded = true
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }) {
+        if let id = stagedWindowID,
+           CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps, onScreen: onScreen, streaming: activeWindowID)[id] == nil,
+           !content.windows.contains(where: { $0.windowID == id }) {
             if let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
                 captureContent = all
                 if stagedWindowID == id { pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) } }
@@ -371,16 +399,16 @@ final class WindowCatalog {
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         lookedDisplays = content.displays
         resolveDesktopDisplay()
-        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
-        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
-        let plain = content.windows.map(Self.plain)
-        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        // Merged again after the await above: the coordinator may have followed one meanwhile.
+        tabSwaps = CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps, onScreen: onScreen, streaming: activeWindowID)
         for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        lastTabs = visible.map(Self.tab)
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
-        // fixed order in the bar, so keep first-seen order and append newcomers.
+        // fixed order in the bar, so keep first-seen order (a native tab taking its previous tab's
+        // slot, #366) and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
-        seenOrder = seenOrder.filter { byID[$0] != nil } + visible.map(\.windowID).filter { !seenOrder.contains($0) }
+        seenOrder = CatalogWindows.orderedIDs(seenOrder: seenOrder, currentIDs: visible.map(\.windowID), swaps: swaps)
         let ordered = seenOrder.compactMap { byID[$0] }
         let newInfos = ordered.map { w in
             WindowInfo(id: w.windowID,

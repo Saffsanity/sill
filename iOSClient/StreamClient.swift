@@ -4231,7 +4231,16 @@ final class StreamClient: ObservableObject {
         }
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
         #if DEBUG
-        print("pointer: this device has it")
+        // What took it, so a console says which input went (full screen's swipe in sends none).
+        let what: String
+        switch event {
+        case .pointer(let action, _, _): what = "a pointer \(action)"
+        case .scroll: what = "a scroll"
+        case .scrollGesture(let phase, _, _): what = "a scroll's \(phase)"
+        case .text: what = "text"
+        case .key(let usage, let down, _): what = "key \(usage) \(down ? "down" : "up")"
+        }
+        print("pointer: this device has it (\(what))")
         #endif
         DispatchQueue.main.async { self.renderPointer() }
     }

@@ -285,6 +285,42 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
+
+    // Full screen (docs/full-screen-plan.md; FullScreenPolicy, FullScreen.swift): Sill's interface hidden, the
+    // picture in the screen's room. Up here, as the drawer is, so a rotation and a trip to another app keep it;
+    // a new session's screen (a launch, a reconnect) starts with everything shown, and nothing is stored.
+    /// How much of the interface shows.
+    @State private var chrome: ChromeLevel = .shown
+    /// The swipe in from the left bezel while it drags: how far the interface has come in (0…1), drawn over
+    /// the hidden picture (`revealPreview`); nil otherwise.
+    @State private var reveal: CGFloat? = nil
+    /// Whether the controls slide in and out with the left edge as they come and go; off for the moment an
+    /// interactive swipe in lands, whose preview has brought them in already.
+    @State private var chromeSlides = true
+    /// Sill's window covers the screen (FullScreenEdges; FullScreenPolicy.offered): full screen is offered.
+    @State private var coversScreen = true
+    /// The window's safe area while the controls last showed (its status bar's room included): where the swipe
+    /// in's preview lays them out, so they land where the shown layout puts them; nil before any was read.
+    @State private var shownInsets: FullScreenPolicy.Insets? = nil
+    /// The window's safe area as UIKit has it now (FullScreenEdges): full screen's room is measured by it, since
+    /// this screen's reader, which ignores the safe area while hidden, then reports none (`deviceInsets`).
+    @State private var windowInsets: FullScreenPolicy.Insets? = nil
+    /// The harness's fake screen's safe area (ContentView's LayoutHarness, DEBUG), which stands for the window's
+    /// there; nil on a device.
+    @Environment(\.harnessSafeArea) private var harnessSafeArea
+    /// The person's own software keyboard was up when the interface hid: it comes back with the interface.
+    @State private var keyboardBeforeHide = false
+    /// The hint over the hidden picture (FullScreenHint), the first few times, and its fade.
+    @State private var hintShown = false
+    @State private var hintFade: Task<Void, Never>? = nil
+    /// How many times the hint has shown on this device (FullScreenPolicy.showsHint).
+    @AppStorage(StreamScreen.fullScreenHintsKey) private var hintsShown = 0
+    /// Shake to Show Controls (Settings › This iPad): on unless turned off (FullScreenPolicy.shakeShows).
+    @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
+    /// This screen turned iOS's Shake to Undo off for the app (FullScreenPolicy.shakeToUndoOff), so it is the
+    /// one to turn it back on.
+    @State private var shakeToUndoTurnedOff = false
+    static let fullScreenHintsKey = "Sill.fullScreenHints"
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -314,6 +350,12 @@ struct StreamScreen: View {
             : nil)
         _pairingOverlay = State(initialValue: pairingOverlay)
         self.scannerOverride = scannerOverride
+        // `-SillFullScreen 1`: the interface hidden from the start (FullScreenDebug), and `-SillFullScreenReveal
+        // P` the swipe in caught at P of the way, so each can be photographed.
+        let debug = FullScreenDebug.current
+        _chrome = State(initialValue: debug.startHidden ? .hidden : .shown)
+        _reveal = State(initialValue: debug.startHidden ? debug.reveal : nil)
+        _hintShown = State(initialValue: debug.startHidden && debug.hint != .off)
     }
     #endif
 
@@ -339,31 +381,45 @@ struct StreamScreen: View {
             // makes larger, judged on this screen held upright, whichever way it is held now.
             let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
+            // Full screen (docs/full-screen-plan.md): while hidden this reader takes the whole screen (the
+            // safe area ignored), and the picture goes in the room FullScreenPolicy gives (clear of the
+            // sensor housing, down to the bottom edge; above the fold in the Duo's laptop pose).
+            let hidden = chromeHidden
+            let insets = deviceInsets(geo)
+            let room = FullScreenPolicy.room(size: geo.size, insets: insets, choice: Self.roomChoice,
+                                             topIsStatusBar: !DuoLayout.phoneArrangement,
+                                             foldTop: posture.info(in: geo.size).horizontalBand?.minY)
             ZStack {
                 Group {
-                    switch duo {
-                    case .innerLandscape:
-                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .outerLandscape:
-                        landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .innerPortrait:
-                        portrait(metrics: .regular)
-                    case .outerPortrait:
-                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
-                    }
+                    layouts(duo, size: geo.size, posture: posture, largerKeyboard: largerKeyboard, hidden: hidden, room: room)
                 }
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. Full screen
+                // has no trackpad, so none of its arrow either.
+                .onChange(of: DuoLayout.of(geo.size).isPortrait && !hidden, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
                 // is told when it first shows (ClipboardPolicy.chipCounts).
                 .onChange(of: clipboardChipOnScreen, initial: true) { _, onScreen in
                     client.clipboardChipShown(onScreen)
+                }
+                // The swipe in from the left bezel, while it drags: the interface as it will be, coming in
+                // with the finger over the hidden picture, which shows through its picture's pane.
+                if hidden, let progress = reveal {
+                    revealPreview(progress, size: geo.size, posture: posture, insets: insets)
+                }
+                // The hint, the first few times the interface hides: how to bring it back, by the left edge.
+                if hidden, hintShown {
+                    FullScreenHint()
+                        .padding(.leading, room.minX + 18)
+                        .padding(.trailing, 18)
+                        .frame(width: geo.size.width, alignment: .leading)
+                        .position(x: geo.size.width / 2, y: room.midY)
+                        .transition(.opacity)
                 }
                 // The clipboard's chip (docs/clipboard-plan.md): a sibling after the layouts, so its
                 // Paste button and Dismiss take their touches over the stream's UIKit input view, and
@@ -425,10 +481,15 @@ struct StreamScreen: View {
                 closeWindowMenu()
             }
             .background(TouchWatcher(watch: touches))
+            // Full screen's edges on the window: the swipe in from the left edge and the pointer at the edge
+            // while the interface is hidden (nothing while it shows), the shake, and whether the window covers
+            // the screen.
+            .background(fullScreenEdges)
             // The layouts and the overlays share this screen's space, and so its fold; the inner
             // display gives the picture the status bar's strip in every pose.
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
+            .modifier(FullScreenSystem(hidden: hidden))
             .environment(\.largerPictureOffered, offersLarger)
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
@@ -460,7 +521,8 @@ struct StreamScreen: View {
         // panel away. (Opening the panel closes them, the drawer and the keyboard.)
         .onChange(of: scaleOpen) { _, open in if open { setSettings(false) } }
         .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
-        .ignoresSafeArea(edges: .bottom)
+        // Full screen takes the whole screen; otherwise the bottom alone, under the home indicator, as before.
+        .ignoresSafeArea(edges: chromeHidden ? .all : .bottom)
         .onAppear {
             // Where the software keyboard is, from now on: the laptop pose's key row follows it (#215).
             _ = KeyboardFrameMonitor.shared
@@ -501,6 +563,12 @@ struct StreamScreen: View {
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        // Full screen: the interface comes back by itself whenever something needs it (FullScreenPolicy.mustShow).
+        // Shake to Show Controls turned on or off (Settings): Shake to Undo follows while hidden.
+        .onChange(of: shakeShowsControls) { _, _ in applyShakeToUndo() }
+        .onChange(of: FullScreenPolicy.mustShow(fullScreenSituation)) { _, reason in
+            if let reason, chrome != .shown { showChrome(by: reason.rawValue, person: false) }
+        }
         // The stream rate follows the panel (`StreamClient.wantedFPS`): re-send when Low Power Mode
         // toggles or the screen's mode changes. Both notifications can arrive off the main thread.
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
@@ -535,6 +603,11 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
+            // Shake to Undo back for the rest of the app, should this screen go while hidden.
+            if shakeToUndoTurnedOff {
+                UIApplication.shared.applicationSupportsShakeToEdit = true
+                shakeToUndoTurnedOff = false
+            }
         }
     }
 
@@ -740,8 +813,62 @@ struct StreamScreen: View {
                 }
             }
         }
+        // Full screen (FullScreenDebug; docs/full-screen-plan.md): hidden or shown at these seconds, as Settings ›
+        // Full Screen and the swipe in do; a swipe in played; a shake.
+        let fullScreen = FullScreenDebug.current
+        for time in fullScreen.toggles {
+            after(time) {
+                print("harness: full screen toggled at " + Self.points(CGFloat(time)) + " s (the controls were " + (chrome == .shown ? "shown" : "hidden") + ")")
+                if chrome == .shown { hideChrome(by: "the harness") } else { showChrome(by: "the harness") }
+            }
+        }
+        for time in fullScreen.swipes {
+            // Its progress in five steps of 0.1, 30 ms apart, then its lift at a flick's speed.
+            for step in 1...5 {
+                after(time + Double(step) * 0.03) {
+                    let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                    revealMoved(step == 1 ? .began : .changed, travel: width * 0.1 * CGFloat(step), speed: 0, width: width)
+                }
+            }
+            after(time + 0.2) {
+                let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                print("harness: a swipe in from the left edge played at " + Self.points(CGFloat(time)) + " s")
+                revealMoved(.ended, travel: width * 0.5, speed: 600, width: width)
+            }
+        }
+        for time in fullScreen.takeBacks {
+            // In 60 % of the width in six steps 30 ms apart, then lifted moving back at 1,500 pt/s: it springs back.
+            for step in 1...6 {
+                after(time + Double(step) * 0.03) {
+                    let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                    revealMoved(step == 1 ? .began : .changed, travel: width * 0.1 * CGFloat(step), speed: 0, width: width)
+                }
+            }
+            after(time + 0.25) {
+                let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                print("harness: a swipe in taken back at " + Self.points(CGFloat(time)) + " s")
+                revealMoved(.ended, travel: width * 0.6, speed: -1500, width: width)
+            }
+        }
+        for time in fullScreen.shakes {
+            after(time) {
+                print("harness: a shake at " + Self.points(CGFloat(time)) + " s")
+                let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+                NotificationCenter.default.post(name: .sillDeviceShaken, object: window)
+            }
+        }
+        if fullScreen.startHidden, fullScreen.hint == .every { showHint() }
         guard live else { return }
         client.runSoundArguments()
+        // `-SillDesktopTapAt <s>[,<s>…]` (live): the Desktop button tapped at those seconds, as a finger does
+        // (StreamClient.tapDesktop: with the Desktop streaming on a Mac of two stops or more, the next stop), so
+        // a gate can show that full screen keeps the stop the Desktop is on (docs/full-screen-plan.md).
+        for time in (defaults.string(forKey: "SillDesktopTapAt") ?? "").split(separator: ",").compactMap({ Double($0) }) {
+            after(time) {
+                print("harness: the Desktop button tapped at " + Self.points(CGFloat(time)) + " s (it read \"" + client.desktopButton.label + "\")")
+                client.tapDesktop()
+            }
+        }
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
@@ -988,6 +1115,297 @@ struct StreamScreen: View {
         menusOpen = false
     }
 
+    // MARK: Full screen
+
+    /// The interface is hidden (docs/full-screen-plan.md): the picture alone, in the screen's room.
+    private var chromeHidden: Bool { chrome == .hidden }
+
+    /// Full screen's edges on the window: the swipe in from the left edge and the pointer at the edge while the
+    /// interface is hidden (while it shows nothing of full screen's listens), the shake, whether the window
+    /// covers the screen, and its safe area.
+    private var fullScreenEdges: FullScreenEdges {
+        FullScreenEdges(
+            hidden: chrome != .shown,
+            onReveal: { state, travel, speed, width in revealMoved(state, travel: travel, speed: speed, width: width) },
+            onDwell: { showChrome(by: "the pointer at the left edge") },
+            onShake: {
+                if FullScreenPolicy.shakeShows(chrome, switchOn: shakeShowsControls) {
+                    showChrome(by: "a shake")
+                } else if chrome != .shown {
+                    #if DEBUG
+                    print("full screen: a shake, and Shake to Show Controls is off: the controls stay hidden")
+                    #endif
+                }
+            },
+            onCoverage: { coversScreen = $0 },
+            onInsets: { e in
+                let now = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right)
+                windowInsets = now
+                if chrome == .shown { shownInsets = now }
+            })
+    }
+
+    /// What FullScreenPolicy weighs: whether a hide may start, and the interface must come back by itself (the
+    /// tour, a pairing, the link's line, the Mac's cover or off-console view, nothing streaming, the window no
+    /// longer filling the screen).
+    private var fullScreenSituation: FullScreenPolicy.Situation {
+        FullScreenPolicy.Situation(coversScreen: coversScreen,
+                                   streaming: client.active != .none,
+                                   somethingOpen: settingsOpen || drawerOpen || menusOpen || windowMenu != nil || scaleOpen,
+                                   tour: tour != nil,
+                                   pairing: overlayShown,
+                                   linkLine: linkReportLine != nil,
+                                   lockCover: client.lockShade != nil,
+                                   offConsoleView: client.lockView)
+    }
+
+    /// Settings › Full Screen's row: dimmed while a hide could not start (nothing streams, the window does
+    /// not fill the screen, something that would bring the controls straight back); the panel itself is
+    /// not counted, as the row closes it first.
+    private var fullScreenRow: HostSettingsPanel.FullScreenRow {
+        var s = fullScreenSituation
+        s.somethingOpen = false
+        return HostSettingsPanel.FullScreenRow(offered: FullScreenPolicy.hideAllowed(s), coversScreen: coversScreen,
+                                               hide: hideFromSettings)
+    }
+
+    /// The safe area as FullScreenPolicy takes it.
+    private static func insets(_ e: EdgeInsets) -> FullScreenPolicy.Insets {
+        FullScreenPolicy.Insets(top: e.top, left: e.leading, bottom: e.bottom, right: e.trailing)
+    }
+
+    /// The screen's safe area as full screen measures its room and the swipe in's preview by (the sensor
+    /// housing's side, the status bar's room, the home indicator's): the window's, as UIKit gives it, or in the
+    /// harness its fake screen's. Not this screen's reader's: a GeometryReader that ignores the safe area, as
+    /// this one does while hidden, reports none (the live gate measured the hidden room at 393×852 on a
+    /// 393×852 screen with a 59 pt Dynamic Island), so the picture would have gone under the island. The
+    /// reader's own only before the window has said.
+    private func deviceInsets(_ geo: GeometryProxy) -> FullScreenPolicy.Insets {
+        if let harnessSafeArea { return Self.insets(harnessSafeArea) }
+        return windowInsets ?? Self.insets(geo.safeAreaInsets)
+    }
+
+    /// Where the hidden picture goes: clear of the sensor housing, down to the bottom edge (open question 5;
+    /// DEBUG `-SillFullScreenRoom` photographs the others).
+    private static var roomChoice: FullScreenPolicy.Room {
+        #if DEBUG
+        return FullScreenDebug.current.room ?? .clearOfHousing
+        #else
+        return .clearOfHousing
+        #endif
+    }
+
+    /// The motion of the controls going and coming: they slide with the left edge, the picture's pane grows
+    /// and shrinks; a fade under Reduce Motion.
+    private var chromeMotion: Animation {
+        reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.34, bounce: 0.06)
+    }
+
+    /// The controls' own transition as they go and come: out by the left edge and back from it, but not while
+    /// an interactive swipe in lands (its preview brought them in already).
+    private var chromeTransition: AnyTransition {
+        guard chromeSlides else { return .identity }
+        return reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity)
+    }
+
+    /// Hides the interface: Settings › Full Screen, or the harness. Only while a hide
+    /// may start (FullScreenPolicy.hideAllowed). The person's own software keyboard goes with it (a hardware
+    /// keyboard's hold stays, and keeps typing to the Mac: HardwareKeyboardPolicy.toggled), and comes back with
+    /// the interface. The hint the first few times; VoiceOver hears where the controls went every time.
+    private func hideChrome(by how: String, keyboardWasUp: Bool? = nil) {
+        guard chrome == .shown else { return }
+        guard FullScreenPolicy.hideAllowed(fullScreenSituation) else {
+            #if DEBUG
+            print("full screen: \(how): not now (" + (FullScreenPolicy.mustShow(fullScreenSituation)?.rawValue ?? "something is open") + ")")
+            #endif
+            return
+        }
+        keyboardBeforeHide = keyboardWasUp ?? keyboardShown
+        if keyboardShown { overlay.toggleKeyboard() }
+        chromeSlides = true
+        reveal = nil
+        withAnimation(chromeMotion) { chrome = chrome.afterHide }
+        applyShakeToUndo()
+        client.noteAction()
+        if FullScreenPolicy.showsHint(shownBefore: hintsShown, forced: hintForced) {
+            hintsShown += 1
+            showHint()
+        }
+        // The screen is new to VoiceOver (the picture alone): it reads it afresh, and says where the controls went.
+        UIAccessibility.post(notification: .screenChanged, argument: FullScreenPolicy.Copy.announcement)
+        #if DEBUG
+        print("full screen: hidden by \(how)" + (keyboardBeforeHide ? "; the keyboard comes back with the controls" : ""))
+        #endif
+    }
+
+    /// Brings the interface back: the swipe in, a shake, an assistive technology, the pointer at the edge, the
+    /// harness, or by itself (`person` false: FullScreenPolicy.mustShow).
+    private func showChrome(by why: String, person: Bool = true) {
+        guard chrome != .shown else { return }
+        hintFade?.cancel()
+        hintFade = nil
+        withAnimation(chromeMotion) {
+            chrome = chrome.afterReveal
+            reveal = nil
+            hintShown = false
+        }
+        applyShakeToUndo()
+        if keyboardBeforeHide { overlay.setKeyboard(shown: true) }
+        keyboardBeforeHide = false
+        if person { client.noteAction() }
+        if voiceOverEnabled { UIAccessibility.post(notification: .screenChanged, argument: FullScreenPolicy.Copy.shownAnnouncement) }
+        #if DEBUG
+        print("full screen: shown by \(why)")
+        #endif
+    }
+
+    /// iOS's Shake to Undo for the app: off only while the interface is hidden and a shake is Sill's
+    /// (FullScreenPolicy.shakeToUndoOff), so a shake never brings an Undo alert then; otherwise as it was.
+    private func applyShakeToUndo() {
+        let off = FullScreenPolicy.shakeToUndoOff(chrome, switchOn: shakeShowsControls)
+        guard off != shakeToUndoTurnedOff else { return }
+        UIApplication.shared.applicationSupportsShakeToEdit = !off
+        shakeToUndoTurnedOff = off
+    }
+
+    /// Settings › Full Screen: the panel closes (the keyboard it took down stays down, and comes back with the
+    /// controls if it was up before the panel), then the interface hides.
+    private func hideFromSettings() {
+        let keyboard = keyboardBeforeSettings
+        setSettings(false, restoreKeyboard: false)
+        let mark = client.connectedAt
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.2))       // the panel's close
+            guard sameSession(mark) else { return }
+            hideChrome(by: "Settings › Full Screen", keyboardWasUp: keyboard)
+        }
+    }
+
+    /// The hint: on, then faded after `hintSeconds` (DEBUG `-SillFullScreenHint hold` keeps it).
+    private func showHint() {
+        hintFade?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { hintShown = true }
+        #if DEBUG
+        if FullScreenDebug.current.hint == .hold { return }
+        #endif
+        hintFade = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(FullScreenPolicy.hintSeconds))
+            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.35)) { hintShown = false } }
+        }
+    }
+
+    /// DEBUG `-SillFullScreenHint 1`: the hint every time.
+    private var hintForced: Bool {
+        #if DEBUG
+        return FullScreenDebug.current.hint != .off
+        #else
+        return false
+        #endif
+    }
+
+    /// The swipe in from the left bezel (RevealEdgePan): the preview follows the finger, and at the lift it
+    /// finishes or springs back (EdgeReveal).
+    private func revealMoved(_ state: UIGestureRecognizer.State, travel: CGFloat, speed: CGFloat, width: CGFloat) {
+        guard chrome != .shown else { return }
+        switch state {
+        case .began, .changed:
+            reveal = CGFloat(EdgeReveal.progress(translation: Double(travel), width: Double(width)))
+        case .ended:
+            let finishes = EdgeReveal.finishes(translation: Double(travel), velocity: Double(speed), width: Double(width))
+            #if DEBUG
+            print(String(format: "reveal: lifted after %.0f pt at %.0f pt/s on a screen %.0f pt wide: %@ (it finishes past %.0f pt)",
+                         Double(travel), Double(speed), Double(width), finishes ? "comes in" : "springs back",
+                         EdgeReveal.distance(width: Double(width))))
+            #endif
+            if finishes { landReveal() } else { springBack() }
+        default:
+            #if DEBUG
+            print(String(format: "reveal: cancelled after %.0f pt", Double(travel)))
+            #endif
+            springBack()
+        }
+    }
+
+    /// The swipe in finished: the preview the rest of the way in, then the controls in its place with no slide
+    /// of their own, and the picture into its pane.
+    private func landReveal() {
+        withAnimation(.easeOut(duration: 0.14 * revealSlow)) { reveal = 1 }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.14 * revealSlow))
+            guard chrome != .shown, reveal != nil else { return }
+            chromeSlides = false
+            showChrome(by: "the swipe in from the left edge")
+            try? await Task.sleep(for: .seconds(0.4))
+            chromeSlides = true
+        }
+    }
+
+    /// The swipe in's own animations at their speed (1), or slower for photos mid-way (DEBUG `-SillRevealSlow`).
+    private var revealSlow: Double {
+        #if DEBUG
+        return FullScreenDebug.current.slow
+        #else
+        return 1
+        #endif
+    }
+
+    /// The swipe in sprang back: the preview out by the left edge, then gone.
+    private func springBack() {
+        withAnimation(.easeOut(duration: 0.2 * revealSlow)) { reveal = 0 }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.22 * revealSlow))
+            if chrome != .shown, reveal == 0 { reveal = nil }
+        }
+    }
+
+    /// The layout for a screen of `size`: the real one, or (`preview`) the swipe in's picture of it.
+    @ViewBuilder
+    private func layouts(_ duo: DuoLayout, size: CGSize, posture: DuoPosture, largerKeyboard: CGFloat?, hidden: Bool,
+                         room: CGRect, preview: Bool = false) -> some View {
+        switch duo {
+        case .innerLandscape:
+            landscape(bar: .regular, width: size.width, fold: posture.info(in: size), screen: size, hidden: hidden,
+                      room: room, preview: preview)
+        case .outerLandscape:
+            landscape(bar: .compact, width: size.width, fold: posture.info(in: size), screen: size, hidden: hidden,
+                      room: room, preview: preview)
+        case .innerPortrait:
+            portrait(metrics: .regular, hidden: hidden, room: room, preview: preview)
+        case .outerPortrait:
+            portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard,
+                     hidden: hidden, room: room, preview: preview)
+        }
+    }
+
+    /// The swipe in's preview: the interface as it will show, laid out where it will be (the safe area, down to
+    /// the bottom edge, as the stream screen is while shown), `progress` of the way in from the left edge, over
+    /// the hidden picture. Each layout's preview draws its controls with the background they sit on and nothing
+    /// of the picture's place (RevealCut): no pane, panel, rim, margin or black there, by construction, and no
+    /// mask or measurement that could arrive a frame late, so the hidden picture is all there is around the
+    /// controls until they land. It takes no touch, says nothing to VoiceOver and reports no tour target.
+    private func revealPreview(_ progress: CGFloat, size: CGSize, posture: DuoPosture, insets now: FullScreenPolicy.Insets) -> some View {
+        // Where the shown layout will be: the safe area now, down to the bottom edge; on an iPad with the status
+        // bar's room it had while shown (hidden now, the status bar comes back as the controls land). An iPhone's
+        // top inset is its sensor housing's, the same either way, and a turn while hidden changes it.
+        let pad = !DuoLayout.phoneArrangement      // an iPad's idiom (DEBUG `-SillIdiom` changes it, as for the layouts)
+        let insets = FullScreenPolicy.Insets(top: pad ? (shownInsets?.top ?? now.top) : now.top, left: now.left,
+                                             bottom: now.bottom, right: now.right)
+        let shown = CGRect(x: insets.left, y: insets.top, width: max(0, size.width - insets.left - insets.right),
+                           height: max(0, size.height - insets.top))
+        let duo = DuoLayout.of(shown.size)
+        let keyboard = DuoLayout.drawsPhone(shown.size)
+            ? PhonePortraitLayout.keyboard(for: shown.size, largerPicture: largerPictureNow, foldable: posture.hinge != .unknown) : nil
+        return layouts(duo, size: shown.size, posture: posture, largerKeyboard: keyboard, hidden: false, room: .zero, preview: true)
+            .frame(width: shown.width, height: shown.height)
+            .transformPreference(TourTargetsKey.self) { $0 = [:] }
+            .transformPreference(KeyboardToggleFrameKey.self) { $0 = nil }
+            .offset(x: shown.minX - (1 - progress) * size.width, y: shown.minY)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .transition(.identity)
+    }
+
     // MARK: The tour
 
     /// The picture, as the tour counts it: the Mac's first window list, a frame size and a source
@@ -1025,6 +1443,8 @@ struct StreamScreen: View {
         // keyboard attached still gets the tour (HardwareKeyboardPolicy).
         if keyboardShown { return "the keyboard was up" }
         if overlayShown { return "the pairing overlay was open" }
+        // Full screen: the tour points at the controls, which the person has just put away.
+        if chrome != .shown { return "the controls were hidden" }
         // UIKit's word, not the scene phase: in a headless simulator the environment's scenePhase
         // stays inactive for an app that is active and on screen.
         if UIApplication.shared.applicationState != .active { return "the app was not active" }
@@ -1310,27 +1730,38 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
-    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo) -> some View {
+    /// `hidden`: full screen (docs/full-screen-plan.md): no bar, and the stream panel at `room` with no
+    /// margin, corner or rim, its letterbox black; the panel is the same view either way (its input view stays
+    /// first responder, a composition and a coast go on), so its frame animates. `screen`: this layout's size.
+    /// `preview`: the swipe in's picture of the shown layout: the bar alone, which carries its own background;
+    /// nothing under it, the picture's place (RevealCut.landscape), is drawn.
+    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo, screen: CGSize, hidden: Bool = false,
+                           room: CGRect = .zero, preview: Bool = false) -> some View {
         // The book pose (docs/iphone-duo-plan.md, (a)): nothing on the fold's band; elsewhere as before.
         let (bar, stripWidth) = plain.clearing(fold, width: width)
         return VStack(spacing: 0) {
-            TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
-                   keyboardShown: $keyboardShown,
-                   textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                   settingsOpen: settingsOpen,
-                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
-                   // button: Send Audio and Mute are the Settings panel's switches (Noah, 2026-10-27).
-                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
-                                                gap: bar.gap, thumbWidth: bar.thumbWidth),
-                   toggleKeyboard: { overlay.toggleKeyboard() },
-                   setSettings: { setSettings($0, restoreKeyboard: $1) },
-                   menusOpened: menusOpened, menusClosed: menusClosed)
-            contentArea(bar: bar)
+            if !hidden {
+                TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
+                       keyboardShown: $keyboardShown,
+                       textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
+                       settingsOpen: settingsOpen,
+                       // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
+                       // button: Send Audio and Mute are the Settings panel's switches (Noah, 2026-10-27).
+                       menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
+                                                    gap: bar.gap, thumbWidth: bar.thumbWidth),
+                       toggleKeyboard: { overlay.toggleKeyboard() },
+                       setSettings: { setSettings($0, restoreKeyboard: $1) },
+                       menusOpened: menusOpened, menusClosed: menusClosed)
+                    .transition(chromeTransition)
+            }
+            contentArea(bar: bar, screen: screen, hidden: hidden, room: room, preview: preview)
         }
     }
 
-    /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.
-    private func portrait(metrics: PortraitMetrics, largerKeyboard: CGFloat? = nil) -> some View {
+    /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise. `hidden`, `room`,
+    /// `preview`: full screen's, as `landscape`'s.
+    private func portrait(metrics: PortraitMetrics, largerKeyboard: CGFloat? = nil, hidden: Bool = false,
+                          room: CGRect = .zero, preview: Bool = false) -> some View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
                              keyboardShown: $keyboardShown,
                              textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
@@ -1339,18 +1770,36 @@ struct StreamScreen: View {
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              menusOpened: menusOpened, menusClosed: menusClosed,
                              settingsTransition: { settingsTransition(anchor: $0) },
-                             onPanelSize: { panelSize = $0 },
+                             onPanelSize: { if !preview { panelSize = $0 } },
                              pairThisDevice: openPairingOverlay,
                              linkLine: streamLine,
                              linkLineLines: streamLineLines,
                              takeTour: takeTour,
                              largerKeyboard: largerKeyboard,
-                             zoom: zoom)
+                             zoom: zoom,
+                             hidden: hidden, room: room, preview: preview,
+                             chromeTransition: chromeTransition,
+                             fullScreen: fullScreenRow,
+                             showChrome: { showChrome(by: "an assistive technology") })
     }
 
-    private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
+    /// The stream panel's shape: rounded inside its margin, square while full screen.
+    private func streamShape(_ hidden: Bool) -> RoundedRectangle { RoundedRectangle(cornerRadius: hidden ? 0 : 12, style: .continuous) }
 
-    private func contentArea(bar: BarMetrics) -> some View {
+    /// Under the bar: the stream panel, the drawer and the Settings panel. In the swipe in's preview, nothing at
+    /// all: it is the picture's place (RevealCut.landscape), so no pane, rim, margin or black can come in with
+    /// the bar, by construction (Noah, 2026-11-12: "no bezel gets rendered above or below the controls until
+    /// they are fully summoned").
+    @ViewBuilder
+    private func contentArea(bar: BarMetrics, screen: CGSize, hidden: Bool, room: CGRect, preview: Bool) -> some View {
+        if preview {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            liveContentArea(bar: bar, screen: screen, hidden: hidden, room: room)
+        }
+    }
+
+    private func liveContentArea(bar: BarMetrics, screen: CGSize, hidden: Bool, room: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
 
@@ -1371,16 +1820,23 @@ struct StreamScreen: View {
                              readZoom: { [zoom] in zoom.zoom },
                              writeZoom: { [zoom] in zoom.set($0) })
             }
-            .background(Palette.panel)
+            // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
+            .background(hidden ? Color.black : Palette.panel)
             // A locked Mac: its cover over the picture (LockedMac), under the link's line.
             .overlay { LockedMacShade(client: client) }
             .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
-            .clipShape(streamShape)
-            .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+            // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
+            .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName,
+                                            show: { showChrome(by: "an assistive technology") }) }
+            .clipShape(streamShape(hidden))
+            .overlay(streamShape(hidden).strokeBorder(Color.white.opacity(hidden ? 0 : 0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
             .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
             .tourTarget(.stream)
-            .padding(8)
+            // 8 pt all round; full screen, the room (the panel's frame is the room, in this area's space).
+            .padding(hidden ? EdgeInsets(top: room.minY, leading: room.minX, bottom: max(0, screen.height - room.maxY),
+                                         trailing: max(0, screen.width - room.maxX))
+                            : EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
             // closes the drawer instead of clicking the Mac.
@@ -1410,7 +1866,7 @@ struct StreamScreen: View {
                     .accessibilityHidden(true)
 
                 HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay,
-                                  takeTour: takeTour)
+                                  takeTour: takeTour, fullScreen: fullScreenRow)
                     .frame(width: bar.settingsWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)

@@ -15,6 +15,9 @@ final class AppModel {
     /// The update check (GitHub's releases feed): the menu's "Sill 0.4 Is Available…" and Settings ›
     /// General's section. Started once the host has started, or could not.
     let updates: UpdateChecker
+    /// Update Now: the one-click update of the release the check offers (docs/one-click-update-plan.md).
+    /// Not available without an update key compiled in (UpdateManifest.releaseKeys).
+    let updater: AppUpdater
     /// `--synthetic`: the Desktop streams a test pattern and the host stays off Bonjour, exactly
     /// as with the CLI's flag. No onboarding in this mode.
     let synthetic = CommandLine.arguments.contains("--synthetic")
@@ -83,9 +86,41 @@ final class AppModel {
         // is up (up to a second or more), and -SillSetAfter counts from launch. Before `start()`
         // the checker only records it.
         settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(settings.updateCheck) }
+        let updater = AppUpdater(bundled: Self.bundled, accessGroup: Self.entitledKeychainAccessGroup())
+        self.updater = updater
+        updater.offer = { [updates] in updates.offer }
+        // Automatically update Sill (docs/one-click-update-plan.md §15): the daily check's switch, a check's
+        // answer, the pairing window, and the host's hold on new sessions (none connected and none can be,
+        // or nothing installs by itself).
+        updater.checkOn = { [settings] in settings.updateCheck }
+        updates.onAnswered = { [weak updater] in updater?.checkAnswered() }
+        updater.latestRelease = { [updates] in updates.latest }
+
+        // A test feed or a test version (the check's -SillUpdateFeed, -SillUpdateVersion) is in use: Update
+        // Now is then unavailable rather than acting on what a test said.
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        updater.checkerUsesTestValues = { [updates] in
+            updates.configuration.testFeed || updates.configuration.running != bundleVersion
+        }
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
+        // The devices an update would disconnect, each by its connection (two iPads of one name are two
+        // devices), named as the menu's card names it. The key is the connection's endpoint (a new
+        // connection has a new source port) with its object's identity, which alone can be reused once a
+        // connection is gone: a device that connects later is never taken for one the person agreed to.
+        // After an update the person started in Settings › General, the new Sill opens that window again.
+        updater.showUpdated = { [weak self] in self?.showSettings?(.general) }
+        updater.devices = { [weak self] in
+            (self?.coordinator?.status.snapshot.devices ?? []).map {
+                UpdateInstallPolicy.Device(key: "\($0.endpoint) \(String(describing: $0.id))", name: $0.name ?? "a device")
+            }
+        }
+        updater.pairing = { [weak self] in
+            if case .open? = self?.coordinator?.status.snapshot.remote?.pairing { return true }
+            return false
+        }
+        updater.hold = { [weak self] on in self?.coordinator?.holdNewSessions(on) ?? 0 }
     }
 
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
@@ -139,9 +174,14 @@ final class AppModel {
                 // Off by default, and worth seeing in a log someone sends (issue #108).
                 if settings.showPairingWindowToScreenSharing { print(PairingWindowSharing.line(on: true)) }
                 onboardIfNeeded()
+                // This Sill's host is up: the copy an update replaced (kept until now so it could be put
+                // back) and anything else earlier updates left go. Not when the host could not start: the
+                // copy before may be the way back.
+                updater.afterHostUp()
             } catch {
                 startupError = "\(error)"
                 print("Sill couldn’t start: \(error)")
+                updater.hostDidNotStart()
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
@@ -156,6 +196,10 @@ final class AppModel {
             MainActor.assumeIsolated { self?.updates.systemDidWake() }
         }
         updates.start()
+        // An offer the last check stored, with the switch on: the rule decides at once (it never repeats an
+        // attempt within its own spacing, so a relaunch is no loop). With Use nightly builds on, the nightly is
+        // read first, only while the daily check is on.
+        updater.checkAnswered(atLaunch: true)
     }
 
     // MARK: Pairing and remote access
@@ -220,7 +264,7 @@ final class AppModel {
     /// without an embedded provisioning profile (every development and ad hoc build reads its own
     /// entitlement as nil, measured 2026-09-27), which is exactly the signal to use the legacy store.
     /// This reads only this process's own entitlements; it authenticates nothing about other apps.
-    private static func entitledKeychainAccessGroup() -> String? {
+    static func entitledKeychainAccessGroup() -> String? {
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else { return nil }
         if let groups = value as? [String], !groups.isEmpty {
@@ -379,11 +423,14 @@ final class AppModel {
             print("Status: \(line)")
         }
         let snapshot = coordinator?.status.snapshot
-        holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0)
+        holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0,
+                      lockWait: snapshot?.privacyLock.pending ?? false)
+        // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).
+        updater.devicesChanged(snapshot?.devices.count ?? 0)
         scheduleExpiry()
     }
 
-    private enum NapHold { case none, connected, remote }
+    private enum NapHold { case none, connected, remote, lockWait }
 
     /// App Nap would coalesce this windowless app's timers once it is in the background, among
     /// them the 30 ms link keepalive ticks that keep a device's Wi-Fi out of power save, and the
@@ -391,10 +438,12 @@ final class AppModel {
     /// latency-critical activity, which still lets the Mac sleep when idle: a device at home can
     /// wake it (Bonjour Sleep Proxy) or walk over. A device connected from away cannot, so while
     /// one is, the activity is `.userInitiated`, which also keeps the Mac from idle sleep (the
-    /// display may still sleep; docs/remote-access-plan.md §6.5). Switching ends one activity and
-    /// begins the other.
-    private func holdAppNapOff(devices: Int, remote: Int) {
-        let want: NapHold = remote > 0 ? .remote : (devices > 0 ? .connected : .none)
+    /// display may still sleep; docs/remote-access-plan.md §6.5). With no device left, while Lock
+    /// this Mac when the last device leaves waits (or confirms its lock: `lockWait`), an activity
+    /// that only keeps App Nap off, so the wait's half-second ticks are not coalesced into a late
+    /// lock; the Mac may still sleep when idle. Switching ends one activity and begins the other.
+    private func holdAppNapOff(devices: Int, remote: Int, lockWait: Bool) {
+        let want: NapHold = remote > 0 ? .remote : (devices > 0 ? .connected : (lockWait ? .lockWait : .none))
         guard want != napHold else { return }
         if let activity = napActivity {
             ProcessInfo.processInfo.endActivity(activity)
@@ -408,6 +457,9 @@ final class AppModel {
         case .connected:
             napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
                                                                 reason: "Sill is serving a connected device")
+        case .lockWait:
+            napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
+                                                                reason: "Sill locks this Mac shortly after the last device left")
         case .none:
             break
         }
