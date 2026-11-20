@@ -105,6 +105,12 @@ package final class StreamCoordinator {
     let stage: VirtualStage
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
+    /// Lock this Mac when the last device leaves (PrivacyLock, PrivacyPolicy; docs/privacy-mode-plan.md, part 1): the
+    /// server's count of registered sessions, each session's route as it registers, the switches (at once, from
+    /// `setTarget`), the lock's reading and a quit go to it. Only Sill.app's own (`testHooks` false, not `synthetic`:
+    /// PrivacyPolicy.locksForReal) locks; the CLI's, the bare SillMenuBar binary's and a test host's lock nothing and
+    /// put no display to sleep: they say what they would do.
+    private let privacy: PrivacyLock
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
     private var stageLosses = 0
@@ -433,6 +439,10 @@ package final class StreamCoordinator {
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
         status = HostStatus()
+        privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
+                              real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
+                              testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                              status: status, gate: SessionLock.shared.gate)
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
             if let identity = remote.identity {
@@ -546,6 +556,9 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
+                // Lock this Mac when the last device leaves, Only after a device away from home: this visit had one
+                // (after the count that took it, which the server reported first).
+                self.privacy.joined(away: route.isAway)
                 // A paired device shows its paired name until its own stats arrive, and a remote one
                 // its route; a home device its link (Wired, Wi-Fi, Direct) as soon as it is known.
                 self.status.update {
@@ -645,6 +658,9 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
+                // Lock this Mac when the last device leaves: every registered session counts, and only those (a
+                // pairing connection, one the device gate refuses and one an update's hold sends away never are).
+                self.privacy.sessions(count)
                 // SessionLock looks once a second while someone watches, and at once as the first comes.
                 SessionLock.shared.devices(count)
                 self.catalog.clientCount = count          // the catalog idles itself at 0
@@ -859,6 +875,8 @@ package final class StreamCoordinator {
         for line in SessionLock.testHookLines(testHost: server.isTestHost, environment: ProcessInfo.processInfo.environment) { print(line) }
         // Show this account while another user is on the screen (docs/off-console-plan.md): one line, only when on.
         if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
+        // Lock this Mac when the last device leaves: a test host's hooks, and one line, only when on.
+        for line in privacy.startLines { print(line) }
         checkFirewall()                                         // at launch, beside the listener's own check
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
@@ -958,6 +976,8 @@ package final class StreamCoordinator {
             print(LockPolicy.viewChangedLine(view.now))
             Task { @MainActor in await self.lockChanged() }
         }
+        // Lock this Mac when the last device leaves and its two switches, at once too: off ends a wait under way now.
+        privacy.switched(on: new.lockAfterSession, sleeps: new.lockSleepsDisplay, onlyAway: new.lockOnlyAfterAway)
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -1516,6 +1536,8 @@ package final class StreamCoordinator {
     /// streamed (`enforceLock`), whose window is remembered; unlocked (after the settle), the catalog
     /// looked at again and what streamed back (`afterUnlock`).
     private func lockChanged() async {
+        // A lock Sill asked for (Lock this Mac when the last device leaves) is confirmed by the reading's change.
+        privacy.readingChanged()
         let now = lockReading
         guard lockGate.established else { return }
         let was = lockActedOn, wasView = lockActedView
@@ -3132,6 +3154,7 @@ package final class StreamCoordinator {
     /// window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices notice
     /// by liveness.
     package func shutdownForExit() {
+        privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
@@ -3143,10 +3166,24 @@ package final class StreamCoordinator {
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
     /// every key and button a device holds down on the Mac goes up, and a window Sill sized for a
     /// device goes back to its own frame (a line each, only when a window was sized); nothing else
-    /// happens (no goodbye), as before.
+    /// happens (no goodbye), as before, but that a lock's wait under way ends with its line (only a
+    /// --synthetic host with --lock-after-session has one).
     package func releaseKeysForExit() {
+        privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
         injector.releaseAll()
         restoreFits(keeping: nil)
+    }
+
+    /// Sill.app's Quit began (applicationShouldTerminate, before an update's install step or a full-screen window
+    /// makes it wait): Lock this Mac when the last device leaves locks nothing from here on, as at a signal.
+    package func quitBegins() {
+        privacy.quit()
+    }
+
+    /// Settings › Devices opened: Lock this Mac when the last device leaves looks again at whether this Mac has a
+    /// display to type its password at (a monitor plugged in or out since), for the warning under its switch.
+    package func lookAtDisplaysForLock() {
+        privacy.lookAtDisplays()
     }
 
     // MARK: A window Sill sized goes back (WindowRestore, issue #57)
