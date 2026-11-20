@@ -81,6 +81,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/protocol`. Kind 44, `keyframeRequest` (device → host, no
   payload: this device's picture was interrupted and waits for a keyframe;
   issue #101), has no type of its own.
+  `Pen.swift` — `PenInput` and
+  `PenSample` (kind 45, device → host: an Apple Pencil on the stream as a pen,
+  one phase of a stroke with its samples' position, pressure and tilt;
+  `checked()`, what a host acts on), sent only to a host whose
+  `WindowList.pencil` is 1 or more (docs/pencil-pressure-plan.md).
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -393,7 +398,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   drops only frames).
   A sleeping display (issue #134): `DisplayWake` (which of a device's messages
   are a person at it, so the host declares user activity on the Mac for it, as
-  a key press would: a session's connect every time, kinds 7, 8, 15, 25 and 28
+  a key press would: a session's connect every time, kinds 7, 8, 15, 25, 28 and 45
   only 5 s or more after the last declaration, never a pick or any other kind,
   nor a bare pointer move within 2 s after the host's own stream restart or new
   frame size (`streamChanged`); a test host counts `disp.wakeDry` instead; what
@@ -408,6 +413,23 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   again by the Mac's own setting); the coordinator's `handle` forwards every
   message to the rule (`deviceActive`), and `parameterSetsSent` its stream
   changes.
+  The Apple Pencil as a pen (docs/pencil-pressure-plan.md §4): `PenTablet`
+  (kind 45's messages as what the Mac posts: the pen entering range before its
+  first point and leaving at a device's leave, 1 s after an up with no hover
+  since, the device leaving and the host's end, never for mouse input;
+  the tip as the left button, its own (InputInjector's `penButton`, apart
+  from kind 8's, as Sidecar's Pencil's), a down it posted getting exactly one up; a
+  sample's pressure, 0.01 at least while the tip is down, and its angles as
+  macOS's tilt; the pointer event a message amounts to for kind 8's rules,
+  and what still goes with nowhere to land; pure, `Tests/checks/pen`) and
+  `PenEvents` (the tablet fields of a pen's point on a mouse event, the
+  pressure in the tablet point alone, and the proximity event; building only).
+  `InputInjector.pen` posts what PenTablet says through its pointer path
+  (`in.pen`, `in.penProximity`), so the dry run is kind 8's and the click
+  count works as kind 8's, on the pen's own button; StreamServer counts kind 45 as input (the ticks, kind 26's
+  `seen`, the pointer's hand-over); the coordinator puts it through kind 8's
+  rules as the pointer event it amounts to and holds it in order with the
+  input around it (`Held.pen`); the window list says `pencil` 1.
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
@@ -598,7 +620,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and `--input=JSON@T` (a literal kind 8), the input flags only to a
   `--synthetic` host on this Mac (lsof and ps); trackpad gestures with
   `--gesture=NAME[,FINGERS]@T` and `--raw28=JSON@T` (kind 28), likewise only to
-  a `--synthetic` host on this Mac; the Mac's menus with
+  a `--synthetic` host on this Mac; the Apple Pencil with
+  `--pen=PHASE[,X,Y[,P[,ALT,AZ]]]@T` and `--raw45=JSON@T` (kind 45), likewise;
+  the Mac's menus with
   `--menus` (the subscription; each kind 24 on one line),
   `--fetch=ID[xN][,TITLE]@T` (the title the menu was shown under, by default
   the one listed for the id), `--press=ID[,TITLE]@T`, `--raw25=JSON@T`,
@@ -725,6 +749,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   without it. `docs/release-checklist.md` is the order of work: the one-time
   setup (Developer ID, notary credentials, hosting and DNS, the App Store
   Connect record) and every release's steps.
+- `Sources/PenProbe/` — step 0 of docs/pencil-pressure-plan.md, not shipped: posts three test
+  strokes of synthesized tablet events where the pointer is (only with `--post-to-this-mac`), to
+  see whether drawing apps take pressure and tilt; `--canvas` is a window that draws and prints
+  what it receives. It builds its events with the host's `PenEvents` (`Sources/SillHost/`: the
+  tablet fields of a pen's point and the proximity event, building only), which `PenSelfTest`
+  (`SillHost --pen-selftest`) reads back through AppKit without posting.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -970,7 +1000,23 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   receipt, a ping whose pong says the Mac read it; pbxproj AC64/FC64) and `ClipboardChip`
   (the chip and `ClipboardPasteButton`, the system's Paste control;
   AD64/FD64); StreamScreen places the chip, the Settings panel's This iPad
-  group has Share Clipboard and Paste on ‹Mac›. The
+  group has Share Clipboard and Paste on ‹Mac›. The Apple Pencil as a pen
+  (docs/pencil-pressure-plan.md §5): `PenStrokes` (whether a stroke goes to the
+  Mac as a pen's, kind 45, or the mouse's, kind 8, fixed as the tip lands: this
+  device's switch `Sill.pencilPressure` and the Mac's `pencil`; a touch's force
+  and angles as the wire's samples, every reading of a callback in messages of
+  32 at most; the leave, only when a Pencil that can hover is neither touching
+  nor hovering 0.1 s later; `Palm`, the finger strokes that say nothing while
+  the tip is on the glass, to their end, and for 0.5 s after it lifts; pure,
+  `Tests/checks/pen` with the host's PenTablet; pbxproj A045/F045).
+  InputOverlayView feeds it its Pencil touches (every coalesced reading) and
+  hover and sends what it says through `PenLink` (`StreamClient.penLink`:
+  `sendPen`, which counts as input and sends a hover as pointer moves go, the
+  newest only; `pencilTouching` and `fingersSilent`, the palm rule shared with
+  the portrait trackpad under the picture, where the hand rests); a palm's
+  taps, long presses, scrolls and gestures are dropped on both surfaces (never
+  the trackpad's press-and-hold drag, whose button must come up).
+  `SessionLink` counts kind 45 as input, as the Mac does. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers and
   the tour's version (`version`, 2 since 0.6; `upgraded`, an older memory
