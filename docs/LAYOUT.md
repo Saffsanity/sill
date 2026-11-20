@@ -837,7 +837,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   use; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
   `DeviceIdleTimer` carries it out, PR #230), `PictureInPicturePolicy` (Picture in Picture,
   #291: when a window's picture is offered and which window, what counts as watched, heard and
-  running while it shows, the pause, what ends it, the Lifecycle; pure,
+  running while it shows, the pause, what ends it, the session's end when it ends with Sill in the
+  background (#379), the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
   `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
