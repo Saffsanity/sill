@@ -172,7 +172,7 @@ final class DeviceIdleTimer {
             RunLoop.main.add(timer, forMode: .common)
             recheck = timer
         }
-        let hold = ends != nil
+        let hold = ends != nil || ExternalDisplay.shared.isHoldingAwake
         guard hold != holding || UIApplication.shared.isIdleTimerDisabled != hold else { return }
         holding = hold
         UIApplication.shared.isIdleTimerDisabled = hold
@@ -238,6 +238,8 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// A monitor on this device: the picture goes there and this screen is its trackpad.
+    @ObservedObject private var external = ExternalDisplay.shared
     /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
     /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
     /// would redraw this whole screen at every step of a pinch): only the picture's own view watches it
@@ -398,8 +400,9 @@ struct StreamScreen: View {
                 .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. Full screen
-                // has no trackpad, so none of its arrow either.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait && !hidden, initial: true) { _, portrait in
+                // has no trackpad, so none of its arrow either; with the picture on a monitor this screen is
+                // a trackpad held either way, so it shows in both.
+                .onChange(of: (DuoLayout.of(geo.size).isPortrait && !hidden) || external.shows(client), initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
@@ -531,6 +534,7 @@ struct StreamScreen: View {
             // dictation and an input method may revise (#138).
             let proxy = overlay
             client.onCaretMayMove = { [weak proxy] in proxy?.caretMayHaveMoved() }
+            ExternalDisplay.shared.show(client)
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
@@ -555,6 +559,7 @@ struct StreamScreen: View {
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
         }
+        .onChange(of: external.size) { sendViewport() }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
         .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
@@ -603,12 +608,14 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
+            ExternalDisplay.shared.leave(client)
             // Shake to Undo back for the rest of the app, should this screen go while hidden.
             if shakeToUndoTurnedOff {
                 UIApplication.shared.applicationSupportsShakeToEdit = true
                 shakeToUndoTurnedOff = false
             }
         }
+        .background { ExternalDisplayAccessory().frame(width: 0, height: 0).accessibilityHidden(true) }
     }
 
     // MARK: The link's line
@@ -674,6 +681,8 @@ struct StreamScreen: View {
                 try? await Task.sleep(for: .seconds(delay))
                 if Task.isCancelled { return }
             }
+            // On a monitor (ExternalDisplay): its size, which the Mac sizes the window to.
+            let panelSize = external.shows(client) ? external.size ?? panelSize : panelSize
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
             #if DEBUG
@@ -728,6 +737,12 @@ struct StreamScreen: View {
         let live = !client.mockDiscovery
         func after(_ seconds: Double, _ step: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
+        }
+        // `-SillExternalDisplay 1920x1080`: a monitor's size without its scene (a simulator has none
+        // without Simulator.app): the trackpad in the picture's place and the monitor's viewport.
+        if let spec = defaults.string(forKey: "SillExternalDisplay") {
+            let sides = spec.split(separator: "x").compactMap { Double($0) }
+            if sides.count == 2 { ExternalDisplay.shared.pretend(CGSize(width: sides[0], height: sides[1])) }
         }
         if defaults.bool(forKey: "SillKeyboard"), live {
             after(0.5) {
@@ -1804,8 +1819,8 @@ struct StreamScreen: View {
             Color.black
 
             ZStack {
-                // Scaled and moved by the picture's zoom, inside the clip below.
-                ZoomedStreamView(client: client, zoom: zoom)
+                // Scaled and moved by the picture's zoom, inside the clip below. On a monitor, not here.
+                if external.shows(client) { Color.black } else { ZoomedStreamView(client: client, zoom: zoom) }
                 // Same frame as the video, so a touch maps straight onto the streamed frame (through the
                 // zoom, StreamZoom.unzoomedPoint).
                 InputOverlay(videoSize: client.videoSize,
@@ -1819,6 +1834,24 @@ struct StreamScreen: View {
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },
                              writeZoom: { [zoom] in zoom.set($0) })
+                // The picture on a monitor: this pane is its trackpad, over the input view (which keeps
+                // the hardware keyboard).
+                if external.shows(client) {
+                    Trackpad(send: { client.sendInput($0) },
+                             setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                             feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                             onFingers: { client.trackpadFingers($0) },
+                             latched: latched,
+                             onModifiersConsumed: { latched = [] },
+                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                        .overlay(alignment: .top) {
+                            Text("The Mac is on the external display.")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Palette.muted)
+                                .padding(.top, 14)
+                                .allowsHitTesting(false)
+                        }
+                }
             }
             // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
             .background(hidden ? Color.black : Palette.panel)

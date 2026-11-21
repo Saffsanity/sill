@@ -150,6 +150,8 @@ struct PortraitMetrics {
 /// in both; each arrangement places them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
+    /// A monitor on this device (ExternalDisplay): the picture is there, and the pane stays black.
+    @ObservedObject private var external = ExternalDisplay.shared
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
@@ -662,8 +664,8 @@ struct PortraitStreamScreen: View {
 
     private func livePicturePane(measured: Bool) -> some View {
         ZStack {
-            // Scaled and moved by the picture's zoom, inside the clip below.
-            ZoomedStreamView(client: client, zoom: zoom)
+            // Scaled and moved by the picture's zoom, inside the clip below. On a monitor, not here.
+            if external.shows(client) { Color.black } else { ZoomedStreamView(client: client, zoom: zoom) }
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -675,6 +677,18 @@ struct PortraitStreamScreen: View {
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) })
+            // The picture on a monitor: this pane is a trackpad too (a tap here would click the Mac
+            // blind), over the input view, which keeps the hardware keyboard.
+            if external.shows(client) {
+                trackpadSurface(verticalSpan: nil)
+                    .overlay(alignment: .top) {
+                        Text("The Mac is on the external display.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.top, 14)
+                            .allowsHitTesting(false)
+                    }
+            }
         }
         // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
         .background(hidden ? Color.black : Palette.panel)
@@ -714,11 +728,11 @@ struct PortraitStreamScreen: View {
                 .fill(Palette.trackpad)
                 .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
         } else {
-            liveTrackpad(verticalSpan: verticalSpan)
+            trackpadSurface(verticalSpan: verticalSpan).tourTarget(.trackpad)
         }
     }
 
-    private func liveTrackpad(verticalSpan: CGFloat?) -> some View {
+    private func trackpadSurface(verticalSpan: CGFloat?) -> some View {
         Trackpad(send: { client.sendInput($0) },
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
@@ -727,7 +741,6 @@ struct PortraitStreamScreen: View {
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
-            .tourTarget(.trackpad)
     }
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }
