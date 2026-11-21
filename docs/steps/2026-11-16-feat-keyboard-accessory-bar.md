@@ -1,0 +1,22 @@
+**Keyboard accessory bar and custom shortcut keys above virtual keyboard (2026-11-16, branch `feat-keyboard-accessory-bar` from main at e1b302c).**
+
+- **Context & Need:** In remote display touch sessions, the system virtual keyboard frequently obscures bottom input fields, dialog buttons, and command lines. Additionally, accessing macOS modifier combinations (⌘ Cmd, ⌥ Opt, ⌃ Ctrl, ⇧ Shift) and essential navigation keys (Esc, Tab, Space, Dismiss) is awkward on iOS standard keyboards without dedicated modifier rows.
+- **Accessory Bar (`KeyboardAccessoryBar`):**
+  - Attached directly to the native virtual keyboard via `InputOverlayView`'s `inputAccessoryView` (UITextInput).
+  - Floating controls stay anchored directly above the virtual keyboard without being obscured.
+  - Modifier buttons support three-state cycling (Off -> Latched -> Locked) with visual highlight feedback:
+    - *Latched*: Applies to the immediate next keystroke, then auto-clears.
+    - *Locked*: Persists across multiple keystrokes until manually toggled off.
+  - Dedicated action keys: `Esc` (0x29), `Tab` (0x2B), `Space` (0x2C), and Keyboard Dismiss.
+- **Bottom Expandable Shortcut Bar (`BottomShortcutBar`):**
+  - Anchored at the bottom of the streaming viewport when the native keyboard is hidden.
+  - Out-of-the-box presets: Undo (⌘Z), Redo (⇧⌘Z), Save (⌘S), Hand Tool (Space), Copy (⌘C), Paste (⌘V), Cut (⌘X), Brush (B), Eraser (E).
+  - Add Custom Shortcut sheet modal (`AddShortcutSheet`) allowing arbitrary modifier + key combinations with live preview and persistence in UserDefaults (`CustomShortcutStore`).
+  - Haptic feedback (`UIImpactFeedbackGenerator`) on trigger with key chord sequencing.
+- **Integration & Files:**
+  - `iOSClient/KeyboardAccessoryBar.swift`: Native UIKit input accessory bar.
+  - `iOSClient/CustomShortcuts.swift`: Modifier state management, `CustomShortcut` model, and persistent store.
+  - `iOSClient/BottomShortcutBar.swift`: SwiftUI expandable shortcut bar and shortcut creation sheet.
+  - `iOSClient/InputOverlay.swift`: Modifier latching/locking state coordination and `inputAccessoryView` hook.
+  - `iOSClient/StreamScreen.swift`: Integrated `BottomShortcutBar` at viewport bottom in landscape and portrait modes.
+- **Verified:** `swift build -c release`, `./Tests/checks/run-all.sh`.

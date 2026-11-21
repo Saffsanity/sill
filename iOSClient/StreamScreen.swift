@@ -1755,6 +1755,14 @@ struct StreamScreen: View {
                     .transition(chromeTransition)
             }
             contentArea(bar: bar, screen: screen, hidden: hidden, room: room, preview: preview)
+
+            if !hidden && !preview {
+                BottomShortcutBar(
+                    isNativeKeyboardShown: $keyboardShown,
+                    sendInput: { client.sendFromKeyRow($0) },
+                    toggleNativeKeyboard: { overlay.toggleKeyboard() }
+                )
+            }
         }
     }
 
@@ -1762,25 +1770,35 @@ struct StreamScreen: View {
     /// `preview`: full screen's, as `landscape`'s.
     private func portrait(metrics: PortraitMetrics, largerKeyboard: CGFloat? = nil, hidden: Bool = false,
                           room: CGRect = .zero, preview: Bool = false) -> some View {
-        PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
-                             keyboardShown: $keyboardShown,
-                             textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                             latched: $latched, overlay: overlay,
-                             settingsOpen: settingsOpen,
-                             setSettings: { setSettings($0, restoreKeyboard: $1) },
-                             menusOpened: menusOpened, menusClosed: menusClosed,
-                             settingsTransition: { settingsTransition(anchor: $0) },
-                             onPanelSize: { if !preview { panelSize = $0 } },
-                             pairThisDevice: openPairingOverlay,
-                             linkLine: streamLine,
-                             linkLineLines: streamLineLines,
-                             takeTour: takeTour,
-                             largerKeyboard: largerKeyboard,
-                             zoom: zoom,
-                             hidden: hidden, room: room, preview: preview,
-                             chromeTransition: chromeTransition,
-                             fullScreen: fullScreenRow,
-                             showChrome: { showChrome(by: "an assistive technology") })
+        VStack(spacing: 0) {
+            PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
+                                 keyboardShown: $keyboardShown,
+                                 textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
+                                 latched: $latched, overlay: overlay,
+                                 settingsOpen: settingsOpen,
+                                 setSettings: { setSettings($0, restoreKeyboard: $1) },
+                                 menusOpened: menusOpened, menusClosed: menusClosed,
+                                 settingsTransition: { settingsTransition(anchor: $0) },
+                                 onPanelSize: { if !preview { panelSize = $0 } },
+                                 pairThisDevice: openPairingOverlay,
+                                 linkLine: streamLine,
+                                 linkLineLines: streamLineLines,
+                                 takeTour: takeTour,
+                                 largerKeyboard: largerKeyboard,
+                                 zoom: zoom,
+                                 hidden: hidden, room: room, preview: preview,
+                                 chromeTransition: chromeTransition,
+                                 fullScreen: fullScreenRow,
+                                 showChrome: { showChrome(by: "an assistive technology") })
+
+            if !hidden && !preview {
+                BottomShortcutBar(
+                    isNativeKeyboardShown: $keyboardShown,
+                    sendInput: { client.sendFromKeyRow($0) },
+                    toggleNativeKeyboard: { overlay.toggleKeyboard() }
+                )
+            }
+        }
     }
 
     /// The stream panel's shape: rounded inside its margin, square while full screen.
