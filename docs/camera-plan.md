@@ -773,7 +773,8 @@ app as CI builds it; docs/steps/2026-11-18-camera.md has the numbers.
 
 - The fourth run (2026-11-23; its notes in docs/steps/2026-11-18-camera.md): main c33d1057 (#399, #396, #402) merged
   in, its five conflicts settled keeping both sides (#402's lock switches, then `deviceCamera`, in HostConfig and its
-  check), and verified in a heavy hold of its own; no step of this plan changed.
+  check), and verified in a heavy hold of its own; then main 5d062a3c (#389, #418), one conflict (the Settings panel's
+  row IDs, both kept), verified by CI; no step of this plan changed.
 
 Not yet: step 8 (Sill.app: `CameraExtensionState`, `CameraExtensionManager`, `CameraSink` with the fit into the app's
 size, the "Camera and Microphone (beta)" section with "Use iPhone and iPad cameras", the card's line, the previews;
