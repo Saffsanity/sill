@@ -76,10 +76,10 @@ flags=()
 # The gestures when the surfaces have them (the stroke gate and `sendGesture`), and the picture's zoom (#65).
 if grep -q "var sendGesture" TrackpadView.swift; then flags+=(-D GESTURES); fi
 if grep -q "StreamZoom" InputOverlay.swift; then flags+=(-D ZOOM); fi
-# Full screen's swipe in from the left edge (docs/full-screen-plan.md), where the sources have it: on the rig's window.
-if [ -f RevealEdgePan.swift ]; then flags+=(-D REVEAL); fi
 # Hold, Then Drag (#292), where the overlay asks it: the rig then says in its log whether it was on (RIG_HOLD).
 if grep -q "holdThenDragOn" InputOverlay.swift; then flags+=(-D HOLD); fi
+# Full screen's swipe in from the left edge (docs/full-screen-plan.md), where the sources have it: on the rig's window.
+if [ -f RevealEdgePan.swift ]; then flags+=(-D REVEAL); fi
 cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth.m" "$here/Bridging.h" .
 
 target=arm64-apple-ios17.0-simulator
