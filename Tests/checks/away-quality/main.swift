@@ -94,7 +94,8 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, shareClipboardImages: true, offConsoleView: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -120,7 +121,8 @@ do {
     check(!off.validated().shareClipboardImages && standard.validated().shareClipboardImages, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: false, offConsoleView: false)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: false, offConsoleView: false,
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(!made.shareClipboardImages && made.shareClipboard, "a HostConfig made with it off has it off, Share clipboard on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -140,13 +142,83 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: true,
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(on.applying(all).offConsoleView && on.applyingAway(all).offConsoleView
           && !standard.applying(all).offConsoleView && !standard.applyingAway(all).offConsoleView,
           "a device's change never moves it, at home or away")
+}
+
+// Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283), the Mac's alone: off in `standard`
+// and `app`, named in the log's line, kept by `validated`, set by a HostConfig made with it, never moved by a device's
+// change at home or away, and no other knob moved by it.
+do {
+    check(!standard.lockAfterSession && !HostConfig.app.lockAfterSession, "standard and app: the lock when the last device leaves off")
+    var on = standard
+    on.lockAfterSession = true
+    eq(standard.changes(to: on), "lock when the last device leaves off → on", "changes: the lock's switch")
+    eq(on.changes(to: standard), "lock when the last device leaves on → off", "changes: and back")
+    check(on.validated().lockAfterSession && !standard.validated().lockAfterSession, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
+                          lockAfterSession: true, lockSleepsDisplay: true, lockOnlyAfterAway: false)
+    check(made.lockAfterSession && !made.offConsoleView, "a HostConfig made with it on has it on, and the off-console view as given")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(on.applying(all).lockAfterSession && on.applyingAway(all).lockAfterSession
+          && !standard.applying(all).lockAfterSession && !standard.applyingAway(all).lockAfterSession,
+          "a device's change never moves it, at home or away")
+    var others = on
+    others.lockAfterSession = false
+    check(others == standard, "turning it on moves no other knob")
+}
+
+// Its two switches (the review of PR #402: Noah's "a toggle wherever sensible"), the Mac's alone like it: Turn off its
+// display too on and Only after a device away from home off in `standard` and `app` (the plan's open decisions 6 and
+// 5), each named in the log's line both ways, kept by `validated` whatever the lock's switch says, set by a HostConfig
+// made with it, never moved by a device's change at home or away, and moving no other knob.
+do {
+    check(standard.lockSleepsDisplay && HostConfig.app.lockSleepsDisplay, "standard and app: its display off with the lock")
+    check(!standard.lockOnlyAfterAway && !HostConfig.app.lockOnlyAfterAway, "standard and app: every session counts, home or away")
+    var lit = standard
+    lit.lockSleepsDisplay = false
+    eq(standard.changes(to: lit), "its display off with the lock on → off", "changes: the display's switch")
+    eq(lit.changes(to: standard), "its display off with the lock off → on", "changes: and back")
+    var away = standard
+    away.lockOnlyAfterAway = true
+    eq(standard.changes(to: away), "lock only after a device away from home off → on", "changes: the scope's switch")
+    eq(away.changes(to: standard), "lock only after a device away from home on → off", "changes: and back")
+    var all3 = standard
+    all3.lockAfterSession = true
+    all3.lockSleepsDisplay = false
+    all3.lockOnlyAfterAway = true
+    eq(standard.changes(to: all3),
+       "lock when the last device leaves off → on, its display off with the lock on → off, lock only after a device away from home off → on",
+       "changes: all three in one line, in the pane's order")
+    check(!lit.validated().lockSleepsDisplay && away.validated().lockOnlyAfterAway && standard.validated().lockSleepsDisplay
+          && !standard.validated().lockOnlyAfterAway, "validated keeps both either way, with the lock's switch off")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
+                          lockAfterSession: true, lockSleepsDisplay: false, lockOnlyAfterAway: true)
+    check(!made.lockSleepsDisplay && made.lockOnlyAfterAway && made.lockAfterSession, "a HostConfig made with them has them as given")
+    let change = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                    directWireless: true, sendAudio: true)
+    check(!lit.applying(change).lockSleepsDisplay && !lit.applyingAway(change).lockSleepsDisplay
+          && standard.applying(change).lockSleepsDisplay && standard.applyingAway(change).lockSleepsDisplay,
+          "a device's change never moves the display's switch, at home or away")
+    check(away.applying(change).lockOnlyAfterAway && away.applyingAway(change).lockOnlyAfterAway
+          && !standard.applying(change).lockOnlyAfterAway && !standard.applyingAway(change).lockOnlyAfterAway,
+          "a device's change never moves the scope's switch, at home or away")
+    var back = all3
+    back.lockAfterSession = false
+    back.lockSleepsDisplay = true
+    back.lockOnlyAfterAway = false
+    check(back == standard, "the three move no other knob")
 }
 
 // Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual

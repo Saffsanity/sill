@@ -17,6 +17,7 @@ import StreamProtocol
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, shareClipboardImages, offConsoleView,
+///                                              lockAfterSession, lockSleepsDisplay, lockOnlyAfterAway,
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -372,6 +373,9 @@ enum DebugHooks {
         case "shareClipboard": config.shareClipboard = flag
         case "shareClipboardImages": config.shareClipboardImages = flag
         case "offConsoleView": config.offConsoleView = flag
+        case "lockAfterSession": config.lockAfterSession = flag
+        case "lockSleepsDisplay": config.lockSleepsDisplay = flag
+        case "lockOnlyAfterAway": config.lockOnlyAfterAway = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -405,7 +409,11 @@ enum DebugHooks {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
                                    showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
                                    offConsoleView: .constant(sample.offConsoleView),
-                                   requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
+                                   lockAfterSession: .constant(sample.lockAfterSession),
+                                   lockSleepsDisplay: .constant(sample.lockSleepsDisplay),
+                                   lockOnlyAfterAway: .constant(sample.lockOnlyAfterAway),
+                                   requirePairingProblem: nil, privacyLock: sample.privacyLock,
+                                   actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -1011,6 +1019,25 @@ extension DebugHooks {
         var requirePairing = true
         var showPairingWindowToScreenSharing = false
         var offConsoleView = false
+        var lockAfterSession = false
+        var lockSleepsDisplay = true
+        var lockOnlyAfterAway = false
+        var privacyLock = PrivacyLockStatus()
+    }
+
+    /// pane-devices-{lock,lockaway,locknodisplay,lockfailed}: Lock this Mac when the last device leaves on
+    /// (docs/privacy-mode-plan.md, part 1), as it is (its display off with the lock, every session counting); with its
+    /// display left on and only after a device away from home; with this Mac's displays none a lock screen could take
+    /// a password at (#298); after a lock macOS did not let Sill make.
+    static func privacyLockSamples() -> [(name: String, status: PrivacyLockStatus, sleeps: Bool, onlyAway: Bool)] {
+        var on = PrivacyLockStatus()
+        on.on = true
+        var noDisplay = on
+        noDisplay.noDisplay = true
+        var failed = on
+        failed.failure = PrivacyPolicy.Words.unavailableReason
+        return [("lock", on, true, false), ("lockaway", on, false, true), ("locknodisplay", noDisplay, true, false),
+                ("lockfailed", failed, true, false)]
     }
 
     /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
@@ -1035,6 +1062,10 @@ extension DebugHooks {
             DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
                               showPairingWindowToScreenSharing: true),
             DevicesPaneSample(name: "offconsoleview", status: RemoteStatus(homeDoor: .pairingRequired), offConsoleView: true),
+        ] + privacyLockSamples().map {
+            DevicesPaneSample(name: $0.name, status: RemoteStatus(homeDoor: .pairingRequired), lockAfterSession: true,
+                              lockSleepsDisplay: $0.sleeps, lockOnlyAfterAway: $0.onlyAway, privacyLock: $0.status)
+        } + [
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

@@ -9,7 +9,7 @@
 # full run, a known failure and no regression: AAC-ELD at codec quality Medium measured +2.1 to +3.1
 # points (docs/audio-plan.md, Results, item 9), and Low or Medium is Noah's call (open question 16).
 #
-#   Scripts/audio/run.sh                   every case (about 7 minutes)
+#   Scripts/audio/run.sh                   every case (about 8 minutes)
 #   Scripts/audio/run.sh --cases home,home-off
 #   Scripts/audio/run.sh --list
 # Everything goes to .build/audio (git-ignored): the host package, audiocheck, and each matrix's runs in
@@ -36,6 +36,10 @@
 #              it goes out), and back together (the sound's age back in the second the frames' is)
 #   relay2     H6: the remote door's slow link (sillrelay.py, 2 Mbit/s, +150 ms), the synthetic host's
 #              frame sizes: no eviction, the sound never dropped
+#   retry      #365: the tone ends by itself 3 s after it starts and the next start fails
+#              (SILL_TEST_AUDIO_END=3,0): the pipeline tries again by itself 10 s after the first start,
+#              then 20 s after the second (two failures in a row), and the tone runs on: the device hears
+#              it for 3 s, then nothing until a second epoch about 30 s in, nothing between
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -58,6 +62,7 @@ cases=(
   "away4|45|Remote|bottleneck|1||away-drops|--audio --kf 1500000 --delta 30000 -- --rate-mbps 4 --delay-ms 70 --queue-bytes 262144 --"
   "dip|50|Remote|bottleneck|1||dip=20-32|--audio --kf 100000 --delta 8000 -- --rate-mbps 8 --rate-at 20:0.5,32:8 --delay-ms 70 --queue-bytes 1048576 --"
   "relay2|60|Remote|sillrelay|1||away|--audio --kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 --"
+  "retry|42|Home|none|1|SILL_TEST_AUDIO_END=3,0|retry|--audio -- --"
 )
 if [ "$list" = 1 ]; then printf '%s\n' "${cases[@]}"; exit 0; fi
 "$here/build.sh" || exit 1
