@@ -1162,7 +1162,8 @@ check(laptopFirst.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "A hard
 check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "keyboard.badge.ellipsis", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
 check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
 check(everyFeatures.allSatisfy { words(.laptop, P, first: true, features: $0) == laptopFirst }, "the halves' laptop card is the same for every Mac")
-check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
+check(touchPad.rows[1].spoken == T2drag && words(.touch, L, first: true, features: holdOff).rows[1].spoken == "Touch and hold to right-click.",
+      "a row is spoken as it reads (the hold's, Hold, Then Drag on by default and off)")
 
 // The iPhone Duo open: its keys and trackpad come with the device on its side (the laptop pose, open
 // flat upright), so the words say so where an iPhone's and the Duo's cover's say upright.
