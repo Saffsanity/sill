@@ -1,4 +1,4 @@
-**Privacy, part 2: this Mac's screens dark while a device uses it, built up to the one place that darkens them and waiting for Noah's probe (2026-11-18, branch `privacy-darken` from `privacy-lock` at 4d6a470, which is main at 8dbbb50 with #184 and part 1).**
+**Privacy, part 2: this Mac's screens dark while a device uses it, built for real in Sill.app from Noah's probe G0 of 2026-11-23 (2026-11-18, branch `privacy-darken` from `privacy-lock` at 4d6a470, which is main at 8dbbb50 with #184 and part 1; main with #402 merged in since).**
 
 docs/privacy-mode-plan.md (part 2: rules 2–5, 7–9, 11–14; G0) and docs/privacy-mode-assessment.md. Part 1, the lock when
 the last device leaves, is the branch `privacy-lock` underneath this one; this branch's pull request is based on it, so
@@ -102,8 +102,9 @@ used)"; #323: "as a toggle".
   (run 44534158115).
 - **Docs**: one entry each in docs/LAYOUT.md (DarkenPolicy and PrivacyScreen; the probe and darken.py) and
   docs/BUILD-AND-RUN.md (the probe's command; the dry run), carried there from CLAUDE.md by `Scripts/migrate-notes.py`
-  when `privacy-lock` took main's #388 and was merged in here (a34c675d).
-- **Defaults taken** (the pull request lists them for Noah): the plan's recommendations for its open decisions; the
+  when `privacy-lock` took main's #388 and was merged in here (a34c675d). Run 4 adds PrivacyCurtain and PrivacyWatchdog to
+  docs/LAYOUT.md, the stall hook and the three keys to docs/BUILD-AND-RUN.md, and G0's results to the plan.
+- **Defaults taken in runs 1 to 3** (the two about G0 superseded by run 4's, below): the plan's recommendations for its open decisions; the
   black under the lock screen until G0; one key's lock may hold the dark up to 3 s past the wait; a failed key lock
   stops key locks until a lock shows or a switch changes; a change of scope lifts at once, a move home under "only away"
   waits 30 s; the hint at most once a second; no Settings switch until G0 (one that darkens nothing would mislead); the
@@ -111,13 +112,14 @@ used)"; #323: "as a toggle".
   the screen is lit 30 s after the last device away leaves and the lock comes 30 s after the one at home does, and with
   part 1's only after a device away and a visit at home alone, whenever ends lit at its wait with no lock (rule 6 as
   planned, now checked with both rules together).
-- **Not yet** (the next runs, after G0): the real `Curtain` (the windows at G0's level and opacity, the hint view, the
+- **Not yet after run 3** (run 4 below built all of it but the away case from a real distance, rule 6's "not taken
+  back" in part 1's lock and the site's words): the real `Curtain` (the windows at G0's level and opacity, the hint view, the
   re-sync at display changes) and `LocalInput` (NSEvent's monitors), InputInjector's tag, the watchdog
   (`PrivacyWatchdog`, SILL_TEST_PRIVACY_STALL), Settings › Devices' section and previews, Sill.app's App Nap hold on
   `privacyDark`, the remote door's away case live, rule 6's "not taken back" in part 1's lock (a Mac its owner took
   back still locks 30 s after the last device leaves: one input to PrivacyPolicy, coordinated with `privacy-lock`),
   docs and the site.
-- **Proposed words** (for the release that ships it; not in any published page): What's New: "Privacy: keep your Mac’s
+- **Proposed words of runs 1 to 3** (run 4's, below, replace them): What's New: "Privacy: keep your Mac’s
   screen dark while you use it from afar, and lock it when someone touches it (Settings › Devices)." Support:
   "Keep your Mac’s screen dark while you use it from afar. In Sill on the Mac, Settings › Devices: turn on Darken this
   Mac’s screen. While your iPhone or iPad uses the Mac from away (or whenever one is connected, if you choose), every
@@ -125,3 +127,174 @@ used)"; #323: "as a toggle".
   any key; the Mac locks, and your password or Touch ID brings it back." Privacy page: "While Darken this Mac’s screen
   is on and the screen is dark, Sill for Mac notices whether a key is pressed or the mouse is used on the Mac itself,
   only to lock it. It reads no key and keeps or sends nothing of it."
+- **Run 4 (2026-11-23): Noah ran the probe G0, and darkening is built for real.** He ran it in Terminal.app at 15:19
+  on his Mac14,9 (macOS 27.2.1; the report is sill-handoff's next/privacy-darken/probe-report.txt, whose first ten lines
+  are a refused run at 15:14, before Terminal had Accessibility). What it measured, checked line by line against the
+  report:
+  - *Step 1, covered windows.* Under all four covers (S1 opaque at the screen saver's level 1000, #184's; S2 not opaque
+    at 1000; S3 opaque at the shielding level 2147483628; S4 opaque at 1500) the probe's test window, a Safari window
+    playing a video and an Electron app's window kept drawing at 99 to 101 % of their uncovered rate, macOS still
+    called the test window 100 % visible, and the captures, the Desktop's with the black left out among them, stayed at
+    57 to 58 frames a second. So the black freezes nothing on this Mac, the level costs nothing, and the plan's note
+    for frozen apps is not needed (its risk 1 did not happen).
+  - *Step 2, what shows in front (all at 1000).* Spell 1: loginwindow's lock screen came in front (layers 2001 and 2004,
+    from 2.1 s to 4.5 s) and Noah wrote "When I clicked Control-Command-Q it brought me to regular lock screen. When I
+    logged in it still showed the black screen with the text for a little then eventually went away." Behind the black,
+    and unseen by him: a notification (Notification Center, layer 23: "No"), the volume indicator (layer 101, and another
+    app's own indicator at 23: "No"), Spotlight (layer 23: "No"), Mission Control (layers 2 to 20: "Only black") and the
+    Force Quit window (loginwindow, layer 996: "No"). The pointer showed on the black ("Yes"). Another app's window
+    (1×1 pt, transparent) at the same layer 1000 was listed in front of the black for the whole of spell 3 (0.0 to
+    8.9 s), when that app showed its own volume indicator: two windows at one level stack by who ordered last.
+  - *The "IN FRONT … from 0.0 s to 0.0 s" lines* (every ordinary window, at layers far below 1000, in every spell): the
+    probe's first sample, taken before the window server listed the black window. Its source took every window as in
+    front when none of the black windows was listed (`frontmost` was `Int.max`) and never touched a window again once it
+    was behind. So it is so; fixed in probe.swift (a sample without the black windows listed judges nothing).
+  - *Step 3, killed or frozen.* After `kill -9` the black windows were gone in 14 and 16 ms; a stopped probe's stayed
+    listed and the screen stayed black until the kill ("Yes", "Yes and yes"). Only the end of the process lifts a hung
+    Sill's black: the watchdog is needed.
+  - *Step 4, whose input.* NSEvent's global monitor kept the tag (0x53494C4C50525631) on the posted pointer move and
+    Shift, and an untagged post carried 0; the posted events named the probe's own process as their source, and Noah's
+    own pointer move process 0 with no tag. His own Shift press is not in the report (only the move is), so whether a
+    person's key reaches the monitor on this Mac is not shown by G0; a click (a mouse event) is.
+  - *Step 5, black.* With "All the above" set up (Night Shift, True Tone, an HDR video, a monitor or Sidecar), two
+    screens went black and "Every screen was pure black". The report does not say which second screen it was.
+  - *The script's own fault.* zsh's `print` took each heading that begins with "-" for its options ("print:93: bad
+    option: -" at lines 93, 110, 135, 162 and 169), so those five headings were lost. Every print in run.sh is now
+    `print -r --` (the rest were harmless, but an answer typed with a backslash would have been read as an escape).
+- **What G0 decided** (each a constant in DarkenPolicy, checked):
+  - *The level, 1501* (`windowLevel`, `levelFits`): above everything spell 1 to 7 saw stay hidden (996 at most), above
+    1000 (the screen saver's level, where another app's window can be ordered in front of the black) and above 1500
+    (kCGAssistiveTechHighWindowLevel, the highest level macOS names under its lock screen, which assistive windows such
+    as spoken text's captions share), so no window of a named level ties with the black; and 500 under the lock screen's
+    2001, so a person at the Mac always sees it. Step 1 measured no cost at 1000, 1500 or the shielding level, so a level
+    between costs nothing either (inferred: 1501 itself was not a candidate; the probe's new S5 re-runs a step at it).
+  - *Opaque*, #184's (`windowOpaque`): S2 drew no differently, and step 5 was pure black opaque.
+  - *Under the lock screen* (`staysUnderLockScreen` stays true): the lock screen came in front at 1000, and 1501 is
+    still under it. The fallback stays in the rule, checked, for a macOS that moves its lock screen.
+  - *Sill's own input* (`ownEvent`): an event is Sill's when it carries the tag (InputInjector's source now sets it on
+    every event it posts) or names Sill's own process as its source; a person's hardware (process 0, no tag) and other
+    apps' events are a person's. Either one alone would do on G0's numbers; both keep a device's input from ever locking
+    the Mac.
+  - *The hint* now says "Press any key or click to lock it.": a click always reaches the observer, while a focused
+    password field and Terminal's Secure Keyboard Entry withhold keys from every observer, and G0 did not see a person's
+    key.
+- **Built** (Sill.app itself only: `DarkenPolicy.darkensForReal`, the lock's rule; the CLI, the bare SillMenuBar binary
+  and every test host keep the dry run, and the pre-G0 hold-back `heldBack` and its line are gone):
+  - `PrivacyCurtain.swift`: `WindowCurtain`, one black window per screen (#184's recipe as the probe made it:
+    borderless, black, opaque, no shadow, ignoring the mouse, on every Space and beside full-screen windows, stationary,
+    out of the window cycle) at level 1501, plus never hidden with Sill (`canHide` false: Hide Others in another app
+    leaves it up), no animation, out of the Window menu; ordered in by `raise` in the connect's own turn, before the wake;
+    re-synced at each display change, a new screen's window in before an old one goes, framed from CoreGraphics' bounds
+    as soon as the reconfiguration callback runs. `CurtainView`: black, and the hint's two lines in the middle (15 pt, 35 %
+    white) for 10 s, faded. `MonitorInput`: NSEvent's global and local monitors for key downs, button downs, moves, drags
+    and scrolls (`watchedEventTypes`, `localKind`), each telling the rule its kind and whether it is Sill's, never a key
+    code or a character. `DisplayChanges`: the reconfiguration callback and AppKit's screen notification, while
+    darkening is on.
+  - `PrivacyWatchdog.swift` (rule 12): while the black is up the main actor beats once a second; a timer on
+    `sill.privacy.watchdog` looks once a second on a clock that stops while the Mac sleeps. Ten seconds without a beat:
+    the line, the log flushed, Sill opened again with `open -n -g` on its own bundle (at most once in 10 minutes, kept in
+    ~/Library/Application Support/Sill/privacy-watchdog, which the next launch reads for its line), then `_exit(70)`,
+    with a second `_exit` 2 s later in case the line or the log is what hangs. A test host's dry run says so and goes on;
+    `SILL_TEST_PRIVACY_STALL=<s>` stops a test host's main thread once, a second after the black first goes up.
+  - Settings › Devices, before Lock this Mac when the last device leaves: **Darken this Mac's screen** (off), and under
+    it while on **Only while a device is away from home** (on) and **A key or click on this Mac locks it** (on), with
+    Accessibility's warning while keys lock and Sill lacks it, and a footnote for each state (`DarkenPolicy.Words`).
+    Saved as `darkenScreen`, `darkenOnlyAway` and `darkenKeysLock` in me.saffer.sill.mac (the scope kept while off:
+    `DarkenPolicy.scope`); the bare binary's `-SillSetAfter` takes `darkenScreen=off|away|any` and `darkenKeysLock`.
+    No device sets them, as before (absent from everything a device sends).
+  - Sill.app holds App Nap off while the black is up with no device left (the wait, the hold), so the ticks and the
+    watchdog's beats keep their time; with a device connected its own hold already does.
+  - The probe: `print -r --`, the first sample, and S5 (opaque at 1501, Sill's level) for `--candidate S5`.
+- **Every way the black ends** (none of them needs Sill's menu or Settings, which the black covers):
+  1. *The last device leaves*: 30 s later it lifts (`grace`, the lock's). If Lock this Mac when the last device leaves
+     is on and the same departure started its wait, the black holds until the lock's outcome, at most 30 + 3 + 1 s after
+     the departure, so the room sees the lock screen and never the desktop. A device back within the 30 s keeps it dark.
+  2. *The switch is turned off*: lit at once (rule 9), from Settings on the Mac or from a device's view of it.
+  3. *Sill quits* (its Quit, a logout, a restart, an update's install, SIGTERM): lit at once (rule 11), before the quit
+     goes on, and the windows go with the process anyway.
+  4. *Sill crashes or is force-quit*: the window server removes a dead process's windows (G0: 14 and 16 ms).
+  5. *Sill freezes*: the watchdog ends it 10 to 11 s after the main thread stops answering, and reopens it once in 10
+     minutes. A process stopped whole (`kill -STOP`, a debugger) stops its watchdog too: nothing in Sill does that.
+  6. *The Mac locks* (a key or click with keys locking, ⌃⌘Q, the screen saver, a device's Lock Screen): the black stays
+     under the lock screen (spell 1), which shows above it. An unlock at the Mac itself (password, Touch ID, a Watch)
+     takes it back: lit about 2 s later (the gate's settle) and kept lit until every device has left (rule 8). An unlock
+     typed from a paired device keeps it dark.
+  7. *The Mac sleeps*: the windows stay; at the wake the lock screen (if the Mac asks for its password) shows over them.
+     A device that dropped during the sleep starts the 30 s wait (a clock that counts the sleep, so it may end at the
+     first tick after the wake); one that comes back keeps it dark. A sleep is no hang for the watchdog (its clock stops).
+  8. *Another user takes the screen* (fast user switching, the login window): this account's windows are not on the
+     screen at all; coming back with the password at the Mac is the Mac's own unlock: lit.
+  9. *A display is added or removed while dark*: the new one gets its black window as soon as macOS reports the change
+     (its picture shows until then, a moment, not measured); a removed one's window goes; with no screen left the rule
+     lifts ("no screen to darken") and darkens again when one returns, from the same watch.
+- **If the screen stays black** (for the step file's readers and Noah), in order:
+  1. Wait 35 seconds after the last device left (the 30 s wait, the lock's 3 s confirmation and a second).
+  2. Press any key or click (with A key or click on this Mac locks it on), or press Control-Command-Q (macOS's own
+     lock, which works whatever Sill does): the lock screen shows over the black. Unlock it with Touch ID or your
+     password: about 2 seconds later the screens light, and stay lit until every device has left.
+  3. Still black 15 seconds after the unlock: Sill has stopped answering, and its watchdog quits it (the black goes with
+     it) and opens it again; wait those 15 seconds.
+  4. Still black: quit Sill from a device that still shows the Mac (Sill's menu › Quit Sill), or from another Mac or an
+     SSH session with `killall Sill` (`killall -9 Sill` if that does nothing): the black goes at once with the process.
+  5. Last resort: hold the power button to turn the Mac off; nothing of the black survives a restart.
+- **Known visible behaviour, each a default or a question for Noah:** the pointer shows and moves on the black (hiding
+  it while Sill is in the background needs a private window-server property: not built; the plan's open decision 14
+  recommends shown); the Mac's speakers keep playing the session's sound (open decision 13: unchanged in this version);
+  a key on the dark Mac while a password field or Secure Keyboard Entry has the keyboard is not noticed (it goes to that
+  field; a click still locks); the key or click that locks still reaches the app under it (an observer cannot stop it,
+  open decision 3); the black lifts 2 s after an unlock at the Mac, not at once (open decision 8's settled unlock); a
+  display plugged in while dark shows its picture until its window is in; the pairing window is under the black, so a new
+  device pairs only after the Mac is taken back; a window another app puts above 1501 (an overlay at the shielding
+  level) would show over the black (none in G0); a main-thread stall of 10 s while dark (a slow answer to a keychain
+  prompt, say) ends Sill and reopens it; a Touch Bar keeps the front app's controls, and VoiceOver started at the Mac
+  with keys passing reads the covered windows aloud (the plan's small leaks).
+- **Defaults taken in run 4** (the pull request lists them for Noah): level 1501, opaque; the black under the lock
+  screen, lit 2 s after an unlock at the Mac; Sill's own input by its tag or its own process; the hint's "Press any key
+  or click to lock it."; moving, dragging and scrolling only show the hint, a modifier key alone does nothing; Only
+  while a device is away from home a switch (on) under Darken this Mac's screen, not the plan's picker, like #402's Only
+  after a device away from home; the section just before #402's in Settings › Devices, with no header (as #402's); the
+  pointer shown (open decision 14); the speakers unchanged (13); the watchdog's 10 s, and one reopening in 10 minutes
+  (9); Accessibility's warning only while keys lock; the earlier runs' defaults above, but for their two about G0.
+- **Noah's trial** (only on his Mac, with a test build of Sill.app from this branch installed as his test builds are;
+  the pull request has the same steps). What it does, in plain words: while an iPhone or iPad uses the Mac, every screen
+  of the Mac is black, so nobody near it sees anything; a key or click on the Mac locks it; 30 seconds after the last
+  device leaves, the screens come back. Shortest first; the first is safe and takes a minute, each later one tries one
+  way out of the black:
+  1. With no device connected, Settings › Devices: turn on Darken this Mac's screen, turn off Only while a device is
+     away from home (at home a device is not away), and turn off Lock this Mac when the last device leaves for now.
+     Connect the iPad: every screen of the Mac turns black within 2 seconds, before the iPad shows the Mac, with "This
+     Mac is in use from another device. Press any key or click to lock it." for 10 seconds; the iPad shows the Mac as
+     always. Close Sill on the iPad: about 30 seconds later the Mac's screens come back.
+  2. Connect again; on the iPad open Sill's Settings › Devices on the Mac and turn Darken this Mac's screen off: lit at
+     once. Turn it on: black at once. (The switch.)
+  3. Black again: press a letter key on the Mac: the lock screen shows over the black; unlock with Touch ID: about 2
+     seconds later the screens light and stay lit while the iPad is connected. Close Sill on the iPad, connect again,
+     and do it with a click. (The Mac locks; its own unlock.)
+  4. Turn off A key or click on this Mac locks it. Black: press Command-Space, F3 and the volume keys: nothing shows
+     over the black (G0 saw that at 1000; Sill's 1501 is above it). Press Control-Command-Q: the lock screen; unlock at
+     the Mac: lit. (macOS's own lock.)
+  5. Black: from the iPad, quit Sill (its menu bar item on the Mac, Quit Sill): lit at once. Open Sill again. (Sill
+     quits.)
+  6. Black: from the iPad, open Terminal on the Mac and run `killall -9 Sill`: lit at once. Open Sill again. (Sill
+     crashes.)
+  7. Black: plug a monitor in, then out (or connect Sidecar): the new screen turns black within a moment (say how long
+     its picture showed first); the others stay black. (A display while dark.)
+  8. Black: from the iPad put the Mac to sleep (Apple menu › Sleep), wake it at the Mac and unlock there: lit. Then
+     switch to another user from the lock screen and back with the password: lit. (Sleep; another user.)
+  9. From away: turn Only while a device is away from home back on; connect the iPhone through Tailscale: black; at home
+     on Wi-Fi: nothing. Turn Lock this Mac when the last device leaves on and close Sill on the iPhone: the black holds
+     30 seconds, then the lock screen shows and the display sleeps.
+  A frozen Sill (the watchdog) cannot be tried without a debugger, which this Mac must not run: its dry run is checked on
+  a test host. If the screen ever stays black: the list above, "If the screen stays black".
+- **Proposed words** (for the release that ships it; not in any published page). What's New: "Privacy: keep your Mac’s
+  screens black while you use it from afar, and lock it when someone touches it (Settings › Devices)." Support: "Keep
+  your Mac’s screen dark while you use it from afar. In Sill on the Mac, Settings › Devices: turn on Darken this Mac’s
+  screen. While your iPhone or iPad uses the Mac from away from home (or whenever one is connected, if you turn off
+  Only while a device is away from home), every display of the Mac is black, and a key or click on the Mac locks it.
+  The displays come back 30 seconds after you’re done." Under troubleshooting: "If your Mac’s screen stays black: press
+  any key or click, or press Control-Command-Q; unlock it with your password or Touch ID, and the screen comes back. If
+  Sill has stopped answering, it quits by itself within about 10 seconds, and the screen comes back." Privacy page:
+  "While Darken this Mac’s screen is on and the screen is dark, Sill for Mac notices whether a key is pressed or the
+  mouse is used on the Mac itself, only to lock it. It reads no key and keeps or sends nothing of it." Review notes
+  (Sill for Mac ships outside the App Store; for the App Store's Sill for iPhone and iPad, once that Mac release is out):
+  "Your Mac’s own screen can stay dark while you use it from afar."

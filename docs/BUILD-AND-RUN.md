@@ -67,7 +67,7 @@ Scripts/encoder-check/run.sh            # the encoder checks that never touch an
 Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
 Scripts/privacy-probe/run.sh ~/Downloads/sill-handoff/next/privacy-darken/probe-report.txt   # TEST ONLY, NOAH ONLY (darkens the screens in spells of at most 10 s): G0, in Terminal.app with Screen Recording and Accessibility, no device connected
-SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_INPUT=/tmp/sill-input .build/release/SillHost --synthetic --darken=any   # TEST ONLY dry run of Darken this Mac's screen: "would darken", nothing drawn; echo key > /tmp/sill-input is a key on the dark Mac (--darken=away, --darken-keys=pass, SILL_TEST_PRIVACY_LOG; Scripts/privacy-check/darken.py)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_INPUT=/tmp/sill-input .build/release/SillHost --synthetic --darken=any   # TEST ONLY dry run of Darken this Mac's screen: "would darken", nothing drawn; echo key > /tmp/sill-input is a key on the dark Mac (--darken=away, --darken-keys=pass, SILL_TEST_PRIVACY_LOG, SILL_TEST_PRIVACY_STALL=12 for the watchdog's dry run: the main thread stopped once, 12 s; Scripts/privacy-check/darken.py). Only Sill.app itself puts black windows on a screen; never run it to see them, the real trial is Noah's
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
@@ -80,7 +80,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, sendAudio, shareClipboard, lockAfterSession, lockSleepsDisplay, lockOnlyAfterAway, updateCheck,
+virtualDisplay, directWireless, sendAudio, shareClipboard, lockAfterSession, lockSleepsDisplay, lockOnlyAfterAway, darkenScreen, darkenOnlyAway, darkenKeysLock, updateCheck,
 showPairingWindowToScreenSharing; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a

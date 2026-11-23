@@ -412,12 +412,20 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   dark and its raise before the wake, the wait and the hold for the lock, under
   the lock screen, a key on the dark Mac, taken back, the switches, the
   watchdog's decisions, the screens, who darkens: only Sill.app itself, the
-  lock's rule; the words; pure, `Tests/checks/darken`, which also runs it
-  beside the lock's rule with part 1's switches and each session's route)
-  and `PrivacyScreen` (main actor: the rule's state and tick; its seams
-  `Curtain` and `LocalInput`, the dry run's `DryCurtain` and a test host's
-  `FileInput` everywhere but in Sill.app itself, and nothing in Sill.app
-  until the probe G0 fills them).
+  lock's rule; what the probe G0 decided: the black windows' level and
+  opacity, which events count and which are Sill's own; Settings' switches as
+  the scope; the words; pure, `Tests/checks/darken`, which also runs it
+  beside the lock's rule with part 1's switches and each session's route),
+  `PrivacyScreen` (main actor: the rule's state and tick, the watchdog's
+  beats, the display watch; its seams `Curtain` and `LocalInput`: the dry
+  run's `DryCurtain` and a test host's `FileInput` everywhere but in Sill.app
+  itself), `PrivacyCurtain.swift` (Sill.app's seams: `WindowCurtain`, the
+  black windows at level 1501; `CurtainView`, their black and the hint, drawn
+  offscreen for the previews; `MonitorInput`, NSEvent's monitors, kind and
+  ownership only; `DisplayChanges`) and `PrivacyWatchdog` (a hung Sill.app
+  ends itself after 10 s without a beat while dark and opens again once in 10
+  minutes; elsewhere a dry run). InputInjector's event source carries
+  `DarkenPolicy.eventTag`.
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
@@ -438,7 +446,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
   (Settings › Devices: Require pairing, Show the pairing window to screen
-  sharing, Lock this Mac when the last device leaves with its two switches, the
+  sharing, Darken this Mac's screen with its two switches and Accessibility's
+  warning, Lock this Mac when the last device leaves with its two switches, the
   paired devices, Remove and rename), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code; the window a device's ask opens, and the cable notice),
@@ -653,9 +662,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it darkens the screens in spells of at most 10 s, each under a hard 12 s kill)
   measures what Sill's black windows would do: covered windows still drawing,
   what shows in front of them, a killed or stopped process, Sill's own input
-  told apart, black on every screen; `--build-only` compiles it and runs
-  nothing. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST ONLY) runs
-  darkening's dry run on synthetic test hosts on loopback. `Scripts/lock-check/` (TEST ONLY;
+  told apart, black on every screen (Noah ran it on 2026-11-23; its numbers
+  are in docs/privacy-mode-plan.md, G0's results); `--build-only` compiles it
+  and runs nothing; S5 is Sill's own level, for a step re-run with
+  `--candidate S5`. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST
+  ONLY) runs darkening's dry run on synthetic test hosts on loopback, the
+  watchdog's among its cases. `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to
   another user, the unlock's settle, the flap and a start while locked, with the
