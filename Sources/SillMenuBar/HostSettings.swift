@@ -52,6 +52,9 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
+        static let lockAfterSession = "lockAfterSession"
+        static let lockSleepsDisplay = "lockSleepsDisplay"
+        static let lockOnlyAfterAway = "lockOnlyAfterAway"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -143,6 +146,12 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off, like the CLI: a Mac off console shows nothing of this session unless its user says so here.
             Key.offConsoleView: base.offConsoleView,
+            // Off, like the CLI: a Mac locks by itself after a device leaves only once its user says so here.
+            Key.lockAfterSession: base.lockAfterSession,
+            // Under it (shown while it is on): its display off with the lock, and every session counting (the plan's
+            // open decisions 6 and 5), as the CLI.
+            Key.lockSleepsDisplay: base.lockSleepsDisplay,
+            Key.lockOnlyAfterAway: base.lockOnlyAfterAway,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -164,6 +173,9 @@ final class HostSettings {
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
+                            lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
+                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
                             // Use iPhone and iPad cameras: no key yet. Its switch comes with Sill Camera's
                             // extension (docs/camera-plan.md §15, step 8); until then Sill.app never takes a
                             // device's camera.
@@ -195,6 +207,9 @@ final class HostSettings {
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
+        if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
+        if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
+        if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
     }
 
     // MARK: Remote devices seen (display only)

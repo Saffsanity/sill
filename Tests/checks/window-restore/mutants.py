@@ -162,6 +162,18 @@ MUTANTS = [
     ("W48 a moved restore in whole's words",
      "return whole ? \"Restored \\(name) to \\(text(frame))\" : \"Restored \\(name) to \\(text(frame)), its own size where it was moved\"",
      "return \"Restored \\(name) to \\(text(frame))\""),
+    ("N1 transfer leaves the old tab's entry behind (#366)",
+     "guard oldID != newID, let old = entries.removeValue(forKey: oldID) else { return }",
+     "guard oldID != newID, let old = entries[oldID] else { return }"),
+    ("N2 transfer drops the fit record (#366)",
+     "entries[newID] = Entry(record: old.record, handle: handle)",
+     "_ = (old, handle)"),
+    ("N3 a transfer to the same window takes the new handle (#366)",
+     "guard oldID != newID, let old = entries.removeValue(forKey: oldID) else { return }",
+     "guard let old = entries.removeValue(forKey: oldID) else { return }"),
+    ("N4 a transfer keeps the hidden tab's handle (#366)",
+     "entries[newID] = Entry(record: old.record, handle: handle)",
+     "entries[newID] = Entry(record: old.record, handle: old.handle)"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
