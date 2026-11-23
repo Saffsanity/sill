@@ -4,9 +4,10 @@ import CoreGraphics
 // Sill's own Desktop display: its size and rate by default the device's (VirtualDesktopSize; Noah, 2026-11-18: "should
 // default to resolution and refresh of client device, not what we originally proposed"), and the guard for #380
 // (DisplayMakeGuard: two runs in a row that ended while making a display, and Sill makes none by itself until Try
-// Again). Phase 2b: following the device (VirtualDesktopSize.Follow, followStep and P2's one-line seam, followWay), when
-// the Virtual Desktop exists (VirtualDesktopLife, 5,000 random sessions against the plan's invariants) and its windows
-// out and back (DesktopWindowLedger, over a stand-in Mac). Compiled with Sources/SillHost/VirtualDesktopSize.swift,
+// Again). Phase 2b: following the device (VirtualDesktopSize.Follow, followStep, the backing, and InPlace, the probes'
+// way of 2026-11-23, driven against TestDisplay, the display as P2b and P2c measured it), when the Virtual Desktop exists
+// (VirtualDesktopLife, 5,000 random sessions against the plan's invariants) and its windows out and back
+// (DesktopWindowLedger, over a stand-in Mac). Compiled with Sources/SillHost/VirtualDesktopSize.swift,
 // DisplayMakeGuard.swift, VirtualDesktopLife.swift, DesktopWindowLedger.swift and WindowRestore.swift; the guard's Store
 // runs in a folder of its own under .build, never Sill.app's.
 
@@ -22,6 +23,10 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String) {
 typealias VDS = VirtualDesktopSize
 func size(_ w: Int, _ h: Int) -> VDS.Size { VDS.Size(widthPt: w, heightPt: h, scale: 2) }
 func panel(_ w: Double, _ h: Double) -> VDS.Size? { VDS.device(room: nil, panel: CGSize(width: w, height: h)) }
+extension VirtualDesktopSize.Size {
+    /// The same points at another scale (a turn's pixels at 1x: P2c's 1600×2436 @1×).
+    func withScale(_ s: Int) -> VirtualDesktopSize.Size { VirtualDesktopSize.Size(widthPt: widthPt, heightPt: heightPt, scale: s) }
+}
 
 // MARK: This device: the plan's table (docs/virtual-desktop-plan.md §4, revised 2026-11-18), held sideways and upright
 
@@ -258,33 +263,67 @@ for life in 0..<2_000 {
 }
 try? FileManager.default.removeItem(at: base)
 
-// MARK: Following the device (VirtualDesktopSize.Follow, followStep, otherModes, P2's seam, the line; plan §5)
+// MARK: Following the device (VirtualDesktopSize.Follow, followStep, the backing, InPlace, the lines; plan §5)
 
 let mini = size(1218, 800), miniUp = size(800, 1218)
 check(mini.turned == miniUp && size(900, 900).turned == size(900, 900) && VDS.Size(widthPt: 3, heightPt: 4, scale: 1).turned.scale == 1,
       "a size turned a quarter, its scale kept")
-check(VDS.followWay == .nextMake,
-      "P2's verdict not in: the Virtual Desktop takes a new size at its next make, the way that rests on nothing unmeasured")
-check(VDS.otherModes(mini, way: .nextMake) == [] && VDS.otherModes(mini, way: .remake) == [], "one mode for the ways not in place")
-check(VDS.otherModes(mini, way: .listedModes) == [miniUp] && VDS.otherModes(mini, way: .newModes) == [miniUp],
-      "its turn beside it for the ways in place")
-check(VDS.otherModes(size(1000, 1000), way: .listedModes) == [] && VDS.otherModes(size(1000, 1000), way: .newModes) == [],
-      "a square has no other turn")
-func step(_ way: VDS.FollowWay, to: VDS.Size = miniUp, listed: [VDS.Size] = [mini, miniUp], headless: Bool = false,
+check(VDS.followWay == .newModes,
+      "the probes' verdict (P2b and P2c, 2026-11-23): in place, by applySettings: with the size alone and a switch for a turn")
+check(VDS.FollowWay.allCases == [.nextMake, .newModes, .remake], "no way by the modes listed at creation (P2b: refused, complete 1001)")
+
+// The backing: its own pixels; following a device, a square of the longest side among it and the devices connected, at
+// least 3072 and at most 4096 pixels a side, never less than its own.
+func bk(_ w: Int, _ h: Int) -> VDS.Backing { VDS.Backing(wide: w, high: h) }
+check(VDS.backingFloor == 3072 && VDS.backingCap == 4096, "the floor 3072 px, the cap 4096 px")
+check(VDS.backing(made: mini, devices: [], follows: true) == bk(3072, 3072), "an iPad mini's: the floor's square, its turn inside")
+check(VDS.backing(made: size(1376, 1032), devices: [], follows: true) == bk(3072, 3072), "an iPad Pro 13-inch's: the floor's square")
+check(VDS.backing(made: mini, devices: [size(1496, 800)], follows: true) == bk(3072, 3072), "with an iPhone's room: inside the floor")
+check(VDS.backing(made: mini, devices: [size(1900, 800)], follows: true) == bk(3800, 3800),
+      "a device's longer room (a Stage Manager window): the square of its long side (\(VDS.backing(made: mini, devices: [size(1900, 800)], follows: true)))")
+check(VDS.backing(made: mini, devices: [size(800, 1900)], follows: true) == bk(3800, 3800), "the same upright: either way round")
+check(VDS.backing(made: mini, devices: [size(2600, 800), size(1496, 800)], follows: true) == bk(4096, 4096), "past the cap: 4096")
+check(VDS.backing(made: size(2600, 800), devices: [], follows: true) == bk(5200, 4096),
+      "a display made past the cap: its own pixels that way, the cap the other (\(VDS.backing(made: size(2600, 800), devices: [], follows: true)))")
+check(VDS.backing(made: size(1920, 1080), devices: [size(1496, 800)], follows: false) == bk(3840, 2160),
+      "a chosen size never follows: its own pixels, as every display Sill made")
+check(VDS.backing(made: VDS.Size(widthPt: 1920, heightPt: 1080, scale: 1), devices: [], follows: false) == bk(1920, 1080), "at 1x: its points")
+check(VDS.fits(miniUp, bk(3072, 3072)) && VDS.fits(size(1536, 800), bk(3072, 3072)) && !VDS.fits(size(1537, 800), bk(3072, 3072))
+      && !VDS.fits(size(800, 1537), bk(3072, 3072)) && VDS.fits(size(1536, 1536), bk(3072, 3072)),
+      "fits: its pixels each way inside, to the pixel")
+check(VDS.fits(size(1218, 800), bk(2436, 1600)) && !VDS.fits(miniUp, bk(2436, 1600)), "the made size's own backing holds it and not its turn")
+for _ in 0..<2_000 {
+    let made = size(Int.random(in: 800...2200, using: &rng), Int.random(in: 800...2200, using: &rng))
+    let devices = (0..<Int.random(in: 0...3, using: &rng)).map { _ in size(Int.random(in: 800...2400, using: &rng), 800) }
+    let b = VDS.backing(made: made, devices: devices, follows: true)
+    var ok = b.wide >= made.widthPt * 2 && b.high >= made.heightPt * 2
+    ok = ok && b.wide <= max(VDS.backingCap, made.widthPt * 2) && b.high <= max(VDS.backingCap, made.heightPt * 2)
+    ok = ok && min(b.wide, b.high) >= min(VDS.backingCap, VDS.backingFloor)
+    for d in [made] + devices where max(d.widthPt, d.heightPt) * 2 <= VDS.backingCap {
+        ok = ok && VDS.fits(d, b) && VDS.fits(d.turned, b)
+    }
+    check(ok, "random backing for \(made) and \(devices): \(b)")
+}
+
+// The step: nothing for the size it has, nothing locked; in place for a device that sends its room, inside the backing.
+func step(_ way: VDS.FollowWay, to: VDS.Size = miniUp, backing: VDS.Backing = bk(3072, 3072), sendsRoom: Bool = true, headless: Bool = false,
           locked: Bool = false) -> VDS.FollowStep {
-    VDS.followStep(to: to, display: mini, listed: listed, way: way, headless: headless, locked: locked)
+    VDS.followStep(to: to, display: mini, backing: backing, sendsRoom: sendsRoom, way: way, headless: headless, locked: locked)
 }
 for way in VDS.FollowWay.allCases {
     check(step(way, to: mini) == .nothing && step(way, to: mini, headless: true, locked: true) == .nothing, "\(way): the size it has: nothing")
     check(step(way, locked: true) == .later && step(way, headless: true, locked: true) == .later, "\(way): locked: at the unlock")
 }
 check(step(.nextMake) == .nextMake && step(.nextMake, headless: true) == .nextMake, "no way in place: the next make")
-check(step(.listedModes) == .switchMode && step(.listedModes, headless: true) == .switchMode, "a listed mode: switched in place, the headless display too")
-check(step(.listedModes, listed: [mini]) == .nextMake && step(.listedModes, to: size(1000, 800)) == .nextMake,
-      "a size not listed (a Stage Manager window, a fold): the next make")
-check(step(.newModes) == .newModes && step(.newModes, to: size(1000, 800), headless: true) == .newModes, "new modes: in place, any size")
+check(step(.newModes) == .inPlace && step(.newModes, to: size(1496, 800)) == .inPlace, "a turn, another device: in place inside the backing")
+check(step(.newModes, to: size(1900, 800)) == .beyondBacking && step(.newModes, backing: bk(2436, 1600)) == .beyondBacking,
+      "beyond the backing: the next make (P2b: never taken)")
+check(step(.newModes, sendsRoom: false) == .nextMake && step(.newModes, to: size(1900, 800), sendsRoom: false) == .nextMake,
+      "a device before phase 2b (no room, its panel): the next make, as before")
 check(step(.remake) == .remake, "the remake (phase 3)")
 check(step(.remake, headless: true) == .nextMake, "never the headless display: the Mac's only screen is never removed and made again")
+check(VDS.followWhy(from: mini, to: miniUp, newDevice: false) == .turned && VDS.followWhy(from: mini, to: size(1000, 800), newDevice: false) == .room
+      && VDS.followWhy(from: mini, to: miniUp, newDevice: true) == .device, "why: a turn, a room, another device")
 
 var follow = VDS.Follow(made: mini, at: 0)
 check(follow.due(now: 0) == .nothing && follow.taken == mini && follow.lastChange == 0, "made: nothing due")
@@ -315,16 +354,242 @@ check(during.pending == size(1000, 800) && during.due(now: 12) == .wait(until: 1
 var fresh = VDS.Follow(made: mini, at: 100)
 fresh.saw(miniUp, at: 100.2)
 check(fresh.due(now: 101.2) == .wait(until: 103), "within 3 s of the make: waits for them")
-check(VDS.followLine(device: "iPad mini", from: mini, to: miniUp, step: .switchMode) == "Virtual Desktop: iPad mini turned; 800×1218 pt in place.",
-      "the line in place, as the plan words it")
-check(VDS.followLine(device: "iPad mini", from: mini, to: miniUp, step: .nextMake)
-      == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the line without a way in place")
-check(VDS.followLine(device: "iPad", from: mini, to: size(1000, 800), step: .remake) == "Virtual Desktop: iPad changed its room; made again at 1000×800 pt.",
-      "a room that is no turn, remade")
-check(VDS.followLine("Headless display", device: "iPhone", from: mini, to: miniUp, step: .newModes) == "Headless display: iPhone turned; 800×1218 pt in place.",
-      "the headless display's")
-check(VDS.followLine(device: "iPad", from: mini, to: miniUp, step: .nothing) == nil && VDS.followLine(device: "iPad", from: mini, to: miniUp, step: .later) == nil,
-      "nothing done: no line")
+
+// InPlace against the display the probes measured (TestDisplay: P2b, P2c), driven as the coordinator drives it.
+typealias IP = VDS.InPlace
+struct Drive { var actions: [IP.Action] = []; var end: IP.Action = .wait; var display: VDS.TestDisplay; var machine: IP; var t: Double }
+func drive(from: VDS.Size, to: VDS.Size, made: VDS.Size? = nil, at start: VDS.Size? = nil, backing: VDS.Backing = bk(3072, 3072),
+           knobs: VDS.TestKnobs = VDS.TestKnobs(), poll: Double = 0.02, blank: Double = 0) -> Drive {
+    var d = VDS.TestDisplay(made: made ?? from, backing: backing, knobs: knobs)
+    if let start, start != d.now {        // the display somewhere else first (made lying down, turned since: P2c's way)
+        _ = d.apply(start, at: -10)
+        var t = -10.0, asked = false
+        while d.read(at: t) != start, t < -5 {
+            t += 0.02
+            if !asked, d.lists(start, at: t) { _ = d.switchTo(start, at: t); asked = true }
+        }
+    }
+    var m = IP(from: from, to: to, at: 0)
+    var r = Drive(display: d, machine: m, t: 0)
+    var action = m.first
+    var t = 0.0
+    var steps = 0
+    func reading(_ t: Double) -> VDS.Size? { (blank > 0 && Double.random(in: 0..<1, using: &rng) < blank) ? nil : d.read(at: t) }
+    while steps < 2_000 {
+        steps += 1
+        r.actions.append(action)
+        switch action {
+        case .apply(let s):
+            let answered = d.apply(s, at: t)
+            action = m.applied(answered, reading: reading(t), at: t)
+        case .switchTo(let s):
+            let code = d.switchTo(s, at: t)
+            action = m.switched(code, reading: reading(t), at: t)
+        case .wait:
+            t += poll
+            let now = reading(t)
+            action = m.saw(now, listed: now == m.goalAtOneX && d.lists(m.goal, at: t), at: t)
+        case .done, .fellBack, .remove:
+            r.end = action; r.display = d; r.machine = m; r.t = t
+            return r
+        }
+    }
+    r.end = .wait; r.display = d; r.machine = m; r.t = t
+    return r
+}
+func applies(_ r: Drive) -> [VDS.Size] { r.actions.compactMap { if case .apply(let s) = $0 { return s } else { return nil } } }
+func switches(_ r: Drive) -> [VDS.Size] { r.actions.compactMap { if case .switchTo(let s) = $0 { return s } else { return nil } } }
+
+let iphone = size(1496, 800)
+let same = drive(from: iphone, to: mini)
+check(applies(same) == [mini] && switches(same).isEmpty, "the same orientation, smaller (P2b step e): applySettings: alone, no switch: \(same.actions.filter { $0 != .wait })")
+if case .done(let ms) = same.end { check(ms >= 320 && ms <= 360, "…done when it lands, about 320 ms: \(ms)") } else { check(false, "…done: \(same.end)") }
+check(same.display.now == mini, "…the display at it, at 2x")
+let bigger = drive(from: mini, to: iphone)
+check(applies(bigger) == [iphone] && switches(bigger).isEmpty && bigger.display.now == iphone, "larger inside the backing, the same orientation: one step")
+let turn = drive(from: mini, to: miniUp)
+check(applies(turn) == [miniUp] && switches(turn) == [miniUp], "a turn (P2c): applySettings: with the turn alone, then the switch: \(turn.actions.filter { $0 != .wait })")
+if case .done(let ms) = turn.end { check(ms >= 640 && ms <= 700, "…done in about 650 ms, the two landings: \(ms)") } else { check(false, "…done: \(turn.end)") }
+check(turn.display.now == miniUp && turn.display.now.scale == 2, "…the display at the turn, at 2x")
+// The detail line, at P2c's own times (iPad mini, case 1).
+var tr = IP(from: mini, to: miniUp, at: 0)
+_ = tr.applied(true, reading: mini, at: 0.285)
+_ = tr.saw(size(1600, 2436).withScale(1), listed: true, at: 0.318)
+_ = tr.switched(0, reading: size(1600, 2436).withScale(1), at: 0.639)
+check(tr.saw(miniUp, listed: true, at: 0.650) == .done(ms: 650), "P2c's turn: done at 650 ms")
+check(tr.traceLine(said: false) == "Virtual Desktop: in place: applySettings: with 800×1218 alone answered YES at +285 ms; at 1600×2436 @1× at +318 ms; "
+      + "800×1218 @2× listed usable at +318 ms; switch to 800×1218 @2×: complete 0 at +639 ms; at 800×1218 @2× at +650 ms.",
+      "the turn's detail line: \(tr.traceLine(said: false))")
+check(tr.traceLine(said: true).hasPrefix("Virtual Desktop: in place (TEST ONLY: said, the display as the probes measured it): "),
+      "a test host's says TEST ONLY")
+let back = drive(from: miniUp, to: mini, made: mini, at: miniUp)
+check(back.display.made == mini && applies(back) == [mini] && switches(back).isEmpty && back.display.now == mini,
+      "back to the made orientation from the turn (P2c's way back): one step, at 2x")
+let upUp = drive(from: miniUp, to: size(800, 1496), made: mini, at: miniUp)
+check(switches(upUp) == [size(800, 1496)] && upUp.display.now == size(800, 1496), "upright to another upright size: 1x first, then the switch")
+let madeUp = drive(from: miniUp, to: mini, made: miniUp)
+check(switches(madeUp) == [mini] && madeUp.display.now == mini, "a display made upright turned to lie down: its own other orientation, two steps")
+let refused = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(switchRefused: true))
+check(refused.end == .fellBack(.switchRefused(1001), ms: refused.machine.ms(refused.t)) && applies(refused) == [miniUp, mini] && refused.display.now == mini,
+      "the switch refused: back to the room by applySettings: alone, at 2x, the next make: \(refused.end), \(refused.display.now)")
+let stuck = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(switchRefused: true, stuck: true))
+check(stuck.end == .remove(.switchRefused(1001)) && stuck.display.now == size(1600, 2436).withScale(1),
+      "…and the way back never lands: removed, never left at 1x: \(stuck.end), \(stuck.display.now)")
+let late = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(late: true))
+if case .fellBack(.late, let ms) = late.end {
+    check(applies(late) == [miniUp] && ms >= 2000 && ms <= 2100, "nothing lands: back where it is after 2 s, nothing more asked: \(ms)")
+} else { check(false, "nothing lands: fell back late: \(late.end)") }
+let beyond = drive(from: mini, to: size(1900, 800))
+check(beyond.end == .fellBack(.late, ms: beyond.machine.ms(beyond.t)) && beyond.display.now == mini, "a size beyond the backing asked anyway: never taken, falls back")
+let blanks = drive(from: mini, to: miniUp, blank: 0.3)
+check(blanks.end == .done(ms: blanks.machine.ms(blanks.t)) && blanks.display.now == miniUp, "a display that reads nothing now and then: still done")
+
+// By hand: each step refused or late on the way, and the way back that needs the switch too.
+var h = IP(from: mini, to: miniUp, at: 0)
+check(h.first == .apply(miniUp) && h.goal == miniUp && h.before == mini, "the first step: the size asked, alone")
+check(h.applied(false, reading: mini, at: 0.3) == .fellBack(.refused, ms: 300) && h.phase == .ended, "applySettings: NO, the display where it was: fell back, nothing more")
+h = IP(from: mini, to: miniUp, at: 0)
+check(h.applied(true, reading: mini, at: 0.3) == .wait && h.phase == .land && abs(h.deadline - 2.3) < 1e-9, "YES: it waits for the display, 2 s")
+check(h.saw(nil, listed: false, at: 0.5) == .wait && h.saw(mini, listed: false, at: 2.29) == .wait, "nothing read, or unchanged: it waits")
+check(h.saw(size(1000, 700), listed: false, at: 0.6) == .apply(mini) && h.goal == mini && h.before == size(1000, 700) && h.failure == .elsewhere(size(1000, 700)),
+      "elsewhere: back to where it was")
+check(h.applied(true, reading: size(1000, 700), at: 0.9) == .wait && h.saw(mini, listed: false, at: 1.2) == .fellBack(.elsewhere(size(1000, 700)), ms: 1200),
+      "…landed back at 2x: fell back, saying why")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+check(h.saw(mini, listed: false, at: 2.31) == .fellBack(.late, ms: 2310) && h.failure == .late, "late, where it was: fell back, nothing asked")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+check(h.saw(size(1600, 2436).withScale(1), listed: false, at: 0.35) == .wait && h.phase == .listing && abs(h.deadline - 1.35) < 1e-9,
+      "its 1x: wait for the listing, 1 s")
+check(h.saw(size(1600, 2436).withScale(1), listed: false, at: 1.34) == .wait, "…not listed yet: waits")
+check(h.saw(size(1600, 2436).withScale(1), listed: false, at: 1.36) == .apply(mini) && h.failure == .notListed, "…never listed: back")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+_ = h.saw(size(1600, 2436).withScale(1), listed: false, at: 0.35)
+check(h.saw(size(1600, 2436).withScale(1), listed: true, at: 0.5) == .switchTo(miniUp), "…listed a little later: the switch then")
+check(h.saw(miniUp, listed: true, at: 0.6) == .wait, "…and nothing more until the switch answers")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+_ = h.saw(size(1600, 2436).withScale(1), listed: false, at: 0.35)
+check(h.saw(miniUp, listed: false, at: 0.5) == .done(ms: 500), "…2x taken by macOS itself while it waits for the listing: done")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+_ = h.saw(size(1600, 2436).withScale(1), listed: false, at: 0.35)
+check(h.saw(size(1000, 700), listed: false, at: 0.5) == .apply(mini) && h.failure == .elsewhere(size(1000, 700)), "…elsewhere while it waits: back")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+check(h.saw(size(1600, 2436).withScale(1), listed: true, at: 0.35) == .switchTo(miniUp) && h.phase == .switchAsked, "listed as it lands: the switch")
+check(h.saw(miniUp, listed: true, at: 0.4) == .wait, "nothing read while the switch is asked")
+check(h.switched(nil, reading: size(1600, 2436).withScale(1), at: 0.4) == .apply(mini) && h.failure == .notListed, "the mode not found: back")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+_ = h.saw(size(1600, 2436).withScale(1), listed: true, at: 0.35)
+check(h.switched(0, reading: size(1600, 2436).withScale(1), at: 0.7) == .wait && h.phase == .switching && abs(h.deadline - 2.2) < 1e-9,
+      "complete 0: waits 1.5 s for 2x")
+check(h.saw(size(1600, 2436).withScale(1), listed: true, at: 2.19) == .wait, "…not yet")
+check(h.saw(size(1600, 2436).withScale(1), listed: true, at: 2.21) == .apply(mini) && h.failure == .switchLate, "…never 2x: back")
+check(h.applied(true, reading: size(1600, 2436).withScale(1), at: 2.5) == .wait && h.saw(mini, listed: false, at: 2.8) == .fellBack(.switchLate, ms: 2800),
+      "…back at the room: fell back")
+h = IP(from: mini, to: miniUp, at: 0)
+_ = h.applied(true, reading: mini, at: 0.3)
+_ = h.saw(size(1600, 2436).withScale(1), listed: true, at: 0.35)
+check(h.switched(1001, reading: size(1600, 2436).withScale(1), at: 0.7) == .apply(mini) && h.failure == .switchRefused(1001), "refused: back")
+check(h.applied(false, reading: size(1600, 2436).withScale(1), at: 1.0) == .remove(.switchRefused(1001)), "the way back refused too: removed, saying the first why")
+// The way back to an upright size needs the switch as well: from 800×1218 (made lying down), a follow that went elsewhere.
+h = IP(from: miniUp, to: mini, at: 0)
+_ = h.applied(true, reading: miniUp, at: 0.3)
+check(h.saw(size(1000, 700), listed: false, at: 0.6) == .apply(miniUp), "an upright display's follow gone elsewhere: back to upright")
+_ = h.applied(true, reading: size(1000, 700), at: 0.9)
+check(h.saw(size(1600, 2436).withScale(1), listed: true, at: 1.2) == .switchTo(miniUp), "…its 1x, then its switch")
+check(h.switched(0, reading: size(1600, 2436).withScale(1), at: 1.5) == .wait && h.saw(miniUp, listed: true, at: 1.6) == .fellBack(.elsewhere(size(1000, 700)), ms: 1600),
+      "…back upright at 2x: fell back")
+h = IP(from: miniUp, to: mini, at: 0)
+_ = h.applied(true, reading: miniUp, at: 0.3)
+_ = h.saw(size(1000, 700), listed: false, at: 0.6)
+_ = h.applied(true, reading: size(1000, 700), at: 0.9)
+check(h.saw(size(1000, 700), listed: false, at: 2.9) == .remove(.elsewhere(size(1000, 700))), "the way back late: removed")
+check(h.saw(mini, listed: false, at: 3) == .wait && h.applied(true, reading: mini, at: 3) == .wait, "ended: nothing more")
+
+// 2,000 random follows against the display as measured, its steps refused, late or stuck now and then: it ends in
+// bounded time, done only at `to` at 2x, fallen back only at `from` at 2x, never at 1x unless removed, each switch to a
+// size macOS listed as it read that size's 1x, each size asked at most once.
+let shapes = [mini, miniUp, iphone, iphone.turned, size(1376, 1032), size(1032, 1376), size(1137, 800), size(1900, 800), size(800, 1900)]
+for run in 0..<2_000 {
+    let made = [mini, miniUp, iphone][run % 3]
+    let from = Bool.random(using: &rng) ? made : made.turned
+    var to = shapes.randomElement(using: &rng)!
+    if to == from { to = from.turned == from ? mini : from.turned }
+    let knobs = VDS.TestKnobs(switchRefused: Int.random(in: 0..<5, using: &rng) == 0, stuck: Int.random(in: 0..<3, using: &rng) == 0,
+                              late: Int.random(in: 0..<8, using: &rng) == 0)
+    let r = drive(from: from, to: to, made: made, at: from, knobs: knobs, poll: Double.random(in: 0.005...0.06, using: &rng),
+                  blank: run % 4 == 0 ? 0.2 : 0)
+    var bad: String?
+    let atOneX = r.display.now.scale == 1
+    switch r.end {
+    case .done:
+        if r.display.now != to { bad = "done at \(r.display.now)" }
+    case .fellBack:
+        if r.display.now != from { bad = "fell back at \(r.display.now)" }
+    case .remove:
+        if r.display.now == from || r.display.now == to { bad = "removed at \(r.display.now)" }
+    default:
+        bad = "never ended: \(r.end)"
+    }
+    if bad == nil, atOneX { if case .remove = r.end {} else { bad = "left at 1x: \(r.display.now), \(r.end)" } }
+    if bad == nil, r.t > 2 * (IP.landWait + IP.listWait + IP.switchWait) + 0.5 { bad = "took \(r.t) s" }
+    let asked = applies(r)
+    if bad == nil, asked.filter({ $0 == to }).count > 1 || asked.filter({ $0 == from }).count > 1 || asked.first != to { bad = "asked \(asked)" }
+    if bad == nil, switches(r).contains(where: { $0 != to && $0 != from }) { bad = "switched to \(switches(r))" }
+    let fitsTo = VDS.fits(to, bk(3072, 3072))
+    if bad == nil, !knobs.late, !knobs.switchRefused, fitsTo, r.end != .done(ms: r.machine.ms(r.t)) { bad = "a clean follow inside the backing not done: \(r.end)" }
+    if bad == nil, knobs.late, r.end != .fellBack(.late, ms: r.machine.ms(r.t)) { bad = "nothing lands, not fallen back late: \(r.end)" }
+    if bad == nil, !fitsTo, case .done = r.end { bad = "beyond the backing, done" }
+    check(bad == nil, "random follow \(run) \(from)→\(to) on \(made) \(knobs): \(bad ?? "") \(r.actions.filter { $0 != .wait })")
+}
+
+// The lines (the plan's words, Noah's "… turned; followed in place in N ms").
+func line(_ why: VDS.FollowWhy, _ step: VDS.FollowStep, _ outcome: IP.Action? = nil, device: String = "iPad mini", to: VDS.Size = miniUp) -> String? {
+    VDS.followLine(device: device, why: why, from: mini, to: to, step: step, outcome: outcome, hz: 60, backing: bk(3072, 3072))
+}
+check(line(.turned, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
+      "in place: \(line(.turned, .inPlace, .done(ms: 650)) ?? "nil")")
+check(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) == "Virtual Desktop: iPhone shows it now; followed in place in 300 ms: 1496×800 pt @2× at 60 Hz.",
+      "another device: \(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) ?? "nil")")
+check(line(.turned, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
+      == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in 980 ms; the next one is made at 800×1218 pt.",
+      "fallen back: \(line(.turned, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
+check(line(.turned, .inPlace, .remove(.switchRefused(1001)))
+      == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001), and it did not come back to 1218×800 pt @2×; removed it: the next one is made at 800×1218 pt.",
+      "removed: \(line(.turned, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
+check(line(.device, .beyondBacking, device: "iPad", to: size(1900, 800))
+      == "Virtual Desktop: iPad shows it now; 1900×800 pt @2× is beyond the backing it was made with (3072×3072 px); the next one is made at 1900×800 pt.",
+      "beyond: \(line(.device, .beyondBacking, device: "iPad", to: size(1900, 800)) ?? "nil")")
+check(line(.turned, .nextMake) == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the next make, as before")
+check(line(.room, .remake, device: "iPad", to: size(1000, 800)) == "Virtual Desktop: iPad changed its room; made again at 1000×800 pt.", "a room that is no turn, remade")
+check(VDS.followLine("Headless display", device: "iPhone", why: .turned, from: mini, to: miniUp, step: .inPlace, outcome: .done(ms: 700))
+      == "Headless display: iPhone turned; followed in place in 700 ms: 800×1218 pt @2×.", "the headless display's, no rate known")
+check(line(.turned, .nothing) == nil && line(.turned, .later) == nil && line(.turned, .inPlace) == nil && line(.turned, .inPlace, .wait) == nil,
+      "nothing done, or not yet: no line")
+for (f, w) in [(IP.Failure.refused, "applySettings: answered NO"), (.late, "the display did not change in time"),
+               (.elsewhere(size(1000, 700)), "the display went to 1000×700 instead"), (.elsewhere(nil), "the display went to no mode instead"),
+               (.notListed, "macOS did not list its 2x mode as usable"), (.switchLate, "the switch did not land in time")] {
+    check(IP.failureWords(f) == w, "\(f): \(IP.failureWords(f))")
+}
+
+// TEST ONLY: SILL_TEST_VD_STEPS, the said display's steps made to fail.
+check(VDS.testSteps(environment: [:], on: true) == (VDS.TestKnobs(), nil), "no variable: as measured, no line")
+check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused"], on: true).knobs == VDS.TestKnobs(switchRefused: true), "switch-refused")
+check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused, Stuck,late"], on: true).knobs == VDS.TestKnobs(switchRefused: true, stuck: true, late: true),
+      "all three, spaced and in capitals")
+check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused"], on: true).line
+      == "Test Virtual Desktop: its said display's steps: switch-refused (SILL_TEST_VD_STEPS), not as the probes measured them.", "its line")
+check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused,sideways"], on: true).knobs == VDS.TestKnobs()
+      && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "sideways"], on: true).line?.contains("ignored: it takes switch-refused, stuck and late") == true,
+      "an unknown word: ignored whole, said")
+check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).knobs == VDS.TestKnobs()
+      && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).line?.contains("ignored: it needs a test host's Virtual Desktop") == true,
+      "without the test host's Virtual Desktop: ignored, said")
 
 // 2,000 random rooms: a follow only to a size the room has kept 1 s and 3 s after the last change, never to the size
 // taken, and always once both have passed.
