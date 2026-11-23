@@ -784,7 +784,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `offersLargerPicture(screen:)`) no strip, the room over the keyboard, Menus in
   row 1 (`buttonsBesideMenus`), the drawer above row 1, the pane at the
   picture's shape (`pane(video:)`) and its span (`trackpadSpan(video:)`); pure,
-  `Tests/checks/phone-portrait`), `DuoPosture`
+  `Tests/checks/phone-portrait`), `PhoneKeyboardLift` (a phone upright's rows
+  over the person's software keyboard, from its real top, whatever its height:
+  row 1, the thumbnails and the key row lifted together while the keyboard
+  would come within 10 pt of the key row (`lift`, whole points, at most the
+  picture's height), the picture's frame at its shape in the room left
+  (`frame(video:)`; the viewport stays the layout's), the trackpad from under
+  the moved key row, the drawer and the dim with row 1; Hide Thumbnails While
+  Typing (`switchKey`, off: the thumbnails' row and its Menus button tucked
+  away while a keyboard is up, the key row in their place, `tucked`), its
+  words and the console's `keys: …` line; pure,
+  `Tests/checks/phone-keyboard-lift`; pbxproj A0B0/F0B0; PortraitStreamScreen
+  places the phone's rows from it), `DuoPosture`
   (the iPhone Duo's posture and the rules that follow from it, docs/iphone-duo-plan.md:
   `FoldInfo`, inferred before iOS 27.1 or the fold's band; the laptop pose's
   split at the real fold and open flat's at the picture's shape, the book
