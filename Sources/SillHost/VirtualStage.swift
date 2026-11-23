@@ -610,6 +610,9 @@ final class VirtualStage {
         let bounds = CGDisplayBounds(d.displayID)
         let keep = keeping ?? placement?.windowID
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return }
+        let stagedOnScreen = placement.map { p in
+            list.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == p.windowID }
+        } ?? false
         for info in list {
             guard (info[kCGWindowLayer as String] as? Int) == 0,
                   (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
@@ -618,6 +621,9 @@ final class VirtualStage {
                   let b = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b as CFDictionary),
                   rect.width >= 100, rect.height >= 100, rect.intersects(bounds) else { continue }
+            // When the staged window went off screen because the user clicked another native tab of the
+            // same app (#366), that tab is the staged window now, not a stranger to evict.
+            if keeping == nil, !stagedOnScreen, let p = placement, pid == p.pid { continue }
             let name = (info[kCGWindowName as String] as? String) ?? ""
             if name.lowercased().contains("layerprobe") { continue }
             let owner = (info[kCGWindowOwnerName as String] as? String) ?? "?"
@@ -657,6 +663,20 @@ final class VirtualStage {
             try? await Task.sleep(for: .milliseconds(100))
         }
         fullScreen = false
+    }
+
+    /// The staged window switched to another native tab (`window`, issue #366): same app, already on
+    /// this virtual display at the staged frame. Adopts the new tab's window ID and element while
+    /// keeping the tab group's original home frame on the real display, so the group is neither sent
+    /// home nor re-moved.
+    func adoptTab(_ window: SCWindow) -> Bool {
+        guard let current = placement, let d = display, d.isAlive,
+              let fresh = sizer.placement(for: window) else { return false }
+        let adopted = fresh.homed(at: current.originalFrame)
+        placement = adopted
+        EmergencySnapshot.set((adopted.element, adopted.originalFrame))
+        catalog.stagedWindowID = adopted.windowID
+        return true
     }
 
     // MARK: Teardown (synchronous, idempotent; the signal handler calls these)
