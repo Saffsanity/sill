@@ -105,6 +105,12 @@ package final class StreamCoordinator {
     let stage: VirtualStage
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
+    /// Lock this Mac when the last device leaves (PrivacyLock, PrivacyPolicy; docs/privacy-mode-plan.md, part 1): the
+    /// server's count of registered sessions, each session's route as it registers, the switches (at once, from
+    /// `setTarget`), the lock's reading and a quit go to it. Only Sill.app's own (`testHooks` false, not `synthetic`:
+    /// PrivacyPolicy.locksForReal) locks; the CLI's, the bare SillMenuBar binary's and a test host's lock nothing and
+    /// put no display to sleep: they say what they would do.
+    private let privacy: PrivacyLock
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
     private var stageLosses = 0
@@ -436,6 +442,10 @@ package final class StreamCoordinator {
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
         status = HostStatus()
+        privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
+                              real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
+                              testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                              status: status, gate: SessionLock.shared.gate)
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
             if let identity = remote.identity {
@@ -527,6 +537,14 @@ package final class StreamCoordinator {
         audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
         audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
         audio.onStatus = { [weak self] _ in self?.showAudio() }
+        // A sound that failed or ended by itself, due to be tried again (issue #365): what it should be of
+        // now, from the source, the display and the lock as they are (`audioKey`), never the key it had. Not
+        // during a switch, whose end asks anyway (`active`'s didSet, set on every path of `select`), and
+        // whose stage may have just taken the display that sound was built on away.
+        audio.onRetry = { [weak self] in
+            guard let self, !self.switching else { return }
+            self.audioFollow()
+        }
         server.onAudioListenersChanged = { [weak self] count in
             Task { @MainActor in
                 guard let self else { return }
@@ -541,6 +559,9 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
+                // Lock this Mac when the last device leaves, Only after a device away from home: this visit had one
+                // (after the count that took it, which the server reported first).
+                self.privacy.joined(away: route.isAway)
                 // A paired device shows its paired name until its own stats arrive, and a remote one
                 // its route; a home device its link (Wired, Wi-Fi, Direct) as soon as it is known.
                 self.status.update {
@@ -645,6 +666,9 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
+                // Lock this Mac when the last device leaves: every registered session counts, and only those (a
+                // pairing connection, one the device gate refuses and one an update's hold sends away never are).
+                self.privacy.sessions(count)
                 // SessionLock looks once a second while someone watches, and at once as the first comes.
                 SessionLock.shared.devices(count)
                 self.catalog.clientCount = count          // the catalog idles itself at 0
@@ -863,6 +887,8 @@ package final class StreamCoordinator {
         for line in SessionLock.testHookLines(testHost: server.isTestHost, environment: ProcessInfo.processInfo.environment) { print(line) }
         // Show this account while another user is on the screen (docs/off-console-plan.md): one line, only when on.
         if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
+        // Lock this Mac when the last device leaves: a test host's hooks, and one line, only when on.
+        for line in privacy.startLines { print(line) }
         checkFirewall()                                         // at launch, beside the listener's own check
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
@@ -962,6 +988,8 @@ package final class StreamCoordinator {
             print(LockPolicy.viewChangedLine(view.now))
             Task { @MainActor in await self.lockChanged() }
         }
+        // Lock this Mac when the last device leaves and its two switches, at once too: off ends a wait under way now.
+        privacy.switched(on: new.lockAfterSession, sleeps: new.lockSleepsDisplay, onlyAway: new.lockOnlyAfterAway)
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -1520,6 +1548,8 @@ package final class StreamCoordinator {
     /// streamed (`enforceLock`), whose window is remembered; unlocked (after the settle), the catalog
     /// looked at again and what streamed back (`afterUnlock`).
     private func lockChanged() async {
+        // A lock Sill asked for (Lock this Mac when the last device leaves) is confirmed by the reading's change.
+        privacy.readingChanged()
         let now = lockReading
         guard lockGate.established else { return }
         let was = lockActedOn, wasView = lockActedView
@@ -1893,6 +1923,11 @@ package final class StreamCoordinator {
             if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
             return
         }
+        // A pick of a window the catalog lists is the person's choice of it as it shows now: a tab switch
+        // still held for it (owed while it streamed, its follow held back by a switch in flight) is not
+        // followed after the pick (#368's review). One the catalog no longer lists (hidden behind another
+        // tab since the device's list) keeps it, and the stream follows to the tab that shows.
+        if case .window(let id) = source, catalog.window(id: id) != nil { catalog.tabSwaps[id] = nil }
         await select(source, bringForward: true)
     }
 
@@ -2652,7 +2687,7 @@ package final class StreamCoordinator {
         // window under the click point.
         let point = injectorProbePoint(event)
         let cover = point.flatMap { Self.topmostWindow(at: $0) }
-        let covered = cover != nil && cover?.id != id            // any other window over the spot, same app or not
+        let covered = cover != nil && cover?.id != id && !(staged && cover?.pid == pid)   // on the stage, the app's own sheet or new tab (#366) is not a stranger
         // On the virtual display a cover is a stranger (a window left there by an earlier run):
         // move it off, then the click lands.
         if staged, covered { stage.evictForeignWindows() }
@@ -2867,6 +2902,10 @@ package final class StreamCoordinator {
     /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
     private func catalogPolled() {
         menusPolled()
+        if !switching, !shuttingDown, case .window(let id) = active, catalog.tabSwaps[id] != nil {
+            Task { @MainActor in _ = await self.followTabSwap(for: id) }
+            return
+        }
         guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
               let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
         Task { @MainActor in
@@ -2994,12 +3033,13 @@ package final class StreamCoordinator {
     // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
     //
     // One function decides what the sound is of, from Send Audio, the devices that play it, the
-    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
-    // stream through the picture's restarts and starts another for another source. It runs in
-    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
-    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
-    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
-    // server keeps each device's codec and epoch.
+    // source, the display an app's sound is built on, the lock and whether Sill is quitting, and hands
+    // it to the pipeline, which keeps the same app's stream through the picture's restarts (on the same
+    // display) and starts another for another source. It runs in `active`'s didSet (set on every path
+    // of `select`, once the picture has started, or to none), when the count of devices that play it
+    // changes, in `adopt` when Send Audio changed outside a select, when the pipeline's own retry is
+    // due outside a select (`onRetry`, issue #365), and at quit. The sound adds no device → host kind
+    // and no per-connection state here: the server keeps each device's codec and epoch.
 
     /// What the sound should be of now, and why none when none: the log's reason.
     private func audioKey() -> (AudioKey, String) {
@@ -3031,8 +3071,20 @@ package final class StreamCoordinator {
             guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
             let name = NSRunningApplication(processIdentifier: pid)?.localizedName
                 ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
-            return (.app(pid: pid, name: SafeText.label(name)), "")
+            return (.app(pid: pid, display: appAudioDisplay?.displayID ?? 0, name: SafeText.label(name)), "")
         }
+    }
+
+    /// The display an app's sound filter is built on (issue #365): Sill's virtual display while the
+    /// streamed window is staged there (the app may have no window on the main display, and when Sill's
+    /// display appears or goes a filter on the main display can fail or end with -3815), else the main
+    /// display.
+    private var appAudioDisplay: SCDisplay? {
+        if case .window(let id) = active, virtualDisplay, stage.isStaged, stage.placement?.windowID == id,
+           let d = stage.scDisplay {
+            return d
+        }
+        return catalog.mainDisplay
     }
 
     /// Hands the pipeline what the sound should be of now.
@@ -3043,9 +3095,9 @@ package final class StreamCoordinator {
         }
     }
 
-    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
-    /// main display whatever stop the Desktop shows (sound does not depend on the display: an app on the
-    /// virtual display or another monitor is heard the same), so a step to another stop keeps the sound
+    /// The source for `key`: ScreenCaptureKit's sound of one app (on Sill's virtual display while its
+    /// window is staged there, else on the main display: `appAudioDisplay`), or of every app but Sill's
+    /// on the main display whatever stop the Desktop shows, so a step to another stop keeps the sound
     /// running (DesktopDisplays); or a synthetic host's test tone.
     private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
         switch key {
@@ -3062,11 +3114,13 @@ package final class StreamCoordinator {
                 filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
-        case .app(let pid, let name):
-            guard let display = catalog.mainDisplay else { return .failed("no display to capture from") }
+        case .app(let pid, let displayID, let name):
+            // The display the key names while it is still Sill's, else the one `appAudioDisplay` gives now.
+            guard let display = (stage.scDisplay.flatMap { $0.displayID == displayID ? $0 : nil }) ?? appAudioDisplay else { return .failed("no display to capture from") }
+            let onStage = display.displayID == stage.scDisplay?.displayID ? " on virtual display \(display.displayID)" : ""
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it)\(onStage).")
         }
     }
 
@@ -3112,6 +3166,7 @@ package final class StreamCoordinator {
     /// window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices notice
     /// by liveness.
     package func shutdownForExit() {
+        privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
@@ -3123,10 +3178,24 @@ package final class StreamCoordinator {
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
     /// every key and button a device holds down on the Mac goes up, and a window Sill sized for a
     /// device goes back to its own frame (a line each, only when a window was sized); nothing else
-    /// happens (no goodbye), as before.
+    /// happens (no goodbye), as before, but that a lock's wait under way ends with its line (only a
+    /// --synthetic host with --lock-after-session has one).
     package func releaseKeysForExit() {
+        privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
         injector.releaseAll()
         restoreFits(keeping: nil)
+    }
+
+    /// Sill.app's Quit began (applicationShouldTerminate, before an update's install step or a full-screen window
+    /// makes it wait): Lock this Mac when the last device leaves locks nothing from here on, as at a signal.
+    package func quitBegins() {
+        privacy.quit()
+    }
+
+    /// Settings › Devices opened: Lock this Mac when the last device leaves looks again at whether this Mac has a
+    /// display to type its password at (a monitor plugged in or out since), for the warning under its switch.
+    package func lookAtDisplaysForLock() {
+        privacy.lookAtDisplays()
     }
 
     // MARK: A window Sill sized goes back (WindowRestore, issue #57)
@@ -3421,6 +3490,7 @@ package final class StreamCoordinator {
             return
         }
         if case .window(let id) = active {
+            if await followTabSwap(for: id) { return }
             guard let w = infos.first(where: { $0.id == id }) else {
                 // Alive on the virtual display even if the on-screen list dropped it.
                 if virtualDisplay, stage.isStaged, Self.liveBounds(of: id) != nil { broadcastList(); return }
@@ -3479,6 +3549,24 @@ package final class StreamCoordinator {
             }
         }
         broadcastList()
+    }
+
+    /// Re-targets the stream when the active window (`id`) was replaced in place by another native tab
+    /// (#366). Waits while a switch is in flight so `tabSwaps[id]` is not consumed before `select` can
+    /// take it (`catalogPolled` picks it up once `!switching`).
+    private func followTabSwap(for id: CGWindowID) async -> Bool {
+        guard !switching, !shuttingDown, active == .window(id),
+              let nextID = catalog.tabSwaps[id], let nextW = catalog.window(id: nextID) else { return false }
+        catalog.tabSwaps.removeValue(forKey: id)
+        print("Tab switched in \(nextW.owningApplication?.applicationName ?? "?"): window \(id) → \(nextID) (\(nextW.title ?? "")).")
+        if virtualDisplay, stage.isStaged, stage.placement?.windowID == id {
+            _ = stage.adoptTab(nextW)
+        }
+        if fits.record(id) != nil, let nextPlacement = sizer.placement(for: nextW) {
+            fits.transfer(from: id, to: nextID, handle: nextPlacement)
+        }
+        await select(.window(nextID))
+        return true
     }
 
     private var encoderWidth: Int { encoder?.width ?? 0 }
