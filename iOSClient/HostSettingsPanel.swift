@@ -23,7 +23,8 @@ import StreamProtocol
 /// iPhone), whose switches are preferences here and send nothing to the Mac (Picture in Picture,
 /// `StreamClient.pictureInPictureKey`, where iOS has it, #291; Larger Picture,
 /// `StreamClient.largerPictureKey`,
-/// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
+/// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Hide Thumbnails While
+/// Typing, `PhoneKeyboardLift.switchKey`, on every iPhone; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
 /// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
@@ -90,6 +91,9 @@ struct HostSettingsPanel: View {
         _ = storedThumbnailHold
         return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
     }
+    /// This iPhone's Hide Thumbnails While Typing (PhoneKeyboardLift.switchKey): off unless turned on, read by
+    /// the stream screen held upright while the keyboard is up, never sent; offered on an iPhone alone.
+    @AppStorage(PhoneKeyboardLift.switchKey) private var hideThumbnailsWhileTyping = PhoneKeyboardLift.defaultOn
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
@@ -123,6 +127,7 @@ struct HostSettingsPanel: View {
     /// under it; `reverse`, to Reverse Scrolling's switch, so a photo of the panel in the lower half shows
     /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
+    /// `typing`, to Hide Thumbnails While Typing and its footnote (an iPhone's alone; PhoneKeyboardLift).
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
@@ -138,6 +143,7 @@ struct HostSettingsPanel: View {
         case "mute"?: return muteID
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
+        case "typing"?: return hideThumbnailsRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
@@ -155,6 +161,7 @@ struct HostSettingsPanel: View {
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
+    private static let hideThumbnailsRowID = "hideThumbnails"
     private static let filesRowsID = "files"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
@@ -693,7 +700,7 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
+    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture and Hide Thumbnails While Typing (PhoneKeyboardLift), then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
     /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
@@ -744,6 +751,19 @@ struct HostSettingsPanel: View {
                 .rowFrame()
             }
             Footnote(text: Self.largerPictureFooter)
+        }
+        // Hide Thumbnails While Typing (PhoneKeyboardLift), beside Larger Picture: both are about the thumbnails'
+        // row of an iPhone held upright. On every iPhone, the iPhone Duo too (its cover), never on an iPad.
+        if PhoneKeyboardLift.offered(phoneArrangement: DuoLayout.phoneArrangement) {
+            Rows {
+                Toggle(isOn: $hideThumbnailsWhileTyping) {
+                    Text(PhoneKeyboardLift.Copy.title).foregroundStyle(Palette.text)
+                }
+                .padding(.vertical, 6)          // two lines on the Duo's cover and a narrow iPhone
+                .rowFrame()
+            }
+            .id(Self.hideThumbnailsRowID)
+            Footnote(text: PhoneKeyboardLift.Copy.footnote)
         }
         // Files and photos (docs/files-plan.md §9), before the clipboard as the overview's §2.2 orders This
         // ‹device›: they move into settings-pane's whole-screen pane with the rest of this group.
