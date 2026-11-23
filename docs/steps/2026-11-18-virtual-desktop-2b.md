@@ -409,3 +409,86 @@ Desktop|Headless|Displays:|Desktop:|Settings from" ~/Library/Logs/Sill/Sill.log 
 - The review notes' NEW IN 0.7: "Virtual Desktop (Settings, needs Sill for Mac 0.7): the Mac makes a desktop the size of
   this device after its own screens; the Desktop button steps to it. Nothing leaves the user's own Mac." (under 300 bytes)
 - contribute.html's credits: addhumal (#200, #225), dr-apple (#156), lepeos (#312).
+
+**Main brought in, through `virtual-desktop-2a` (2026-11-23: #395's branch with main c33d1057 merged, a297443b and
+303112f6; this branch's merge 66e0fe85).** Noah tested and merged #399 (a streamed window follows its native tab
+switches, #366), #396 (a staged window's sound built on Sill's display, its bounded retry, #365) and #402 (Lock this Mac
+when the last device leaves, #283 and #275) into main; #395 took main in first (its step file has that merge), and this
+branch took #395's new head with `git fetch origin virtual-desktop-2a` and `git merge FETCH_HEAD` in a worktree of its
+own (`~/Downloads/wt-vd-2b-main`). Eight files conflicted, each settled keeping both sides; nothing under iOSClient or
+StreamProtocol differs from this branch's, so the wire and the device are as they were and no photo changed:
+- `HostConfig.swift`: the initializer and `standard` take the lock's three knobs, then `headlessDisplay`, then the
+  Virtual Desktop's three, as git merged the declarations and `changes(to:)`; the doc lines say both.
+- `DebugHooks.swift` and `HostSettings.swift`: both, the lock's three keys before `headlessDisplay` and the Virtual
+  Desktop's three.
+- away-quality's `main.swift`, `mutants.py` and `README.md`: every case and every mutant of both, 81 mutants (this
+  branch's 67 and main's 14). Each HostConfig the check makes takes every knob: the lock's blocks give the Virtual
+  Desktop's three their defaults, and the Virtual Desktop's block gives the lock's three theirs. AQ-O1 keeps main's
+  pattern; AQ-H1 and AQ-V1 match the merged `standard`'s `headlessDisplay: true, virtualDesktop: false,` line. This
+  branch's size and rate mutants AQ-S1 to AQ-S8 are AQ-VS1 to AQ-VS8, since main's lock display switch is AQ-S1 to AQ-S4
+  (docs/steps/2026-11-18-privacy-lock.md names them).
+- docs/BUILD-AND-RUN.md: both, the `--virtual-desktop` line and the `--lock-after-session` dry run; the saved keys name
+  the lock's three and the Virtual Desktop's.
+- docs/LAYOUT.md: both, VirtualStage's `adoptTab` note before `SillDisplays`, and desktop-check's Virtual Desktop
+  sentence before privacy-check's.
+
+Where main meets the Virtual Desktop, read in the merged program:
+- The lock (#402): `PrivacyLock` counts only a real screen for its rule 10, and the Virtual Desktop has the Desktop's
+  identity (`.sillDesktop`), so beside a real screen nothing changes, and as the Mac's only display (its screens gone,
+  the Virtual Desktop kept) it is #395's question, default 18 there. Both 30 s count from the last device leaving: the
+  lock's wait and the Virtual Desktop's grace (default 9); whichever ends first acts, and a lock that lands first keeps
+  the Virtual Desktop and its windows until 30 s after the next unlock, as any lock does (default 30).
+- The tab switches (#399): `VirtualStage.adoptTab` reads the stage's display through `display`, which is
+  `displays.display(.stage)` here; the catalog's tab tracking is beside this branch's look, and the Virtual Desktop's
+  windows are moved by the coordinator's own `moveVirtualDesktopWindowsOut`, not by the stage's eviction that #399
+  changed.
+- The sound (#396): `appAudioDisplay` reads `stage.scDisplay` (`displays.listed(.stage)` here), so a staged window's
+  sound follows a stage display made again as on main; the Desktop's sound is built on `catalog.mainDisplay` and keeps
+  running across a step onto the Virtual Desktop (the `.desktop` key does not change). A window on the Virtual Desktop
+  streamed in regular mode has its app's sound built on the main display, as a window on any other monitor does: #365's
+  open case, which #396 left as it was (not tried: no real window here).
+
+**Defaults taken for Noah to confirm** (this run's; 1 to 29 stand):
+30. Lock this Mac when the last device leaves and the Virtual Desktop's grace both count 30 s from the last device
+    leaving; whichever ends first acts. If the lock lands first, the Virtual Desktop and its windows stay, as while any
+    lock (default 9), until 30 s after the next unlock; if the grace ends first, its windows move to the main display
+    and then the Mac locks.
+
+**Verified in this run** (2026-11-23; nothing made a display, posted input, locked, slept or switched anything; every
+live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtual Desktop only said to be made):
+- The merge's tree is the one tried first (fdb41c89, the same merge of #395's a297443b, kept local), but for #395's step
+  file: `git merge` of 303112f6 met the same eight conflicts, and the trial's resolution was taken whole (`git diff
+  fdb41c89 66e0fe85` is 87 lines of docs/steps/2026-11-18-virtual-desktop-2a.md). The checks below ran on the trial's
+  snapshot, the build and the gates on 66e0fe85.
+- On a `git archive` snapshot (the heavy lock's slot B, 16:08–16:31): away-quality 286 checks and 81 of 81 mutants
+  caught; stage-release 847 checks and 25 of 25; sill-displays 53 checks and 43 of 43 (both read VirtualStage.swift's
+  and StreamCoordinator.swift's wiring, where main's lines landed); then `Tests/checks/run-all.sh`, all 77 checks passed
+  (virtual-desktop 104,874, desktop-displays 213, full-screen 101,607, ledger (1,929 runs of the Virtual Desktop's rule
+  11), compatibility 193, viewport-bounds 100, privacy 217, lock-policy 1,420, catalog-windows 107, window-restore
+  41,944, audio-packetizer 106, update-install 1,062, virtual-display-api 308, repo-rules 11 of 11). Every other check's
+  mutant patterns are found exactly once in the merged sources (a text check of every `mutants.py`; its few hits were
+  short generic strings in files those checks never mutate).
+- `swift build -c release` of 66e0fe85 (slot B, 16:31): 69 s, no warning but CaptureProbe's known one; `SillHost
+  --internet` exits 2, `--print-reachability` 0, `--virtual-desktop=999x999@2` exits 2 naming the sizes it takes.
+- The live gates on its CLI (synthetic hosts on 127.0.0.1, 16:32–16:49): `Scripts/desktop-check/live.py` 51 of 51 (24 of
+  the stops and 27 of the Virtual Desktop's, as in the third part); `Scripts/lock-check/live.py` poll 42 of 42, start 4
+  of 4, paired 6 of 6, view 26 of 26; `Scripts/headless-check/live.py OUT all` 66 of 66; main's
+  `Scripts/privacy-check/live.py OUT all` 48 of 48; #396's sound gate (`retry_gate.py`, R1 to R4) 17 of 17; #399's
+  loopback smoke 6 of 6.
+- H2 against main's c33d1057 (built in #395's hold), run one right after the other in this hold, the statistics by name:
+  idle identical (7 distinct lines, 3 statistics), with a test client identical (14 and 11), with `--virtual-display`
+  and a test client identical (17 and 11); started locked, #395's one line, "Displays: N online, …" (11 lines and 10).
+  Against #395's merged CLI it was not run in a hold: hold A's try found no base binary (its glob dropped every path in
+  the folder vd-main), and a second hold queued behind other agents' jobs was withdrawn. In all four runs the masked
+  lines and the statistics' names of each are the same sets as main's c33d1057 (#395's in its hold, this branch's in
+  this one), so they are each other's too.
+- Previews from the bare binary (its own log file, its defaults domain deleted after): 353 files; looked at: Settings ›
+  Displays with the Virtual Desktop's section and A Mac with no screen's, the card's "Virtual Desktop · 1218×800", and
+  Settings › Devices' lock section, main's.
+- The iOS app as CI builds it (Xcode 27.1, Debug, the generic simulator, arm64, unsigned; its DerivedData removed
+  after): BUILD SUCCEEDED, only the known capture warning in StreamClient.swift.
+- GitHub's CI on 66e0fe85 (run 45158295317): every step of Build and check passed, and #408 read mergeable with its
+  base.
+
+The pull request's list of Noah's steps gains an 11 (Lock this Mac when the last device leaves with the Virtual Desktop
+showing, default 30); its 11 to 14 are now 12 to 15. The list above keeps its old numbers.
