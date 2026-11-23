@@ -20,10 +20,12 @@ import ScreenCaptureKit
 //   S2  not opaque (isOpaque false, black content), at .screenSaver: may not count as covering what is under it
 //   S3  opaque, at the shielding level (CGShieldingWindowLevel())
 //   S4  opaque, at 1500
+//   S5  opaque, at 1501: the level Sill took from G0's run of 2026-11-23 (DarkenPolicy.windowLevel); no step of
+//       run.sh uses it, `--candidate S5` re-runs a step at it
 //
 // Commands (each exits by itself before its deadline; the black windows go with the process whatever happens):
 //   probe check                          what this Mac is, and whether the probe can run (exit 2 if not)
-//   probe cover S1|S2|S3|S4 WINDOW-LOG   step 1: the test window (window.swift, its log), Safari and an Electron app
+//   probe cover S1|…|S5 WINDOW-LOG     step 1: the test window (window.swift, its log), Safari and an Electron app
 //                                        captured 2 s uncovered, 4 s under the candidate, 1.5 s after it lifts
 //   probe levels TAG [--notify] [--text LINE]... [--candidate S1] [--seconds 9]
 //                                        step 2: the black windows up with the prompt on them; the window server's
@@ -79,13 +81,14 @@ func flag(_ name: String) -> Bool { argv.contains(name) }
 // MARK: The candidates and the black windows
 
 enum Candidate: String, CaseIterable {
-    case S1, S2, S3, S4
+    case S1, S2, S3, S4, S5
 
     var level: NSWindow.Level {
         switch self {
         case .S1, .S2: return .screenSaver
         case .S3: return NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         case .S4: return NSWindow.Level(rawValue: 1500)
+        case .S5: return NSWindow.Level(rawValue: 1501)
         }
     }
     var opaque: Bool { self != .S2 }
@@ -95,13 +98,15 @@ enum Candidate: String, CaseIterable {
         case .S2: return "S2: not opaque (black content), at .screenSaver (\(NSWindow.Level.screenSaver.rawValue))"
         case .S3: return "S3: opaque, at the shielding level (\(CGShieldingWindowLevel()))"
         case .S4: return "S4: opaque, at 1500"
+        // Sill's own since G0 (DarkenPolicy.windowLevel), for a re-run of a step with `--candidate S5`.
+        case .S5: return "S5: opaque, at 1501, Sill's"
         }
     }
 }
 
 func candidate(_ raw: String?) -> Candidate {
     guard let raw else { return .S1 }
-    guard let c = Candidate(rawValue: raw) else { fail("unknown candidate \(raw): S1, S2, S3 or S4") }
+    guard let c = Candidate(rawValue: raw) else { fail("unknown candidate \(raw): S1, S2, S3, S4 or S5") }
     return c
 }
 
@@ -441,6 +446,13 @@ func levels(tag: String, notify: Bool, text: [String], c: Candidate, seconds: Do
     while Date().timeIntervalSince1970 - started < seconds {
         let list = windowList()
         let ours = list.filter { curtain.numbers.contains($0.number) }
+        // A sample taken before the window server lists the black windows judges nothing: with none of them listed,
+        // every window would count as in front (G0's run of 2026-11-23 listed every ordinary window "IN FRONT … from
+        // 0.0 s to 0.0 s", its first sample, at layers far below 1000).
+        guard !ours.isEmpty else {
+            try? await Task.sleep(for: .milliseconds(50))
+            continue
+        }
         curtainListed = max(curtainListed, ours.count)
         if let l = ours.first?.layer { curtainLayer = l }
         let frontmost = ours.map(\.index).min() ?? Int.max
@@ -581,7 +593,7 @@ case "gone":
     guard let p = argv.first.flatMap({ Int32($0) }) else { fail("usage: probe gone PID [--present]") }
     gone(pid: p, present: flag("--present"))
 case "cover":
-    guard argv.count >= 2 else { fail("usage: probe cover S1|S2|S3|S4 WINDOW-LOG") }
+    guard argv.count >= 2 else { fail("usage: probe cover S1|S2|S3|S4|S5 WINDOW-LOG") }
     let c = candidate(argv[0]), log = argv[1]
     armDeadline(11.5)
     Task { @MainActor in await cover(c, windowLog: log) }

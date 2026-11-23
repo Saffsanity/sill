@@ -97,10 +97,10 @@ package struct HostConfig: Equatable, Sendable {
     /// Darken this Mac's screen while a device uses it (docs/privacy-mode-plan.md, part 2; issues #133 and #323;
     /// DarkenPolicy, PrivacyScreen): off, only while a device away from home is connected, or whenever one is. Off in
     /// both `standard` and `app`; the CLI takes it only with --synthetic (`--darken=away|any`), where it darkens nothing
-    /// and says what it would do, and Sill.app has no switch for it until the probe G0 has chosen how its black windows
-    /// are made. The Mac's alone, like Share clipboard: absent from StreamSettings, HostSettingsChange,
-    /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on or off. Applied at once
-    /// (`StreamCoordinator.setTarget`), never by a restart.
+    /// and says what it would do; Sill.app's switches are in Settings › Devices (Darken this Mac's screen, and Only while
+    /// a device is away from home under it: DarkenPolicy.scope). The Mac's alone, like Share clipboard: absent from
+    /// StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it
+    /// on or off. Applied at once (`StreamCoordinator.setTarget`), never by a restart.
     package var darkenScreen: Darken
     /// While this Mac's screen is dark, a key or click on it locks it (DarkenPolicy rule 7); off, they reach its apps
     /// unseen and its screen says how to lock it (⌃⌘Q). On in both: it only counts while `darkenScreen` is on. The Mac's

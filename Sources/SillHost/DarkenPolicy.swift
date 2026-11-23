@@ -13,12 +13,13 @@ import StreamProtocol
 /// - **Dark** (rule 3, `wantsDark`): the switch on, a screen to cover (rule 13), Sill not quitting, the Mac not taken
 ///   back (rule 8), and a session that counts connected, or its wait (`grace`) under way, or the wait over and held for
 ///   the lock it ends in (rule 6), or a lock asked at a key on this Mac awaiting its confirmation (rule 7).
-/// - **Under the lock screen** (rule 4, `staysUnderLockScreen`, which the probe G0 settles): the black windows sit under
-///   macOS's lock screen and stay up whatever the reading, so a lock shows the lock screen above them and an unlock (by
-///   anyone) reveals black. If G0 finds no level that is above everything else and under the lock screen, the constant
-///   is false: the windows come down at a locked reading (the person at the Mac must see the lock screen) and go up
-///   again at an unlocked one if the dark still holds. (The gate's unlock comes after its 2 s settle; the raw witness
-///   would shorten that gap and is the glue's to add if the fallback is ever taken.)
+/// - **Under the lock screen** (rule 4, `staysUnderLockScreen`, settled by the probe G0 on 2026-11-23): the black
+///   windows sit at `windowLevel`, under macOS's lock screen, and stay up whatever the reading, so a lock shows the lock
+///   screen above them and an unlock (by anyone) reveals black. G0 found such a level (`levelFits`): at the screen
+///   saver's level the lock screen came in front (loginwindow at layers 2001 and 2004) and Noah locked and unlocked over
+///   the black, while a notification, the volume indicator, Spotlight, Mission Control and the Force Quit window (layer
+///   996) all stayed behind it. The fallback (the constant false: the windows down at a locked reading, up again at an
+///   unlocked one) stays in the rule, checked, for a macOS that moves its lock screen.
 /// - **Up before the panel lights** (rule 5): `sessions` returns `raise` at the connect of a session that counts, and the
 ///   coordinator calls it before it declares the connect's user activity (DisplayWake), in the same main-actor turn.
 /// - **The session's end** (rule 6): when the last session that counts leaves, the windows stay up `grace` (30 s, the
@@ -28,11 +29,12 @@ import StreamProtocol
 ///   confirmation pending), so the room never sees the desktop between the dark and the lock screen; never longer than
 ///   `grace` + `lockConfirm` + `holdSlack` after the departure (R0: the screen never stays dark).
 /// - **Someone at the Mac** (rule 7, `local`): while the windows are up and the Mac reads unlocked, a key or a click Sill
-///   did not post (without `eventTag`) asks `lock` with the switch "A key or click on this Mac locks it" on (at most once
-///   per `lockConfirm`), and shows the hint; with it off, or for a pointer movement, only the hint. A lock that does not
-///   show in the reading within `lockConfirm`, or that macOS cannot make, switches the hint to its ⌃⌘Q wording
-///   (macOS's own lock, which nothing observing keys stops) and asks no more until a lock shows or a switch changes.
-///   While the Mac reads locked or off console, nothing counts: the lock screen takes it.
+///   did not post (`ownEvent`: it carries neither `eventTag` nor Sill's own process as its source) asks `lock` with the
+///   switch "A key or click on this Mac locks it" on (at most once per `lockConfirm`), and shows the hint; with it off,
+///   or for a pointer movement or a scroll (`localKind`), only the hint. A lock that does not show in the reading within
+///   `lockConfirm`, or that macOS cannot make, switches the hint to its ⌃⌘Q wording (macOS's own lock, which nothing
+///   observing keys stops) and asks no more until a lock shows or a switch changes. While the Mac reads locked or off
+///   console, nothing counts: the lock screen takes it.
 /// - **Taken back** (rule 8): an unlock while dark (the reading unlocked after screen locked or off console) is the
 ///   Mac's own unless a paired device's input was posted at the locked screen within `remoteUnlockWindow` before it
 ///   (LockPolicy lets only a paired session type there); off console nothing is posted, so a return to the console is
@@ -42,13 +44,16 @@ import StreamProtocol
 ///   once; a change of scope that leaves no session counting lifts at once (no wait: the person chose it). Any change of
 ///   the darkening's switches clears `takenBack`.
 /// - **Quitting** (rule 11): lift at once, nothing asked from then on.
-/// - **A hung Sill** (rule 12): the watchdog's decisions, `watchdogFires` and `reopens`, pure here.
+/// - **A hung Sill** (rule 12): the watchdog's decisions, `watchdogFires`, `reopens`, `followsWatchdog` and
+///   `reopenCommand`, pure here (PrivacyWatchdog carries them out). G0's frozen probe kept its black window up for as
+///   long as it was stopped, and a killed one lost it within 16 ms: only an end of the process lifts a hung Sill's.
 /// - **Screens** (rule 13, `screens`): every screen (DesktopDisplays.role) of some size; never Sill's stage or Desktop
 ///   display, nor macOS's stand-in for a Mac with no screen.
 /// - **Only Sill.app itself darkens** (rule 14, `darkensForReal`: the lock's rule, PrivacyPolicy.locksForReal). The
 ///   CLI, the bare SillMenuBar binary and every test host decide the same and act on nothing: their glue says what it
-///   would do (the "(dry run)" lines), draws nothing, watches no input and locks nothing. Sill.app's own glue waits for
-///   the probe G0 (`heldBack`): until it is filled, darkening stays off there whatever the switch says.
+///   would do (the "(dry run)" lines), draws nothing, watches no input, locks nothing and never quits for the watchdog.
+/// - **Settings › Devices** (`scope(on:onlyAway:)`): Darken this Mac's screen, and under it Only while a device is away
+///   from home (on by default, remembered while the first is off) and A key or click on this Mac locks it (on).
 ///
 /// Pure (Foundation, StreamProtocol's DesktopDisplays and SafeText, HostConfig's scope, PrivacyPolicy's constants,
 /// readings and rule of who acts), checked with them as one module (Tests/checks/darken).
@@ -73,14 +78,73 @@ package enum DarkenPolicy {
     package static let hangLimit: Double = 10
     /// Rule 12: Sill opens itself again after such an end at most once in this long, so it is never a loop.
     package static let relaunchSpacing: Double = 600
-    /// Rule 7: what every event Sill posts carries (`CGEventSource.userData`, so `kCGEventSourceUserData`; InputInjector
-    /// sets it on its source once the seam is filled), never a person's hardware (whose events carry 0). G0's step 4
-    /// says whether NSEvent's global monitor keeps it.
+    /// Rule 7: what every event Sill posts carries (`CGEventSource.userData`, so `kCGEventSourceUserData`: InputInjector
+    /// sets it on its source), never a person's hardware (whose events carry 0). G0's step 4: NSEvent's global monitor
+    /// keeps it (a posted pointer move and Shift, 0x53494C4C50525631), and an untagged one carries 0.
     package static let eventTag: Int64 = 0x5349_4C4C_5052_5631
     /// The glue's tick while something here waits on the clock (`State.pending`).
     static let tick: Double = 0.5
-    /// Rule 4: the black windows sit under macOS's lock screen (true until the probe G0 says otherwise).
+    /// Rule 4: the black windows sit under macOS's lock screen (settled by G0: `windowLevel` fits under it).
     package static let staysUnderLockScreen = true
+
+    // MARK: The black windows (the probe G0, 2026-11-23, on Noah's Mac14,9 with macOS 27.2.1)
+
+    /// What G0's step 2 saw with the black windows at the screen saver's level (1000, #184's), every layer the window
+    /// server listed. Behind the black, and so to stay behind it: the Force Quit window (loginwindow, 996), the volume
+    /// indicator (101), a notification banner and Spotlight (23), Mission Control and the Dock (2 to 20); Noah saw
+    /// none of them ("No", "No", "No", "Only black", "No").
+    static let probeHidden = [996, 101, 23, 20, 19, 14, 2]
+    /// In front of it, at its own level: another app's window (1×1 pt, transparent) listed in front of the black for the
+    /// whole spell once that app ordered it in again. Two windows at one level stack by who ordered last, so the same
+    /// level is no barrier.
+    static let probeSameLevel = 1000
+    /// In front of it: macOS's lock screen (loginwindow, layers 2001 and 2004). Noah locked with ⌃⌘Q, saw "regular lock
+    /// screen", unlocked, and found the black still there until the spell ended.
+    static let probeLockScreen = [2001, 2004]
+    /// The highest window level macOS names under its lock screen (kCGAssistiveTechHighWindowLevel), which assistive
+    /// windows (spoken text's captions, hover text) share.
+    static let assistiveLevel = 1500
+
+    /// The black windows' level (rule 4): one above the highest level macOS names under its lock screen, so no window of
+    /// a named level (the screen saver's, an assistive one) ties with them, above everything G0 saw hidden, and 500
+    /// under the lock screen, so a person at the Mac always sees it. G0's step 1 measured no cost of the level: covered
+    /// windows drew on at 99 to 101 % under the black at 1000, 1500 and the shielding level alike.
+    package static let windowLevel = 1501
+    /// Opaque, as #184's: G0's step 1 found no difference (not opaque, S2, drew 100 to 101 % as the opaque ones), and
+    /// step 5 found every screen pure black (Night Shift, True Tone, an HDR video, two screens).
+    package static let windowOpaque = true
+
+    /// Whether a level keeps what G0 saw hidden behind the black, ties with no named level under the lock screen (no
+    /// window of another app at the same level can be ordered in front), and stays under the lock screen.
+    static func levelFits(_ level: Int) -> Bool {
+        probeHidden.allSatisfy { $0 < level } && level > probeSameLevel && level > assistiveLevel
+            && probeLockScreen.allSatisfy { level < $0 }
+    }
+
+    // MARK: Someone at the Mac: which events (rule 7)
+
+    /// The kind of an event of this Mac's own (NSEvent.EventType's and CGEventType's number), nil for one that is none
+    /// of these: a key down (10); a mouse button down, left (1), right (3) or other (25); a pointer move (5), a drag (6,
+    /// 7, 27) or a scroll (22), which only show the hint. A modifier alone (12), a key or button up and anything else
+    /// count for nothing. Never a key code or a character.
+    static func localKind(eventType: Int) -> Local? {
+        switch eventType {
+        case 10: return .key
+        case 1, 3, 25: return .click
+        case 5, 6, 7, 27, 22: return .move
+        default: return nil
+        }
+    }
+
+    /// The event types the glue's observer asks NSEvent for (each `localKind` takes).
+    static let watchedEventTypes = [10, 1, 3, 25, 5, 6, 7, 27, 22]
+
+    /// Rule 7: an event Sill posted itself, which never counts as a person's: it carries `eventTag` (InputInjector's
+    /// source), or its source is this very process. G0's step 4: the posted events named the probe's own process as
+    /// their source (and carried the tag when tagged), Noah's own pointer move process 0 and no tag.
+    static func ownEvent(userData: Int64, sourcePID: Int64, ownPID: Int64) -> Bool {
+        userData == eventTag || sourcePID == ownPID
+    }
 
     // MARK: Who darkens (rule 14)
 
@@ -94,10 +158,14 @@ package enum DarkenPolicy {
         PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)
     }
 
-    /// Whether darkening stays off here whatever the switch says: a host that darkens for real (`real`) whose seams are
-    /// not filled (`filled`: Sill.app until the probe G0 has chosen how its black windows are made), which says so once
-    /// (`Words.waitsForProbe`). A dry run is never held back: it draws nothing anyway.
-    static func heldBack(real: Bool, filled: Bool) -> Bool { real && !filled }
+    // MARK: Settings › Devices
+
+    /// The host's scope from Settings' two switches: Darken this Mac's screen, and under it Only while a device is away
+    /// from home (HostSettings keeps it while the first is off, so turning darkening on again keeps the choice).
+    package static func scope(on: Bool, onlyAway: Bool) -> HostConfig.Darken {
+        guard on else { return .off }
+        return onlyAway ? .away : .any
+    }
 
     // MARK: Inputs
 
@@ -418,17 +486,37 @@ package enum DarkenPolicy {
         return now - lastReopen >= relaunchSpacing || now < lastReopen
     }
 
+    /// A launch that follows the watchdog's end (its record, written just before, at most `reopenedWithin` old): it
+    /// says so once (`Words.reopened`).
+    static func followsWatchdog(record: Double?, now: Double) -> Bool {
+        guard let record else { return false }
+        return now >= record && now - record <= reopenedWithin
+    }
+
+    /// How long after the watchdog's end a launch still counts as its reopening (`open` and Sill's own wait for the
+    /// Sill before it to be gone, AppUpdater.waitForOtherSill, take a few seconds).
+    static let reopenedWithin: Double = 60
+
+    /// How the watchdog opens Sill again: a new instance (`-n`, the stuck one is ending), in the background (`-g`), from
+    /// Sill.app's own bundle, never the bare binary; nil for anything that is not an app bundle.
+    static func reopenCommand(bundlePath: String) -> [String]? {
+        guard bundlePath.hasSuffix(".app") else { return nil }
+        return ["/usr/bin/open", "-n", "-g", bundlePath]
+    }
+
     // MARK: The TEST ONLY hooks
 
     /// What a test host takes (DoorPolicy.isTestHost; TestHooks says elsewhere that each is ignored):
     /// SILL_TEST_PRIVACY_INPUT=<file> (the Mac's own input, in place of the observer: a test host reads `key`, `click`
-    /// or `move`, with ` tagged` after it for one Sill posted, once from the file and removes it) and
+    /// or `move`, with ` tagged` after it for one Sill posted, once from the file and removes it),
     /// SILL_TEST_PRIVACY_LOG=1 (the dry curtain's lines and the connect's display wake stamped with the host's clock, so
-    /// rule 5's order shows in the log). The wait and the displays are part 1's hooks (SILL_TEST_PRIVACY_GRACE,
-    /// SILL_TEST_PRIVACY_DISPLAYS), which darkening shares.
+    /// rule 5's order shows in the log) and SILL_TEST_PRIVACY_STALL=<seconds> (1 to 30: the main thread stops once for
+    /// that long a second after the black first goes up, so the watchdog's dry run says what it would do). The wait and
+    /// the displays are part 1's hooks (SILL_TEST_PRIVACY_GRACE, SILL_TEST_PRIVACY_DISPLAYS), which darkening shares.
     struct TestHooks: Equatable, Sendable {
         var inputFile: String?
         var log = false
+        var stall: Double?
         var lines: [String] = []
     }
 
@@ -446,6 +534,14 @@ package enum DarkenPolicy {
         if env["SILL_TEST_PRIVACY_LOG"] == "1" {
             h.log = true
             h.lines.append("Test privacy: the dark's lines and the display wake are stamped (SILL_TEST_PRIVACY_LOG).")
+        }
+        if let raw = env["SILL_TEST_PRIVACY_STALL"], !raw.isEmpty {
+            if let s = Double(raw), s >= 1, s <= 30 {
+                h.stall = s
+                h.lines.append("Test privacy: the main thread stops once for \(PrivacyPolicy.Words.number(s)) s, a second after the black first goes up (SILL_TEST_PRIVACY_STALL).")
+            } else {
+                h.lines.append("SILL_TEST_PRIVACY_STALL=\(raw) ignored: seconds from 1 to 30.")
+            }
         }
         return h
     }
@@ -467,6 +563,24 @@ package enum DarkenPolicy {
     // MARK: Every word
 
     package enum Words {
+        // Settings › Devices (the section before Lock this Mac when the last device leaves)
+        package static let toggle = "Darken this Mac’s screen"
+        /// The two switches under it, shown while it is on.
+        package static let awayToggle = "Only while a device is away from home"
+        package static let keysToggle = "A key or click on this Mac locks it"
+        package static let footnoteOff = "For a Mac you use from afar: its displays stay black while you use it, so people near it see nothing."
+        package static func footnoteOn(onlyAway: Bool, keysLock: Bool, grace: Double = DarkenPolicy.grace) -> String {
+            (onlyAway
+                ? "This Mac’s displays turn black while an iPhone or iPad uses it from away from home (through a VPN or over the internet), so people near it see nothing."
+                : "This Mac’s displays turn black while an iPhone or iPad is connected, so people near it see nothing.")
+                + " They come back \(PrivacyPolicy.Words.seconds(grace)) after the last one leaves."
+                + (keysLock
+                    ? " A key or click on this Mac locks it; unlock it here with your password or Touch ID and its displays stay lit until every device has left."
+                    : " Keys and clicks on this Mac still reach its apps, unseen. To use it here, press Control-Command-Q, then unlock it.")
+        }
+        /// Under the switches while keys lock and Sill lacks Accessibility (a click is still noticed without it).
+        package static let accessibilityWarning = "Sill needs Accessibility to notice a key pressed on this Mac; a click still locks it. Allow it in Settings › Permissions."
+
         // Sill.log
         /// The start line while the switch is on. `dry`: not Sill.app itself (`darkensForReal`), which only says what it
         /// would do.
@@ -475,8 +589,8 @@ package enum DarkenPolicy {
                 + (keysLock ? "; a key or click on this Mac locks it." : "; keys and clicks on this Mac reach its apps.")
                 + (dry ? " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do." : "")
         }
-        /// Sill.app itself with the switch on, until the probe G0 fills its seams (`heldBack`).
-        package static let waitsForProbe = "Privacy: darkening this Mac’s screen waits for its probe (docs/privacy-mode-plan.md, G0); this build darkens nothing."
+        /// Sill.app itself, as its screen darkens with keys locking, without Accessibility (AXIsProcessTrusted false).
+        package static let noAccessibility = "Privacy: Sill can’t notice a key pressed on this Mac without Accessibility; a click still locks it."
         package static func dark(_ scope: HostConfig.Darken, screens: Int) -> String {
             let who = scope == .away ? "a device away from home is connected" : "a device is connected"
             return "Privacy: this Mac’s screen is dark while \(who) (\(displays(screens)))."
@@ -504,12 +618,15 @@ package enum DarkenPolicy {
             return "Privacy: unlocked from \(n.isEmpty ? "a device" : n); this Mac’s screen stays dark."
         }
         package static let watchdog = "Privacy: Sill’s main thread hasn’t answered for \(PrivacyPolicy.Words.number(DarkenPolicy.hangLimit)) s while this Mac’s screen was dark; Sill quits so the screen isn’t left black, and opens again."
+        /// The watchdog's end within `relaunchSpacing` of the last one that reopened Sill (no loop), or outside Sill.app.
+        package static let watchdogNoReopen = "Privacy: Sill’s main thread hasn’t answered for \(PrivacyPolicy.Words.number(DarkenPolicy.hangLimit)) s while this Mac’s screen was dark; Sill quits so the screen isn’t left black, and doesn’t open again (it did less than 10 minutes ago)."
         package static let reopened = "Privacy: Sill opened again after it quit with this Mac’s screen dark (its main thread had stopped answering)."
 
-        // The hint on each dark screen (two lines)
+        // The hint on each dark screen (two lines). A click as well as a key: a secure text field (a password) and
+        // Terminal's Secure Keyboard Entry withhold keys from every observer, never a click.
         package static let hintFirst = "This Mac is in use from another device."
         package static func hintSecond(_ hint: Hint) -> String {
-            hint == .lock ? "Press any key to lock it." : "To use it here, press Control-Command-Q, then unlock it."
+            hint == .lock ? "Press any key or click to lock it." : "To use it here, press Control-Command-Q, then unlock it."
         }
 
         // The dry run (PrivacyScreen's DryCurtain) of everything but Sill.app itself: the CLI, the bare binary, a test host
@@ -520,6 +637,8 @@ package enum DarkenPolicy {
         package static func dryHint(_ hint: Hint) -> String {
             "Privacy (dry run): would show “\(hintFirst) \(hintSecond(hint))”; nothing is drawn."
         }
+        /// The watchdog's dry run (PrivacyWatchdog on everything but Sill.app itself): it says, and the host goes on.
+        package static let dryWatchdog = "Privacy (dry run): Sill’s main thread hasn’t answered for \(PrivacyPolicy.Words.number(DarkenPolicy.hangLimit)) s while this Mac’s screen was dark; would quit Sill and open it again; nothing quits."
 
         /// "1 display", "2 displays".
         package static func displays(_ n: Int) -> String { "\(n) display\(n == 1 ? "" : "s")" }

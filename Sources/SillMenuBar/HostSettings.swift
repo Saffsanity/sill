@@ -55,6 +55,7 @@ final class HostSettings {
         static let lockAfterSession = "lockAfterSession"
         static let lockSleepsDisplay = "lockSleepsDisplay"
         static let lockOnlyAfterAway = "lockOnlyAfterAway"
+        static let darkenScreen = "darkenScreen", darkenOnlyAway = "darkenOnlyAway", darkenKeysLock = "darkenKeysLock"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -116,6 +117,23 @@ final class HostSettings {
     }
     @ObservationIgnored var onPairingWindowSharingChange: (@MainActor () -> Void)?
 
+    /// Under Darken this Mac's screen (Settings › Devices; docs/privacy-mode-plan.md, part 2): only while a device is
+    /// away from home (on by default) or whenever one is connected. Kept while darkening is off, so turning it on again
+    /// keeps the choice; while it is on, a change is the host's at once (`config.darkenScreen`, DarkenPolicy.scope).
+    var darkenOnlyAway: Bool {
+        didSet {
+            guard darkenOnlyAway != oldValue else { return }
+            defaults.set(darkenOnlyAway, forKey: Key.darkenOnlyAway)
+            if config.darkenScreen != .off { config.darkenScreen = DarkenPolicy.scope(on: true, onlyAway: darkenOnlyAway) }
+        }
+    }
+
+    /// Darken this Mac's screen, on or off (its switch), keeping the scope under it.
+    var darkenScreenOn: Bool {
+        get { config.darkenScreen != .off }
+        set { config.darkenScreen = DarkenPolicy.scope(on: newValue, onlyAway: darkenOnlyAway) }
+    }
+
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -152,6 +170,12 @@ final class HostSettings {
             // open decisions 6 and 5), as the CLI.
             Key.lockSleepsDisplay: base.lockSleepsDisplay,
             Key.lockOnlyAfterAway: base.lockOnlyAfterAway,
+            // Off, like the CLI: a Mac's screen goes dark while a device uses it only once its user says so here. Under
+            // it (shown while it is on): only while a device is away from home, and a key or click locking the Mac (the
+            // plan's open decisions 2 and 3).
+            Key.darkenScreen: base.darkenScreen != .off,
+            Key.darkenOnlyAway: true,
+            Key.darkenKeysLock: base.darkenKeysLock,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -176,9 +200,10 @@ final class HostSettings {
                             lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
                             lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
                             lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
-                            // Darken this Mac's screen (docs/privacy-mode-plan.md, part 2) has no switch here until the
-                            // probe G0 has chosen how its black windows are made: off, its keys locking once it is on.
-                            darkenScreen: .off, darkenKeysLock: true).validated()
+                            darkenScreen: DarkenPolicy.scope(on: defaults.bool(forKey: Key.darkenScreen),
+                                                             onlyAway: defaults.bool(forKey: Key.darkenOnlyAway)),
+                            darkenKeysLock: defaults.bool(forKey: Key.darkenKeysLock)).validated()
+        darkenOnlyAway = defaults.bool(forKey: Key.darkenOnlyAway)
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -209,6 +234,12 @@ final class HostSettings {
         if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
         if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
         if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
+        if config.darkenScreen != old.darkenScreen {
+            defaults.set(config.darkenScreen != .off, forKey: Key.darkenScreen)
+            // A scope set whole (`-SillSetAfter '… darkenScreen=any'`) is the switch under it too.
+            if config.darkenScreen != .off, darkenOnlyAway != (config.darkenScreen == .away) { darkenOnlyAway = config.darkenScreen == .away }
+        }
+        if config.darkenKeysLock != old.darkenKeysLock { defaults.set(config.darkenKeysLock, forKey: Key.darkenKeysLock) }
     }
 
     // MARK: Remote devices seen (display only)

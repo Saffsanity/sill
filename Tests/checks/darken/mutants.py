@@ -11,7 +11,9 @@ Left out as equivalent (each a second guard behind one that already holds): the 
 the windows down, so nothing after it can raise, lift or lock); `screens`' guard that only a change across zero acts
 (any other change settles to the same); `tick`'s `lockFollows = false` at a wait's end (read only at a wait's end, and
 set again at the next one's start); `lockHolds` dropped from the hold's start (`if lockFollows, lockHolds`: a hold
-started while the lock holds nothing ends in the same tick, at the hold's own end test)."""
+started while the lock holds nothing ends in the same tick, at the hold's own end test); `levelFits`' first two
+clauses (above everything G0 saw hidden, above the screen saver's level: the assistive level, 1500, is above both, so
+the third clause decides for them; they name what G0 measured)."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
@@ -23,9 +25,6 @@ M = [
      "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "!synthetic"),
     ("Sill.app with --synthetic darkens for real", F, "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "bundled"),
     ("everything darkens for real", F, "PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: bundled)", "true"),
-    ("Sill.app darkens before the probe fills its seams", F, "-> Bool { real && !filled }", "-> Bool { false }"),
-    ("a dry run held back", F, "-> Bool { real && !filled }", "-> Bool { !filled }"),
-    ("Sill.app held back once its seams are filled", F, "-> Bool { real && !filled }", "-> Bool { real }"),
     ("the dry run's raise says test host", F, '"Privacy (dry run): would darken \\(displays(screens)); nothing is drawn."',
      '"Privacy (test host): would darken \\(displays(screens)); nothing is drawn."'),
     ("the start line hides the dry run", F, '+ (dry ? " A dry run here', '+ (false ? " A dry run here'),
@@ -37,7 +36,33 @@ M = [
     ("the hint 5 s", F, "package static let hintFor: Double = 10", "package static let hintFor: Double = 5"),
     ("no tag", F, "package static let eventTag: Int64 = 0x5349_4C4C_5052_5631", "package static let eventTag: Int64 = 0"),
     ("the hold's slack under two ticks", F, "static let holdSlack: Double = 1", "static let holdSlack: Double = 0.25"),
-    ("above the lock screen before G0", F, "package static let staysUnderLockScreen = true", "package static let staysUnderLockScreen = false"),
+    ("the fallback taken though G0 found a level under the lock screen", F, "package static let staysUnderLockScreen = true", "package static let staysUnderLockScreen = false"),
+    # The probe G0: the black windows' level and opacity.
+    ("the black at the screen saver's level (#184's)", F, "package static let windowLevel = 1501", "package static let windowLevel = 1000"),
+    ("the black at the assistive level", F, "package static let windowLevel = 1501", "package static let windowLevel = 1500"),
+    ("the black over the lock screen (the shielding level)", F, "package static let windowLevel = 1501", "package static let windowLevel = 2_147_483_628"),
+    ("the black at the lock screen's level", F, "package static let windowLevel = 1501", "package static let windowLevel = 2001"),
+    ("not opaque", F, "package static let windowOpaque = true", "package static let windowOpaque = false"),
+    ("a level the lock screen covers fits", F, "\n            && probeLockScreen.allSatisfy { level < $0 }", ""),
+    ("the assistive level fits", F, "level > probeSameLevel && level > assistiveLevel", "level > probeSameLevel && level >= assistiveLevel"),
+    ("the lock screen's own level fits", F, "probeLockScreen.allSatisfy { level < $0 }", "probeLockScreen.allSatisfy { level <= $0 }"),
+    # Rule 7: which events count, and which are Sill's own (G0's step 4).
+    ("a key is only a move", F, "        case 10: return .key", "        case 10: return .move"),
+    ("a modifier alone is a key", F, "        case 10: return .key", "        case 10, 12: return .key"),
+    ("a key's up is a key too", F, "        case 10: return .key", "        case 10, 11: return .key"),
+    ("a right click is nothing", F, "        case 1, 3, 25: return .click", "        case 1, 25: return .click"),
+    ("a click's up is a click too", F, "        case 1, 3, 25: return .click", "        case 1, 2, 3, 25: return .click"),
+    ("a scroll is nothing", F, "        case 5, 6, 7, 27, 22: return .move", "        case 5, 6, 7, 27: return .move"),
+    ("a drag is nothing", F, "        case 5, 6, 7, 27, 22: return .move", "        case 5, 22: return .move"),
+    ("the observer misses scrolls", F, "static let watchedEventTypes = [10, 1, 3, 25, 5, 6, 7, 27, 22]", "static let watchedEventTypes = [10, 1, 3, 25, 5, 6, 7, 27]"),
+    ("the observer asks for key ups", F, "static let watchedEventTypes = [10, 1, 3, 25, 5, 6, 7, 27, 22]", "static let watchedEventTypes = [10, 11, 1, 3, 25, 5, 6, 7, 27, 22]"),
+    ("Sill's own events known by the tag alone", F, "userData == eventTag || sourcePID == ownPID", "userData == eventTag"),
+    ("Sill's own events known by the process alone", F, "userData == eventTag || sourcePID == ownPID", "sourcePID == ownPID"),
+    ("a person's hardware counted Sill's", F, "userData == eventTag || sourcePID == ownPID", "userData == eventTag || sourcePID == ownPID || sourcePID == 0"),
+    ("any tag counted Sill's", F, "userData == eventTag || sourcePID == ownPID", "userData != 0 || sourcePID == ownPID"),
+    # Settings › Devices: the two switches as the scope.
+    ("on whatever the switch says", F, "        guard on else { return .off }\n", ""),
+    ("only away the wrong way round", F, "return onlyAway ? .away : .any", "return onlyAway ? .any : .away"),
     # Rule 13: the screens.
     ("Sill's Desktop display and the stand-in covered", F, "madeByStage: $0.madeByStage) == .screen", "madeByStage: $0.madeByStage) != .stage"),
     ("a display the stage made that has gone covered", F, "madeByStage: $0.madeByStage) == .screen", "madeByStage: false) == .screen"),
@@ -146,11 +171,20 @@ M = [
     ("never reopened at first", F, "guard let lastReopen else { return true }", "guard let lastReopen else { return false }"),
     ("reopened late", F, "now - lastReopen >= relaunchSpacing || now < lastReopen", "now - lastReopen > relaunchSpacing || now < lastReopen"),
     ("a clock gone back stops it", F, "now - lastReopen >= relaunchSpacing || now < lastReopen", "now - lastReopen >= relaunchSpacing"),
+    ("no record is a reopening", F, "        guard let record else { return false }", "        guard let record else { return true }"),
+    ("any later launch is the reopening", F, "return now >= record && now - record <= reopenedWithin", "return now >= record"),
+    ("a record from the future is a reopening", F, "return now >= record && now - record <= reopenedWithin", "return now - record <= reopenedWithin"),
+    ("the reopening's minute 10 s", F, "static let reopenedWithin: Double = 60", "static let reopenedWithin: Double = 10"),
+    ("the bare binary reopened", F, '        guard bundlePath.hasSuffix(".app") else { return nil }\n', ""),
+    ("the reopening not a new instance", F, '["/usr/bin/open", "-n", "-g", bundlePath]', '["/usr/bin/open", "-g", bundlePath]'),
+    ("the reopening in front", F, '["/usr/bin/open", "-n", "-g", bundlePath]', '["/usr/bin/open", "-n", bundlePath]'),
     # The TEST ONLY hooks.
     ("any host takes the hooks", F, "        guard testHost else { return h }\n        if let path", "        if let path"),
     ("a relative input file taken", F, "            if path.hasPrefix(\"/\") {", "            if !path.isEmpty {"),
     ("any value stamps the lines", F, 'if env["SILL_TEST_PRIVACY_LOG"] == "1" {', 'if env["SILL_TEST_PRIVACY_LOG"] != nil {'),
     ("three words taken", F, "guard let first = parts.first, parts.count <= 2 else { return nil }", "guard let first = parts.first, parts.count <= 3 else { return nil }"),
+    ("a stall of any length", F, "if let s = Double(raw), s >= 1, s <= 30 {", "if let s = Double(raw) {"),
+    ("a stall shorter than a second", F, "if let s = Double(raw), s >= 1, s <= 30 {", "if let s = Double(raw), s > 0, s <= 30 {"),
     ("any second word is tagged", F, '        if tagged, parts[1] != "tagged" { return nil }\n', ""),
     # Every word.
     ("the scopes' words swapped", F, 'scope == .away ? "a device away from home is connected" : "a device is connected"',
@@ -159,7 +193,12 @@ M = [
      'package static func displays(_ n: Int) -> String { "\\(n) display\\(n > 1 ? "s" : "")" }'),
     ("a device's name not cleaned", F, "let n = SafeText.label(name ?? \"\")", "let n = name ?? \"\""),
     ("no name, an empty one", F, 'return "Privacy: unlocked from \\(n.isEmpty ? "a device" : n);', 'return "Privacy: unlocked from \\(n);'),
-    ("the hint's lines swapped", F, 'hint == .lock ? "Press any key to lock it." : "To use it here', 'hint == .pass ? "Press any key to lock it." : "To use it here'),
+    ("the hint's lines swapped", F, 'hint == .lock ? "Press any key or click to lock it." : "To use it here', 'hint == .pass ? "Press any key or click to lock it." : "To use it here'),
+    ("the hint says nothing of a click", F, '"Press any key or click to lock it."', '"Press any key to lock it."'),
+    ("the footnote's scopes swapped", F, "            (onlyAway\n                ? \"This Mac", "            (!onlyAway\n                ? \"This Mac"),
+    ("the footnote's keys swapped", F, "                + (keysLock\n", "                + (!keysLock\n"),
+    ("the footnote's wait always 30 s", F, '" They come back \\(PrivacyPolicy.Words.seconds(grace)) after the last one leaves."',
+     '" They come back 30 seconds after the last one leaves."'),
     # Part 1's switches and a session's route, beside the dark (the review of PR #400, follow-up 2).
     ("the lock waits with its switch off", P, "guard on, !onlyAway || awaySeen else {", "guard !onlyAway || awaySeen else {"),
     ("the lock's only away ignored at the departure", P, "guard on, !onlyAway || awaySeen else {", "guard on else {"),

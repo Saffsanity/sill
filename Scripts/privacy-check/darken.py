@@ -17,8 +17,10 @@ and is killed at the end. One verdict per rule:
   takeback  locked and unlocked at the Mac with no device's input (the lock file): lit, and stays lit
   hold      with --lock-after-session: the dark holds through the lock's wait and its confirmation, lit only after
   quit      SIGTERM while dark: lit before the host exits
+  watchdog  SILL_TEST_PRIVACY_STALL=12 while dark: the main thread stops 12 s, the watchdog's dry run says once, 10 s
+            into it, that it would quit Sill, and the host goes on after the stall (rule 12; Sill.app itself would end)
 
-    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|all]
+    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|all]
 
 Needs .build/release/SillHost. Exits 1 when a verdict fails."""
 import os, re, signal, subprocess, sys, threading, time
@@ -31,11 +33,13 @@ BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_
             "SILL_TEST_LOCK_IGNORE_MAC": "1", "SILL_TEST_PRIVACY_DISPLAYS": "1"}
 DARK = "Privacy (dry run): would darken 1 display; nothing is drawn."
 LIGHT = "Privacy (dry run): would light this Mac’s screen again; nothing was drawn."
-HINT_LOCK = "Privacy (dry run): would show “This Mac is in use from another device. Press any key to lock it.”"
+HINT_LOCK = "Privacy (dry run): would show “This Mac is in use from another device. Press any key or click to lock it.”"
 HINT_PASS = "Privacy (dry run): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”"
 DRY_CURTAIN = ("Privacy (dry run): would darken", "Privacy (dry run): would light", "Privacy (dry run): would show")
 DRY_START = " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do."
 LOCK_DRY = "Privacy (dry run): would lock this Mac now; nothing is locked."
+WATCHDOG_DRY = ("Privacy (dry run): Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; would quit Sill and open "
+                "it again; nothing quits.")
 
 verdicts = []
 
@@ -259,8 +263,26 @@ def case_quit(out):
     verdict(bool(q) and bool(lit) and lit[0][1] < q[0][1], f"lit, then its line, as the host quits: {len(lit)} lifts, {len(q)} lines")
 
 
+def case_watchdog(out):
+    print("== watchdog: the main thread stops 12 s while dark (SILL_TEST_PRIVACY_STALL)", flush=True)
+    h = Host(out, "watchdog", {"SILL_TEST_PRIVACY_STALL": "12", "SILL_TEST_PRIVACY_GRACE": "2"}, ["--darken=any"])
+    c = client(h, "watchdog", 20, 1.0)
+    c.join(); h.at(26); h.stop()
+    dark, _, _ = h.first(DARK)
+    stops, _, _ = h.first("Test privacy: the main thread stops for 12 s in 1 s (SILL_TEST_PRIVACY_STALL).")
+    goes, _, _ = h.first("Test privacy: the main thread goes on after 12 s (SILL_TEST_PRIVACY_STALL).")
+    dog = h.find(WATCHDOG_DRY)
+    verdict(dark is not None and stops is not None and stops >= dark, f"the black up at {dark}, the stall announced at {stops}")
+    into = [round(t - (stops + 1), 2) for t, _, _ in dog] if stops is not None else []
+    verdict(len(dog) == 1 and 9.5 <= into[0] <= 12.5, f"the watchdog's dry run says once, 10 s into the stall (and a look's second): {into}")
+    verdict(goes is not None and bool(dog) and goes > dog[0][0], f"the stall ends after it ({goes}) and nothing quits: the host goes on")
+    left = h.find("Privacy: the last device left;")
+    verdict(bool(left) and goes is not None and left[0][0] > goes and bool(h.find(LIGHT)),
+            "the device's departure after the stall starts the wait and the screen is lit: the host still runs")
+
+
 CASES = {"order": case_order, "home": case_home, "away": case_away, "wait": case_wait, "keys": case_keys, "pass": case_pass,
-         "takeback": case_takeback, "hold": case_hold, "quit": case_quit}
+         "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: raise SystemExit(__doc__)

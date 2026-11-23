@@ -38,7 +38,14 @@ final class InputInjector {
 
     /// `.hidSystemState` merges with the real HID state, so a modifier physically held on the Mac
     /// still applies to an injected click. Keyboard events below set their flags explicitly anyway.
-    private let source = CGEventSource(stateID: .hidSystemState)
+    /// Every event made from it carries DarkenPolicy.eventTag (`kCGEventSourceUserData`), so while this
+    /// Mac's screen is dark a device's keys, clicks and pointer never count as a person's at the Mac
+    /// (DarkenPolicy rule 7; the probe G0 saw NSEvent's global monitor keep the tag).
+    private let source: CGEventSource? = {
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.userData = DarkenPolicy.eventTag
+        return source
+    }()
     private var lastMoveArrival: CFTimeInterval = 0   // jitter probe, see apply()
     private var left = ButtonState()
     private var right = ButtonState()

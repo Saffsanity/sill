@@ -6,10 +6,11 @@
 //   Tests/checks/darken/run.sh --mutants   one-line mutants of DarkenPolicy.swift (and five of PrivacyPolicy.swift's
 //                                          switches and route); each must fail it
 //
-// What it checks: the constants (the lock's wait and confirmation shared, the windows under the lock screen until G0);
-// rule 14, who darkens (Sill.app itself alone, the lock's rule PrivacyPolicy.locksForReal; held back until the probe
-// fills its seams; the dry run's words for everything else); rule 13's screens (through DesktopDisplays.role's real
-// identities); rule 2's sessions that darken; rule 1, off
+// What it checks: the constants (the lock's wait and confirmation shared, the windows under the lock screen); the probe
+// G0's measurements (the black windows' level and opacity); rule 7's events (which count, which are Sill's own); the
+// Settings switches as the scope; rule 14, who darkens (Sill.app itself alone, the lock's rule
+// PrivacyPolicy.locksForReal; the dry run's words for everything else); rule 13's screens (through
+// DesktopDisplays.role's real identities); rule 2's sessions that darken; rule 1, off
 // (nothing ever); rules 3 and 5, the dark and its raise at a connect (its line, the hint, the order); rule 6, the wait
 // (its line, a return, its boundary, two sessions, a move, a move home, a test host's shorter wait) and the hold for the
 // lock when the same departure started the lock's wait (held while the lock is under way, never past its bound, never
@@ -17,7 +18,8 @@
 // the pointer on the dark Mac (the lock asked once per confirmation, its confirmation, a lock that does not show or
 // cannot be made, the hint's wording and pace, Sill's own events, a locked Mac); rule 8, taken back (the Mac's own unlock
 // and the device's, the window, off console, until every session has left or a switch changes); rule 9, the switches;
-// rule 11, a quit; rule 12, the watchdog's decisions; rule 13's count; the TEST ONLY hooks; every word; both rules
+// rule 11, a quit; rule 12, the watchdog's decisions and its reopening; rule 13's count; the TEST ONLY hooks; every word
+// (the log's, the hint's, the watchdog's, Settings'); both rules
 // together, scripted (part 1's three switches and each session's route: a visit away and one at home under only after a
 // device away, a device at home left behind, a move home, a switch turned on or off during the waits, the display left
 // on); then a model of the coordinator's glue running this rule beside the lock's (PrivacyPolicy, its three switches,
@@ -83,7 +85,49 @@ same(D.relaunchSpacing, 600, "Sill reopens at most once in 10 minutes")
 check(D.eventTag != 0 && D.eventTag != 1 && D.eventTag != -1, "the tag is no value a person's hardware or a default sets")
 check(D.tick > 0 && D.tick * 2 <= D.lockConfirm, "the tick looks at least twice within a confirmation")
 check(D.holdSlack >= 2 * D.tick, "the hold's slack covers the two rules' ticks")
-check(D.staysUnderLockScreen, "the black windows sit under the lock screen until the probe G0 says otherwise")
+check(D.staysUnderLockScreen, "the black windows sit under the lock screen (the probe G0 found a level for it)")
+
+// MARK: - The probe G0 (2026-11-23): the black windows' level and opacity
+
+same(D.probeHidden, [996, 101, 23, 20, 19, 14, 2], "what G0 saw stay behind the black: Force Quit, the volume indicator, a notification and Spotlight, Mission Control and the Dock")
+same(D.probeSameLevel, 1000, "the screen saver's level, where another app's window was listed in front of the black")
+same(D.probeLockScreen, [2001, 2004], "the lock screen's layers, in front of the black")
+same(D.assistiveLevel, 1500, "kCGAssistiveTechHighWindowLevel, the highest level macOS names under the lock screen")
+check(D.levelFits(D.windowLevel), "the black windows' level fits what G0 measured")
+same(D.windowLevel, 1501, "one above the assistive level")
+check(D.probeHidden.allSatisfy { $0 < D.windowLevel }, "above everything G0 saw stay hidden")
+check(D.windowLevel > D.probeSameLevel && D.windowLevel > D.assistiveLevel, "above every named level under the lock screen: no other app's window ties with it")
+check(D.probeLockScreen.allSatisfy { D.windowLevel < $0 } && D.windowLevel <= D.probeLockScreen.min()! - 500,
+      "under the lock screen, 500 below it at least, so a person at the Mac always sees it")
+check(!D.levelFits(1000), "not the screen saver's level (#184's): another app's window can be ordered in front of it there")
+check(!D.levelFits(1500), "not the assistive level: its windows (spoken text's captions, hover text) could show over the black")
+check(D.levelFits(1501) && D.levelFits(2000), "anything above 1500 and under the lock screen fits")
+check(!D.levelFits(2001) && !D.levelFits(2004) && !D.levelFits(2_147_483_628), "never at or over the lock screen (the shielding level, S3, covered it)")
+check(!D.levelFits(996) && !D.levelFits(0), "never with the Force Quit window or ordinary windows")
+check(D.windowOpaque, "opaque, as #184's: G0's S2 (not opaque) drew no differently")
+
+// MARK: - Rule 7: which events are this Mac's own, and which Sill posted (G0's step 4)
+
+same(D.localKind(eventType: 10), .key, "a key down is a key")
+for t in [1, 3, 25] { same(D.localKind(eventType: t), .click, "mouse button down \(t) is a click") }
+for t in [5, 6, 7, 27, 22] { same(D.localKind(eventType: t), .move, "pointer move, drag or scroll \(t) only shows the hint") }
+for t in [2, 4, 26, 11, 12, 0, 9, 14, 18, 29, 30, 31, 32] { same(D.localKind(eventType: t), nil, "event type \(t) counts for nothing (an up, a modifier alone, a gesture, anything else)") }
+same(Set(D.watchedEventTypes), Set((0..<64).filter { D.localKind(eventType: $0) != nil }), "the observer asks for exactly the events that count")
+same(D.watchedEventTypes.count, Set(D.watchedEventTypes).count, "each once")
+same(D.eventTag, 0x5349_4C4C_5052_5631, "the tag G0 saw kept in the global monitor (0x53494C4C50525631)")
+check(D.ownEvent(userData: D.eventTag, sourcePID: 0, ownPID: 500), "the tag alone: Sill's own (an event a helper of Sill's might post)")
+check(D.ownEvent(userData: 0, sourcePID: 500, ownPID: 500), "this process as the source alone: Sill's own (G0: a posted event names its poster)")
+check(!D.ownEvent(userData: 0, sourcePID: 0, ownPID: 500), "a person's hardware (G0: process 0, no tag) is a person's")
+check(!D.ownEvent(userData: 0, sourcePID: 777, ownPID: 500), "another app's posted event is a person's (someone at the Mac runs it)")
+check(!D.ownEvent(userData: 0x1234, sourcePID: 0, ownPID: 500) && !D.ownEvent(userData: D.eventTag &+ 1, sourcePID: 0, ownPID: 500),
+      "another tag is not Sill's")
+
+// MARK: - Settings › Devices: the two switches as the scope
+
+same(D.scope(on: false, onlyAway: true), .off, "off, only away remembered: off")
+same(D.scope(on: false, onlyAway: false), .off, "off, whenever remembered: off")
+same(D.scope(on: true, onlyAway: true), .away, "on, only while a device is away from home")
+same(D.scope(on: true, onlyAway: false), .any, "on, whenever a device is connected")
 
 // MARK: - Rule 14: only Sill.app itself darkens (the review of PR #400, follow-up 1)
 
@@ -98,9 +142,6 @@ for synthetic in [false, true] {
              "the lock's rule, synthetic \(synthetic), bundled \(bundled): whatever darkens for real locks for real, and nothing else")
     }
 }
-check(D.heldBack(real: true, filled: false), "Sill.app before the probe G0 fills its seams: darkening off whatever the switch says")
-check(!D.heldBack(real: true, filled: true), "Sill.app once they are filled: the switch decides")
-check(!D.heldBack(real: false, filled: true) && !D.heldBack(real: false, filled: false), "a dry run is never held back: it draws nothing anyway")
 
 // MARK: - Rule 13: the screens to cover
 
@@ -567,6 +608,14 @@ check(D.reopens(lastReopen: nil, now: 5), "the first such end reopens Sill")
 check(!D.reopens(lastReopen: 100, now: 699), "not again within 10 minutes")
 check(D.reopens(lastReopen: 100, now: 700), "again after them")
 check(D.reopens(lastReopen: 100, now: 50), "a clock that went back (a restart) never stops it")
+same(D.reopenedWithin, 60, "a launch within a minute of the watchdog's end is its reopening")
+check(D.followsWatchdog(record: 100, now: 100) && D.followsWatchdog(record: 100, now: 160), "the launch the watchdog's reopening makes says so")
+check(!D.followsWatchdog(record: 100, now: 160.01), "a launch later is an ordinary one")
+check(!D.followsWatchdog(record: 100, now: 99), "a record from the future (the clock went back) is no reopening")
+check(!D.followsWatchdog(record: nil, now: 5), "no record, no reopening")
+same(D.reopenCommand(bundlePath: "/Applications/Sill.app"), ["/usr/bin/open", "-n", "-g", "/Applications/Sill.app"],
+     "a new instance of Sill.app's own bundle, in the background")
+same(D.reopenCommand(bundlePath: "/Users/x/sill/.build/release"), nil, "never the bare binary's folder")
 
 // MARK: - The TEST ONLY hooks
 
@@ -582,6 +631,16 @@ do {
     check(!r.log, "SILL_TEST_PRIVACY_LOG takes 1 only")
     same(r.lines, ["SILL_TEST_PRIVACY_INPUT=relative ignored: an absolute path."], "with its line")
     same(D.testHooks(testHost: true, environment: [:]), D.TestHooks(), "nothing set: nothing")
+    let stall = D.testHooks(testHost: true, environment: ["SILL_TEST_PRIVACY_STALL": "12"])
+    same(stall.stall, 12, "a test host stops its main thread once for SILL_TEST_PRIVACY_STALL's seconds")
+    same(stall.lines, ["Test privacy: the main thread stops once for 12 s, a second after the black first goes up (SILL_TEST_PRIVACY_STALL)."], "with its line")
+    same(D.testHooks(testHost: false, environment: ["SILL_TEST_PRIVACY_STALL": "12"]).stall, nil, "never anywhere but a test host")
+    for raw in ["0.5", "31", "x"] {
+        let h = D.testHooks(testHost: true, environment: ["SILL_TEST_PRIVACY_STALL": raw])
+        check(h.stall == nil && h.lines == ["SILL_TEST_PRIVACY_STALL=\(raw) ignored: seconds from 1 to 30."], "a stall of \(raw) s is ignored, with its line")
+    }
+    check(D.testHooks(testHost: true, environment: ["SILL_TEST_PRIVACY_STALL": "1"]).stall == 1
+          && D.testHooks(testHost: true, environment: ["SILL_TEST_PRIVACY_STALL": "30"]).stall == 30, "1 and 30 s are taken")
     check(D.testInput("key")! == (.key, false) && D.testInput("click")! == (.click, false) && D.testInput("move")! == (.move, false),
           "the file's words: key, click, move")
     check(D.testInput("key tagged")! == (.key, true) && D.testInput(" move  tagged ")! == (.move, true), "with tagged: one Sill posted")
@@ -594,15 +653,15 @@ do {
 do {
     let all: [String] = [W.dark(.away, screens: 1), W.dark(.any, screens: 2), W.lastLeft(30), W.cameBack(30), W.lit, W.switchedOff,
                          W.noneCounts, W.noScreen, W.quitting, W.locking, W.couldNotLock("why"), W.lockScreenShows, W.takenBack,
-                         W.deviceUnlocked("iPad"), W.watchdog, W.reopened, W.startLine(.away, keysLock: true, dry: false),
-                         W.startLine(.any, keysLock: false, dry: true), W.waitsForProbe]
+                         W.deviceUnlocked("iPad"), W.watchdog, W.watchdogNoReopen, W.reopened, W.noAccessibility,
+                         W.startLine(.away, keysLock: true, dry: false), W.startLine(.any, keysLock: false, dry: true)]
     check(all.allSatisfy { $0.hasPrefix("Privacy: ") && $0.hasSuffix(".") && !$0.contains("\n") }, "every log line begins with Privacy: and is one sentence")
     check(Set(all).count == all.count, "no two lines alike")
     check(all.allSatisfy { !$0.contains("'") }, "typographic apostrophes only")
     same(W.watchdog, "Privacy: Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; Sill quits so the screen isn’t left black, and opens again.", "the watchdog's line")
     same(W.reopened, "Privacy: Sill opened again after it quit with this Mac’s screen dark (its main thread had stopped answering).", "the line at the next launch")
     same(W.hintFirst, "This Mac is in use from another device.", "the hint's first line")
-    same(W.hintSecond(.lock), "Press any key to lock it.", "its second, keys locking")
+    same(W.hintSecond(.lock), "Press any key or click to lock it.", "its second, keys locking: a click too (a secure field withholds keys from an observer, never a click)")
     same(W.hintSecond(.pass), "To use it here, press Control-Command-Q, then unlock it.", "its second, keys passing")
     same(W.dryRaise(1), "Privacy (dry run): would darken 1 display; nothing is drawn.", "the dry run's raise (anything but Sill.app itself)")
     same(W.dryRaise(3), "Privacy (dry run): would darken 3 displays; nothing is drawn.", "plural")
@@ -618,8 +677,31 @@ do {
          "whenever, keys passing, a dry run: it says so")
     check(W.startLine(.away, keysLock: true, dry: true).hasPrefix(W.startLine(.away, keysLock: true, dry: false)),
           "the dry run's sentence comes after the switch's words")
-    same(W.waitsForProbe, "Privacy: darkening this Mac’s screen waits for its probe (docs/privacy-mode-plan.md, G0); this build darkens nothing.",
-         "Sill.app with the switch on, before G0")
+    same(W.watchdogNoReopen, "Privacy: Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; Sill quits so the screen isn’t left black, and doesn’t open again (it did less than 10 minutes ago).",
+         "the watchdog's line within 10 minutes of the last reopening")
+    same(W.noAccessibility, "Privacy: Sill can’t notice a key pressed on this Mac without Accessibility; a click still locks it.", "no Accessibility as the screen darkens")
+    same(W.dryWatchdog, "Privacy (dry run): Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; would quit Sill and open it again; nothing quits.",
+         "the watchdog's dry run (anything but Sill.app itself)")
+    check(W.dryWatchdog.hasPrefix("Privacy (dry run): "), "it begins as every dry run's line")
+    // Settings › Devices
+    same(W.toggle, "Darken this Mac’s screen", "the switch")
+    same(W.awayToggle, "Only while a device is away from home", "the scope's switch under it")
+    same(W.keysToggle, "A key or click on this Mac locks it", "the keys' switch under it")
+    same(W.footnoteOff, "For a Mac you use from afar: its displays stay black while you use it, so people near it see nothing.", "the footnote, off")
+    same(W.footnoteOn(onlyAway: true, keysLock: true),
+         "This Mac’s displays turn black while an iPhone or iPad uses it from away from home (through a VPN or over the internet), so people near it see nothing. They come back 30 seconds after the last one leaves. A key or click on this Mac locks it; unlock it here with your password or Touch ID and its displays stay lit until every device has left.",
+         "the footnote, on as it comes: only away, keys locking")
+    same(W.footnoteOn(onlyAway: false, keysLock: false),
+         "This Mac’s displays turn black while an iPhone or iPad is connected, so people near it see nothing. They come back 30 seconds after the last one leaves. Keys and clicks on this Mac still reach its apps, unseen. To use it here, press Control-Command-Q, then unlock it.",
+         "the footnote, whenever, keys passing")
+    check(W.footnoteOn(onlyAway: true, keysLock: false, grace: 1).contains("They come back 1 second after"), "the footnote says the wait it has")
+    same(W.accessibilityWarning, "Sill needs Accessibility to notice a key pressed on this Mac; a click still locks it. Allow it in Settings › Permissions.",
+         "the warning without Accessibility")
+    let settings = [W.toggle, W.awayToggle, W.keysToggle, W.footnoteOff, W.footnoteOn(onlyAway: true, keysLock: true),
+                    W.footnoteOn(onlyAway: false, keysLock: false), W.accessibilityWarning]
+    check(settings.allSatisfy { !$0.contains("'") && !$0.contains("\n") }, "Settings' words: typographic apostrophes, one line each")
+    check([W.toggle, W.awayToggle, W.keysToggle].allSatisfy { !$0.hasSuffix(".") }, "a switch's title has no full stop")
+    check([W.footnoteOff, W.footnoteOn(onlyAway: true, keysLock: true), W.accessibilityWarning].allSatisfy { $0.hasSuffix(".") }, "footnotes and the warning are sentences")
     same(W.displays(1) + ", " + W.displays(0) + ", " + W.displays(2), "1 display, 0 displays, 2 displays", "display counts")
     same(W.stillUnlocked, PW.stillUnlockedLog, "the same words as the lock's for a lock that did not show")
 }

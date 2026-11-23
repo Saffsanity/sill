@@ -5,9 +5,10 @@ import StreamProtocol
 
 /// Settings › Devices, live: Require pairing, which the model keeps in the identity store beside
 /// the trust list (never in UserDefaults), the pairing window's switch for screen sharing (in
-/// UserDefaults, HostSettings), Lock this Mac when the last device leaves with its warning from the
-/// host's status, and the paired devices from the host's status (pushed, so nothing polls), with the
-/// model's actions. Opening the pane looks again at whether this Mac has a display to type its
+/// UserDefaults, HostSettings), Darken this Mac's screen with its two switches and Accessibility's
+/// warning (the model's permissions), Lock this Mac when the last device leaves with its warning from
+/// the host's status, and the paired devices from the host's status (pushed, so nothing polls), with
+/// the model's actions. Opening the pane looks again at whether this Mac has a display to type its
 /// password at (the lock's warning).
 struct LiveDevicesPane: View {
     let model: AppModel
@@ -21,8 +22,12 @@ struct LiveDevicesPane: View {
                     lockAfterSession: $settings.config.lockAfterSession,
                     lockSleepsDisplay: $settings.config.lockSleepsDisplay,
                     lockOnlyAfterAway: $settings.config.lockOnlyAfterAway,
+                    darkenScreen: $settings.darkenScreenOn,
+                    darkenOnlyAway: $settings.darkenOnlyAway,
+                    darkenKeysLock: $settings.config.darkenKeysLock,
                     requirePairingProblem: model.requirePairingProblem,
                     privacyLock: model.coordinator?.status.snapshot.privacyLock ?? PrivacyLockStatus(),
+                    accessibility: model.permissions.accessibility,
                     actions: DevicesPane.Actions(pair: { model.pairDevice() },
                                                  remove: { model.removeDevice($0) },
                                                  rename: { model.renameDevice($0, to: $1) }))
@@ -32,10 +37,11 @@ struct LiveDevicesPane: View {
 
 /// The Devices pane (docs/home-pairing-plan.md §6.1): Require pairing; Show the pairing window to
 /// screen sharing (issue #108, PairingWindowSharing); Show this account while another user is on the
-/// screen (docs/off-console-plan.md); Lock this Mac when the last device leaves (docs/privacy-mode-plan.md,
-/// part 1); and the devices paired with this Mac at home and from afar (one trust list), each with how
-/// it paired and how it last connected, Remove, rename and Pair iPhone or iPad…. Values in, actions
-/// out, so the previews can draw every state. Errors show inline, never in alerts.
+/// screen (docs/off-console-plan.md); Darken this Mac's screen (docs/privacy-mode-plan.md, part 2);
+/// Lock this Mac when the last device leaves (part 1); and the devices paired with this Mac at home and
+/// from afar (one trust list), each with how it paired and how it last connected, Remove, rename and
+/// Pair iPhone or iPad…. Values in, actions out, so the previews can draw every state. Errors show
+/// inline, never in alerts.
 struct DevicesPane: View {
     struct Actions {
         var pair: () -> Void = {}
@@ -56,11 +62,20 @@ struct DevicesPane: View {
     @Binding var lockAfterSession: Bool
     @Binding var lockSleepsDisplay: Bool
     @Binding var lockOnlyAfterAway: Bool
+    /// Darken this Mac's screen (HostConfig.darkenScreen; docs/privacy-mode-plan.md, part 2), and the two switches shown
+    /// under it while it is on: Only while a device is away from home (HostSettings.darkenOnlyAway, which the scope is
+    /// made from: DarkenPolicy.scope) and A key or click on this Mac locks it (HostConfig.darkenKeysLock).
+    @Binding var darkenScreen: Bool
+    @Binding var darkenOnlyAway: Bool
+    @Binding var darkenKeysLock: Bool
     /// The last Require pairing change the identity store did not keep.
     var requirePairingProblem: AppModel.RequirePairingProblem?
     /// The lock's state as the host runs it: its warning (no display to type the password at, or the last lock
     /// that failed).
     var privacyLock = PrivacyLockStatus()
+    /// Sill has Accessibility (PermissionsModel): without it a key on the dark Mac goes unnoticed, so the darkening's
+    /// section says so while keys lock.
+    var accessibility = true
     let actions: Actions
     /// "Last connected 2 minutes ago" counts from here (fixed in the previews).
     var now: Date?
@@ -112,6 +127,21 @@ struct DevicesPane: View {
                 Toggle("Show this account while another user is on the screen", isOn: $offConsoleView)
             } footer: {
                 Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
+            }
+            // Darken this Mac's screen (docs/privacy-mode-plan.md, part 2; #133, #323): at once, no restart; the Mac's
+            // alone. While it is on, its two switches (the plan's open decisions 2 and 3) and Accessibility's warning.
+            Section {
+                Toggle(DarkenPolicy.Words.toggle, isOn: $darkenScreen)
+                if darkenScreen {
+                    Toggle(DarkenPolicy.Words.awayToggle, isOn: $darkenOnlyAway)
+                    Toggle(DarkenPolicy.Words.keysToggle, isOn: $darkenKeysLock)
+                    if darkenKeysLock, !accessibility {
+                        Warning(DarkenPolicy.Words.accessibilityWarning)
+                    }
+                }
+            } footer: {
+                Footnote(darkenScreen ? DarkenPolicy.Words.footnoteOn(onlyAway: darkenOnlyAway, keysLock: darkenKeysLock)
+                                      : DarkenPolicy.Words.footnoteOff)
             }
             // Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283, #275): at once, no
             // restart; the Mac's alone. While it is on, its two switches (#275's display; the plan's open decision 5's

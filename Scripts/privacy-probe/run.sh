@@ -32,9 +32,9 @@ swiftc -O $HERE/window.swift -o $WINDOW || exit 1
 codesign -s - --force $APP 2>/dev/null || exit 1
 swiftc -O $HERE/probe.swift -o $PROBE || exit 1
 for b in $PROBE $WINDOW; do
-  if otool -L $b | grep -q VideoToolbox; then print "REFUSED: $b links VideoToolbox"; exit 1; fi
+  if otool -L $b | grep -q VideoToolbox; then print -r -- "REFUSED: $b links VideoToolbox"; exit 1; fi
 done
-if [[ ${1:-} == --build-only ]]; then print "Built $PROBE and $APP; nothing run."; exit 0; fi
+if [[ ${1:-} == --build-only ]]; then print -r -- "Built $PROBE and $APP; nothing run."; exit 0; fi
 
 REPORT=${1:-$OUT/report.txt}
 mkdir -p ${REPORT:h}
@@ -48,15 +48,18 @@ cleanup() {
   (( WIN )) && kill $WIN 2>/dev/null
   (( GUARD )) && { pkill -P $GUARD sleep 2>/dev/null; kill $GUARD 2>/dev/null }
 }
-trap 'cleanup; print "\nStopped. The report so far: $REPORT"; exit 130' INT TERM
+trap 'cleanup; print -r -- ""; print -r -- "Stopped. The report so far: $REPORT"; exit 130' INT TERM
 trap cleanup EXIT
+# Every print is `print -r --`: zsh's print takes a first word that begins with "-" for its options (the headings below
+# begin "---", and G0's run of 2026-11-23 lost each of them to "print: bad option: -"), and without -r it reads
+# backslashes in the text (an answer typed with one) as escapes.
 
 # guard PID: kill -9 PID 12 s from now if it is still the probe; prints the guard's own pid, for `unguard`.
 guard() {
   local pid=$1
   ( trap - INT TERM EXIT
     sleep 12 & wait $!
-    [[ $(ps -p $pid -o comm= 2>/dev/null) == *probe* ]] && kill -9 $pid 2>/dev/null && print "(the probe was killed after 12 s)" ) &
+    [[ $(ps -p $pid -o comm= 2>/dev/null) == *probe* ]] && kill -9 $pid 2>/dev/null && print -r -- "(the probe was killed after 12 s)" ) &
   GUARD=$!
 }
 unguard() { pkill -P $GUARD sleep 2>/dev/null; kill $GUARD 2>/dev/null; GUARD=0 }
@@ -80,20 +83,20 @@ go() { read -r "?$1 Press Return to start. " }
 ask() {
   local a=""
   read -r "a?$2 "
-  print "ANSWER $1: ${a:-(none)}"
+  print -r -- "ANSWER $1: ${a:-(none)}"
 }
 
-print "=== Sill privacy probe (G0), $(date '+%Y-%m-%d %H:%M %Z') ==="
-print "Every black spell lasts at most 10 s. Ctrl-C ends the probe at once, and the screen comes back."
-print "The report goes to $REPORT."
-print ""
-$PROBE check || { print "The probe can't run yet (see above)."; exit 2 }
-print ""
+print -r -- "=== Sill privacy probe (G0), $(date '+%Y-%m-%d %H:%M %Z') ==="
+print -r -- "Every black spell lasts at most 10 s. Ctrl-C ends the probe at once, and the screen comes back."
+print -r -- "The report goes to $REPORT."
+print -r -- ""
+$PROBE check || { print -r -- "The probe can't run yet (see above)."; exit 2 }
+print -r -- ""
 
-print "--- Step 1 of 5: do the windows under the black keep drawing? (4 spells of 4 s) ---"
-print "Before you go on: play a video in Safari (a YouTube video in a window, not full screen) and open VS Code"
-print "(or Slack, Discord, Notion; else Chrome) beside it, both fully on screen. A small test window will appear"
-print "at the top left. Each spell: 2 s as it is, 4 s black, then it comes back."
+print -r -- "--- Step 1 of 5: do the windows under the black keep drawing? (4 spells of 4 s) ---"
+print -r -- "Before you go on: play a video in Safari (a YouTube video in a window, not full screen) and open VS Code"
+print -r -- "(or Slack, Discord, Notion; else Chrome) beside it, both fully on screen. A small test window will appear"
+print -r -- "at the top left. Each spell: 2 s as it is, 4 s black, then it comes back."
 go "When Safari's video plays and the other app is on screen,"
 $WINDOW 40 60 420 260 180 > $OUT/window.log &
 WIN=$!
@@ -105,10 +108,10 @@ done
 kill $WIN 2>/dev/null
 WIN=0
 ask step1 "Anything odd in step 1 (a spell longer than 4 s, a screen that stayed black, a flash)? Return if not:"
-print ""
+print -r -- ""
 
-print "--- Step 2 of 5: what shows in front of the black? (7 spells of 9–10 s) ---"
-print "Each spell shows a short instruction on the black screen. Do it, and look."
+print -r -- "--- Step 2 of 5: what shows in front of the black? (7 spells of 9–10 s) ---"
+print -r -- "Each spell shows a short instruction on the black screen. Do it, and look."
 go "Spell 1: when the screen goes black, press Control-Command-Q to lock the Mac. If you see the lock screen, unlock it with Touch ID or your password. If you see only black, wait: it lifts within 10 s."
 spell $PROBE levels lock --seconds 10 --text "Press Control-Command-Q now." --text "Then unlock with Touch ID or your password."
 ask lock "Did the lock screen show over the black? Could you unlock while it was black? After unlocking, was the screen still black until the spell ended?"
@@ -130,9 +133,9 @@ ask forcequit "Did the Force Quit window show over the black?"
 go "Spell 7: move the mouse around."
 spell $PROBE levels pointer --text "Move the mouse."
 ask pointer "Did you see the pointer on the black?"
-print ""
+print -r -- ""
 
-print "--- Step 3 of 5: Sill killed, or stuck, while the screen is black (2 spells) ---"
+print -r -- "--- Step 3 of 5: Sill killed, or stuck, while the screen is black (2 spells) ---"
 go "The screen goes black, and 3 s later the probe is killed (kill -9): it should come back at once."
 $PROBE hold 10 &
 CUR=$!
@@ -157,22 +160,22 @@ $PROBE gone $CUR
 unguard
 CUR=0
 ask stop "While it was frozen, was the screen black? After the kill, did it come back at once?"
-print ""
+print -r -- ""
 
-print "--- Step 4 of 5: telling Sill's own input from a person's (no black) ---"
-print "The probe posts a pointer move (to where the pointer already is) and a Shift press, once with Sill's tag and"
-print "once without; then it asks you to move the mouse a little and press Shift once."
+print -r -- "--- Step 4 of 5: telling Sill's own input from a person's (no black) ---"
+print -r -- "The probe posts a pointer move (to where the pointer already is) and a Shift press, once with Sill's tag and"
+print -r -- "once without; then it asks you to move the mouse a little and press Shift once."
 go "When ready,"
 spell $PROBE events
-print ""
+print -r -- ""
 
-print "--- Step 5 of 5: is the black black? (1 spell of 10 s) ---"
-print "Before you go on, if you can: turn on Night Shift and True Tone (Control Center › Display), play an HDR"
-print "video (YouTube's HDR, or the TV app) where the black will cover it, and connect an external monitor or a"
-print "Sidecar iPad if you have one at hand."
+print -r -- "--- Step 5 of 5: is the black black? (1 spell of 10 s) ---"
+print -r -- "Before you go on, if you can: turn on Night Shift and True Tone (Control Center › Display), play an HDR"
+print -r -- "video (YouTube's HDR, or the TV app) where the black will cover it, and connect an external monitor or a"
+print -r -- "Sidecar iPad if you have one at hand."
 ask setup "What did you set up (Night Shift, True Tone, an HDR video, a monitor, Sidecar)?"
 go "Every screen goes black for 10 s. Look at each, from the side too."
 spell $PROBE black 10
 ask black "Was every screen pure black? Any glow, bright HDR spots, a band, or a screen that stayed lit? Which screens?"
-print ""
-print "=== Done. Thank you. The report: $REPORT ==="
+print -r -- ""
+print -r -- "=== Done. Thank you. The report: $REPORT ==="
