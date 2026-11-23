@@ -12,6 +12,8 @@ import Foundation
 ///   stays as it is, the way back included (docs/app-icons-plan.md, "Defaults taken for Noah to confirm").
 /// - `community`: grub-basket's design from pull request #386, `Packaging/AppIconCommunity.icon`, an alternate
 ///   icon (ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES), credited to its author by login.
+/// - `windowsill`: joannou's, `Packaging/AppIconWindowsill.icon`: a Mac's window lit green at night with its three
+///   lights, and a cat sitting on its sill, looking in; an alternate icon, credited to its author by login.
 ///
 /// A later icon is one more case, its document, its preview (Scripts/app-icon-previews.sh) and its name in the
 /// project's alternates; Tests/checks/app-icon says which of them is missing. Sill for Mac keeps the original
@@ -29,6 +31,7 @@ import Foundation
 enum AppIconChoice: String, CaseIterable, Identifiable {
     case original
     case community
+    case windowsill
 
     var id: String { rawValue }
 
@@ -40,6 +43,7 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
         switch self {
         case .original: return "AppIcon"
         case .community: return "AppIconCommunity"
+        case .windowsill: return "AppIconWindowsill"
         }
     }
 
@@ -60,6 +64,7 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
         switch self {
         case .original: return nil
         case .community: return "grub-basket"
+        case .windowsill: return "joannou"
         }
     }
 
@@ -68,6 +73,7 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
         switch self {
         case .original: return "Original"
         case .community: return "Community"
+        case .windowsill: return "Windowsill"
         }
     }
 

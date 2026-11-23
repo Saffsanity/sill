@@ -14,6 +14,7 @@
 		A1000001000000000000A005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F005 /* Assets.xcassets */; };
 		A1000001000000000000A1C0 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1C0 /* AppIcon.icon */; };
 		A1000001000000000000A1C1 /* AppIconCommunity.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1C1 /* AppIconCommunity.icon */; };
+		A1000001000000000000A1C4 /* AppIconWindowsill.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1C4 /* AppIconWindowsill.icon */; };
 		A1000001000000000000A1C2 /* AppIconChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1C2 /* AppIconChoice.swift */; };
 		A1000001000000000000A1C3 /* AppIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1C3 /* AppIconPicker.swift */; };
 		A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F101 /* PrivacyInfo.xcprivacy */; };
@@ -86,6 +87,7 @@
 		A1000001000000000000F005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000001000000000000F1C0 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = AppIcon.icon; path = ../Packaging/AppIcon.icon; sourceTree = SOURCE_ROOT; };
 		A1000001000000000000F1C1 /* AppIconCommunity.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = AppIconCommunity.icon; path = ../Packaging/AppIconCommunity.icon; sourceTree = SOURCE_ROOT; };
+		A1000001000000000000F1C4 /* AppIconWindowsill.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = AppIconWindowsill.icon; path = ../Packaging/AppIconWindowsill.icon; sourceTree = SOURCE_ROOT; };
 		A1000001000000000000F1C2 /* AppIconChoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconChoice.swift; sourceTree = "<group>"; };
 		A1000001000000000000F1C3 /* AppIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconPicker.swift; sourceTree = "<group>"; };
 		A1000001000000000000F101 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -234,6 +236,7 @@
 				A1000001000000000000F005 /* Assets.xcassets */,
 				A1000001000000000000F1C0 /* AppIcon.icon */,
 				A1000001000000000000F1C1 /* AppIconCommunity.icon */,
+				A1000001000000000000F1C4 /* AppIconWindowsill.icon */,
 				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
 				A1000001000000000000F006 /* Info.plist */,
 				A1000001000000000000F00D /* Info-Debug.plist */,
@@ -324,6 +327,7 @@
 				A1000001000000000000A005 /* Assets.xcassets in Resources */,
 				A1000001000000000000A1C0 /* AppIcon.icon in Resources */,
 				A1000001000000000000A1C1 /* AppIconCommunity.icon in Resources */,
+				A1000001000000000000A1C4 /* AppIconWindowsill.icon in Resources */,
 				A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -531,7 +535,7 @@
 		A10000010000000000009301 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconWindowsill";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -564,7 +568,7 @@
 		A10000010000000000009302 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconWindowsill";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
