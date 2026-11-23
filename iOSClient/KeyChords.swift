@@ -65,6 +65,144 @@ struct KeyModifiers: OptionSet {
     }
 }
 
+/// The key row's modifier caps (#268). A tap latches a modifier for the next key, character or click,
+/// and that use spends it, as a sticky key does; with Hold to Lock Modifiers on (`switchKey`: Settings ›
+/// This iPad › Keys, off unless turned on), a finger held on the cap for `holdSeconds` locks it instead
+/// (`ModifierHold`), and a locked modifier stays on through every use until its cap is tapped again, so ⌘
+/// then Z three times is three undos. `latched` is everything the key row, the keyboard and the pad send
+/// with, locked or not (what every sender already reads); `locked` is the part of it a use does not spend,
+/// always within `latched`. Nothing here is held down on the Mac: a modifier goes out around the key or
+/// click that uses it (`KeyChord`), so a lock left on when the stream ends leaves no key down there. And
+/// both ride a key, a character or a click only while a key row is on screen to show them (`carried`): on
+/// the device's side, in full screen and under the laptop pose's Keyboard toggle nothing carries them, and
+/// the row shows them again when it comes back.
+enum ModifierLock {
+    /// How long a finger stays on a modifier's cap before it locks ("about one second", #268).
+    static let holdSeconds = 1.0
+
+    /// Hold to Lock Modifiers, this device's switch (Settings › This iPad › Keys): off unless turned on
+    /// (`defaultOn`). Off, a finger held on a modifier's cap is a tap, as before the lock, and VoiceOver
+    /// offers no lock. The device's own preference, never sent to the Mac.
+    static let switchKey = "Sill.holdToLockModifiers"
+    static let defaultOn = false
+
+    /// A tap on `flag`'s cap: a locked modifier is let go; any other latches, or unlatches.
+    static func tapped(_ flag: KeyModifiers, latched: KeyModifiers, locked: KeyModifiers)
+        -> (latched: KeyModifiers, locked: KeyModifiers) {
+        if locked.contains(flag) { return (latched.subtracting(flag), locked.subtracting(flag)) }
+        return (latched.symmetricDifference(flag), locked)
+    }
+
+    /// A finger has stayed on `flag`'s cap for `holdSeconds`: it is locked, latched or not, and a lock
+    /// held again stays one.
+    static func held(_ flag: KeyModifiers, latched: KeyModifiers, locked: KeyModifiers)
+        -> (latched: KeyModifiers, locked: KeyModifiers) {
+        (latched.union(flag), locked.union(flag))
+    }
+
+    /// What is latched once a key, character or click has used it: what is locked.
+    static func spent(locked: KeyModifiers) -> KeyModifiers { locked }
+
+    /// A key, a character or a click went out with `latched` (what its sender carried), `locked` of it
+    /// locked: what is latched after it, or nil when the use spends nothing (all of it locked, or nothing
+    /// carried), so the key row is not told. What the input view and the trackpad do after each use.
+    static func used(latched: KeyModifiers, locked: KeyModifiers) -> KeyModifiers? {
+        latched.subtracting(locked).isEmpty ? nil : spent(locked: locked)
+    }
+
+    /// Hold to Lock Modifiers turned off: every lock is let go, whole, as a tap on its cap lets it go;
+    /// what is only latched stays latched for its one use.
+    static func switchedOff(latched: KeyModifiers, locked: KeyModifiers) -> (latched: KeyModifiers, locked: KeyModifiers) {
+        (latched.subtracting(locked), [])
+    }
+
+    /// Whether a key row is on screen to show what is latched and locked: in a layout held upright (the
+    /// halves, a phone's; none on its side has a key row), its controls shown (full screen hides them),
+    /// and its caps in view (`rowDisplaced`: the laptop pose's software keyboard has taken their place
+    /// with no row of its own, only the Keyboard toggle, or nothing while a reading of the keyboard is on
+    /// its way: DuoPosture.KeyboardStandIn without a `row`).
+    static func keyRowOnScreen(upright: Bool, controlsHidden: Bool, rowDisplaced: Bool) -> Bool {
+        upright && !controlsHidden && !rowDisplaced
+    }
+
+    /// What a key, a character or a click carries of `modifiers` (what is latched, or what of it is
+    /// locked): all of it while a key row is on screen to show it, nothing while none is, where a lock or
+    /// a latch would ride every key unseen (⌘ locked upright, the device turned on its side, and "quit"
+    /// typed there would go out as ⌘Q; a hardware keyboard's too). Set aside, not forgotten: a use while
+    /// none shows spends nothing, and the key row shows them again when it comes back, as a turn of the
+    /// device always kept a latch for upright again (docs/iphone-portrait-plan.md, P6).
+    static func carried(_ modifiers: KeyModifiers, keyRowOnScreen: Bool) -> KeyModifiers {
+        keyRowOnScreen ? modifiers : []
+    }
+
+    /// The words: Settings › This iPad › Keys, and the caps' for VoiceOver.
+    enum Copy {
+        /// The group's heading, under This iPad.
+        static let group = "Keys"
+        static let title = "Hold to Lock Modifiers"
+        /// Under the switch ("for a second": `holdSeconds`).
+        static let footnote = "Touch and hold ctrl, opt, cmd or shift for a second to keep it on for every key and click, until you tap it again. A locked key shows a lock."
+        /// A modifier's cap's accessibility action, with the switch on, while it is not locked: the lock
+        /// for anyone who cannot hold a cap (VoiceOver, Switch Control, Voice Control), and at the
+        /// accessibility text sizes on a phone, where a long press shows the cap large instead.
+        static let lockAction = "Lock until released"
+
+        /// A modifier's cap as VoiceOver reads it, by its name ("Command"): locked, latched for its one use
+        /// (never "held", which is the gesture that locks), or neither.
+        static func capLabel(_ name: String, latched: Bool, locked: Bool) -> String {
+            if locked { return "\(name), locked. Tap to release." }
+            if latched { return "\(name), on for the next key." }
+            return "\(name), hold for the next key"
+        }
+    }
+}
+
+/// The key row's modifier caps under a finger, with Hold to Lock Modifiers on (#268): a finger that stays
+/// on a cap `ModifierLock.holdSeconds` locks its modifier (the view's timer asks `holdElapsed` when the
+/// time is up), and the cap's own action as that finger lifts is the end of the hold, not a tap, which
+/// would let the lock go (`activated`). Each cap on its own, as two fingers on two caps are two touches:
+/// ⌘ held until it locks while another finger taps ⇧ still ends as a hold, and a touch on ⇧ never stops
+/// ⌘'s hold from locking. An action with no touch (VoiceOver, Switch Control, Voice Control, Full Keyboard
+/// Access) is a tap. With the switch off no touch is told here, and every action is the tap it was before.
+struct ModifierHold {
+    /// A finger's press on a modifier's cap whose action has not come: which touch it is (the hold's timer
+    /// names it), when the finger left (nil while it is still on the cap), and whether its hold locked.
+    private struct Touch { var id: Int; var endedAt: Double?; var locked: Bool }
+    private var touches: [UInt64: Touch] = [:]
+    private var lastID = 0
+
+    /// A finger landed on `flag`'s cap: the touch the hold's timer, started now, is for.
+    mutating func touchDown(_ flag: KeyModifiers) -> Int {
+        lastID += 1
+        touches[flag.rawValue] = Touch(id: lastID, endedAt: nil, locked: false)
+        return lastID
+    }
+
+    /// The hold's timer for touch `id` on `flag`'s cap is up: whether the modifier locks now, which it
+    /// does once, and only while that finger is still on the cap.
+    mutating func holdElapsed(_ flag: KeyModifiers, touch id: Int) -> Bool {
+        guard var touch = touches[flag.rawValue], touch.id == id, touch.endedAt == nil, !touch.locked else { return false }
+        touch.locked = true
+        touches[flag.rawValue] = touch
+        return true
+    }
+
+    /// The finger left `flag`'s cap at `time` (systemUptime): lifted, slid off or cancelled.
+    mutating func touchUp(_ flag: KeyModifiers, at time: Double) {
+        guard var touch = touches[flag.rawValue], touch.endedAt == nil else { return }
+        touch.endedAt = time
+        touches[flag.rawValue] = touch
+    }
+
+    /// `flag`'s cap's action at `time`: a tap (true: ModifierLock.tapped), or the end of a hold that locked
+    /// it (false: nothing more), which its Button sends as the finger lifts, just before or just after the
+    /// press ends (within `HeldCap.actionWindow`, as for esc, tab and the arrows).
+    mutating func activated(_ flag: KeyModifiers, at time: Double) -> Bool {
+        guard let touch = touches.removeValue(forKey: flag.rawValue) else { return true }
+        return !(touch.locked && time - (touch.endedAt ?? time) <= HeldCap.actionWindow)
+    }
+}
+
 enum KeyChord {
     /// One key with `modifiers`, as a keyboard sends it: each modifier's own key down, the key down
     /// and up carrying them all, each modifier's key up (`modifiersDown`, `modifiersUp`). With nothing

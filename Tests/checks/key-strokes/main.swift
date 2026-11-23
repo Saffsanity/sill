@@ -2639,5 +2639,484 @@ do {
     print("device: \(sessions) sessions (the Mac typing in \(macTyped), \(switched) keyboard switches); checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
+// MARK: The key row's modifier caps: a tap latches, a hold locks (ModifierLock, #268)
+//
+// A tap on ⌘, ⇧, ⌃ or ⌥ latches it for the next key, character or click, and that use spends it. A
+// finger held on the cap for a second locks it: every use after carries it, until the cap is tapped
+// again. `latched` is what every sender reads; `locked` is the part a use leaves.
+
+do {
+    let cmd = KeyModifiers.command, sft = KeyModifiers.shift, opt = KeyModifiers.option, ctl = KeyModifiers.control
+    typealias State = (latched: KeyModifiers, locked: KeyModifiers)
+    func tap(_ f: KeyModifiers, _ s: State) -> State { ModifierLock.tapped(f, latched: s.latched, locked: s.locked) }
+    func hold(_ f: KeyModifiers, _ s: State) -> State { ModifierLock.held(f, latched: s.latched, locked: s.locked) }
+    func use(_ s: State) -> State { (ModifierLock.spent(locked: s.locked), s.locked) }
+    func same(_ a: State, _ l: KeyModifiers, _ k: KeyModifiers) -> Bool { a.latched == l && a.locked == k }
+    let none: State = ([], [])
+
+    check(ModifierLock.holdSeconds == 1.0, "a lock takes a finger held for about a second")
+
+    // A tap, as before: latched for the next use, spent by it, and a second tap unlatches.
+    let tapped = tap(cmd, none)
+    check(same(tapped, cmd, []), "a tap on ⌘ latches it, locks nothing: \(tapped)")
+    check(same(use(tapped), [], []), "a use spends a tapped ⌘")
+    check(same(tap(cmd, tapped), [], []), "a second tap on ⌘ unlatches it")
+    check(same(tap(sft, tapped), [cmd, sft], []), "⇧ tapped beside a latched ⌘: both latched, neither locked")
+    check(same(use(tap(sft, tapped)), [], []), "a use spends both")
+
+    // A hold: locked, latched with it, and a use leaves it.
+    let locked = hold(cmd, none)
+    check(same(locked, cmd, cmd), "a hold on ⌘ latches and locks it: \(locked)")
+    check(same(use(locked), cmd, cmd), "a use leaves a locked ⌘ latched")
+    check(same(use(use(use(locked))), cmd, cmd), "three uses (⌘Z three times): still locked")
+    check(same(hold(cmd, locked), cmd, cmd), "a hold on a locked ⌘ keeps it locked")
+    check(same(hold(cmd, tapped), cmd, cmd), "a hold on a ⌘ already latched locks it")
+    check(same(hold(cmd, tap(sft, none)), [cmd, sft], cmd), "a hold on ⌘ beside a latched ⇧ locks the ⌘ alone")
+
+    // A tap on a locked modifier lets it go, whole: not latched for one more use.
+    check(same(tap(cmd, locked), [], []), "a tap on a locked ⌘ lets it go: \(tap(cmd, locked))")
+    check(same(use(tap(cmd, locked)), [], []), "and nothing waits for the next use")
+
+    // Locked and latched modifiers together.
+    let both = tap(sft, locked)
+    check(same(both, [cmd, sft], cmd), "⇧ tapped over a locked ⌘: both latched, only ⌘ locked: \(both)")
+    check(same(use(both), cmd, cmd), "a use spends ⇧ and leaves ⌘ locked")
+    check(same(tap(cmd, both), sft, []), "a tap on the locked ⌘ leaves the latched ⇧")
+    check(same(tap(sft, hold(opt, hold(cmd, none))), [cmd, opt, sft], [cmd, opt]), "two locked, one latched")
+    check(same(use(hold(ctl, hold(sft, hold(opt, hold(cmd, none))))), [cmd, sft, opt, ctl], [cmd, sft, opt, ctl]), "all four locked, a use spends none")
+
+    // What goes out: ⌘Z three times from one hold, each ⌘Z whole; from one tap, the first alone.
+    var s = locked
+    var undone = 0
+    for _ in 0..<3 {
+        if KeyChord.press(uZ, with: s.latched) == KeyChord.press(uZ, with: [.command]) { undone += 1 }
+        s = use(s)
+    }
+    check(undone == 3, "⌘ locked: \(undone) of 3 presses of Z carried ⌘")
+    s = tapped
+    var carried: [Bool] = []
+    for _ in 0..<3 {
+        carried.append(KeyChord.press(uZ, with: s.latched) == KeyChord.press(uZ, with: [.command]))
+        s = use(s)
+    }
+    check(carried == [true, false, false], "⌘ tapped: only the first press of Z carried it: \(carried)")
+
+    // Random sessions: whatever the order of taps, holds and uses, what is locked stays latched, a use
+    // leaves exactly what is locked, and a cap tapped while locked is let go of whole.
+    var rng = Rng(state: 0x10C4_ED01)
+    let flags: [KeyModifiers] = [.shift, .control, .option, .command]
+    var broke = 0, locks = 0, releases = 0, spends = 0
+    for _ in 0..<2000 {
+        var st = none
+        for step in 0..<rng.below(40) + 1 {
+            let f = rng.pick(flags)
+            switch rng.below(3) {
+            case 0:
+                let was = st.locked.contains(f)
+                st = tap(f, st)
+                if was { releases += 1; if st.latched.contains(f) || st.locked.contains(f) { broke += 1 } }
+            case 1:
+                st = hold(f, st)
+                locks += 1
+                if !st.locked.contains(f) || !st.latched.contains(f) { broke += 1 }
+            default:
+                let before = st.locked
+                st = use(st)
+                spends += 1
+                if st.latched != before || st.locked != before { broke += 1 }
+            }
+            if !st.locked.isSubset(of: st.latched) { broke += 1; print("FAIL: step \(step): \(st)") }
+        }
+    }
+    check(broke == 0, "random sessions: \(broke) steps broke a rule")
+    check(locks > 5000 && releases > 1000 && spends > 5000, "the sessions locked \(locks), released \(releases), spent \(spends) times")
+
+    // A use as the input view and the trackpad spend it (ModifierLock.used): what is latched after it, or
+    // nothing to tell the key row when all it carried is locked, or it carried nothing.
+    check(ModifierLock.used(latched: cmd, locked: []) == [], "a use spends a tapped ⌘")
+    check(ModifierLock.used(latched: cmd, locked: cmd) == nil, "a use of a locked ⌘ alone spends nothing: the row is not told")
+    check(ModifierLock.used(latched: [cmd, sft], locked: cmd) == cmd, "a use of ⌘ locked and ⇧ tapped leaves ⌘")
+    check(ModifierLock.used(latched: [], locked: []) == nil, "a use with nothing carried spends nothing")
+
+    // Hold to Lock Modifiers turned off: every lock let go whole, a tapped latch kept for its one use.
+    check(ModifierLock.switchKey == "Sill.holdToLockModifiers", "the switch is stored as Sill.holdToLockModifiers: \(ModifierLock.switchKey)")
+    check(ModifierLock.defaultOn == false, "Hold to Lock Modifiers is off unless turned on")
+    let off = ModifierLock.switchedOff(latched: [cmd, sft, opt], locked: [cmd, opt])
+    check(off.latched == sft && off.locked == [], "the switch off: ⌘ and ⌥ let go, the tapped ⇧ kept: \(off)")
+    let offNone = ModifierLock.switchedOff(latched: ctl, locked: [])
+    check(offNone.latched == ctl && offNone.locked == [], "the switch off with nothing locked changes nothing: \(offNone)")
+}
+
+// MARK: The key row's modifiers while no key row shows them (#268's hidden lock; ModifierLock.carried)
+//
+// What is latched and locked lives in the stream screen, which outlives the key row. On the device's
+// side, in full screen and under the laptop pose's Keyboard toggle no key row is on screen; before this
+// rule every key, character and click there went out with it, unseen: ⌘ locked upright, the device
+// turned on its side, and "quit" typed there went out as ⌘Q (a hardware keyboard's letters too: while
+// anything is latched they go through the text system, KeyTyping). The model: the stream screen's
+// latched and locked; the layout (upright or on its side, the controls shown or hidden, the row
+// displaced by the laptop pose's keyboard); the input view and the trackpad given their modifiers as
+// the layouts give them (carried) and spending them after each use as they do (used, then the stream
+// screen's spent); the key row's caps (tapped, and held with the switch on) only while it is on screen.
+
+/// Whether an event carries a modifier: a key with any of the four, or a modifier's own key.
+func carriesModifier(_ e: InputEvent) -> Bool {
+    guard case .key(let usage, _, let modifiers) = e else { return false }
+    return modifiers & modifierBits != 0 || KeyModifiers.flag(forKey: usage) != nil
+}
+
+/// The stream screen's key row state and the layout it is drawn in. `rule`: the layouts give their input
+/// views what ModifierLock.carried gives; without it, what is latched as it is (the glue before the rule).
+struct KeyRowScreen {
+    var latched: KeyModifiers = []
+    var locked: KeyModifiers = []
+    var upright = true, hidden = false, displaced = false
+    var switchOn = true
+    var rule = true
+    var rowShown: Bool { ModifierLock.keyRowOnScreen(upright: upright, controlsHidden: hidden, rowDisplaced: displaced) }
+    /// What the layout on screen gives its input view and its trackpad.
+    var given: (latched: KeyModifiers, locked: KeyModifiers) {
+        guard rule else { return (latched, locked) }
+        return (ModifierLock.carried(latched, keyRowOnScreen: rowShown), ModifierLock.carried(locked, keyRowOnScreen: rowShown))
+    }
+    /// A character typed (the on-screen keyboard's, or a hardware keyboard's through the text system): as
+    /// the key carrying ⌘, ⌃ or ⌥ while one is given (InputOverlayView.sendLatched), else as typed text;
+    /// then the use, as the input view spends it and the stream screen hears it.
+    mutating func type(_ usage: UInt16, _ text: String) -> [InputEvent] {
+        let g = given
+        let events: [InputEvent] = g.latched.isDisjoint(with: .shortcutMakers) ? [.text(text)] : KeyChord.press(usage, with: g.latched)
+        if ModifierLock.used(latched: g.latched, locked: g.locked) != nil { latched = ModifierLock.spent(locked: locked) }
+        return events
+    }
+    /// The key row's own key (esc, tab, an arrow), and the trackpad's click: only while the row is on
+    /// screen, both carrying what is latched (KeyChord.press; the click's modifiers' keys around it).
+    mutating func rowKey(_ usage: UInt16) -> [InputEvent] {
+        guard rowShown else { return [] }
+        let g = given
+        let events = KeyChord.press(usage, with: g.latched)
+        if HeldCap.spendsLatch(events) { latched = ModifierLock.spent(locked: locked) }
+        return events
+    }
+    mutating func tap(_ f: KeyModifiers) {
+        guard rowShown else { return }
+        (latched, locked) = ModifierLock.tapped(f, latched: latched, locked: locked)
+    }
+    mutating func hold(_ f: KeyModifiers) {
+        guard rowShown, switchOn else { return }
+        (latched, locked) = ModifierLock.held(f, latched: latched, locked: locked)
+    }
+    mutating func switchOff() {
+        switchOn = false
+        (latched, locked) = ModifierLock.switchedOff(latched: latched, locked: locked)
+    }
+}
+
+do {
+    let cmd = KeyModifiers.command, sft = KeyModifiers.shift
+    let uQ: UInt16 = 0x14, uU: UInt16 = 0x18, uI: UInt16 = 0x0C, uT: UInt16 = 0x17
+    let quit: [(UInt16, String)] = [(uQ, "q"), (uU, "u"), (uI, "i"), (uT, "t")]
+
+    // Where a key row is on screen: upright, the controls shown, its caps in view.
+    for upright in [false, true] {
+        for hidden in [false, true] {
+            for displaced in [false, true] {
+                let shown = ModifierLock.keyRowOnScreen(upright: upright, controlsHidden: hidden, rowDisplaced: displaced)
+                check(shown == (upright && !hidden && !displaced),
+                      "upright \(upright), the controls hidden \(hidden), the row displaced \(displaced): a key row on screen \(shown)")
+            }
+        }
+    }
+    // What a key, a character or a click carries: everything while it shows, nothing while it does not.
+    for bits in 0..<16 {
+        let m = KeyModifiers(rawValue: (bits & 1 != 0 ? KeyModifiers.shift.rawValue : 0) | (bits & 2 != 0 ? KeyModifiers.control.rawValue : 0)
+                             | (bits & 4 != 0 ? KeyModifiers.option.rawValue : 0) | (bits & 8 != 0 ? KeyModifiers.command.rawValue : 0))
+        check(ModifierLock.carried(m, keyRowOnScreen: true) == m && ModifierLock.carried(m, keyRowOnScreen: false) == [],
+              "\(names(m.rawValue)): carried in full while the row shows, not at all while it does not")
+    }
+
+    // #268's hidden lock, as the review found it: ⌘ locked upright, the device turned on its side, "quit"
+    // typed. Before the rule ⌘Q; with it, q, u, i and t as typed text, and upright again ⌘ is locked as
+    // it was, so Z goes out as ⌘Z.
+    var before = KeyRowScreen(rule: false)
+    before.hold(cmd)
+    before.upright = false
+    let sentBefore = quit.flatMap { before.type($0.0, $0.1) }
+    check(sentBefore.first == key(0xE3, true, command) && sentBefore.contains(key(uQ, true, command)),
+          "before the rule, \"quit\" typed sideways after ⌘ was locked upright went out as ⌘Q: \(sentBefore.prefix(4))")
+    var s = KeyRowScreen()
+    s.hold(cmd)
+    s.upright = false
+    let sent = quit.flatMap { s.type($0.0, $0.1) }
+    check(sent == quit.map { InputEvent.text($0.1) }, "\"quit\" typed on its side goes out as typed text, no ⌘Q: \(sent)")
+    check(s.latched == cmd && s.locked == cmd, "⌘ set aside, still locked: \(s.latched), \(s.locked)")
+    s.upright = true
+    check(s.type(uZ, "z") == KeyChord.press(uZ, with: .command), "upright again, Z goes out as ⌘Z")
+    check(s.latched == cmd && s.locked == cmd, "and ⌘ stays locked")
+    // The same in full screen, and under the laptop pose's Keyboard toggle; and a tapped latch likewise.
+    for place in ["full screen", "the Keyboard toggle"] {
+        var t = KeyRowScreen()
+        t.hold(cmd)
+        t.tap(sft)
+        if place == "full screen" { t.hidden = true } else { t.displaced = true }
+        let out = quit.flatMap { t.type($0.0, $0.1) } + t.rowKey(uEsc)
+        check(out == quit.map { InputEvent.text($0.1) }, "\(place): \"quit\" as typed text, and no key of the row's: \(out)")
+        check(t.latched == [cmd, sft] && t.locked == cmd, "\(place): ⌘ locked and ⇧ latched set aside: \(t.latched), \(t.locked)")
+        t.hidden = false; t.displaced = false
+        check(t.rowKey(uLeft) == KeyChord.press(uLeft, with: [cmd, sft]) && t.latched == cmd,
+              "\(place) over: ⌘⇧← goes out, the ⇧ spent and ⌘ kept: \(t.latched)")
+    }
+    // A latch alone, as before the lock: set aside on its side, spent upright by its one use.
+    var latch = KeyRowScreen()
+    latch.tap(cmd)
+    latch.upright = false
+    check(latch.type(uC, "c") == [.text("c")] && latch.latched == cmd, "a tapped ⌘ on its side: C typed, ⌘ set aside")
+    latch.upright = true
+    check(latch.type(uC, "c") == KeyChord.press(uC, with: .command) && latch.latched == [], "upright again: ⌘C, and the latch spent")
+    // A cap cannot be touched where no key row shows: nothing changes there.
+    var unseen = KeyRowScreen()
+    unseen.upright = false
+    unseen.tap(cmd); unseen.hold(sft)
+    check(unseen.latched == [] && unseen.locked == [], "no key row on screen, no cap changes anything")
+    // The switch off: a hold does nothing, and turned off mid-session every lock goes.
+    var offScreen = KeyRowScreen()
+    offScreen.hold(cmd)
+    offScreen.tap(sft)
+    offScreen.switchOff()
+    check(offScreen.latched == sft && offScreen.locked == [], "the switch turned off: ⌘'s lock let go, ⇧ kept: \(offScreen.latched)")
+    offScreen.hold(cmd)
+    check(offScreen.locked == [] && offScreen.latched == sft, "the switch off: a hold locks nothing")
+
+    // Random sessions: taps, holds, characters, the row's keys and clicks, turns, full screen, the laptop
+    // pose's keyboard and the switch, in any order. Nothing sent while no key row is on screen carries a
+    // modifier; everything sent while one is carries exactly what is latched; a layout change never
+    // changes what is latched or locked (set aside, never forgotten); a use while none shows spends
+    // nothing; one while it shows leaves what is locked; locked stays within latched; and the switch off,
+    // nothing is locked. Beside each, the glue before the rule, counting what it sent unseen.
+    var rng = Rng(state: 0x2681_0C4D)
+    let flags: [KeyModifiers] = [.shift, .control, .option, .command]
+    let typed: [(UInt16, String)] = [(uQ, "q"), (uZ, "z"), (uC, "c"), (uS, "s"), (uA, "a")]
+    var broke = 0, sideways = 0, hiddenSent = 0, unseenBefore = 0, shownSent = 0, sessionsLocked = 0
+    for _ in 0..<3000 {
+        var st = KeyRowScreen(), old = KeyRowScreen(rule: false)
+        st.switchOn = rng.chance(80); old.switchOn = st.switchOn
+        var everLocked = false
+        for _ in 0..<(rng.below(60) + 1) {
+            let shownBefore = st.rowShown
+            let state = (st.latched, st.locked)
+            switch rng.below(10) {
+            case 0, 1:
+                let f = rng.pick(flags); st.tap(f); old.tap(f)
+            case 2:
+                let f = rng.pick(flags); st.hold(f); old.hold(f)
+            case 3, 4:
+                let k = rng.pick(typed)
+                let given = st.given
+                let out = st.type(k.0, k.1), outOld = old.type(k.0, k.1)
+                if !shownBefore {
+                    hiddenSent += 1
+                    if out.contains(where: carriesModifier) { broke += 1; print("FAIL: sent unseen: \(out)") }
+                    if (st.latched, st.locked) != state { broke += 1; print("FAIL: a use while no key row shows spent something") }
+                    if outOld.contains(where: carriesModifier) { unseenBefore += 1 }
+                } else {
+                    shownSent += 1
+                    let want: [InputEvent] = given.latched.isDisjoint(with: .shortcutMakers) ? [.text(k.1)] : KeyChord.press(k.0, with: state.0)
+                    if out != want || st.latched != st.locked { broke += 1; print("FAIL: shown, \(out) for \(want); after it \(st.latched)") }
+                }
+            case 5:
+                let u = rng.pick([uEsc, uLeft, uRight])
+                let out = st.rowKey(u); _ = old.rowKey(u)
+                if !shownBefore && !out.isEmpty { broke += 1 }
+                if shownBefore && (out != KeyChord.press(u, with: state.0) || st.latched != st.locked) { broke += 1 }
+            case 6, 7, 8:
+                // Another layout: upright with the row in view about half the time; else on its side, full
+                // screen (either way up), or the laptop pose's keyboard over the row.
+                switch rng.below(8) {
+                case 0, 1, 2, 3: st.upright = true; st.hidden = false; st.displaced = false
+                case 4: st.upright = false; st.displaced = false; sideways += 1
+                case 5: st.hidden = true
+                case 6: st.upright = true; st.displaced = true
+                default: st.upright = false; st.hidden = rng.chance(50); st.displaced = false; sideways += 1
+                }
+                old.upright = st.upright; old.hidden = st.hidden; old.displaced = st.displaced
+                if (st.latched, st.locked) != state { broke += 1; print("FAIL: a change of layout changed the state") }
+            default:
+                if rng.chance(30) { st.switchOff(); old.switchOff() }
+            }
+            if !st.locked.isSubset(of: st.latched) { broke += 1; print("FAIL: locked \(st.locked) not within latched \(st.latched)") }
+            if !st.switchOn && !st.locked.isEmpty { broke += 1; print("FAIL: the switch off, \(st.locked) locked") }
+            if !st.rowShown && (st.given.latched != [] || st.given.locked != []) { broke += 1 }
+            if !st.locked.isEmpty { everLocked = true }
+        }
+        if everLocked { sessionsLocked += 1 }
+    }
+    check(broke == 0, "random sessions: \(broke) steps broke a rule")
+    check(hiddenSent > 5000 && shownSent > 5000 && sideways > 3000 && sessionsLocked > 1000,
+          "the sessions typed \(hiddenSent) characters with no key row on screen and \(shownSent) with one, turned on their side \(sideways) times, locked something in \(sessionsLocked)")
+    check(unseenBefore > 1000, "before the rule, \(unseenBefore) of those \(hiddenSent) went out with a modifier no key row showed")
+    print("hidden lock: \(hiddenSent) characters typed with no key row on screen, none carrying a modifier; before the rule \(unseenBefore) did")
+}
+
+// MARK: A finger held on a modifier's cap (ModifierHold, #268, with Hold to Lock Modifiers on)
+//
+// Each cap's touch on its own: its timer locks at holdSeconds if that finger is still on it, and the cap's
+// action as the finger lifts (just before or after the press ends) is the hold's end, not a tap, which would
+// let the lock go; an action with no touch, after a finger slid off, or for a touch that never locked, is a
+// tap. Two fingers on two caps are two touches: before, one touch on ⇧ while ⌘ was held reset ⌘'s, and ⌘'s
+// lift then let its lock go.
+
+do {
+    let cmd = KeyModifiers.command, sft = KeyModifiers.shift
+    let window = HeldCap.actionWindow
+    // A short touch: the timer stopped at the lift, the action a tap.
+    var h = ModifierHold()
+    _ = h.touchDown(cmd)
+    h.touchUp(cmd, at: 10.4)
+    check(h.activated(cmd, at: 10.41), "a short touch's action is a tap")
+    // A hold: locked at the timer, the action at the lift its end (after the press's end, and before it).
+    var g = ModifierHold()
+    let id = g.touchDown(cmd)
+    check(g.holdElapsed(cmd, touch: id), "the timer locks while the finger is on the cap")
+    check(!g.holdElapsed(cmd, touch: id), "and only once")
+    g.touchUp(cmd, at: 11.2)
+    check(!g.activated(cmd, at: 11.25), "the hold's action at its lift is its end, not a tap")
+    check(g.activated(cmd, at: 11.3), "the next action, with no touch, is a tap")
+    var early = ModifierHold()
+    let e1 = early.touchDown(cmd)
+    _ = early.holdElapsed(cmd, touch: e1)
+    check(!early.activated(cmd, at: 20), "the hold's action before its press ends is its end too")
+    // The window after the lift: an action within it is the hold's, one after it a tap.
+    for (delay, tap) in [(0.0, false), (window, false), (window + 0.01, true), (5.0, true)] {
+        var w = ModifierHold()
+        let i = w.touchDown(sft)
+        _ = w.holdElapsed(sft, touch: i)
+        w.touchUp(sft, at: 30)
+        check(w.activated(sft, at: 30 + delay) == tap, "a hold's action \(delay) s after its lift: a tap \(tap)")
+    }
+    // A timer that is not the touch on the cap now: lifted already, or another touch since.
+    var stale = ModifierHold()
+    let first = stale.touchDown(cmd)
+    stale.touchUp(cmd, at: 40.3)
+    check(!stale.holdElapsed(cmd, touch: first), "a timer after its finger lifted locks nothing")
+    let second = stale.touchDown(cmd)
+    check(!stale.holdElapsed(cmd, touch: first) && stale.holdElapsed(cmd, touch: second), "a stale timer locks nothing; the new touch's does")
+    // Two fingers: ⌘ held until it locks, ⇧ tapped meanwhile, ⌘ lifted: ⇧'s a tap, ⌘'s the hold's end.
+    var two = ModifierHold()
+    let c = two.touchDown(cmd)
+    let s1 = two.touchDown(sft)
+    check(two.holdElapsed(cmd, touch: c), "a touch on ⇧ does not stop ⌘'s hold")
+    two.touchUp(sft, at: 50.2)
+    check(two.activated(sft, at: 50.2), "⇧'s short touch is a tap")
+    two.touchUp(cmd, at: 51)
+    check(!two.activated(cmd, at: 51.05), "⌘'s lift is still its hold's end")
+    check(!two.holdElapsed(sft, touch: s1), "⇧'s timer, stopped at its lift, never locks")
+    // No touch at all (VoiceOver, Switch Control, Voice Control, Full Keyboard Access): a tap.
+    var none = ModifierHold()
+    check(none.activated(.option, at: 1), "an action with no touch is a tap")
+    // A hold whose finger slid off: no action; the next one, later, is a tap.
+    var slid = ModifierHold()
+    let sl = slid.touchDown(.control)
+    _ = slid.holdElapsed(.control, touch: sl)
+    slid.touchUp(.control, at: 60)
+    check(slid.activated(.control, at: 63), "after a hold slid off, a later action is a tap")
+    // A lift told twice keeps the first: the window runs from when the finger left.
+    var twice = ModifierHold()
+    let tw = twice.touchDown(.option)
+    _ = twice.holdElapsed(.option, touch: tw)
+    twice.touchUp(.option, at: 70)
+    twice.touchUp(.option, at: 72)
+    check(twice.activated(.option, at: 72.2), "a hold lifted at 70 and told again at 72: an action at 72.2 is a tap")
+
+    // Random sessions: touches on the four caps, overlapping as fingers do (never two on one cap), each a
+    // tap (lifted before holdSeconds) or a hold (lifted after), its action as it lifts (up to 0.05 s
+    // before or 0.3 s after, either way round) or none (slid off), and actions with no touch; the view's
+    // timers as it runs them (started at a touch, stopped at its lift, firing at holdSeconds). Each action
+    // must be what the person did: a tap's a tap, a hold's its end, one with no touch a tap; and the
+    // key row's state through ModifierLock must end as the person left it.
+    var rng = Rng(state: 0x4D0D_1F1E)
+    let caps: [KeyModifiers] = [.shift, .control, .option, .command]
+    var wrong = 0, holds = 0, taps = 0, bare = 0, overlapped = 0
+    for _ in 0..<2000 {
+        enum Step { case down(KeyModifiers, Int), timer(KeyModifiers, Int), up(KeyModifiers, Int), action(KeyModifiers, Int?) }
+        var timeline: [(Double, Int, Step)] = []
+        var busyUntil: [UInt64: Double] = [:]
+        var intent: [Int: Bool] = [:]              // a touch's number: a hold?
+        var order = 0
+        var t = 0.0
+        for n in 0..<(rng.below(12) + 1) {
+            let cap = rng.pick(caps)
+            t += Double(rng.below(120)) / 100
+            let start = max(t, busyUntil[cap.rawValue] ?? 0)
+            if rng.chance(15) {
+                timeline.append((start, order, .action(cap, nil))); order += 1; bare += 1
+                busyUntil[cap.rawValue] = start + 0.01
+                continue
+            }
+            let isHold = rng.chance(50)
+            let length = isHold ? ModifierLock.holdSeconds + 0.1 + Double(rng.below(150)) / 100
+                                : 0.05 + Double(rng.below(80)) / 100
+            intent[n] = isHold
+            timeline.append((start, order, .down(cap, n))); order += 1
+            timeline.append((start + ModifierLock.holdSeconds, order, .timer(cap, n))); order += 1
+            timeline.append((start + length, order, .up(cap, n))); order += 1
+            if rng.chance(85) {
+                let at = start + length + (rng.chance(30) ? -Double(rng.below(5)) / 100 : Double(rng.below(30)) / 100)
+                timeline.append((at, order, .action(cap, n))); order += 1
+            }
+            busyUntil[cap.rawValue] = start + length + window + 0.05
+            if busyUntil.values.filter({ $0 > start }).count > 1 { overlapped += 1 }
+        }
+        timeline.sort { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
+        var hold = ModifierHold()
+        var ids: [Int: Int] = [:]                   // a touch's number: its id
+        var down: [UInt64: Int] = [:]               // the touch a finger is on each cap with
+        var state: (latched: KeyModifiers, locked: KeyModifiers) = ([], [])
+        var want: (latched: KeyModifiers, locked: KeyModifiers) = ([], [])
+        for (time, _, step) in timeline {
+            switch step {
+            case .down(let cap, let n):
+                ids[n] = hold.touchDown(cap); down[cap.rawValue] = n
+            case .timer(let cap, let n):
+                // The view stops a touch's timer at its lift: it fires only while that finger is on the cap.
+                guard down[cap.rawValue] == n, let id = ids[n] else { continue }
+                if hold.holdElapsed(cap, touch: id) { state = ModifierLock.held(cap, latched: state.latched, locked: state.locked) }
+            case .up(let cap, let n):
+                if down[cap.rawValue] == n { down[cap.rawValue] = nil }
+                hold.touchUp(cap, at: time)
+            case .action(let cap, let n):
+                let isTap = hold.activated(cap, at: time)
+                let expected = n.map { !(intent[$0] ?? false) } ?? true
+                if isTap != expected { wrong += 1; print("FAIL: touch \(n.map(String.init) ?? "none") on \(names(cap.rawValue)): a tap \(isTap)") }
+                if isTap { state = ModifierLock.tapped(cap, latched: state.latched, locked: state.locked); taps += 1 } else { holds += 1 }
+            }
+            // What the person did, step by step: a hold locks at its timer, a tap toggles at its action.
+            if case .timer(let cap, let n) = step, intent[n] == true, down[cap.rawValue] == n {
+                want = ModifierLock.held(cap, latched: want.latched, locked: want.locked)
+            }
+            if case .action(let cap, let n) = step, n.map({ !(intent[$0] ?? false) }) ?? true {
+                want = ModifierLock.tapped(cap, latched: want.latched, locked: want.locked)
+            }
+        }
+        if state.latched != want.latched || state.locked != want.locked { wrong += 1; print("FAIL: the row ended \(state), the person left \(want)") }
+    }
+    check(wrong == 0, "random sessions: \(wrong) actions or end states not what the person did")
+    check(holds > 1500 && taps > 2000 && bare > 1000 && overlapped > 1000,
+          "the sessions ended \(holds) holds, tapped \(taps) times (\(bare) with no touch), with fingers on two caps at once \(overlapped) times")
+    print("modifier hold: 2000 sessions, \(holds) holds ended as holds, \(taps) taps (\(bare) with no touch), fingers on two caps at once \(overlapped) times")
+}
+
+// MARK: The words (ModifierLock.Copy): Settings › This iPad › Keys, and the caps for VoiceOver
+
+do {
+    check(ModifierLock.Copy.group == "Keys" && ModifierLock.Copy.title == "Hold to Lock Modifiers", "the group and the switch's names")
+    check(ModifierLock.Copy.footnote == "Touch and hold ctrl, opt, cmd or shift for a second to keep it on for every key and click, until you tap it again. A locked key shows a lock.",
+          "the switch's footnote: \(ModifierLock.Copy.footnote)")
+    check(ModifierLock.holdSeconds == 1 && ModifierLock.Copy.footnote.contains("for a second"), "the footnote's second is the hold's")
+    check(ModifierLock.Copy.lockAction == "Lock until released", "the cap's accessibility action")
+    check(ModifierLock.Copy.capLabel("Command", latched: false, locked: false) == "Command, hold for the next key", "a cap off, as before")
+    check(ModifierLock.Copy.capLabel("Command", latched: true, locked: false) == "Command, on for the next key.",
+          "a tapped cap: on for the next key, never \"held\", the gesture that locks: \(ModifierLock.Copy.capLabel("Command", latched: true, locked: false))")
+    check(ModifierLock.Copy.capLabel("Command", latched: true, locked: true) == "Command, locked. Tap to release.", "a locked cap")
+}
+
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)
