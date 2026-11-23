@@ -2,8 +2,8 @@ import Foundation
 import Network
 import CryptoKit
 
-// DeviceFiles with SessionLink's uplink ledger (the device's sender) against the Mac's own FileHub (its receiver),
-// over loopback: a stand-in Mac listens on 127.0.0.1, reads each connection as StreamServer does (a header, then its
+// DeviceFiles with SessionLink's uplink ledger (the device's sender and receiver) against the Mac's own FileHub (its
+// receiver and sender), over loopback: a stand-in Mac listens on 127.0.0.1, reads each connection as StreamServer does (a header, then its
 // payload), hands kinds 34 and 49 to a real FileHub as `onFileMessage` does and writes the hub's kind 49s back, and
 // records every message it read, in order. The device dials it, reads the Mac's messages with its own MessageReader
 // and hands kind 49 to DeviceFiles, as StreamClient does. Files go into a scratch folder of the check's own
@@ -69,18 +69,42 @@ final class Mac {
     private var read: [(kind: StreamMessageKind, size: Int, conn: Int, at: Double)] = []
     var share = true
     var paired = true
+    /// The device's hello takes files from the Mac (Hello.files), and the Mac gives files to a device that asks.
+    var takes = true
+    var gives = true
     /// A slow Mac: each part holds its reading this long (microseconds), so a transfer lasts.
     var partDelay: useconds_t = 0
+    /// A slow link from the Mac: the room after each of its parts comes this much later (seconds), so a transfer
+    /// to the device lasts.
+    var roomDelay = 0.0
+    /// The device's picks the hub passed on (onPick): its connection and its transfer.
+    private var pickList: [(ObjectIdentifier, UInt32)] = []
+    var picks: [(ObjectIdentifier, UInt32)] { lock.lock(); defer { lock.unlock() }; return pickList }
+    /// The Mac's parts handed to a connection.
+    private(set) var partsSent = 0
 
     init(_ name: String) {
         folder = scratch.appendingPathComponent(name, isDirectory: true)
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: 0)
         listener = try! NWListener(using: params)
-        hub = FileHub(gate: gate, folder: folder) { t, c in
+        let ref = HubRef()
+        hub = FileHub(gate: gate, folder: folder, send: { t, c in
             guard let payload = t.payload else { return }
             c.send(content: StreamMessage(kind: .fileTransfer, timestamp: 0, isKeyframe: false, payload: payload).serialized(),
                    completion: .contentProcessed { _ in })
+        }, sendPart: { data, c in
+            // As StreamServer's slot: the part handed to the connection, then the hub told there is room.
+            ref.mac?.countPart()
+            c.send(content: data, completion: .contentProcessed { _ in })
+            let delay = ref.mac?.roomDelay ?? 0
+            if delay > 0 { DispatchQueue.global().asyncAfter(deadline: .now() + delay) { ref.mac?.hub.room(c) } }
+            else { ref.mac?.hub.room(c) }
+        })
+        ref.mac = self
+        hub.onPick = { [weak self] id, transfer in
+            guard let self else { return }
+            self.lock.lock(); self.pickList.append((id, transfer)); self.lock.unlock()
         }
         let ready = DispatchSemaphore(value: 0)
         listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
@@ -89,6 +113,7 @@ final class Mac {
         ready.wait()
     }
 
+    func countPart() { lock.lock(); partsSent += 1; lock.unlock() }
     var port: NWEndpoint.Port { listener.port! }
     var connections: [NWConnection] { lock.lock(); defer { lock.unlock() }; return conns }
     var messages: [(kind: StreamMessageKind, size: Int, conn: Int, at: Double)] { lock.lock(); defer { lock.unlock() }; return read }
@@ -97,8 +122,8 @@ final class Mac {
     /// The hub's context as the coordinator pushes it: the switch, the folder, each connection's name and pairing.
     func pushContext() {
         var c = FileHub.Context()
-        c.share = share; c.folder = folder; c.place = "Downloads › Sill"
-        for conn in connections { c.peers[ObjectIdentifier(conn)] = FileHub.Peer(name: "Test iPad", paired: paired) }
+        c.share = share; c.gives = gives; c.folder = folder; c.place = "Downloads › Sill"
+        for conn in connections { c.peers[ObjectIdentifier(conn)] = FileHub.Peer(name: "Test iPad", paired: paired, takesFiles: takes) }
         hub.update(c)
         hub.queue.sync {}
     }
@@ -137,6 +162,8 @@ final class Mac {
     }
 }
 
+final class HubRef { weak var mac: Mac? }
+
 /// The device: a SessionLink and its DeviceFiles, a connection to the stand-in read by MessageReader.
 final class Device {
     let link = SessionLink()
@@ -144,12 +171,21 @@ final class Device {
     let queue = DispatchQueue(label: "device.net")
     private let lock = NSLock()
     private var shots: [OutgoingFiles] = []
+    private var inShots: [IncomingFiles] = []
     private var readers: [MessageReader] = []
     var connection: NWConnection!
+    /// This device's Documents and its staging folder (DeviceInbox), in the check's scratch folder.
+    let docs: URL
+    let staging: URL
 
-    init(_ mac: Mac) {
-        files = DeviceFiles(link: link)
+    init(_ mac: Mac, askBefore: Bool = true) {
+        docs = mac.folder.appendingPathComponent("device-docs", isDirectory: true)
+        staging = mac.folder.appendingPathComponent("device-incoming", isDirectory: true)
+        let docs = self.docs
+        files = DeviceFiles(link: link, inbox: DeviceInbox(staging: staging, folder: { docs.appendingPathComponent(DeviceFilesCopy.folderName(mac: $0)) }))
+        files.update(DeviceFiles.Context(askBefore: askBefore, mac: "Mac mini"))
         files.onSnapshot = { [weak self] s in self?.record(s) }
+        files.onIncoming = { [weak self] s in self?.recordIn(s) }
         connection = dial(mac)
         link.connection = connection
         _ = waitFor(5) { mac.connections.count >= 1 }
@@ -159,6 +195,7 @@ final class Device {
         let c = NWConnection(host: "127.0.0.1", port: mac.port, using: .tcp)
         let reader = MessageReader(connection: c, stillReads: { [weak self] in self?.link.reads(c) ?? false }, onBytes: { _ in },
                                    onMessage: { [weak self] h, p in
+                                       if h.kind == .fileChunk { self?.files.receivedPart(p, from: c); return }
                                        guard h.kind == .fileTransfer, let t = FileTransfer.parse(p) else { return }
                                        self?.files.received(t, from: c)
                                    }, onEnd: { _ in })
@@ -172,6 +209,16 @@ final class Device {
     }
 
     private func record(_ s: OutgoingFiles) { lock.lock(); shots.append(s); lock.unlock() }
+    private func recordIn(_ s: IncomingFiles) { lock.lock(); inShots.append(s); lock.unlock() }
+    var incoming: [IncomingFiles] { lock.lock(); defer { lock.unlock() }; return inShots }
+    var lastIn: IncomingFiles? { incoming.last }
+    /// The transfer from the Mac's end, waited for.
+    func inEnd(_ limit: Double = 60) -> IncomingFiles? {
+        _ = waitFor(limit) { lastIn?.isOver == true }
+        return lastIn
+    }
+    /// The Mac's folder in this device's Documents.
+    var fromMac: URL { docs.appendingPathComponent("From Mac mini") }
     var snapshots: [OutgoingFiles] { lock.lock(); defer { lock.unlock() }; return shots }
     var last: OutgoingFiles? { snapshots.last }
     /// The transfer's end (done or stopped), waited for.
@@ -530,6 +577,181 @@ do {
           "a second send while one runs: dropped, its copy deleted")
     let end2 = dev.end(60)
     if case .done? = end2?.phase {} else { check(false, "the running one finishes: \(String(describing: end2?.phase))") }
+    dev.stop(); mac.stop()
+}
+
+// MARK: - Files from the Mac: kept whole in Documents › From ‹Mac›, asked about, a pick, stops
+
+func inPhases(_ d: Device) -> [String] {
+    var out: [String] = []
+    for s in d.incoming {
+        let p: String
+        switch s.phase {
+        case .picking: p = "picking"
+        case .asking: p = "asking"
+        case .receiving: p = "receiving"
+        case .done: p = "done"
+        case .stopped(let r, _, let byPeer, _): p = "stopped:\(r)\(byPeer ? ":peer" : "")"
+        }
+        if out.last != p { out.append(p) }
+    }
+    return out
+}
+func macOffers(_ mac: Mac, _ urls: [URL]) { mac.hub.send(urls, to: mac.connections[0]) }
+/// A kind 49 or 34 straight from the stand-in Mac, as a hostile Mac would send it.
+func raw(_ mac: Mac, _ kind: StreamMessageKind, _ payload: Data) {
+    mac.connections[0].send(content: StreamMessage(kind: kind, timestamp: 0, isKeyframe: false, payload: payload).serialized(),
+                            completion: .contentProcessed { _ in })
+}
+func sha(_ d: Data) -> String { Base64URL.encode(Data(SHA256.hash(data: d))) }
+
+do {
+    // Not asking (Ask Before Receiving Files off): taken at once, kept whole, numbered on a second time.
+    let mac = Mac("from-mac")
+    let dev = Device(mac, askBefore: false)
+    let src = mac.folder.appendingPathComponent("mac-src")
+    let three = [make(src, "../Report:final.pdf", 3_000_000), make(src, "empty.txt", 0), make(src, "IMG_7.heic", 65_537)]
+    macOffers(mac, three)
+    let end = dev.inEnd(30)
+    check(inPhases(dev) == ["receiving", "done"], "taken at once, then done: \(inPhases(dev))")
+    if case .done(let kept)? = end?.phase {
+        check(kept == ["Report-final.pdf", "empty.txt", "IMG_7.heic"], "kept under their cleaned names: \(kept)")
+    } else { check(false, "done: \(String(describing: end?.phase))") }
+    check(listing(dev.fromMac) == ["IMG_7.heic", "Report-final.pdf", "empty.txt"], "in Documents › From Mac mini: \(listing(dev.fromMac))")
+    check((try? Data(contentsOf: dev.fromMac.appendingPathComponent("Report-final.pdf"))) == (try? Data(contentsOf: three[0]))
+          && (try? Data(contentsOf: dev.fromMac.appendingPathComponent("IMG_7.heic"))) == (try? Data(contentsOf: three[2])), "byte for byte")
+    check(((try? fm.contentsOfDirectory(atPath: dev.staging.path)) ?? []).isEmpty, "nothing left staged")
+    let mode = (try? fm.attributesOfItem(atPath: dev.fromMac.appendingPathComponent("empty.txt").path))?[.posixPermissions] as? Int
+    check(mode == 0o644, "kept 0644: \(String(describing: mode.map { String($0, radix: 8) }))")
+    check(end?.folder?.path == dev.fromMac.path && end?.photos == ["IMG_7.heic"],
+          "the folder and the photos for Save to Photos: \(String(describing: end?.folder)), \(String(describing: end?.photos))")
+    check(mac.partsSent == 48, "the Mac's parts: 64 KiB each (\(mac.partsSent))")
+    macOffers(mac, [three[2]])
+    _ = waitFor(20) { dev.incoming.filter { if case .done = $0.phase { return true }; return false }.count >= 2 }
+    if case .done(let kept)? = dev.lastIn?.phase { check(kept == ["IMG_7 2.heic"], "the same name again: numbered (\(kept))") }
+    else { check(false, "the second done: \(String(describing: dev.lastIn?.phase))") }
+    dev.stop(); mac.stop()
+}
+
+do {
+    // Asking (on): nothing comes before Accept; Decline tells the Mac; an offer that says asked but answers no pick
+    // of this device's is asked about too.
+    let mac = Mac("ask")
+    let dev = Device(mac)
+    let src = mac.folder.appendingPathComponent("mac-src")
+    let one = make(src, "a.pdf", 300_000)
+    macOffers(mac, [one])
+    check(waitFor(10) { dev.lastIn?.phase == .asking }, "asked: \(inPhases(dev))")
+    usleep(300_000)
+    check(mac.partsSent == 0 && listing(dev.fromMac).isEmpty, "nothing comes before Accept")
+    dev.files.acceptIncoming()
+    let end = dev.inEnd(20)
+    if case .done(let kept)? = end?.phase { check(kept == ["a.pdf"], "accepted: kept") } else { check(false, "accepted: \(String(describing: end?.phase))") }
+    usleep(1_100_000)                       // the Mac's offers to a device have no rate, but its clock ticks once a second
+    macOffers(mac, [one])
+    check(waitFor(10) { dev.lastIn?.phase == .asking && dev.incoming.count > 2 }, "asked again")
+    dev.files.declineIncoming()
+    let declined = dev.inEnd(10)
+    if case .stopped(let r, _, let byPeer, _)? = declined?.phase { check(r == "declined" && !byPeer, "declined here") }
+    else { check(false, "declined: \(String(describing: declined?.phase))") }
+    check(listing(dev.fromMac) == ["a.pdf"] && mac.partsSent == 5, "nothing of the declined one: \(listing(dev.fromMac)), \(mac.partsSent) parts")
+    // A hostile Mac's offer that says asked, with no pick of this device's: asked about all the same.
+    let before = dev.incoming.count
+    raw(mac, .fileTransfer, FileTransfer.offer(transfer: 4242, files: [.init(id: 1, name: "x.bin", size: 3)], asked: true).payload!)
+    check(waitFor(10) { dev.incoming.count > before && dev.lastIn?.phase == .asking }, "an offer saying asked, not asked for: asked about")
+    dev.files.declineIncoming()
+    dev.stop(); mac.stop()
+}
+
+do {
+    // Get Files: the pick, the Mac's panel (its TEST ONLY answer here), the files taken without asking.
+    let mac = Mac("pick")
+    let dev = Device(mac)
+    let src = mac.folder.appendingPathComponent("mac-src")
+    let chosen = [make(src, "chosen.txt", 10), make(src, "clip.mov", 200_000)]
+    dev.files.pickFiles(on: dev.connection)
+    check(waitFor(10) { mac.picks.count == 1 }, "the Mac asked for its Open panel")
+    check(dev.lastIn?.phase == .picking, "the device waits for the Mac's panel")
+    let serial = dev.lastIn?.serial
+    mac.hub.pickEnded(mac.connections[0], transfer: mac.picks[0].1, urls: chosen)
+    let end = dev.inEnd(20)
+    check(inPhases(dev) == ["picking", "receiving", "done"] && end?.serial == serial && end?.asked == true,
+          "taken without asking, the same transfer as the pick: \(inPhases(dev))")
+    check(listing(dev.fromMac) == ["chosen.txt", "clip.mov"], "kept: \(listing(dev.fromMac))")
+    // Nothing chosen: the device is told.
+    usleep(5_100_000)                       // the Mac's spacing between one device's picks
+    dev.files.pickFiles(on: dev.connection)
+    check(waitFor(10) { mac.picks.count == 2 }, "a second pick")
+    mac.hub.pickEnded(mac.connections[0], transfer: mac.picks[1].1, urls: nil)
+    let none = dev.inEnd(10)
+    if case .stopped(let r, _, let byPeer, _)? = none?.phase { check(r == "nothingChosen" && byPeer, "nothing chosen: said by the Mac") }
+    else { check(false, "nothing chosen: \(String(describing: none?.phase))") }
+    // The person stops waiting: the Mac is told, its panel closes.
+    usleep(5_100_000)
+    dev.files.pickFiles(on: dev.connection)
+    check(waitFor(10) { mac.picks.count == 3 }, "a third pick")
+    dev.files.cancelIncoming()
+    check(waitFor(10) { dev.lastIn.map { if case .stopped = $0.phase { return true }; return false } == true }, "the device stopped asking")
+    let late = dev.incoming.count
+    mac.hub.pickEnded(mac.connections[0], transfer: mac.picks[2].1, urls: chosen)
+    usleep(500_000)
+    check(dev.incoming.count == late && listing(dev.fromMac) == ["chosen.txt", "clip.mov"], "the panel's late answer: nothing comes")
+    dev.stop(); mac.stop()
+}
+
+do {
+    // Stops: the device's Cancel, the Mac's lock, a lost connection, a damaged file, a second offer while one runs.
+    let mac = Mac("in-stops")
+    mac.roomDelay = 0.004                   // about 16 MB/s: 40 MB last a few seconds
+    let dev = Device(mac, askBefore: false)
+    let src = mac.folder.appendingPathComponent("mac-src")
+    let big = make(src, "big.bin", 40_000_000)
+    macOffers(mac, [big])
+    check(waitFor(20) { (dev.lastIn?.written ?? 0) >= 1_000_000 }, "under way")
+    dev.files.cancelIncoming()
+    let cancelled = dev.inEnd(10)
+    if case .stopped(let r, _, let byPeer, _)? = cancelled?.phase { check(r == "cancelled" && !byPeer, "the device's Cancel") }
+    else { check(false, "cancelled: \(String(describing: cancelled?.phase))") }
+    check(((try? fm.contentsOfDirectory(atPath: dev.staging.path)) ?? []).isEmpty && listing(dev.fromMac).isEmpty, "its partial deleted, nothing kept")
+    check(waitFor(5) { mac.hub.queue.sync { true } }, "the Mac's hub settles")
+    let partsAtCancel = mac.partsSent
+    usleep(300_000)
+    check(mac.partsSent <= partsAtCancel + 1, "the Mac stops sending (\(partsAtCancel) → \(mac.partsSent))")
+    usleep(1_100_000)
+    macOffers(mac, [big])
+    check(waitFor(20) { (dev.lastIn?.written ?? 0) >= 1_000_000 && dev.lastIn?.phase == .receiving }, "a second one under way")
+    mac.hub.stopAll(.locked, tellPeer: true)
+    let locked = dev.inEnd(10)
+    if case .stopped(let r, _, let byPeer, _)? = locked?.phase { check(r == "locked" && byPeer, "the Mac locked: said by the Mac") }
+    else { check(false, "locked: \(String(describing: locked?.phase))") }
+    check(((try? fm.contentsOfDirectory(atPath: dev.staging.path)) ?? []).isEmpty, "its partial deleted")
+    // A damaged file from a hostile Mac: its end's hash not its bytes'.
+    let shown = dev.incoming.count
+    raw(mac, .fileTransfer, FileTransfer.offer(transfer: 77, files: [.init(id: 5, name: "bad.bin", size: 4)]).payload!)
+    check(waitFor(10) { dev.incoming.count > shown && dev.lastIn?.phase == .receiving }, "a raw offer taken")
+    raw(mac, .fileChunk, FileChunk.pack(id: 5, name: "", total: 4, offset: 0, bytes: Data("abcd".utf8)))
+    raw(mac, .fileTransfer, FileTransfer.end(transfer: 77, file: 5, sha256: sha(Data("abce".utf8))).payload!)
+    let damaged = dev.inEnd(10)
+    if case .stopped(let r, _, _, _)? = damaged?.phase { check(r == "damaged", "a wrong hash: damaged") }
+    else { check(false, "damaged: \(String(describing: damaged?.phase))") }
+    check(!listing(dev.fromMac).contains("bad.bin") && ((try? fm.contentsOfDirectory(atPath: dev.staging.path)) ?? []).isEmpty, "nothing kept, nothing left")
+    // A lost connection mid-file.
+    usleep(1_100_000)
+    macOffers(mac, [big])
+    check(waitFor(20) { (dev.lastIn?.written ?? 0) >= 1_000_000 && dev.lastIn?.phase == .receiving }, "a third one under way")
+    // A second offer while one runs: refused here, the running one goes on.
+    let running = dev.lastIn?.serial
+    raw(mac, .fileTransfer, FileTransfer.offer(transfer: 88, files: [.init(id: 9, name: "second.bin", size: 3)]).payload!)
+    usleep(300_000)
+    check(dev.incoming.allSatisfy { $0.names != ["second.bin"] } && dev.lastIn?.serial == running && dev.lastIn?.phase == .receiving,
+          "a second offer while one runs: refused, the running one goes on")
+    let other = NWConnection(host: "127.0.0.1", port: mac.port, using: .tcp)
+    dev.link.connection = other
+    let lost = dev.inEnd(10)
+    if case .stopped(let r, _, let byPeer, _)? = lost?.phase { check(r == "lost" && !byPeer, "the session's connection changed: lost") }
+    else { check(false, "lost: \(String(describing: lost?.phase))") }
+    check(((try? fm.contentsOfDirectory(atPath: dev.staging.path)) ?? []).isEmpty, "its partial deleted")
+    other.cancel()
     dev.stop(); mac.stop()
 }
 

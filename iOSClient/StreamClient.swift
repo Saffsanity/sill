@@ -967,6 +967,12 @@ final class StreamClient: ObservableObject {
     /// This device's transfer to the Mac as the chip and the Files rows show it (DeviceFiles), kept for
     /// `DeviceFilesCopy.resultLifetime` after it ends.
     @Published var fileOut: OutgoingFiles?
+    /// A transfer from the Mac to this device (or this device's Get Files waiting for the Mac's panel), as the chip
+    /// and the rows show it, kept for `DeviceFilesCopy.incomingResultLifetime` after it ends.
+    @Published var fileIn: IncomingFiles?
+    /// What Save to Photos did with the last transfer from the Mac, on the chip until it goes.
+    @Published var photosResult: DeviceFilesCopy.PhotosResult?
+    var fileInExpiry: DispatchWorkItem?
     /// A file shared into Sill from another app, waiting for the person's Send (StreamClient+Files).
     @Published var filesShared: FilesShared?
     var fileOutExpiry: DispatchWorkItem?
@@ -984,6 +990,7 @@ final class StreamClient: ObservableObject {
         let files = DeviceFiles(link: link)
         files.onSnapshot = { [weak self] s in DispatchQueue.main.async { self?.fileSnapshot(s) } }
         files.onDropped = { [weak self] in DispatchQueue.main.async { self?.filesDropped() } }
+        files.onIncoming = { [weak self] s in DispatchQueue.main.async { self?.incomingSnapshot(s) } }
         return files
     }()
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
@@ -2219,8 +2226,10 @@ final class StreamClient: ObservableObject {
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
+        // `files`: it takes files from the Mac (docs/files-plan.md §5.1): a Mac offers it the files its person sends
+        // (asked about here first, unless Ask Before Receiving Files is off) and answers its Get Files.
         return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
-                                 audio: AudioCodec.devicePlays, offConsoleView: LockedMac.viewGeneration))
+                                 audio: AudioCodec.devicePlays, offConsoleView: LockedMac.viewGeneration, files: FilePolicy.deviceTakes))
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -2256,7 +2265,7 @@ final class StreamClient: ObservableObject {
         guard connected, connectedDirectly, sessionListed, moving == nil, connection != nil,
               let mac = macs.first(where: { $0.name == hostName && $0.route == .network }) else { return }
         // A transfer of files belongs to this connection: the move waits for its end (`filesMovesResume`).
-        guard !OutgoingFiles.holdsMoves(fileOut) else { return }
+        guard !DeviceFilesCopy.movesWait(out: fileOut, incoming: fileIn) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let decision = DiscoveryPolicy.moveToNetwork(listedSince: sightings.since[mac.name], lastAttempt: lastMoveAttempt,
                                                      refusedListing: refusedListing, now: now)
@@ -2328,7 +2337,7 @@ final class StreamClient: ObservableObject {
         guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
               connection != nil, homeInfo.latest != nil, let id = s.macID, let saved = savedMac(id) else { return }
         // A transfer of files belongs to this connection: the move home waits for its end.
-        guard !OutgoingFiles.holdsMoves(fileOut) else { return }
+        guard !DeviceFilesCopy.movesWait(out: fileOut, incoming: fileIn) else { return }
         // Every network row whose tag names the session's saved Mac, by row: one not refused, at a door
         // that speaks TLS, dialed pinned to the saved Mac's key, never plain, never an ask (a plain door
         // is passed over; a Mac that removed this device or has a new key keeps the session remote).
@@ -3007,7 +3016,7 @@ final class StreamClient: ObservableObject {
         case .moveTo(.wired, let interface):
             guard let mac = macs.first(where: { $0.name == hostName && $0.route == .network }), let wired = wiredDial(for: mac) else { return }
             // A move up while a transfer of files runs waits for its end; a path gone never waits.
-            guard !OutgoingFiles.holdsMoves(fileOut) else { return }
+            guard !DeviceFilesCopy.movesWait(out: fileOut, incoming: fileIn) else { return }
             #if DEBUG
             lastKept = nil
             print(input.upFailures > 0 ? "path: the cable is still listed: moving the session to \(interface) again (\(input.upFailures) did not complete)"
@@ -4653,10 +4662,14 @@ final class StreamClient: ObservableObject {
                 self.receiveClipboard(data)
             }
         case .fileTransfer:
-            // A transfer of this device's (StreamClient+Files, DeviceFiles): the Mac's answer, its
-            // acknowledgements, its `done` or a cancel, for the transfer on this connection only.
+            // A transfer either way (StreamClient+Files, DeviceFiles): to the Mac, its answer, acknowledgements,
+            // `done` or a cancel; from it, its offer, each file's end or a cancel; for this connection only.
             guard let t = FileTransfer.parse(data), let from = connection else { return }
             deviceFiles.received(t, from: from)
+        case .fileChunk:
+            // A part of a file from the Mac (DeviceFiles writes it on its own queue, never this one or the main).
+            guard let from = connection else { return }
+            deviceFiles.receivedPart(data, from: from)
         case .macMenu:
             // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
             // (MacMenuState). One that does not decode is dropped: its completion times out.

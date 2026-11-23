@@ -387,6 +387,15 @@ package final class StreamCoordinator {
     private let filesTestFolder: URL?
     /// What `files` was last told.
     private var filesContext: FileHub.Context?
+    /// The devices whose hello says they take files from the Mac (Hello.files; docs/files-plan.md §5.1).
+    private var filesTakers = Set<ObjectIdentifier>()
+    /// TEST ONLY (a test host): SILL_TEST_FILES_PICK's files, which answer a device's pick with no Open panel (the
+    /// list then says `files` 2), and SILL_TEST_FILES_OFFER's, offered on cue as Sill's menu would.
+    private let filesTestPick: [URL]?
+    private let filesTestOffer: (seconds: Double, urls: [URL])?
+    /// This host gives files to a device that asks (`WindowList.files` 2). Only a test host's TEST ONLY choice so far:
+    /// Sill.app's Open panel, shown in the stream, comes with the catalog's exception for it (docs/files-plan.md §7.5).
+    private var filesGives: Bool { filesTestPick != nil }
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -451,6 +460,8 @@ package final class StreamCoordinator {
         let fileHooks = FileHub.testHooks(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                           synthetic: synthetic, environment: env)
         filesTestFolder = fileHooks.folder
+        filesTestPick = fileHooks.pick
+        filesTestOffer = fileHooks.offer
         filesIdentity = remote?.identity != nil
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 } + fileHooks.lines
@@ -485,7 +496,10 @@ package final class StreamCoordinator {
         clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
         let fileServer = server
         files = FileHub(gate: SessionLock.shared.gate, folder: fileHooks.folder ?? Self.filesFolder(config),
-                        testLog: fileHooks.log, testFree: fileHooks.free) { t, c in fileServer.sendFileMessage(t, to: c) }
+                        testLog: fileHooks.log, testFree: fileHooks.free,
+                        send: { t, c in fileServer.sendFileMessage(t, to: c) },
+                        sendPart: { data, c in fileServer.sendFilePart(data, to: c) },
+                        lastInput: { c in fileServer.lastInput(from: ObjectIdentifier(c)) })
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -655,6 +669,7 @@ package final class StreamCoordinator {
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
                 self.files.stop(connection: id, .lost, tellPeer: false)     // its partial files deleted
+                self.filesTakers.remove(id)
                 self.pushFilesContext()
                 self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
@@ -718,6 +733,15 @@ package final class StreamCoordinator {
         // Files go from the network queue straight to their own (FileHub), with the reading as they arrived.
         server.onFileMessage = { [files] message, connection, arrived, done in
             files.received(message, from: connection, arrived: arrived, done: done)
+        }
+        // A part of the Mac's file went to a device's connection: the next is read (FileHub, on its queue).
+        server.onFileRoom = { [files] connection in files.room(connection) }
+        // A device's pick (its Get Files): the Open panel. A test host answers it with SILL_TEST_FILES_PICK's files.
+        files.onPick = { [weak self] id, transfer in
+            Task { @MainActor in
+                guard let self, let connection = self.connections[id] else { return }
+                self.filesPicked(connection, transfer: transfer)
+            }
         }
         // Transfers running: the snapshot says how many, so Sill.app keeps the Mac awake meanwhile.
         files.onRunning = { [weak self] count in
@@ -793,6 +817,10 @@ package final class StreamCoordinator {
                     guard let self, let view = self.listMessages().view else { return }
                     self.server.send(view, to: connection)
                 }
+            }
+            // Files from the Mac go only to a device whose hello takes them (FileHub, docs/files-plan.md §5.1).
+            if (hello.files ?? 0) >= FilePolicy.deviceTakes {
+                Task { @MainActor in self?.filesHello(id) }
             }
             let name = SafeText.label(hello.device ?? "")
             guard !name.isEmpty else { return }
@@ -1196,6 +1224,7 @@ package final class StreamCoordinator {
     /// change publishes, and each connection's state carries its own.
     private func linkChanged(_ id: ObjectIdentifier, _ v: LinkJudge.Verdict) {
         guard routes[id] != nil else { return }       // gone meanwhile
+        defer { pushFilesContext() }                  // the Mac's files to it go in a smaller window while it is behind
         let device = status.snapshot.devices.first { $0.id == id }
         let who = device?.name ?? device?.endpoint ?? "a device"
         switch v.state {
@@ -3721,7 +3750,8 @@ package final class StreamCoordinator {
         // Files (docs/files-plan.md §5.1): 1 while Share files with devices is on, 0 while it is off, and nothing
         // from a host without an identity (no device can pair with the CLI's plain door); none while locked or
         // off console either (LockPolicy.list).
-        if filesIdentity { list.files = target.shareFiles ? FilePolicy.takes : 0 }
+        // 2 where the host also gives files to a device that asks (filesGives).
+        if filesIdentity { list.files = target.shareFiles ? (filesGives ? FilePolicy.gives : FilePolicy.takes) : 0 }
         let stops = catalog.desktopCandidates
         if !synthetic || catalog.testDisplays != nil, stops.count > 1 {
             list.desktopDisplays = stops.count
@@ -3841,12 +3871,35 @@ package final class StreamCoordinator {
     private func pushFilesContext() {
         var c = FileHub.Context()
         c.share = filesIdentity && target.shareFiles
+        c.gives = c.share && filesGives
         c.folder = filesTestFolder ?? Self.filesFolder(target)
         c.place = filesTestFolder == nil && target.filesFolder == nil ? FilesCopy.defaultPlace : c.folder.lastPathComponent
-        for (id, connection) in connections { c.peers[id] = FileHub.Peer(name: deviceName(connection), paired: sessionPaired(id)) }
+        for (id, connection) in connections {
+            c.peers[id] = FileHub.Peer(name: deviceName(connection), paired: sessionPaired(id), takesFiles: filesTakers.contains(id),
+                                       away: routes[id]?.isRemote == true, linkBehind: linkReports[id] != nil)
+        }
         guard c != filesContext else { return }
         filesContext = c
         files.update(c)
+    }
+
+    /// A device's hello takes files from the Mac: FileHub may offer it files. TEST ONLY (SILL_TEST_FILES_OFFER, a test
+    /// host): its files offered on cue, as Sill's menu would.
+    private func filesHello(_ id: ObjectIdentifier) {
+        guard connections[id] != nil else { return }
+        filesTakers.insert(id)
+        pushFilesContext()
+        guard let cue = filesTestOffer else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + cue.seconds) { [weak self] in
+            guard let self, let connection = self.connections[id] else { return }
+            self.files.send(cue.urls, to: connection)
+        }
+    }
+
+    /// A device's pick (its Get Files from ‹Mac›…), which FileHub took: a test host answers it with
+    /// SILL_TEST_FILES_PICK's files at once, as if chosen in the Open panel; no other host gives files yet.
+    private func filesPicked(_ connection: NWConnection, transfer: UInt32) {
+        files.pickEnded(connection, transfer: transfer, urls: filesTestPick)
     }
 
     /// Where files from devices are kept: the folder chosen, else Downloads › Sill.

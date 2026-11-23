@@ -135,6 +135,20 @@ kind 49 from the host is printed on a line but its acknowledgements, which are c
                      (or rN for N random bytes)
   --expect-files=OP[:REASON]  at exit, the last kind 49 from the host that is not an ack must have this op (and
                      reason): done, answer:locked, cancel:stalled…; prints EXPECT-FILES ok or EXPECT-FILES FAIL (exit 1)
+Files from the Mac (the hello says files 1 with any of these, sent even without --hello):
+  --accept-files=DIR take the host's offers as a device does with Ask Before Receiving Files off: each part written
+                     at once into DIR/.incoming, acknowledged, each file kept in DIR under its name (numbered when
+                     taken) once its size and SHA-256 are the host's, then done; a part out of order, a wrong hash or
+                     a size not the offer's cancels it damaged
+  --decline-files    refuse every offer (declined)
+  --ignore-files     answer no offer (the host's minute runs out)
+  --pick-files@T     ask for the host's files T seconds in (a pick, as Get Files does); its answer is taken (with
+                     --accept-files) only when it names that pick's transfer and says asked
+  --cancel-receive@T a cancel of the transfer from the host T seconds in (reason cancelled)
+  --receive-pace=B   acknowledge at most B bytes a second of what came (a slow device's stand-in: the host's window
+                     then holds it to that, so a test can act mid-transfer)
+  --expect-received=N  at exit, N files kept whole in --accept-files' DIR from the host's transfers and the last
+                     ended done; prints EXPECT-RECEIVED ok or EXPECT-RECEIVED FAIL (exit 1)
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -199,12 +213,13 @@ LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
          "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display",
-         "send-file", "cancel-files", "raw49", "raw34")
+         "send-file", "cancel-files", "raw49", "raw34", "pick-files", "cancel-receive")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "files-window", "expect-files", "files-pace")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "files-window", "expect-files", "files-pace",
+          "accept-files", "expect-received", "receive-pace")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -521,12 +536,13 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|cancel-files)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|cancel-files|pick-files|cancel-receive)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "cancel-files") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "cancel-files", "pick-files",
+                        "cancel-receive") and text: raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -571,7 +587,7 @@ try:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
-                       "--off-console-view",
+                       "--off-console-view", "--decline-files", "--ignore-files",
                        "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -671,6 +687,12 @@ if plays_audio:
 # 0.6.1 on: docs/off-console-plan.md), so a host with the switch on sends it the view's list (windows, offConsoleView).
 if "--off-console-view" in flags:
     hello = dict(hello if hello is not None else {"device": device}, offConsoleView=1)
+# Files from the Mac (docs/files-plan.md §5.4): with --accept-files, --decline-files, --ignore-files or --pick-files the
+# hello says files 1 (a device from the files-to-device build on), so a host offers this client files.
+takes_files = valued("accept-files") is not None or "--decline-files" in flags or "--ignore-files" in flags or any(
+    a.startswith("--pick-files@") for a in flags)
+if takes_files:
+    hello = dict(hello if hello is not None else {"device": device}, files=1)
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -820,6 +842,44 @@ expect_files = valued("expect-files")
 files_out = None       # {transfer, files: [(id, path, size)], starts, phase, current, offset, sent, acked, hash, fh, began}
 files_in = []          # every kind 49 from the host but acks, in order
 files_acks = 0
+# Files from the host: --accept-files' folder, the transfer on its way, this client's pick, and what was kept.
+accept_dir = valued("accept-files")
+if accept_dir is not None: os.makedirs(os.path.join(accept_dir, ".incoming"), exist_ok=True)
+expect_received = number(valued("expect-received"), "--expect-received") if valued("expect-received") is not None else None
+rx_pace = number(valued("receive-pace"), "--receive-pace") if valued("receive-pace") else None
+def rx_release():
+    """--receive-pace: the acknowledgements held back, each sent once the pace allows its bytes."""
+    r = files_rx
+    if r is None or not r.get("held"): return
+    allowed = rx_pace * (time.time() - r["began"])
+    while r["held"] and r["held"][0][0] <= allowed:
+        rx_send(r["held"].pop(0)[1])
+files_rx = None        # {transfer, files: [(id, name, size)], current, written, fh, hash, path, began, kept}
+rx_pick = None         # this client's pick's transfer
+rx_kept = []           # every file kept whole, by its name as kept
+rx_last = None         # how the last transfer from the host ended: done, or a cancel's reason
+def rx_send(d): send_all(files_msg(d))
+def rx_stop(reason, tell=True):
+    global files_rx, rx_last
+    r = files_rx
+    if r is None: return
+    if r.get("fh") is not None: r["fh"].close(); r["fh"] = None
+    if r.get("path") and os.path.exists(r["path"]): os.remove(r["path"])
+    if tell: rx_send({"op": "cancel", "transfer": r["transfer"], "reason": reason})
+    print(f"  files received: stopped ({reason}) after {r['bytes']} bytes")
+    rx_last = reason; files_rx = None
+def rx_open(r):
+    fid, name, size = r["files"][r["current"]]
+    r["path"] = os.path.join(accept_dir, ".incoming", f"{r['transfer']:08x}-{fid:08x}.part")
+    r["fh"] = open(r["path"], "xb"); r["hash"] = hashlib.sha256(); r["written"] = 0
+def rx_keep_name(name):
+    clean = name.replace("/", "-").replace(":", "-").strip() or "File"
+    if clean.startswith("."): clean = "File" + clean
+    stem, dot, ext = clean.rpartition(".")
+    candidate, n = clean, 2
+    while os.path.exists(os.path.join(accept_dir, candidate)):
+        candidate = f"{stem} {n}.{ext}" if dot and stem else f"{clean} {n}"; n += 1
+    return candidate
 def send_all(data):
     """A large send whatever the loop's short timeout: blocking for up to 10 s."""
     old = s.gettimeout(); s.settimeout(10)
@@ -947,6 +1007,13 @@ def fire(e, now):
         else: print(f"  --cancel-files at {at}: no transfer of this client's")
     elif name == "raw49":
         send_all(msg(49, text.encode())); print(f"  sent raw kind 49 {text[:200]} at {at}")
+    elif name == "pick-files":
+        global rx_pick
+        rx_pick = struct.unpack(">I", os.urandom(4))[0] or 1
+        rx_send({"op": "pick", "transfer": rx_pick}); print(f"  sent files pick: transfer {rx_pick} at {at}")
+    elif name == "cancel-receive":
+        if files_rx is not None: rx_stop("cancelled"); print(f"  sent receive cancel at {at}")
+        else: print(f"  --cancel-receive at {at}: no transfer from the host")
     elif name == "raw34":
         fid, total, offset, body = parsed
         send_all(chunk_msg(fid, total, offset, body)); print(f"  sent raw kind 34: file {fid}, total {total}, offset {offset}, {len(body)} bytes at {at}")
@@ -1050,6 +1117,38 @@ while time.time() - t0 < dur:
                 continue
             files_in.append(d)
             print(f"  files at {time.time()-t0:.3f}s: {json.dumps(d, ensure_ascii=False)[:300]}")
+            # Files from the host: its offer, each file's end, its cancel (of a transfer to this client, or of its pick).
+            r = files_rx
+            if d.get("op") == "offer" and takes_files:
+                tr = d.get("transfer"); fl = d.get("files") or []
+                if r is not None or not isinstance(tr, int) or not fl:
+                    rx_send({"op": "answer", "transfer": tr, "accept": False, "reason": "busy" if r is not None else "damaged"}); continue
+                asked = d.get("asked") is True and tr == rx_pick
+                if "--ignore-files" in flags and not asked: print("  files: offer left unanswered"); continue
+                if accept_dir is None or ("--decline-files" in flags and not asked):
+                    rx_send({"op": "answer", "transfer": tr, "accept": False, "reason": "declined"}); rx_last = "declined"; continue
+                files_rx = {"transfer": tr, "files": [(f_["id"], f_["name"], int(f_["size"])) for f_ in fl], "current": 0, "kept": [],
+                            "fh": None, "path": None, "began": time.time(), "bytes": 0, "asked": asked}
+                if tr == rx_pick: rx_pick = None
+                rx_send({"op": "answer", "transfer": tr, "accept": True}); rx_open(files_rx)
+                print(f"  files: accepted transfer {tr} from the host, {len(fl)} files{' (asked for)' if asked else ''}")
+            elif d.get("op") == "end" and r is not None and d.get("transfer") == r["transfer"]:
+                fid, name, size = r["files"][r["current"]]
+                r["fh"].close(); r["fh"] = None
+                digest = base64.urlsafe_b64encode(r["hash"].digest()).decode().rstrip("=")
+                if d.get("file") != fid or r["written"] != size or d.get("sha256") != digest: rx_stop("damaged"); continue
+                kept = rx_keep_name(name); os.rename(r["path"], os.path.join(accept_dir, kept)); r["path"] = None
+                r["kept"].append(kept); rx_kept.append(kept); r["current"] += 1
+                if r["current"] < len(r["files"]): rx_open(r)
+                else:
+                    rx_send({"op": "done", "transfer": r["transfer"], "kept": r["kept"], "place": "sillclient"})
+                    took = time.time() - r["began"]
+                    print(f"  files received: {len(r['kept'])} files, {r['bytes']} bytes in {took:.2f} s ({r['bytes'] / max(took, 1e-6) / 1e6:.1f} MB/s)")
+                    rx_last = "done"; files_rx = None
+            elif d.get("op") == "cancel" and r is not None and d.get("transfer") == r["transfer"]:
+                rx_stop(d.get("reason") or "lost", tell=False)
+            elif d.get("op") == "cancel" and rx_pick is not None and d.get("transfer") == rx_pick:
+                rx_last = d.get("reason"); rx_pick = None
             if mine and d.get("op") == "answer":
                 o["phase"] = "sending" if d.get("accept") else "refused"
             elif mine and d.get("op") in ("done", "cancel"):
@@ -1058,6 +1157,20 @@ while time.time() - t0 < dur:
                     print(f"  files done: {o['total']} bytes in {took:.2f} s ({o['total'] / max(took, 1e-6) / 1e6:.1f} MB/s)")
                 o["phase"] = d["op"]
                 if o["fh"] is not None: o["fh"].close(); o["fh"] = None
+        elif kind == 34 and takes_files:
+            # A part of a file from the host: written at once, acknowledged (the host's window moves on).
+            r = files_rx
+            if r is None or len(payload) < 6: continue
+            fid, nlen = struct.unpack(">IH", payload[:6])
+            if len(payload) < 22 + nlen: rx_stop("damaged"); continue
+            total, offset = struct.unpack(">QQ", payload[6 + nlen:22 + nlen]); body = payload[22 + nlen:]
+            cid, _, csize = r["files"][r["current"]]
+            if fid != cid or total != csize or offset != r["written"] or not body or r["written"] + len(body) > csize:
+                rx_stop("damaged"); continue
+            r["fh"].write(body); r["hash"].update(body); r["written"] += len(body); r["bytes"] += len(body)
+            ack = {"op": "ack", "transfer": r["transfer"], "file": fid, "offset": r["written"]}
+            if rx_pace: r.setdefault("held", []).append((r["bytes"], ack))
+            else: rx_send(ack)
         elif kind == 18:
             ok, i = verify_macinfo(payload, mac_pin)
             addrs = ",".join(f"{a['host']}{':' + str(a['port']) if a.get('port') else ''}/{a['kind']}/{a['via']}" for a in i.get("addresses", []))
@@ -1131,6 +1244,7 @@ while time.time() - t0 < dur:
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
     try:
         files_pump()
+        if rx_pace: rx_release()
     except OSError as e:
         print(f"files send failed at {time.time() - t0:.2f}s: {e}"); break
     if now - last >= 1:
@@ -1195,6 +1309,12 @@ if menus_failed: sys.exit(1)
 if files_out is not None or files_in or files_acks:
     o = files_out
     print(f"FILES {len(files_in)} messages, {files_acks} acks" + (f"; this client's transfer {o['phase']}, {o['sent']} of {o['total']} bytes sent, {o['acked']} acknowledged" if o else ""))
+if takes_files:
+    print(f"RECEIVED {len(rx_kept)} files kept, the last transfer ended {rx_last}")
+if expect_received is not None:
+    ok = len(rx_kept) == expect_received and rx_last == "done"
+    print("EXPECT-RECEIVED ok" if ok else f"EXPECT-RECEIVED FAIL: want {expect_received} kept and done, got {len(rx_kept)}, {rx_last}")
+    if not ok: sys.exit(1)
 if expect_files is not None:
     want_op, _, want_reason = expect_files.partition(":")
     got = files_in[-1] if files_in else None

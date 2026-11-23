@@ -19,8 +19,10 @@ struct FilesShared: Equatable {
 // pickers, a file shared into Sill and the share sheet's question hand sources to DeviceFiles, which sends them
 // on the session's connection; its snapshots come back here for the chip, the rows, VoiceOver, the background
 // task that lets a transfer outlast Sill leaving the screen for a while, the device's auto-lock and the moves a
-// transfer holds. The device takes no file from the Mac in this build: its hello says nothing of files, so the
-// Mac never offers it one.
+// transfer holds. From the Mac (docs/files-plan.md §8.4): its hello says `files` 1, so the Mac may offer it files
+// (asked about while Ask Before Receiving Files is on) and answer its Get Files; DeviceFiles keeps them in Documents ›
+// From ‹Mac›, and the chip shows them with Show and Save to Photos (PhotoSaver), or saves photos and videos to Photos
+// by itself while Save Photos and Videos to Photos is on.
 //
 // Everything here is main thread.
 extension StreamClient {
@@ -43,11 +45,108 @@ extension StreamClient {
         updateFilesContext()
     }
 
-    /// The sender's context: away from home (the remote door), the Mac's report of this device's link.
+    /// The transfers' context: away from home (the remote door), the Mac's report of this device's link, Ask
+    /// Before Receiving Files, the Mac's name (its folder in Documents).
     func updateFilesContext() {
         let away = remoteRoute != nil
         let behind = settings.host?.link.map { $0.state == LinkReport.behind || $0.state == LinkReport.stalled } ?? false
-        deviceFiles.update(DeviceFiles.Context(away: away, linkBehind: behind))
+        deviceFiles.update(DeviceFiles.Context(away: away, linkBehind: behind, askBefore: Self.askBeforeReceivingOn, mac: macName))
+    }
+
+    // MARK: Files from the Mac
+
+    /// This device's switch, Ask Before Receiving Files (the Settings panel's This iPad group, while the Mac gives
+    /// files): on unless turned off. Files this device asked for (Get Files) come without asking either way. The
+    /// device's own preference, never sent; read at each offer.
+    static let askBeforeReceivingKey = "Sill.askBeforeReceiving"
+    static var askBeforeReceivingOn: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: askBeforeReceivingKey) == nil || defaults.bool(forKey: askBeforeReceivingKey)
+    }
+
+    /// This device's switch, Save Photos and Videos to Photos: off unless turned on (Noah's rule for new
+    /// behaviour); with it on, the photos and videos of a transfer from the Mac go to the Photos library (add-only
+    /// access, asked as the switch goes on) and leave Files once Photos has them.
+    static let photosAutoSaveKey = "Sill.photosAutoSave"
+    static var photosAutoSaveOn: Bool { UserDefaults.standard.bool(forKey: photosAutoSaveKey) }
+
+    /// What the Get Files row and the receiving switches say now (FilePolicy.deviceGets).
+    var filesGetting: FilePolicy.Offering {
+        FilePolicy.deviceGets(connected: connected, hostFiles: hostFiles, locked: macLocked, sessionPaired: settings.host?.sessionPaired,
+                              receiving: IncomingFiles.holdsMoves(fileIn))
+    }
+
+    /// Get Files from ‹Mac›…: the Mac shows its Open panel; the files chosen come without asking.
+    func getFiles() {
+        guard filesGetting == .yes, let c = connection else { return }
+        updateFilesContext()
+        deviceFiles.pickFiles(on: c)
+        noteAction()
+    }
+
+    func acceptIncoming() { deviceFiles.acceptIncoming(); noteAction() }
+    func declineIncoming() { deviceFiles.declineIncoming(); noteAction() }
+    func cancelIncoming() { deviceFiles.cancelIncoming(); noteAction() }
+
+    /// A snapshot of the transfer from the Mac: the chip and the rows, VoiceOver at its start and end, the
+    /// background task and the auto-lock hold while it runs, and at its end the moves it held and, with Save
+    /// Photos and Videos to Photos on, the photos and videos to Photos.
+    func incomingSnapshot(_ s: IncomingFiles) {
+        let was = fileIn
+        fileIn = s
+        fileInExpiry?.cancel()
+        fileInExpiry = nil
+        let newPhase = was?.serial != s.serial || !Self.samePhase(was?.phase, s.phase)
+        if newPhase, let words = DeviceFilesCopy.incomingAnnouncement(s, mac: macWord, device: Self.deviceWord) {
+            UIAccessibility.post(notification: .announcement, argument: words)
+        }
+        if s.isOver {
+            endFilesBackgroundTaskIfIdle()
+            if newPhase, UIDevice.current.userInterfaceIdiom == .phone, DeviceFilesCopy.incomingEndShown(s) {
+                UINotificationFeedbackGenerator().notificationOccurred(DeviceFilesCopy.incomingWarns(s) ? .warning : .success)
+            }
+            if !DeviceFilesCopy.incomingEndShown(s) { fileIn = nil }
+            let serial = s.serial
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.fileIn?.serial == serial, self.fileIn?.isOver == true else { return }
+                self.fileIn = nil
+                self.photosResult = nil
+            }
+            fileInExpiry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + DeviceFilesCopy.incomingResultLifetime, execute: work)
+            if IncomingFiles.holdsMoves(was), !OutgoingFiles.holdsMoves(fileOut) { filesMovesResume() }
+            if newPhase, case .done = s.phase, Self.photosAutoSaveOn, !s.photos.isEmpty { saveToPhotos(removing: true) }
+            #if DEBUG
+            print("files: \(DeviceFilesCopy.incomingTitle(s, mac: "the Mac", device: Self.deviceWord))")
+            #endif
+        } else {
+            beginFilesBackgroundTask()
+            lastFileProgressAt = ProcessInfo.processInfo.systemUptime
+            if was?.written != s.written || newPhase { DeviceIdleTimer.shared.used() }
+        }
+    }
+
+    private static func samePhase(_ a: IncomingFiles.Phase?, _ b: IncomingFiles.Phase) -> Bool {
+        switch (a, b) {
+        case (.picking?, .picking), (.asking?, .asking), (.receiving?, .receiving): return true
+        case (.done?, .done), (.stopped?, .stopped): return a == b
+        default: return false
+        }
+    }
+
+    /// Save to Photos: the kept photos and videos of the last transfer from the Mac (add-only access, asked the
+    /// first time). `removing`: the automatic switch's, which takes them out of Files once Photos has them.
+    func saveToPhotos(removing: Bool = false) {
+        guard let s = fileIn, let folder = s.folder, !s.photos.isEmpty else { return }
+        let urls = s.photos.map { folder.appendingPathComponent($0) }
+        photosResult = nil
+        PhotoSaver.save(urls) { [weak self] result in
+            guard let self else { return }
+            if removing, case .saved = result { for url in urls { try? FileManager.default.removeItem(at: url) } }
+            self.photosResult = result
+            UIAccessibility.post(notification: .announcement, argument: DeviceFilesCopy.photosLine(result))
+        }
+        noteAction()
     }
 
     // MARK: Sending
@@ -97,7 +196,7 @@ extension StreamClient {
     func filesDropped() {
         guard let out = fileOut, out.serial == OutgoingFiles.localSerial, !out.isOver else { return }
         fileOut = nil
-        endFilesBackgroundTask()
+        endFilesBackgroundTaskIfIdle()
     }
 
     /// A snapshot of the transfer (DeviceFiles, or `showFilesLocally`): the chip and the rows, what
@@ -113,7 +212,7 @@ extension StreamClient {
             UIAccessibility.post(notification: .announcement, argument: words)
         }
         if s.isOver {
-            endFilesBackgroundTask()
+            endFilesBackgroundTaskIfIdle()
             if newPhase, UIDevice.current.userInterfaceIdiom == .phone {
                 UINotificationFeedbackGenerator().notificationOccurred(DeviceFilesCopy.warns(s) ? .warning : .success)
             }
@@ -124,7 +223,7 @@ extension StreamClient {
             }
             fileOutExpiry = work
             DispatchQueue.main.asyncAfter(deadline: .now() + DeviceFilesCopy.resultLifetime, execute: work)
-            if OutgoingFiles.holdsMoves(was) { filesMovesResume() }
+            if OutgoingFiles.holdsMoves(was), !IncomingFiles.holdsMoves(fileIn) { filesMovesResume() }
             #if DEBUG
             print("files: \(DeviceFilesCopy.title(s, mac: "the Mac", device: Self.deviceWord))")
             #endif
@@ -145,7 +244,7 @@ extension StreamClient {
 
     /// While a transfer runs, Sill leaving the screen keeps it going for the time iOS gives a background
     /// task (about 30 s); when that ends, the transfer stops `background`, and the chip says so when Sill
-    /// comes back. With Picture in Picture showing, Sill runs and the transfer goes on.
+    /// comes back. With Picture in Picture showing, Sill runs and the transfer goes on. Either direction's.
     private func beginFilesBackgroundTask() {
         guard filesBackgroundTask == .invalid else { return }
         filesBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Sill files") { [weak self] in
@@ -153,6 +252,12 @@ extension StreamClient {
             self.deviceFiles.stop(.background, tellPeer: true)
             self.endFilesBackgroundTask()
         }
+    }
+
+    /// The background task ends once neither direction runs.
+    private func endFilesBackgroundTaskIfIdle() {
+        guard !DeviceFilesCopy.movesWait(out: fileOut, incoming: fileIn) else { return }
+        endFilesBackgroundTask()
     }
 
     private func endFilesBackgroundTask() {
@@ -179,8 +284,8 @@ extension StreamClient {
         let fm = FileManager.default
         let name = url.lastPathComponent
         var source = DeviceFiles.Source(url: url, name: name, scoped: true, type: UTType(filenameExtension: url.pathExtension)?.identifier)
-        let inbox = fm.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Inbox", isDirectory: true)
-        if let inbox, url.standardizedFileURL.path.hasPrefix(inbox.standardizedFileURL.path + "/") {
+        let inbox = SillDocuments.inbox
+        if url.standardizedFileURL.path.hasPrefix(inbox.standardizedFileURL.path + "/") {
             let folder = DeviceFiles.outbox.appendingPathComponent(UUID().uuidString, isDirectory: true)
             let moved = folder.appendingPathComponent(name)
             do {

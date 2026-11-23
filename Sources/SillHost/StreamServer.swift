@@ -156,6 +156,12 @@ final class StreamServer {
         /// holds no more than that of this Mac's memory, and a slow volume slows only its own sender.
         var filesQueued = 0
         var readPaused = false
+        /// Its hello said it takes files from the Mac (`Hello.files`; docs/files-plan.md §5.1): FileHub may offer
+        /// it files and answer its pick. Read by the coordinator through the hello itself.
+        var takesFiles = false
+        /// One part of a file of the Mac's on its way to it (kind 34, from FileHub): it waits here, never more
+        /// than one, until the connection holds little and the picture needs nothing (`pumpFileSlot`).
+        var fileSlot: Data?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -186,6 +192,10 @@ final class StreamServer {
     /// arrived, never through `onMessage`; the last argument is called once the message is dealt with (on
     /// any queue). Nil (the harnesses): they go to `onMessage`, which ignores them. Called on the network queue.
     var onFileMessage: ((StreamMessage, NWConnection, LockPolicy.Reading, @escaping () -> Void) -> Void)?
+    /// A part of the Mac's own file that `sendFilePart` held was handed to the device's connection: FileHub reads
+    /// the next. Never while one waits, so at most one part of a file is ever in Sill's own queue for a device.
+    /// Called on the network queue.
+    var onFileRoom: ((NWConnection) -> Void)?
     /// A locked Mac (LockPolicy, docs/locked-mac-plan.md): SessionLock's gate, set before `start()`. From
     /// the moment it reads locked, the server sends no picture of the Mac but its placeholder, no thumbnail,
     /// icon, app list, sound, clipboard, pointer or cursor shape (`LockPolicy.withheld`), whatever the main
@@ -1328,6 +1338,7 @@ final class StreamServer {
         // The Mac's sound goes only to a device that said it plays a codec this host makes.
         client.audioCodec = AudioCodec.choose(offered: hello.audio)
         client.viewsOffConsole = (hello.offConsoleView ?? 0) >= LockedMac.viewGeneration
+        client.takesFiles = (hello.files ?? 0) >= FilePolicy.deviceTakes
         updateAudioListeners()
         onClientHello?(c, hello)
     }
@@ -1378,6 +1389,8 @@ final class StreamServer {
             client.withheldThisSecond = 0
             client.takenThisSecond = 0
             if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
+            // A part of the Mac's file that waits: the frames' quiet (FileFlow.keyframeWait) is only seen here.
+            if client.fileSlot != nil { pumpFileSlot(client) }
             guard client.route.isRemote else { continue }
             let silent = now - client.lastHeardAt
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
@@ -1413,6 +1426,21 @@ final class StreamServer {
         heardLock.lock(); heardAt[id] = now; heardLock.unlock()
     }
 
+    /// Input (kind 8) from the registered client `id`, by the repeat's clock: while the person uses the stream
+    /// the Mac's files to that device go in a smaller window (FileFlow.active, FileHub).
+    private var inputAt: [ObjectIdentifier: Double] = [:]
+    private func inputHeard(_ id: ObjectIdentifier) {
+        let now = ProcessInfo.processInfo.systemUptime
+        heardLock.lock(); inputAt[id] = now; heardLock.unlock()
+    }
+
+    /// When the registered client `id` last sent input (kind 8), by the repeat's clock; nil for none. From any
+    /// thread.
+    func lastInput(from id: ObjectIdentifier) -> Double? {
+        heardLock.lock(); defer { heardLock.unlock() }
+        return inputAt[id]
+    }
+
     /// When the registered client `id` was last heard from, by the repeat's clock; nil for one that
     /// is not registered (it left, or is not admitted yet). From any thread.
     func lastHeard(from id: ObjectIdentifier) -> Double? {
@@ -1424,7 +1452,7 @@ final class StreamServer {
     /// connection that was never registered (refused, or failed before it was ready) leaves no line.
     private func unregister(_ id: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: id) else { return }
-        heardLock.lock(); heardAt[id] = nil; heardLock.unlock()
+        heardLock.lock(); heardAt[id] = nil; inputAt[id] = nil; heardLock.unlock()
         pointerWatch?.clientLeft(id)
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
@@ -1505,6 +1533,58 @@ final class StreamServer {
         }
     }
 
+    // MARK: The Mac's files to a device (kind 34; docs/files-plan.md §6.3 and §7.2)
+    //
+    // A send path of its own, as the sound's: never in `inflight`, `inflightFrames` or the drain eviction, which
+    // stay the picture's; counted in `pendingBytes` and, once taken, in `takenThisSecond`, so each device's link
+    // judge sees the link carry it. FileHub hands one part at a time (`sendFilePart`); it waits in the device's
+    // slot until FileFlow.hostMaySend says the picture needs nothing of the link (the connection holds no more
+    // than 64 KiB, no keyframe is wanted while frames go, none is on its way), is handed to the connection, and
+    // only then does FileHub hear `onFileRoom` and read the next. So a frame queues behind at most one part in
+    // Sill's own queue, a keyframe behind none, and the acknowledgement window (FileSender) bounds the rest. A
+    // transfer's kind 49s go through `sendFileMessage`, after the part before them (FileHub waits for the room).
+
+    /// When a frame last went to any device (systemUptime); nil before the first. On `queue`.
+    private var lastFrameAt: Double?
+
+    /// One part (a whole kind 34) of the Mac's file to `connection`, from FileHub on `sill.files`: into its slot,
+    /// and on as soon as the link allows. Dropped without a word when the device is gone, its slot is full
+    /// (FileHub never does that), or the Mac reads locked (the gate withholds kind 34; the lock stops the
+    /// transfer anyway). Thread-safe.
+    func sendFilePart(_ data: Data, to connection: NWConnection) {
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)], client.connection.state == .ready, client.fileSlot == nil else { return }
+            client.fileSlot = data
+            pumpFileSlot(client)
+        }
+    }
+
+    /// On `queue`: the slot's part handed to the connection when the link allows (FileFlow.hostMaySend), then
+    /// FileHub told there is room.
+    private func pumpFileSlot(_ client: Client) {
+        guard let data = client.fileSlot else { return }
+        if lockGate.withholds(.fileChunk) {
+            client.fileSlot = nil
+            withheld(.fileChunk, for: ObjectIdentifier(client.connection))
+            return
+        }
+        let since = lastFrameAt.map { ProcessInfo.processInfo.systemUptime - $0 }
+        guard client.connection.state == .ready,
+              FileFlow.hostMaySend(pendingBytes: client.pendingBytes, needsKeyframe: client.needsKeyframe,
+                                   keyframesInFlight: client.keyframesInFlight.count, sinceFrame: since) else { return }
+        client.fileSlot = nil
+        client.lastSentAt = Date().timeIntervalSince1970
+        client.pendingBytes += data.count
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
+            guard let client else { return }
+            client.pendingBytes -= data.count
+            client.takenThisSecond += data.count
+            if client.fileSlot != nil { self?.pumpFileSlot(client) }
+        })
+        Stats.shared.bump("file.sent")
+        onFileRoom?(client.connection)
+    }
+
     /// A window list in two forms (StreamCoordinator.listMessages; docs/off-console-plan.md): the off-console
     /// view's to each device whose hello said it shows it (`Client.viewsOffConsole`), the plain one, as Sill for
     /// Mac 0.6.0 sends it, to every other. Thread-safe.
@@ -1575,6 +1655,7 @@ final class StreamServer {
                 }
                 if header.kind == .input {
                     self.lastInputAt = Date().timeIntervalSince1970
+                    self.inputHeard(ObjectIdentifier(c))
                     if self.tickTimer == nil { self.updateTicking() }
                     // This device moves the Mac's pointer now. The count and the controller change
                     // in the same queue turn as every sample, so no kind 26 carries the new count
@@ -1784,11 +1865,12 @@ final class StreamServer {
         client.audioUnsent += 1
         client.lastSentAt = Date().timeIntervalSince1970
         client.pendingBytes += data.count
-        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
             guard let client else { return }
             client.audioUnsent -= 1
             client.pendingBytes -= data.count
             client.takenThisSecond += data.count
+            if client.fileSlot != nil { self?.pumpFileSlot(client) }
         })
         Stats.shared.bump("aud.sent")
     }
@@ -1933,12 +2015,14 @@ final class StreamServer {
         if isFrame {
             client.inflightFrames += 1
             if client.oldestUnackedFrameAt == nil { client.oldestUnackedFrameAt = now }
+            lastFrameAt = ProcessInfo.processInfo.systemUptime
         }
-        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
             guard let client else { return }
             client.inflight -= 1
             client.pendingBytes -= data.count
             client.takenThisSecond += data.count
+            if client.fileSlot != nil { self?.pumpFileSlot(client) }
             if remote {
                 if let seq = keyframeSeq, let i = client.keyframesInFlight.firstIndex(where: { $0.seq == seq }) {
                     client.keyframeBytesInFlight -= client.keyframesInFlight.remove(at: i).bytes

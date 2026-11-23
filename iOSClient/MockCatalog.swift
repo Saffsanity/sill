@@ -171,7 +171,9 @@ enum MockCatalog {
     /// switch off; an older Sill on the Mac, which says nothing of files but its version; nothing; it also gives
     /// files); `-SillFiles preparing|offering|sending|finishing|saved|saved3|cancelled|refused|lost|folder|ask`
     /// the chip over the stream (and the Settings panel's line under the Files rows) in that state, or a
-    /// file shared into Sill asking to be sent. Neither goes away by itself here.
+    /// file shared into Sill asking to be sent; `incoming|picking|receiving|received|received3|photosSaved|
+    /// receiveStopped` a transfer from the Mac (the Mac then gives files: Get Files and the receiving switches
+    /// show). Neither goes away by itself here.
     private static func seedFiles(_ client: StreamClient) {
         let defaults = UserDefaults.standard
         switch defaults.string(forKey: "SillFilesHost") {
@@ -201,8 +203,26 @@ enum MockCatalog {
         case "ask":
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("Quarterly report.pdf")
             client.filesShared = FilesShared(sources: [DeviceFiles.Source(url: url, name: "Quarterly report.pdf", scoped: true)], at: 0)
+        // From the Mac (docs/files-plan.md §8.4): its question, Get Files waiting, receiving, received, saved to
+        // Photos, stopped. Nothing is written: the folder is named only, for Show and Save to Photos.
+        case "incoming", "picking", "receiving", "received", "received3", "photosSaved", "receiveStopped":
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(DeviceFilesCopy.folderName(mac: client.macName))
+            func inc(_ phase: IncomingFiles.Phase, _ names: [String], written: UInt64 = 0) -> IncomingFiles {
+                IncomingFiles(serial: 1, phase: phase, names: names, total: 48_000_000, written: written, since: 0, asked: false, folder: folder)
+            }
+            if client.hostFiles == nil || client.hostFiles == FilePolicy.takes { client.hostFiles = FilePolicy.gives }
+            switch state {
+            case "incoming": client.fileIn = inc(.asking, one)
+            case "picking": client.fileIn = inc(.picking, [])
+            case "receiving": client.fileIn = inc(.receiving, one, written: 20_160_000)
+            case "received": client.fileIn = inc(.done(one), one, written: 48_000_000)
+            case "received3": client.fileIn = inc(.done(three), three, written: 48_000_000)
+            case "photosSaved": client.fileIn = inc(.done(three), three, written: 48_000_000); client.photosResult = .saved(2)
+            default: client.fileIn = inc(.stopped(reason: FileReason.noRoom.rawValue, message: nil, byPeer: false, name: one[0]), one)
+            }
         default:
-            print("-SillFiles \(state): not a state (preparing, offering, sending, finishing, saved, saved3, cancelled, refused, lost, folder, ask)")
+            print("-SillFiles \(state): not a state (preparing, offering, sending, finishing, saved, saved3, cancelled, refused, lost, folder, ask, "
+                  + "incoming, picking, receiving, received, received3, photosSaved, receiveStopped)")
         }
     }
 

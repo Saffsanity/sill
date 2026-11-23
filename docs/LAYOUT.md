@@ -116,9 +116,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   line a subscription and none per copy; a synthetic host's own pasteboard,
   the TEST ONLY SILL_TEST_PASTEBOARD, SILL_TEST_CLIPBOARD_LOG and
   SILL_TEST_CLIPBOARD_ACCESS; `MacClipboard`, macOS's paste privacy for the
-  look and for Settings › General's `ClipboardSection`), `FileHub` (files from
-  devices on `sill.files`: answers, the ledgers, stops at a lock, a cut-off, a
-  leave and a quit; the TEST ONLY SILL_TEST_FILES_DIR, _LOG and _FREE) and
+  look and for Settings › General's `ClipboardSection`), `FileHub` (files
+  between devices and the Mac on `sill.files`, both ways: a device's offers
+  answered and kept; the Mac's offers to a device whose hello takes files and
+  the answer to a device's pick, read in parts within its acknowledgement
+  window and handed to StreamServer's `sendFilePart` one at a time; stops at
+  a lock, a cut-off, a leave and a quit; the TEST ONLY SILL_TEST_FILES_DIR,
+  _LOG, _FREE, _PICK and _OFFER) and
   `FileStore` (Downloads › Sill and its hidden staging folder, quarantine,
   `renamex_np(RENAME_EXCL)`; `Tests/checks/file-store`),
   `AwayPolicy` (who counts as away, when the away quality is the target, its
@@ -1011,11 +1015,22 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   shared into Sill and its question; A18A/F18A), `FilePickers` (the Files
   picker's URLs as sources, `PhotosPickerSheet`, PHPicker's originals copied
   into the outbox; A18B/F18B) and `FileChip` (the chip over the stream, in
-  the clipboard chip's corner, which waits while it shows; A18C/F18C); the
-  Settings panel's This ‹device› group has Send Files and Send Photos before
-  the clipboard's rows; both Info.plists declare one document type
-  (`public.item`, Alternate) and open documents in place, for the share
-  sheet. The
+  the clipboard chip's corner, which waits while it shows, and a transfer from
+  the Mac: its question, Get Files waiting, the end with Show and Save to
+  Photos; A18C/F18C). Files from the Mac (docs/files-plan.md §8.4): the hello
+  says `files` 1; `DeviceFiles`' incoming side (asked about, or taken at once
+  for this device's own pick; parts written as they come and acknowledged)
+  and `DeviceInbox` (in DeviceFiles.swift: staging, the checks, 0644,
+  protection, the move into place; no stat-family call),
+  `SillDocuments` (the one owner of Documents: From ‹Mac›, the staging folder
+  in Library/Application Support/Sill/Incoming, the share sheet's Inbox;
+  A18D/F18D) and `PhotoSaver` (Save to Photos, add-only access; A18E/F18E).
+  The Settings panel's This ‹device› group has Send Files and Send Photos
+  before the clipboard's rows, and, where the Mac gives files, Get Files
+  from ‹Mac›…, Ask Before Receiving Files and Save Photos and Videos to
+  Photos; both Info.plists declare one document type (`public.item`,
+  Alternate), open documents in place, share Documents in the Files app
+  (UIFileSharingEnabled) and ask for add-only Photos access. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers and
   the tour's version (`version`, 2 since 0.6; `upgraded`, an older memory
