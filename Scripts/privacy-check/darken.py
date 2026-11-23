@@ -274,7 +274,8 @@ def case_watchdog(out):
     dog = h.find(WATCHDOG_DRY)
     verdict(dark is not None and stops is not None and stops >= dark, f"the black up at {dark}, the stall announced at {stops}")
     into = [round(t - (stops + 1), 2) for t, _, _ in dog] if stops is not None else []
-    verdict(len(dog) == 1 and 9.5 <= into[0] <= 12.5, f"the watchdog's dry run says once, 10 s into the stall (and a look's second): {into}")
+    # The last beat comes up to a second before the stall, and the watchdog looks once a second: 9 to 11 s into it.
+    verdict(len(dog) == 1 and 8.5 <= into[0] <= 12.5, f"the watchdog's dry run says once, 10 s after the last beat: {into} s into the stall")
     verdict(goes is not None and bool(dog) and goes > dog[0][0], f"the stall ends after it ({goes}) and nothing quits: the host goes on")
     left = h.find("Privacy: the last device left;")
     verdict(bool(left) and goes is not None and left[0][0] > goes and bool(h.find(LIGHT)),
