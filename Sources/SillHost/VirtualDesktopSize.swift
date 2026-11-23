@@ -591,7 +591,8 @@ package enum VirtualDesktopSize {
     /// word it does not know, or the variable without the hook, is a line and no knob.
     static func testSteps(environment: [String: String], on: Bool) -> (knobs: TestKnobs, line: String?) {
         guard let raw = environment[testStepsVariable], !raw.isEmpty else { return (TestKnobs(), nil) }
-        guard on else { return (TestKnobs(), "\(testStepsVariable) ignored: it needs a test host's Virtual Desktop (\(VirtualDesktopLife.testVariable)=1).") }
+        // The hook's variable written out: this file compiles without VirtualDesktopLife.swift too (Tests/checks/away-quality).
+        guard on else { return (TestKnobs(), "\(testStepsVariable) ignored: it needs a test host's Virtual Desktop (SILL_TEST_VIRTUAL_DESKTOP=1).") }
         var k = TestKnobs()
         var unknown: [String] = []
         for word in raw.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) {
