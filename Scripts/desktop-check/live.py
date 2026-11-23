@@ -10,10 +10,15 @@ lists; the lock is the test's file (SILL_TEST_LOCKED_FILE, with SILL_TEST_LOCK_I
 lock never counts). One verdict per rule. A second host without the stops checks that nothing changes there.
 Then the Virtual Desktop (phase 2b): a host with --virtual-desktop, two stops and SILL_TEST_VIRTUAL_DESKTOP (said, never
 made; its grace SILL_TEST_VD_GRACE=3 s): the stop after the screens, a step onto it (said, at the device's room, 1218×800),
-following its turn (once after 1 s steady, nothing for a turn back within it), stepped away and its grace, made again,
-kept while locked and back after the unlock, removed off console, the span after the device left; and a --pairing host
-with Require pairing off: an unpaired client's "on" refused, a paired one's shown at once, the switch flipped four times
-a second making at most one change of the display every 3 s, and off.
+following its turn in place as Noah's probes P2b and P2c measured a display (the said display: 1x first, then the switch,
+the Desktop restarted once at 800×1218; back in one step; nothing for a turn back within the settle), stepped away and
+its grace, made again, kept while locked and back after the unlock, removed off console, the span after the device left;
+a --pairing host with Require pairing off: an unpaired client's "on" refused, a paired one's shown at once, the switch
+flipped four times a second making at most one change of the display every 3 s, and off; a host whose said display
+refuses every switch (SILL_TEST_VD_STEPS=switch-refused): a turn falls back to the room at 2x and waits for the next make,
+the iPad leaves and the iPhone that comes takes it over in place (one applySettings:, no switch), then a device whose
+room is beyond the backing waits for the next make; and one whose way back never lands either (switch-refused,stuck):
+removed, and made again at the turned size by the Desktop that still shows its stop.
 Each host is killed at the end; nothing is posted, warped or captured.
 
     Scripts/desktop-check/live.py OUT
@@ -243,12 +248,29 @@ def virtual(out):
     # Its size in points, as every test stop's test pattern (the capture scale's 1× on a test host; probe of 6329077e).
     verdict(bool(on_vd) and on_vd[0][:2] == (3, "Virtual Desktop") and on_vd[0][2] == "1218×800" and on_vd[0][3] == 60,
             f"VD: the Desktop on it, at its size, 60 fps: {on_vd}")
-    # The turn held 1 s: one line, its size for the next make (P2 not run). Turned back 3 s later: nothing, since the
-    # display still has that size (VirtualDesktopSize.followStep's `.nothing`: the next make takes the room as it is then).
+    # The turn held 1 s: in place (Noah's probes P2b and P2c, 2026-11-23), the said display as they measured one: its
+    # pixels at 1x, then the switch to 800×1218 at 2x, about 650 ms; the Desktop restarted once, at the turn. Turned back
+    # 3 s later: in place in one step (the made orientation), about 320 ms. A turn and back within the settle: nothing.
     follows = h.all(r"^Virtual Desktop: iPad mini (turned|changed its room)", 5, 15.5)
-    verdict(len(follows) == 1 and round(follows[0][0]) in (8, 9) and "the next one is made at 800×1218 pt" in follows[0][1],
-            f"VD: a turn held followed once after 1 s steady (by the next make, P2 not run); back to its size, nothing: {[(round(t, 1), l) for t, l in follows]}")
-    verdict(not h.all(r"^Virtual Desktop: iPad mini", 13.2, 15.5), "VD: a turn and back within the settle: nothing")
+    def took(l):
+        m = re.search(r"followed in place in (\d+) ms: (\d+×\d+) pt @2× at 60 Hz\.$", l)
+        return (int(m.group(1)), m.group(2)) if m else None
+    got = [(round(t, 1), took(l)) for t, l in follows]
+    verdict(len(follows) == 2 and 8.8 <= follows[0][0] <= 10.8 and took(follows[0][1]) is not None and took(follows[0][1])[1] == "800×1218"
+            and 600 <= took(follows[0][1])[0] <= 1200,
+            f"VD: a turn held 1 s: followed in place, 1x then the switch, in about 650 ms: {got}")
+    verdict(len(follows) == 2 and 12.2 <= follows[1][0] <= 13.6 and took(follows[1][1]) is not None and took(follows[1][1])[1] == "1218×800"
+            and 250 <= took(follows[1][1])[0] <= 900,
+            f"VD: turned back 3 s later: in place in one step, about 320 ms: {got}")
+    detail = h.all(r"^Virtual Desktop: in place \(TEST ONLY: said, the display as the probes measured it\): applySettings: with 800×1218 alone", 5, 10.8)
+    verdict(len(detail) == 1 and "at 1600×2436 @1×" in detail[0][1] and "switch to 800×1218 @2×: complete 0" in detail[0][1],
+            f"VD: its steps said before it, TEST ONLY: {detail}")
+    turned = streams(h, 8.8, 12)
+    verdict(bool(turned) and turned[0][:3] == (3, "Virtual Desktop", "800×1218") and len([x for x in streams(h, 7.5, 12) if x[1] == "Virtual Desktop"]) == 1,
+            f"VD: the Desktop restarted once, at the turn: {streams(h, 7.5, 12)}")
+    lying = streams(h, 12.2, 13.6)
+    verdict(bool(lying) and lying[-1][:3] == (3, "Virtual Desktop", "1218×800"), f"VD: and once at the room again: {lying}")
+    verdict(not h.all(r"^Virtual Desktop: iPad mini", 13.6, 15.5), "VD: a turn and back within the settle: nothing")
     gone = vd_lines(h, 15, 20)
     verdict(len(gone) == 1 and gone[0][1] == "removed" and 17.5 <= gone[0][0] <= 19.8 and "no device has shown it for 3 s" in gone[0][2]
             and "(TEST ONLY: none was made.)" in gone[0][2], f"VD: stepped away, removed after its 3 s grace: {gone}")
@@ -317,6 +339,72 @@ def virtual(out):
     verdict(rp.get("exit") == 0 and "EXPECT ok" in rp.get("out", ""), "VD: the paired device's last word (off) stands, and it says available")
     last = vd_lines(h2)
     verdict(bool(last) and last[-1][1] == "removed", f"VD: off at the end: removed: {last[-1:] if last else last}")
+    in_place(out)
+
+
+def in_place(out):
+    """The follow in place where a step fails, another device, the backing (TEST ONLY knobs: SILL_TEST_VD_STEPS)."""
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3",
+           "SILL_TEST_VD_STEPS": "switch-refused"}
+    h = Host(out, "vd-in", env, args=["--virtual-desktop"])
+    try:
+        # P, an iPad mini: onto it (made at 1218×800, its backing 3072×3072: no larger device connected), turned at 7
+        # (the switch refused: back to the room), gone at 10. Q, an iPhone, at 11: its Desktop back on the stop, the
+        # Virtual Desktop its own in place (no switch needed). Q gone at 16; R, a room 1900×800 pt wide, at 17: beyond.
+        p, rp = client(h, out, "vdin-p", 9, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",
+                                             "--next-display@1", "--next-display@3", "--room-after=744x1133@6"], 1)
+        p.join()
+        q, rq = client(h, out, "vdin-q", 5, ["desktop", "--fps=120", "--room=735x393", "--device=iPhone"], 11)
+        q.join()
+        r, rr = client(h, out, "vdin-r", 4, ["desktop", "--fps=60", "--room=1900x800", "--device=Wide iPad"], 17)
+        r.join()
+        h.at(22)
+    finally:
+        h.stop()
+    verdict(bool(h.all(r"^Test Virtual Desktop: its said display's steps: switch-refused \(SILL_TEST_VD_STEPS\)")),
+            "VD in place: the host says its said display's steps")
+    made = vd_lines(h, 3, 6)
+    verdict(len(made) == 1 and made[0][1] == "made" and "1218×800 pt @2× at 60 Hz" in made[0][2], f"VD in place: made for the iPad mini: {made}")
+    back = h.all(r"^Virtual Desktop: iPad mini turned; ", 6, 11)
+    verdict(len(back) == 1 and "not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in " in back[0][1]
+            and back[0][1].endswith("; the next one is made at 800×1218 pt."),
+            f"VD in place: a turn whose switch is refused: back to the room at 2x, the next make: {back}")
+    steps = h.all(r"^Virtual Desktop: in place \(TEST ONLY", 6, 11)
+    verdict(len(steps) == 1 and "switch to 800×1218 @2×: complete 1001" in steps[0][1] and "applySettings: with 1218×800 alone answered YES" in steps[0][1],
+            f"VD in place: its steps said, the way back by applySettings: with the room alone: {steps}")
+    verdict(not [x for x in streams(h, 6, 11) if x[2] == "800×1218"], "VD in place: no picture at the turn it did not take")
+    iphone = h.all(r"^Virtual Desktop: iPhone shows it now; ", 11, 16.5)
+    m = re.search(r"followed in place in (\d+) ms: 1496×800 pt @2× at (60|120) Hz\.$", iphone[0][1]) if len(iphone) == 1 else None
+    verdict(m is not None and 250 <= int(m.group(1)) <= 900,
+            f"VD in place: the iPad gone, the iPhone that comes takes it over in place, one step: {iphone}")
+    verdict(not [l for _, l in h.all(r"^Virtual Desktop: in place \(TEST ONLY", 11, 16.5) if "switch to" in l],
+            "VD in place: the iPhone's size of the same orientation: no switch")
+    on_q = [x for x in streams(h, 11, 16.5) if x[1] == "Virtual Desktop"]
+    verdict(bool(on_q) and on_q[-1][2] == "1496×800", f"VD in place: the Desktop at the iPhone's size: {on_q}")
+    wide = h.all(r"^Virtual Desktop: Wide iPad shows it now; ", 17, 22)
+    verdict(len(wide) == 1 and wide[0][1] == "Virtual Desktop: Wide iPad shows it now; 1900×800 pt @2× is beyond the backing it was made with "
+            "(3072×3072 px); the next one is made at 1900×800 pt.", f"VD in place: a room beyond the backing: the next make: {wide}")
+    verdict(not [x for x in streams(h, 17, 22) if x[2] == "1900×800"], "VD in place: no picture at a size it did not take")
+    verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1, f"VD in place: made once, never again: {vd_lines(h)}")
+
+    env = dict(env); env["SILL_TEST_VD_STEPS"] = "switch-refused,stuck"
+    h = Host(out, "vd-stuck", env, args=["--virtual-desktop"])
+    try:
+        p, rp = client(h, out, "vdstuck-p", 16, ["desktop", "--fps=60", "--room=1133x744", "--device=iPad mini",
+                                                 "--next-display@1", "--next-display@3", "--room-after=744x1133@6"], 1)
+        p.join()
+        h.at(21)
+    finally:
+        h.stop()
+    gone = [x for x in vd_lines(h, 6, 13) if x[1] == "removed"]
+    verdict(len(gone) == 1 and "not followed in place: macOS refused the switch to its 2x mode (complete 1001), and it did not come back to "
+            "1218×800 pt @2×; removed it: the next one is made at 800×1218 pt." in gone[0][2] and "(TEST ONLY: none was made.)" in gone[0][2],
+            f"VD stuck: the way back never landed: removed, never left at 1x: {gone}")
+    again = [x for x in vd_lines(h, 6, 18) if x[1] == "made"]
+    verdict(len(again) == 1 and bool(gone) and again[0][0] - gone[0][0] >= 2.95 and "800×1218 pt @2× at 60 Hz" in again[0][2],
+            f"VD stuck: made again at the turn by the Desktop that shows its stop, 3 s after: {again}")
+    on_up = [x for x in streams(h, 12, 18) if x[1] == "Virtual Desktop"]
+    verdict(bool(on_up) and on_up[-1][2] == "800×1218", f"VD stuck: the Desktop on it, upright: {on_up}")
 
 
 if __name__ == "__main__":
