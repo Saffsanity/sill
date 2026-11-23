@@ -244,3 +244,90 @@ stopped|Try Again" ~/Library/Logs/Sill/Sill.log | tail -40`.
     `Headless display: no real screen, but Sill's display for a Mac with no screen is turned off; none made.` once; the
     row gone, nothing named Sill Desktop in System Settings › Displays, and `defaults read me.saffer.sill.mac
     headlessDisplay` says 0. Turn it on: `looking again in 1.0 s …`, then `created …`, and the default says 1.
+
+**Main brought in (2026-11-23: main at c33d1057, with #399, #396 and #402; the merge a297443b).** After this branch was
+cut, Noah tested and merged three pull requests into main: #399 (addhumal's #368: a streamed window follows its native
+tab switches, issue #366), #396 (addhumal's #367: a staged window's sound is built on Sill's display, and its retry asks
+the coordinator and backs off, issue #365) and #402 (Lock this Mac when the last device leaves, #283 and #275, on
+addhumal's #184). In a worktree of its own (`~/Downloads/wt-vd-2a-main`), `git fetch origin main` and `git merge
+FETCH_HEAD`: eleven files conflicted, each settled keeping both sides and main's behaviour as merged:
+- `HostConfig.swift`: main's three lock knobs (`lockAfterSession`, `lockSleepsDisplay`, `lockOnlyAfterAway`) before
+  `headlessDisplay` in the declarations, the initializer, `standard` (main's lines kept, `headlessDisplay: true` on a
+  line of its own), the doc lines and `changes(to:)`.
+- `StreamCoordinator.swift`: both start lines, the lock's (`privacy.startLines`) before the guard's launch line.
+- `WindowCatalog.swift`: both declarations, main's tab tracking (`tab(_:)`, `lastTabs`, `tabSwaps`) before
+  `lastBuiltIn`; git merged the look itself (below).
+- The CLI's `main.swift`: both flags, `--lock-after-session` before `--no-headless-display`.
+- `DebugHooks.swift` and `HostSettings.swift`: both, the lock's three keys before `headlessDisplay` (`-SillSetAfter`'s
+  list and cases; Key, the registered defaults, the read and the saves).
+- away-quality's `main.swift`, `mutants.py` and `README.md`: every case and every mutant of both, 62 mutants (44 shared,
+  main's 14, this branch's 4); each HostConfig the check makes takes the other side's knobs at their defaults; AQ-O1
+  keeps main's pattern, AQ-S1 and AQ-A1 now end at the comma, AQ-H1 matches the `headlessDisplay: true)` line.
+- docs/BUILD-AND-RUN.md and docs/LAYOUT.md: both entries.
+- Not a conflict, in the merge too: `PrivacyPolicy.typesAt`'s comment no longer says #200's display adds itself to rule
+  10 when it lands; it says it does not count as merged and that the question is Noah's (default 18).
+
+Where the two sides meet, read in the merged program:
+- (a) The lock and a Mac with no screen. #402 never locks a Mac with no display to type a password at (rule 10,
+  `PrivacyPolicy.typesAt`: a `.screen` by `DesktopDisplays.role`; issue #298), and Sill's display here has the Desktop's
+  identity (vendor 0x5111, product 2: `.sillDesktop`), so main's rule as merged already leaves it out. With the lock's
+  switch on, a Mac whose only display is Sill's is not locked when the last device leaves ("Privacy: not locking this
+  Mac: it has no display to type its password at (issue #298).") and Settings › Devices shows its warning ("…you
+  couldn’t type its password from a device"), though this branch's display would show the lock screen at the next
+  connect and take the password. Kept as main has it; default 18 puts the question.
+- (b) A tab switch and the stage's display. #399 reads tab switches from the look's windows; this branch builds the
+  look's displays (`HeadlessDesktopPolicy.pool`, by role: `headlessKind`, `stageDisplayIDs`). The merged look does both,
+  so the stage's display is still never one of the Desktop's stops, and `VirtualStage.adoptTab` takes the new tab's
+  placement on the stage's display without touching the display.
+- (c) The sound. #396 keys a staged window's sound by the stage's display (`appAudioDisplay`, `AudioKey.app`'s display
+  ID), so a stage display made again starts the sound on the new one at the select's end. This branch changes when the
+  stage makes its display only by the guard for #380, which makes none while it holds: the window streams where it is
+  and its sound is built on the main display, as in regular mode. Sill's display for a Mac with no screen is the
+  Desktop's, whose sound (`.desktop`, every app but Sill) is built on `catalog.mainDisplay`, from this branch's pool;
+  when that display comes or goes the Desktop restarts (`followDesktopDisplay`), the key stays `.desktop`, and a capture
+  that ended with its display is tried again by #396's retry.
+- (d) away-quality's model gained cases on both sides: every case and mutant of both is kept (62, all run).
+
+**Defaults taken for Noah to confirm** (this run's; 1 to 17 stand):
+18. A Mac whose only display is Sill's, with Lock this Mac when the last device leaves on: not locked, as #402 merged it
+    (rule 10 counts only a real screen), with its line and Settings › Devices' warning. Should it lock? Then rule 10
+    would also count Sill's display for a Mac with no screen while its switch is on and the guard does not hold
+    (`PrivacyPolicy.typesAt` and its check, `privacy`), and the warning would not show for it: a change of its own,
+    after Noah's answer.
+
+**Verified in this run** (2026-11-23; nothing made a display, posted input, locked, slept or switched anything):
+- `swift build -c release` of a297443b (the heavy lock's slot B, 15:49): 62 s, no warning but CaptureProbe's known one;
+  `SillHost --internet` exits 2 ("--internet needs --remote."), `--print-reachability` 0. Main's SillHost at c33d1057
+  built beside it from `git archive` (42 s), for H2.
+- On a `git archive` snapshot of a297443b (slot B, 15:33–15:49): away-quality 176 checks and 62 of 62 mutants caught (44
+  shared, main's 14, this branch's 4); stage-release 847 checks and 25 of 25 mutants (it reads VirtualStage.swift's and
+  StreamCoordinator.swift's wiring, which both sides changed); then `Tests/checks/run-all.sh`, all 76 checks passed
+  (privacy 217, lock-policy 1,418, catalog-windows 107, window-restore 41,944, audio-packetizer 106, update-install
+  1,062, virtual-display-api 284, virtual-desktop 33,153, repo-rules 11 of 11). Every other check's mutant patterns are
+  found exactly once in the merged sources (a text check of every `mutants.py`; its few hits were short generic strings
+  in files those checks never mutate). The mutants of privacy and lock-policy were not run again: privacy's
+  PrivacyPolicy.swift changed only in `typesAt`'s comment, and its module gains this branch's two LockPolicy functions,
+  which it never calls; lock-policy's LockPolicy.swift is this branch's, which main did not touch.
+- The live gates on the merged CLI (synthetic hosts on 127.0.0.1, 15:51–16:06): `Scripts/privacy-check/live.py OUT all`
+  48 of 48 (main's #402, as on main); `Scripts/headless-check/live.py OUT all` 66 of 66 (19 scenarios);
+  `Scripts/desktop-check/live.py` 24 of 24; `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6,
+  view 26 of 26; #396's sound gate (`retry_gate.py` from its review, its cases R1 to R4: the bounded retry, an end after
+  a long run, Send Audio off meanwhile, locked meanwhile) 17 of 17, as on main; #399's loopback smoke (a pick of a
+  window the host does not list, the Desktop, none and the Desktop again, a keyframe request; the catalog's tab branch
+  at every poll) 6 of 6.
+- H2, this CLI against main's c33d1057, each pair run one right after the other in the same hold, every line but the
+  statistics masked and sorted, the statistics compared by name: idle identical (7 distinct lines, 3 statistics), with a
+  test client identical (14 and 11), with `--virtual-display` and a test client identical (17 and 11); started locked by
+  the TEST ONLY lock file, the one line this branch adds, "Displays: N online, N active, N asleep, N Sill's, N macOS's
+  stand-in." (11 lines and 10).
+- Previews from the bare binary (`-SillRenderPreviews`, its own log file, its defaults domain deleted after): 335 files;
+  looked at: Settings › Virtual Display's "A Mac with no screen" (its switch, "1218 × 800 for iPad mini, streaming now",
+  the footnote), the guard's Status row with Try Again, the card's "Sill’s display · 1218×800", and Settings › Devices'
+  lock section with its warning for a Mac with no display, main's as merged.
+- The iOS app as CI builds it (Xcode 27.1, Debug, the generic simulator, arm64, unsigned; its DerivedData removed
+  after): BUILD SUCCEEDED, only the known capture warning in StreamClient.swift; nothing under iOSClient or
+  StreamProtocol differs from main.
+- GitHub's CI on a297443b (run 45150315376): every step of Build and check passed, and #395 read mergeable with main.
+
+The pull request's list of Noah's steps is now shortest first, with a new step 10 (Lock this Mac when the last device
+leaves on a Mac whose only display is Sill's, default 18); the list above keeps its old order.

@@ -52,6 +52,9 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
+        static let lockAfterSession = "lockAfterSession"
+        static let lockSleepsDisplay = "lockSleepsDisplay"
+        static let lockOnlyAfterAway = "lockOnlyAfterAway"
         static let headlessDisplay = "headlessDisplay"
         static let virtualDesktop = "virtualDesktop"
         static let virtualDesktopSize = "virtualDesktopSize", virtualDesktopHz = "virtualDesktopHz"
@@ -146,6 +149,12 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off, like the CLI: a Mac off console shows nothing of this session unless its user says so here.
             Key.offConsoleView: base.offConsoleView,
+            // Off, like the CLI: a Mac locks by itself after a device leaves only once its user says so here.
+            Key.lockAfterSession: base.lockAfterSession,
+            // Under it (shown while it is on): its display off with the lock, and every session counting (the plan's
+            // open decisions 6 and 5), as the CLI.
+            Key.lockSleepsDisplay: base.lockSleepsDisplay,
+            Key.lockOnlyAfterAway: base.lockOnlyAfterAway,
             // On, like the CLI (Noah on #61: a Mac with no screen gets a display of its own); a saved key wins, so a
             // Mac whose user turned it off in Settings › Virtual Display (#380's stops, a #333 monitor) keeps it off.
             Key.headlessDisplay: base.headlessDisplay,
@@ -175,6 +184,9 @@ final class HostSettings {
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
+                            lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
+                            lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
+                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
                             headlessDisplay: defaults.bool(forKey: Key.headlessDisplay),
                             virtualDesktop: defaults.bool(forKey: Key.virtualDesktop),
                             virtualDesktopSize: defaults.string(forKey: Key.virtualDesktopSize) ?? base.virtualDesktopSize,
@@ -206,6 +218,9 @@ final class HostSettings {
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
+        if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
+        if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
+        if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
         if config.headlessDisplay != old.headlessDisplay { defaults.set(config.headlessDisplay, forKey: Key.headlessDisplay) }
         if config.virtualDesktop != old.virtualDesktop { defaults.set(config.virtualDesktop, forKey: Key.virtualDesktop) }
         if config.virtualDesktopSize != old.virtualDesktopSize { defaults.set(config.virtualDesktopSize, forKey: Key.virtualDesktopSize) }

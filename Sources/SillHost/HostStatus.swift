@@ -156,6 +156,9 @@ package struct HostStatusSnapshot: Equatable {
     /// Settings › General shows why with the Terminal command that unblocks Sill, and the menu says
     /// "Devices Can’t Connect".
     package var firewall: FirewallRule.Verdict?
+    /// Lock this Mac when the last device leaves (PrivacyLock; docs/privacy-mode-plan.md, part 1): Settings › Devices'
+    /// warning under the switch, and whether a wait runs, for Sill.app's App Nap hold.
+    package var privacyLock = PrivacyLockStatus()
 
     /// Sill's own display for the Desktop, as the card and Settings show it: a Mac with no working screen's, or the Virtual
     /// Desktop (one display in two roles, docs/virtual-desktop-plan.md §1; `virtualDesktop`).
@@ -222,6 +225,25 @@ extension HostStatusSnapshot.Stream {
     var wire: RunningStream {
         RunningStream(width: width, height: height, fps: fps, mbps: mbps, onVirtualDisplay: onVirtualDisplay)
     }
+}
+
+/// Lock this Mac when the last device leaves (PrivacyLock, PrivacyPolicy; docs/privacy-mode-plan.md, part 1), as
+/// Settings › Devices shows it and Sill.app's App Nap hold reads it.
+package struct PrivacyLockStatus: Equatable {
+    /// The switch as the host runs it.
+    package var on = false
+    /// A wait after the last device left, or a lock's confirmation, runs: Sill.app holds App Nap off meanwhile, so
+    /// the wait's ticks keep their time.
+    package var pending = false
+    /// This Mac had no display to type its password at when Sill last looked (rule 10, issue #298).
+    package var noDisplay = false
+    /// Why the last lock Sill asked for did not happen, in Settings' words; nil once one did, and before any.
+    package var failure: String?
+
+    package init() {}
+
+    /// The warning under the switch while it is on (PrivacyPolicy.warning).
+    package var warning: String? { PrivacyPolicy.warning(on: on, noDisplay: noDisplay, failure: failure) }
 }
 
 /// Both doors' pairing and the remote door as the Mac's panes and menu show them. Never a pairing
