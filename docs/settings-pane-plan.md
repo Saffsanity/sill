@@ -37,10 +37,12 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
     its narrow windows, the Duo's cover either way, and its inner display open flat either way. The header
     pinned at the top, both parts in one scroll view (the Mac's, then this device's), Disconnect under them,
     as the panel had them. The column is at most 600 pt wide, centred, 16 pt from the safe area; the scroll
-    view spans the whole screen with the column inside it, so a drag anywhere on the pane scrolls the rows
-    (Noah, the same day, of the first build with one column: "on iPad in landscape, you have to touch the
-    middle 3rd of the display to scroll instead of anywhere on the screen"; that build's scroll view was the
-    column's 600 pt, of an iPad mini's 1,133). The header and Disconnect keep to the column. Until that day a
+    view spans the whole screen with the column inside it, out to the screen's edges (on an iPhone on its
+    side through the strips beside its sensor housing, on the Duo's cover through its camera's), so a drag
+    anywhere on the pane scrolls the rows (Noah, the same day, of the first build with one column: "on iPad
+    in landscape, you have to touch the middle 3rd of the display to scroll instead of anywhere on the
+    screen"; that build's scroll view was the column's 600 pt, of an iPad mini's 1,133). The header and
+    Disconnect keep to the column. Until that day a
     screen with room for two columns (sideways from 652 pt, upright from 732: every iPhone on its side, an
     iPad either way round, the Duo open flat sideways) had the two parts side by side, the Mac's in the
     leading column; Noah tried that on his iPad mini and his iPhone 15 Pro and asked for one column.
@@ -63,15 +65,19 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   book pose's leading page and the laptop pose's upper page the same way under the Mac's rows. In reach
   either way.
 - **Scrolling**: the rows scroll (in one column both parts together; around the fold each part on its own)
-  and bounce only when they do not fit. Each scroll view spans its page, the whole screen in one column, and
-  the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`), so a drag
-  beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt where
-  rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
+  and bounce only when they do not fit. Each scroll view spans its page, the whole screen in one column, out
+  to the screen's edges through the safe area beside it (the pane is laid out in the safe area and each
+  scroll view reaches past it, `ignoresSafeArea`, as far as the pane's own reader says the safe area goes),
+  and the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`), so a
+  drag beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt
+  where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
   laptop pose's fold left a sliver of a line); the fade runs the scroll view's width, which holds nothing
-  beside the column, so it reads as before. The scroll indicator is the scroll view's: at the trailing edge of
-  the screen in one column (of the page around the fold, beside the band on the book pose's leading page),
-  away from the rows on a wide screen, as in iOS's own Settings, whose lists run the screen's width while their
-  rows keep a readable one.
+  beside the column, so it reads as before. The scroll indicator is the scroll view's, so it sits at the
+  scroll view's trailing edge: the screen's in one column (on an iPad on its side 388 pt beyond the rows of a
+  13-inch), the page's around the fold (beside the band on the book pose's leading page), as in iOS's own
+  Settings, whose lists run the screen's width while their rows keep a readable one. It flashes as the pane
+  opens and shows while the rows move; by an iPhone's sensor housing its exact place is iOS's (no photo shows
+  it: a still is taken after the flash).
 - **For the rows to come**: a feature of the Mac (Virtual Desktop, privacy mode) adds its group to the Mac's
   part, a feature of this device (microphone and camera passthrough, recording, files and photos) to this
   device's: a group is a `Rows` with its `Footnote`, and a group that begins a topic of its own carries a

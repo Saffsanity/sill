@@ -351,7 +351,9 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
-parts scrolled to their ends), `-SillSettingsScroll gestures` (the pane scrolled to its
+parts scrolled to their ends), `-SillSettingsScrollArea 1` (each of Settings' scroll
+views outlined in orange: where a drag scrolls the rows, the whole screen in one column out
+to its edges, each page around the fold; none where the rows fit), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

@@ -232,6 +232,9 @@ struct ContentView: View {
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
 ///   switch and its footnote (#291).
+/// * `-SillSettingsScrollArea 1` — with `-SillSettings 1`: each of Settings' scroll views outlined in
+///   orange, so a still photo shows where a drag scrolls the rows (the whole screen in one column, out to
+///   its edges; each page around the fold); none where the rows fit without scrolling.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or

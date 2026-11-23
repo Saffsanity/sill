@@ -937,13 +937,16 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   under them (right under the rows where they all fit, else pinned at the
   foot), and around the iPhone Duo's fold each in a scroll view of its own
   with Disconnect under the Mac's; each scroll view across its page, the
-  whole screen in one column, the header, the rows and Disconnect in their
-  column inside it (`inColumn`), so a drag anywhere scrolls; a feature's group
+  whole screen in one column, out to the screen's edges through the safe area
+  beside it (`ignoresSafeArea`), the header, the rows and Disconnect in their
+  column inside it (`inColumn`), so a drag anywhere scrolls; DEBUG
+  `-SillSettingsScrollArea 1` outlines them; a feature's group
   goes into the part whose it is), `SettingsPane` (where the pane's two parts
   go: one column on every screen without a fold to keep to, an iPad's and an
   iPhone's either way round (Noah, 2026-11-23), a column on each page of the
   book pose, the laptop pose's two pages, each part's scroll view across its
-  page (`macScroll`, `deviceScroll`: the whole screen in one column), nothing
+  page out to the screen's edges (`macScroll`, `deviceScroll`, `page(_:)`: the
+  whole screen in one column, the side strips of the safe area included), nothing
   on the fold, right to left mirrored, the room under Disconnect, the home
   indicator's (`footBottom`); and `Close`, what each way of closing it
   brings; pure, `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every

@@ -100,12 +100,20 @@
   except that on iPad in landscape, you have to touch the middle 3rd of the display to scroll instead of
   anywhere on the screen": the scroll view was only the column's width (600 of an iPad mini's 1,133 pt). Now
   each scroll view spans its page, the whole screen in one column, the book pose's page from the screen's edge
-  to the fold's band, the laptop pose's page the screen's width, and the header, the rows and Disconnect keep to
-  their column inside it (HostSettingsPanel's `inColumn`). The pure rule says both (`Layout.macScroll`,
-  `deviceScroll`, the column inside), the console's `settings:` line says the scroll views ("one column 600 pt
-  wide at 266.5, its scroll view 0–1133 (1133×720, 20 pt kept at the bottom)" on an iPad mini on its side), and
-  the check holds them at every real size and over the grid, with mutants M37 to M44 (a scroll view narrowed
-  back to its column, or one onto the fold). What a wider scroll view changes: its edge fades run its width,
+  to the fold's band, the laptop pose's page the screen's width, out to the screen's edges through the safe
+  area beside the stream screen (an iPhone on its side: 44 to 62 pt by its sensor housing and as much on the
+  other side; the Duo's cover: its camera's 84), and the header, the rows and Disconnect keep to their column
+  inside it (HostSettingsPanel's `inColumn`). The pane is laid out in the safe area as before; each scroll view
+  reaches past it with `ignoresSafeArea(edges: .horizontal)`, as far as the pane's own reader says the safe
+  area goes (`geo.safeAreaInsets`, in the same layout, so a turn moves both at once), and its rows are placed
+  from its reached edge. The pure rule says both (`Layout.macScroll`, `deviceScroll`, `page(_:)`, the column
+  inside), the console's `settings:` line says the scroll views ("one column 600 pt wide at 266.5, its scroll
+  view 0–1133 (1133×720, 20 pt kept at the bottom)" on an iPad mini on its side, "… at 67, its scroll view
+  -59–793 (734×393, …)" on an iPhone 15 Pro on its side), and the check holds them at every real size and over
+  the grid (both side strips, the leading alone, the trailing alone), with mutants M37 to M48 (a scroll view
+  narrowed back to its column, short of the screen's edge, onto the fold, the strips swapped, a page laid out
+  past the stream screen). DEBUG `-SillSettingsScrollArea 1` outlines each scroll view, so a still shows where a
+  drag scrolls. What a wider scroll view changes: its edge fades run its width,
   which holds nothing beside the column, so they look as before; its indicator is at the page's trailing edge
   (the screen's in one column), as in iOS's own Settings; VoiceOver's order is the same (no element added or
   moved); right to left mirrors it all from the leading edge.

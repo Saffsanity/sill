@@ -5,8 +5,9 @@
 // off centre) and with the laptop pose's across it, left to right and right to left: inside the screen and its
 // margins, never wider than 600, never on the fold, the Mac's part leading and above, the arrangement exactly
 // where its rule says (one column wherever no fold is kept to: Noah, 2026-11-23), each scroll view across its
-// page with its column inside it (the whole screen in one column: Noah, 2026-11-23, a drag anywhere scrolls),
-// the header over the Mac's column; and what each way of closing it brings.
+// page with its column inside it, out to the screen's edges through the safe area beside it (the whole screen in
+// one column: Noah, 2026-11-23, a drag anywhere scrolls), the header over the Mac's column; and what each way of
+// closing it brings.
 //   swiftc -O iOSClient/SettingsPane.swift iOSClient/DuoPosture.swift Tests/checks/settings-pane/main.swift -o .build/checks/settings-pane/check
 import CoreGraphics
 import Foundation
@@ -18,6 +19,8 @@ func near(_ a: CGFloat, _ b: CGFloat, _ tolerance: CGFloat = 0.01) -> Bool { abs
 func str(_ r: CGRect) -> String { String(format: "(%.1f, %.1f, %.1f×%.1f)", r.minX, r.minY, r.width, r.height) }
 func size(_ w: CGFloat, _ h: CGFloat) -> CGSize { CGSize(width: w, height: h) }
 func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x, y: y, width: w, height: h) }
+/// A rect of a screen W wide, mirrored: where right to left puts what left to right has at `r`.
+func mirror(_ r: CGRect, _ W: CGFloat) -> CGRect { rect(W - r.maxX, r.minY, r.width, r.height) }
 func same(_ a: CGRect, _ b: CGRect) -> Bool { near(a.minX, b.minX) && near(a.minY, b.minY) && near(a.width, b.width) && near(a.height, b.height) }
 /// Nothing of `a` on `b`: at most an edge shared (a page's scroll view ends where the fold's band begins).
 func clear(_ a: CGRect, of b: CGRect) -> Bool {
@@ -48,22 +51,28 @@ struct Case {
     /// The Mac's column and this device's, x and width (y and height for the pages), left to right.
     let mac: CGRect
     let device: CGRect
-    /// Their scroll views, left to right: the page each column is on (the whole screen in one column).
+    /// Their scroll views, left to right: the page each column is on (the whole screen in one column), out to
+    /// the screen's edges through the safe area beside the stream screen.
     let macScroll: CGRect
     let deviceScroll: CGRect
+    /// That safe area, at the leading and the trailing edge (the sensor housing's strips of an iPhone on its side,
+    /// the Duo's cover's camera strip).
+    let lead: CGFloat
+    let trail: CGFloat
 }
 func one(_ W: CGFloat, _ H: CGFloat) -> CGRect { let w = min(600, W - 32); return rect((W - w) / 2, 0, w, H) }
 
 var cases: [Case] = []
-func add(_ name: String, _ W: CGFloat, _ H: CGFloat, bottom: CGFloat, fold: FoldInfo = .inferred, _ a: Layout.Arrangement,
-         mac: CGRect? = nil, device: CGRect? = nil, macScroll: CGRect? = nil, deviceScroll: CGRect? = nil) {
+func add(_ name: String, _ W: CGFloat, _ H: CGFloat, bottom: CGFloat, lead: CGFloat = 0, trail: CGFloat = 0, fold: FoldInfo = .inferred,
+         _ a: Layout.Arrangement, mac: CGRect? = nil, device: CGRect? = nil, macScroll: CGRect? = nil, deviceScroll: CGRect? = nil) {
     if a == .oneColumn {
-        // One scroll view for both parts, the whole screen: a drag anywhere on it scrolls the rows.
+        // One scroll view for both parts, the whole screen out to its edges: a drag anywhere on it scrolls the rows.
+        let whole = rect(-lead, 0, W + lead + trail, H)
         cases.append(Case(name: name, size: size(W, H), bottom: bottom, fold: fold, arrangement: a, mac: one(W, H), device: one(W, H),
-                          macScroll: rect(0, 0, W, H), deviceScroll: rect(0, 0, W, H)))
+                          macScroll: whole, deviceScroll: whole, lead: lead, trail: trail))
     } else {
         cases.append(Case(name: name, size: size(W, H), bottom: bottom, fold: fold, arrangement: a, mac: mac!, device: device!,
-                          macScroll: macScroll!, deviceScroll: deviceScroll!))
+                          macScroll: macScroll!, deviceScroll: deviceScroll!, lead: lead, trail: trail))
     }
 }
 // Phones upright: one column, the width less 16 each side.
@@ -74,9 +83,9 @@ add("iPhone SE upright", 375, 667 - 20, bottom: 0, .oneColumn)
 add("iPhone SE with Display Zoom upright", 320, 568 - 20, bottom: 0, .oneColumn)
 // Phones on their side (the notch's or the island's inset at each side): one column too, 600 pt and centred
 // (Noah, 2026-11-23: "Settings should not be 2 columns, please make it 1 column"; until then two columns here).
-add("iPhone 18 Pro Max on its side", 956 - 124, 440, bottom: 21, .oneColumn)
-add("iPhone 15 Pro on its side", 852 - 118, 393, bottom: 21, .oneColumn)
-add("iPhone 13 mini on its side", 812 - 88, 375, bottom: 21, .oneColumn)
+add("iPhone 18 Pro Max on its side", 956 - 124, 440, bottom: 21, lead: 62, trail: 62, .oneColumn)
+add("iPhone 15 Pro on its side", 852 - 118, 393, bottom: 21, lead: 59, trail: 59, .oneColumn)
+add("iPhone 13 mini on its side", 812 - 88, 375, bottom: 21, lead: 44, trail: 44, .oneColumn)
 add("iPhone SE on its side", 667, 375, bottom: 0, .oneColumn)
 add("iPhone SE with Display Zoom on its side", 568, 320, bottom: 0, .oneColumn)
 // iPads (the status bar's 24 pt off the top): one column either way round, 600 pt and centred, and in narrow
@@ -100,8 +109,8 @@ add("Duo, the laptop pose", 669, 951, bottom: 34, fold: .known(laptopFold), .two
     macScroll: rect(0, 0, 669, 455.5), deviceScroll: rect(0, 495.5, 669, 455.5))
 add("Duo, open flat sideways", 951, 669, bottom: 34, fold: .known(nil), .oneColumn)
 add("Duo, open flat upright", 669, 951, bottom: 34, fold: .known(nil), .oneColumn)
-add("Duo, the cover upright", 382, 678, bottom: 34, fold: .known(nil), .oneColumn)
-add("Duo, the cover on its side", 594, 466, bottom: 34, fold: .known(nil), .oneColumn)
+add("Duo, the cover upright", 382, 678, bottom: 34, trail: 84, fold: .known(nil), .oneColumn)
+add("Duo, the cover on its side", 594, 466, bottom: 34, lead: 84, fold: .known(nil), .oneColumn)
 // The harness's first guesses with its stand-in fold (DuoPosture.standInFold).
 add("the harness's 1000×710, half", 1000, 710, bottom: 0, fold: .known(rect(480, 0, 40, 710)), .twoColumns,
     mac: rect(16, 0, 448, 710), device: rect(536, 0, 448, 710),
@@ -114,7 +123,7 @@ add("an inferred crease (710×1000)", 710, 1000, bottom: 0, fold: .inferred, .on
 
 for c in cases {
     for rtl in [false, true] {
-        let l = Layout(size: c.size, bottomInset: c.bottom, fold: c.fold, rightToLeft: rtl)
+        let l = Layout(size: c.size, bottomInset: c.bottom, leadingInset: c.lead, trailingInset: c.trail, fold: c.fold, rightToLeft: rtl)
         let dir = rtl ? ", right to left" : ""
         check("\(c.name)\(dir): \(c.arrangement.rawValue) (\(l.description))", l.arrangement == c.arrangement)
         // Left to right the leading space is the screen's; right to left, its mirror. The Duo's folds are centred,
@@ -126,16 +135,26 @@ for c in cases {
               near(mac.minX, wantMac.minX) && near(mac.width, wantMac.width) && near(mac.minY, wantMac.minY) && near(mac.height, wantMac.height)
                 && near(device.minX, wantDevice.minX) && near(device.width, wantDevice.width)
                 && near(device.minY, wantDevice.minY) && near(device.height, wantDevice.height))
-        // Each scroll view across its page, its column inside it: a drag beside the rows scrolls them too (Noah,
-        // 2026-11-23: "on iPad in landscape, you have to touch the middle 3rd of the display to scroll instead of
-        // anywhere on the screen").
+        // Each scroll view across its page out to the screen's edges, its column inside it: a drag beside the rows
+        // scrolls them too (Noah, 2026-11-23: "on iPad in landscape, you have to touch the middle 3rd of the display
+        // to scroll instead of anywhere on the screen"). Right to left the mirror of left to right (the insets are
+        // the leading and the trailing side's, so they swap sides with it).
         let macScroll = l.onScreen(l.macScroll), deviceScroll = l.onScreen(l.deviceScroll)
-        let wantMacScroll = rtl && c.arrangement == .twoColumns ? c.deviceScroll : c.macScroll
-        let wantDeviceScroll = rtl && c.arrangement == .twoColumns ? c.macScroll : c.deviceScroll
+        let wantMacScroll = rtl ? mirror(c.macScroll, c.size.width) : c.macScroll
+        let wantDeviceScroll = rtl ? mirror(c.deviceScroll, c.size.width) : c.deviceScroll
         check("\(c.name)\(dir): the Mac's part scrolls across \(str(wantMacScroll)), this device's across \(str(wantDeviceScroll)), "
                 + "each column inside its own",
               same(macScroll, wantMacScroll) && same(deviceScroll, wantDeviceScroll)
                 && macScroll.insetBy(dx: -0.001, dy: -0.001).contains(mac) && deviceScroll.insetBy(dx: -0.001, dy: -0.001).contains(device))
+        // Laid out on its page, the part of it in the stream screen: the safe area beside it is the scroll view's alone.
+        let wantMacPage = rect(max(0, c.macScroll.minX), c.macScroll.minY,
+                               min(c.size.width, c.macScroll.maxX) - max(0, c.macScroll.minX), c.macScroll.height)
+        let wantDevicePage = rect(max(0, c.deviceScroll.minX), c.deviceScroll.minY,
+                                  min(c.size.width, c.deviceScroll.maxX) - max(0, c.deviceScroll.minX), c.deviceScroll.height)
+        check("\(c.name)\(dir): the parts laid out on their pages, \(str(rtl ? mirror(wantMacPage, c.size.width) : wantMacPage)) "
+                + "and \(str(rtl ? mirror(wantDevicePage, c.size.width) : wantDevicePage))",
+              same(l.onScreen(l.page(l.macScroll)), rtl ? mirror(wantMacPage, c.size.width) : wantMacPage)
+                && same(l.onScreen(l.page(l.deviceScroll)), rtl ? mirror(wantDevicePage, c.size.width) : wantDevicePage))
         check("\(c.name)\(dir): the bottom inset kept, \(c.bottom)", l.bottom == c.bottom)
         // Disconnect clear of the home indicator (its room, 16 pt at least), or 12 pt over the laptop pose's fold.
         let foot: CGFloat = c.arrangement == .twoPages ? 12 : max(16, c.bottom)
@@ -195,16 +214,17 @@ check("one column 600 at most, centred", Layout(size: size(669, 951), bottomInse
 // The scroll view across the whole screen, not the column alone (Noah, 2026-11-23, of the first build with one
 // column: "on iPad in landscape, you have to touch the middle 3rd of the display to scroll instead of anywhere on
 // the screen"): his iPad mini on its side, an iPad Pro 13-inch, an iPhone 15 Pro on its side.
-let wideScreens: [(name: String, size: CGSize, bottom: CGFloat, column: CGRect)] = [
-    ("an iPad mini on its side", size(1133, 720), 20, rect(266.5, 0, 600, 720)),
-    ("an iPad Pro 13-inch on its side", size(1376, 1008), 20, rect(388, 0, 600, 1008)),
-    ("an iPhone 15 Pro on its side", size(734, 393), 21, rect(67, 0, 600, 393)),
+let wideScreens: [(name: String, size: CGSize, bottom: CGFloat, sides: CGFloat, column: CGRect)] = [
+    ("an iPad mini on its side", size(1133, 720), 20, 0, rect(266.5, 0, 600, 720)),
+    ("an iPad Pro 13-inch on its side", size(1376, 1008), 20, 0, rect(388, 0, 600, 1008)),
+    ("an iPhone 15 Pro on its side, the island's 59 pt each side", size(734, 393), 21, 59, rect(67, 0, 600, 393)),
 ]
-for (name, s, bottom, column) in wideScreens {
-    let l = Layout(size: s, bottomInset: bottom, fold: .inferred)
-    check("\(name): the rows' column at \(str(column)), their scroll view the whole screen, 0–\(Int(s.width)), so a drag at "
-            + "either edge scrolls them",
-          l.mac == column && l.macScroll == rect(0, 0, s.width, s.height) && l.deviceScroll == l.macScroll)
+for (name, s, bottom, sides, column) in wideScreens {
+    let l = Layout(size: s, bottomInset: bottom, leadingInset: sides, trailingInset: sides, fold: .inferred)
+    check("\(name): the rows' column at \(str(column)), their scroll view the whole screen, \(Int(-sides))–\(Int(s.width + sides)), so "
+            + "a drag at either edge scrolls them; laid out on the stream screen, 0–\(Int(s.width))",
+          l.mac == column && l.macScroll == rect(-sides, 0, s.width + 2 * sides, s.height) && l.deviceScroll == l.macScroll
+            && l.page(l.macScroll) == rect(0, 0, s.width, s.height))
 }
 check("the lines for the console, with the scroll views and the bottom the pane was given",
       bookL.description == "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, their scroll views 0–455.5 and 495.5–951, "
@@ -213,8 +233,8 @@ check("the lines for the console, with the scroll views and the bottom the pane 
             + "(669×951, 34 pt kept at the bottom)"
         && Layout(size: size(393, 793), bottomInset: 34, fold: .inferred).description
             == "one column 361 pt wide at 16, its scroll view 0–393 (393×793, 34 pt kept at the bottom)"
-        && Layout(size: size(734, 393), bottomInset: 21, fold: .inferred).description
-            == "one column 600 pt wide at 67, its scroll view 0–734 (734×393, 21 pt kept at the bottom)"
+        && Layout(size: size(734, 393), bottomInset: 21, leadingInset: 59, trailingInset: 59, fold: .inferred).description
+            == "one column 600 pt wide at 67, its scroll view -59–793 (734×393, 21 pt kept at the bottom)"
         && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred, rightToLeft: true).description
             == "one column 600 pt wide at 388, its scroll view 0–1376 (1376×1008, 20 pt kept at the bottom, right to left)")
 check("the line without a bottom: nothing said (an iPhone SE on its side)",
@@ -241,24 +261,28 @@ let single = Rule("one column: both parts in it, min(600, W − 32) wide, centre
 let headerRule = Rule("the header over the Mac's part (in the book pose out to the trailing page's column's edge, its words the leading page's column less 8)")
 let mirrored = Rule("right to left mirrors left to right: the same rects on the screen, mirrored, the Mac's part on the leading side")
 let footRule = Rule("Disconnect clear of the home indicator: at the screen's foot its room, 16 pt at least; 12 over the laptop pose's fold")
-let scrolls = Rule("each scroll view across its page, its column inside it: in one column one scroll view, the whole screen; in the book pose "
-                   + "each page from the screen's edge to the band, never on it; in the laptop pose the screen's width above the band and below it")
+let scrolls = Rule("each scroll view across its page, out to the screen's edges through the safe area beside it, its column inside it: in one "
+                   + "column one scroll view, the whole screen; in the book pose each page from the screen's edge to the band, never on it; in "
+                   + "the laptop pose the screen's width above the band and below it; laid out on its page, the stream screen's part of it")
 let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule, scrolls]
 
-func mirror(_ r: CGRect, _ W: CGFloat) -> CGRect { rect(W - r.maxX, r.minY, r.width, r.height) }
 
 var gridLayouts = 0
 for w in stride(from: 200, through: 1400, by: 1) {
     for h in stride(from: 240, through: 1400, by: 20) {
         let W = CGFloat(w), H = CGFloat(h)
         let bottom: CGFloat = h % 40 == 0 ? 34 : 0
+        // The safe area beside the screen: both sides (an iPhone on its side), the leading alone (the Duo's cover
+        // on its side, its camera's), the trailing alone.
+        let lead: CGFloat = h % 60 == 0 ? 59 : (h % 60 == 20 ? 84 : 0)
+        let trail: CGFloat = h % 60 == 0 ? 59 : (h % 60 == 40 ? 47 : 0)
         // No fold; a book band centred and one off centre; a laptop band across the middle; the Duo's widths.
         let folds: [FoldInfo] = [.inferred, .known(nil), .known(rect(W / 2 - 20, 0, 40, H)), .known(rect(W * 0.4 - 20, 0, 40, H)),
                                  .known(rect(0, H / 2 - 20, W, 40))]
         for fold in folds {
             var both: [Layout] = []
             for rtl in [false, true] {
-                let l = Layout(size: size(W, H), bottomInset: bottom, fold: fold, rightToLeft: rtl)
+                let l = Layout(size: size(W, H), bottomInset: bottom, leadingInset: lead, trailingInset: trail, fold: fold, rightToLeft: rtl)
                 both.append(l)
                 gridLayouts += 1
                 let at = "\(w)×\(h), \(fold), \(rtl ? "right to left" : "left to right"): \(l.description)"
@@ -286,29 +310,32 @@ for w in stride(from: 200, through: 1400, by: 1) {
                                  && (l.arrangement != .twoPages || fold.horizontalBand != nil), at)
                 footRule.expect(l.arrangement == .twoPages ? l.footBottom == 12 : l.footBottom == max(16, bottom) && l.footBottom >= bottom,
                                 at + ", \(l.footBottom) under Disconnect")
-                // The scroll views, on the screen: each holds its column, and spans its page.
-                let macScroll = l.onScreen(l.macScroll), deviceScroll = l.onScreen(l.deviceScroll)
-                let scrollsAt = { at + ", the scroll views \(str(macScroll)) and \(str(deviceScroll))" }   // only on a failure
-                scrolls.expect(macScroll.insetBy(dx: -0.001, dy: -0.001).contains(mac)
-                               && deviceScroll.insetBy(dx: -0.001, dy: -0.001).contains(device), scrollsAt())
-                switch l.arrangement {
-                case .oneColumn:
-                    scrolls.expect(same(macScroll, rect(0, 0, W, H)) && same(deviceScroll, macScroll), scrollsAt())
-                case .twoColumns:
-                    if let band = l.band.map(l.onScreen) {
-                        let left = rect(0, 0, band.minX, H), right = rect(band.maxX, 0, W - band.maxX, H)
-                        scrolls.expect(same(macScroll, rtl ? right : left) && same(deviceScroll, rtl ? left : right)
-                                       && clear(macScroll, of: band) && clear(deviceScroll, of: band), scrollsAt())
-                    } else {
-                        scrolls.expect(false, scrollsAt() + ", two columns without a band")
-                    }
-                case .twoPages:
-                    if let band = l.band.map(l.onScreen) {
-                        scrolls.expect(same(macScroll, rect(0, 0, W, band.minY)) && same(deviceScroll, rect(0, band.maxY, W, H - band.maxY))
-                                       && clear(macScroll, of: band) && clear(deviceScroll, of: band), scrollsAt())
-                    } else {
-                        scrolls.expect(false, scrollsAt() + ", two pages without a band")
-                    }
+                // The scroll views, in the leading-edge space (the mirror rule below holds them right to left): each
+                // holds its column, spans its page and goes on into the safe area beside the screen where the page
+                // meets its edge; laid out on the page, the part of it in the stream screen.
+                let scrollsAt = { at + ", the scroll views \(str(l.macScroll)) and \(str(l.deviceScroll)), the safe area \(lead) and \(trail)" }
+                scrolls.expect(l.macScroll.insetBy(dx: -0.001, dy: -0.001).contains(l.mac)
+                               && l.deviceScroll.insetBy(dx: -0.001, dy: -0.001).contains(l.device)
+                               && l.page(l.macScroll).insetBy(dx: -0.001, dy: -0.001).contains(l.mac)
+                               && l.page(l.deviceScroll).insetBy(dx: -0.001, dy: -0.001).contains(l.device), scrollsAt())
+                switch (l.arrangement, l.band) {
+                case (.oneColumn, _):
+                    scrolls.expect(same(l.macScroll, rect(-lead, 0, W + lead + trail, H)) && same(l.deviceScroll, l.macScroll)
+                                   && same(l.page(l.macScroll), rect(0, 0, W, H)), scrollsAt())
+                case (.twoColumns, let band?):
+                    scrolls.expect(same(l.macScroll, rect(-lead, 0, band.minX + lead, H))
+                                   && same(l.deviceScroll, rect(band.maxX, 0, W - band.maxX + trail, H))
+                                   && same(l.page(l.macScroll), rect(0, 0, band.minX, H))
+                                   && same(l.page(l.deviceScroll), rect(band.maxX, 0, W - band.maxX, H))
+                                   && clear(l.macScroll, of: band) && clear(l.deviceScroll, of: band), scrollsAt())
+                case (.twoPages, let band?):
+                    scrolls.expect(same(l.macScroll, rect(-lead, 0, W + lead + trail, band.minY))
+                                   && same(l.deviceScroll, rect(-lead, band.maxY, W + lead + trail, H - band.maxY))
+                                   && same(l.page(l.macScroll), rect(0, 0, W, band.minY))
+                                   && same(l.page(l.deviceScroll), rect(0, band.maxY, W, H - band.maxY))
+                                   && clear(l.macScroll, of: band) && clear(l.deviceScroll, of: band), scrollsAt())
+                default:
+                    scrolls.expect(false, scrollsAt() + ", two columns or pages without a band")
                 }
                 if let band = l.band.map(l.onScreen) {
                     offFold.expect(!mac.intersects(band) && !device.intersects(band), at)
@@ -342,7 +369,8 @@ for w in stride(from: 200, through: 1400, by: 1) {
             let rtl = both[1]
             // The mirror: right to left, each part is where the mirror of the same screen with the mirrored fold puts it.
             let mirroredFold: FoldInfo = fold.band.map { .known(mirror($0, W)) } ?? fold
-            let ltrOfMirror = Layout(size: size(W, H), bottomInset: bottom, fold: mirroredFold, rightToLeft: false)
+            let ltrOfMirror = Layout(size: size(W, H), bottomInset: bottom, leadingInset: lead, trailingInset: trail, fold: mirroredFold,
+                                     rightToLeft: false)
             mirrored.expect(rtl.arrangement == ltrOfMirror.arrangement
                             && same(rtl.onScreen(rtl.mac), mirror(ltrOfMirror.onScreen(ltrOfMirror.mac), W))
                             && same(rtl.onScreen(rtl.device), mirror(ltrOfMirror.onScreen(ltrOfMirror.device), W))
