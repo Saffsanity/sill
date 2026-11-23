@@ -939,8 +939,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   with Disconnect under the Mac's; each scroll view across its page, the
   whole screen in one column, out to the screen's edges through the safe area
   beside it (`ignoresSafeArea`), the header, the rows and Disconnect in their
-  column inside it (`inColumn`; the rows that scroll by their scroll view's
-  content margins), so a drag anywhere scrolls; DEBUG
+  column inside it (`inColumn`), so a drag anywhere scrolls; DEBUG
   `-SillSettingsScrollArea 1` outlines them; a feature's group
   goes into the part whose it is), `SettingsPane` (where the pane's two parts
   go: one column on every screen without a fold to keep to, an iPad's and an
