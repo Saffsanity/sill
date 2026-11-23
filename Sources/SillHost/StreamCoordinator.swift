@@ -275,10 +275,28 @@ package final class StreamCoordinator {
     private var desktopBook = DesktopWindowLedger.Book<WindowSizer.Placement>()
     /// Its matched device's room over time (VirtualDesktopSize.Follow), from its make; nil while it does not exist.
     private var desktopFollow: VirtualDesktopSize.Follow?
-    /// What it is now: its size and rate (as it came up), the modes it was made with, and the device it was made for (the
-    /// one that stepped onto it or switched it on; nil once that one left, or none had said its size).
-    private var virtualDesktopNow: (size: VirtualDesktopSize.Size, hz: Int, listed: [VirtualDesktopSize.Size], device: ObjectIdentifier?,
-                                    deviceName: String?)?
+    /// What it is now (nil while it does not exist).
+    private var virtualDesktopNow: VirtualDesktopNow?
+    private struct VirtualDesktopNow {
+        /// Its size and rate: as it came up, or as a follow in place left it.
+        var size: VirtualDesktopSize.Size
+        var hz: Int
+        /// The most it can take in place (VirtualDesktopSize.backing; the display's own, VirtualDisplay.backing).
+        var backing: VirtualDesktopSize.Backing
+        /// The device it is for (plan §5's matched device: the one it was made for, or that stepped onto it since; once
+        /// that one left, the one the make's rule names next: `adoptVirtualDesktopDevice`); nil while none.
+        var device: ObjectIdentifier?
+        var deviceName: String?
+        /// The device whose room its size is now, for the follow's line (another device's, or the same one's turned).
+        var sizedFor: ObjectIdentifier?
+    }
+    /// A follow in place under way (`followVirtualDesktopInPlace`): the Desktop's display follower waits for its end, which
+    /// restarts the Desktop once, at the size it ends at (probe P2c: a turn is two reconfigurations, 1x then 2x).
+    private var virtualDesktopResizing = false
+    /// TEST ONLY: a test host's said Virtual Desktop as Noah's probes measured a display (VirtualDesktopSize.TestDisplay),
+    /// and SILL_TEST_VD_STEPS' knobs for it.
+    private var testVirtualDisplay: VirtualDesktopSize.TestDisplay?
+    private let testVirtualDesktopKnobs: VirtualDesktopSize.TestKnobs
     /// The one look scheduled (the grace's end, the spacing's, a real screen's 2 s, a follow's settle), replaced by each look.
     private var virtualDesktopCheck: Task<Void, Never>?
     /// A make or a removal under way (their awaits): a look meanwhile is left to its end, which looks again.
@@ -537,6 +555,8 @@ package final class StreamCoordinator {
                                                  stops: displaysHook.stops != nil)
         testVirtualDesktop = vdHook.on
         desktopLife = VirtualDesktopLife(grace: vdHook.grace ?? VirtualDesktopLife.grace)
+        let vdSteps = VirtualDesktopSize.testSteps(environment: env, on: vdHook.on)
+        testVirtualDesktopKnobs = vdSteps.knobs
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                        environment: env)
@@ -545,7 +565,7 @@ package final class StreamCoordinator {
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, testHeadless.line,
-                         guardHook.line].compactMap { $0 } + vdHook.lines
+                         guardHook.line].compactMap { $0 } + vdHook.lines + [vdSteps.line].compactMap { $0 }
         status = HostStatus()
         privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
@@ -744,7 +764,8 @@ package final class StreamCoordinator {
                 self.viewports[id] = nil
                 if self.newestViewport == id { self.newestViewport = nil }
                 if self.desktopAsker == id { self.desktopAsker = nil }
-                // The Virtual Desktop's matched device left: its size stays until it is made again (plan §5).
+                // The Virtual Desktop's matched device left: its size stays, until the device the make's rule names next
+                // asks for the Desktop on it (adoptVirtualDesktopDevice), or it is made again (plan §5).
                 if self.virtualDesktopNow?.device == id { self.virtualDesktopNow?.device = nil }
                 if self.showVirtualDesktopTo == id { self.showVirtualDesktopTo = nil }
                 self.routes[id] = nil
@@ -2790,6 +2811,11 @@ package final class StreamCoordinator {
             await select(.desktop)
             return
         }
+        // A step onto the Virtual Desktop: it is for the device that stepped (plan §5), which it follows in place.
+        if catalog.desktopDisplayUUID == DesktopDisplays.virtualDesktopChoice, let asker = desktopAsker {
+            adoptVirtualDesktopDevice(stepper: asker)
+            lookAtVirtualDesktop()
+        }
         // Never a test host's pointer (it posts nothing: the test pattern is not the screen), nor while
         // locked or off console (the console's pointer: the stage's `mayWarp`). The stop as the Desktop shows it now: the
         // Virtual Desktop's has its display (and its frame) only once the step made it.
@@ -2823,9 +2849,10 @@ package final class StreamCoordinator {
     /// at the displays first. Both are judged after that look, against what streams then, so a restart made meanwhile is
     /// never made again. Not the placeholder, which captures no display; not mid-switch, whose own end decides; not while
     /// Sill's display is being released, whose own restart moves the Desktop; a test host's test pattern only under
-    /// SILL_TEST_DISPLAYS, and never for a size.
+    /// SILL_TEST_DISPLAYS, and never for a size. Not while the Virtual Desktop follows its device in place, whose end
+    /// restarts the Desktop once, at the size it ends at (`restartDesktopOnVirtualDesktop`).
     private func followDesktopDisplay(look: Bool = false) async {
-        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams, !releasingHeadless,
+        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams, !releasingHeadless, !virtualDesktopResizing,
               synthetic ? catalog.testDisplays != nil : true else { return }
         if look { await catalog.refreshWindows() }
         guard active == .desktop, !switching, !shuttingDown, !placeholderStreams, !releasingHeadless,
@@ -3924,6 +3951,7 @@ package final class StreamCoordinator {
         let decision = desktopLife.look(seen, at: now)
         if desktopLife.role != roleBefore { virtualDesktopRoleChanged(from: roleBefore) }
         refreshVirtualDesktop()                         // whether it shows, by the role the look found
+        adoptVirtualDesktopDevice()                     // the one it was for left: the device the make's rule names now
         guard !switching, !virtualDesktopChanging, !releasingHeadless else { return }
         var next: Double?
         switch decision {
@@ -4016,9 +4044,13 @@ package final class StreamCoordinator {
         let vp = matched.flatMap { viewports[$0] }
         let (asked, hz) = virtualDesktopWanted(target: config, viewport: vp)
         let device = vp == nil ? nil : matched.map { deviceName(id: $0) }
-        // The turn listed beside it only when it follows the device (This device) in a way in place (P2's verdict).
+        // This device follows its device in place (the probes' way), inside a backing for its room both ways and for every
+        // device connected now (VirtualDesktopSize.backing); a size the person chose is made as every display Sill makes.
         let follows = VirtualDesktopSize.choice(config.virtualDesktopSize) == .device
-        let listed = [asked] + (follows ? VirtualDesktopSize.otherModes(asked, way: VirtualDesktopSize.followWay) : [])
+        let connected = viewports.values.compactMap {
+            VirtualDesktopSize.device(room: $0.room.map { CGSize(width: $0.width, height: $0.height) }, panel: CGSize(width: $0.width, height: $0.height))
+        }
+        let backing = VirtualDesktopSize.backing(made: asked, devices: connected, follows: follows)
         sayVirtualDesktopWaited(.make, now: now)
         // The guard's marker from just before the private calls until the display is up or failed (#380; SillDisplays).
         displays.willMake(.desktop)
@@ -4027,15 +4059,16 @@ package final class StreamCoordinator {
             // TEST ONLY: said, never made (SillDisplays.say); one more test stop, at the size and rate a Mac's would be asked for.
             displays.say(.desktop)
             desktopLife.made(.virtualDesktop, at: now)
+            testVirtualDisplay = VirtualDesktopSize.TestDisplay(made: asked, backing: backing, knobs: testVirtualDesktopKnobs)
             addTestVirtualStop(asked, hz: hz)
             print(VirtualDesktopLife.madeLine(came: asked, asked: asked, hz: hz, id: nil, ms: 0, device: device))
-            virtualDesktopMade(asked, hz: hz, listed: listed, device: vp == nil ? nil : matched, name: device, at: now)
+            virtualDesktopMade(asked, hz: hz, backing: backing, device: vp == nil ? nil : matched, name: device, at: now)
             return
         }
         let newDisplay: VirtualDisplay
         do {
             newDisplay = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, refreshHz: Double(hz),
-                                           otherModes: listed.dropFirst().map { VirtualDisplay.ModeSize(width: $0.widthPt, height: $0.heightPt) })
+                                           backing: (backing.wide, backing.high))
         } catch {
             virtualDesktopFailed("\(error)")
             return
@@ -4057,7 +4090,8 @@ package final class StreamCoordinator {
         guard headlessDisplay === newDisplay, !shuttingDown else { return }
         print(VirtualDesktopLife.madeLine(came: came, asked: asked, hz: cameHz, id: newDisplay.displayID,
                                           ms: Int((CFAbsoluteTimeGetCurrent() - t0) * 1000), device: device))
-        virtualDesktopMade(came, hz: cameHz, listed: listed, device: vp == nil ? nil : matched, name: device, at: now)
+        virtualDesktopMade(came, hz: cameHz, backing: VirtualDesktopSize.Backing(wide: newDisplay.backing.wide, high: newDisplay.backing.high),
+                           device: vp == nil ? nil : matched, name: device, at: now)
         // Its stop gets its display: the catalog keeps it beside the real screens and looks again.
         catalog.sillsAsVirtualDesktop = true
         catalog.keepsSills = false
@@ -4096,9 +4130,9 @@ package final class StreamCoordinator {
     }
 
     /// What the Virtual Desktop now is, for following its device, kind 16, Sill.app's card and the Desktop's rate.
-    private func virtualDesktopMade(_ size: VirtualDesktopSize.Size, hz: Int, listed: [VirtualDesktopSize.Size], device: ObjectIdentifier?,
+    private func virtualDesktopMade(_ size: VirtualDesktopSize.Size, hz: Int, backing: VirtualDesktopSize.Backing, device: ObjectIdentifier?,
                                     name: String?, at now: Double) {
-        virtualDesktopNow = (size, hz, listed, device, name)
+        virtualDesktopNow = VirtualDesktopNow(size: size, hz: hz, backing: backing, device: device, deviceName: name, sizedFor: device)
         desktopFollow = VirtualDesktopSize.Follow(made: size, at: now)
         headlessHz = Double(hz)
         status.update {
@@ -4131,6 +4165,18 @@ package final class StreamCoordinator {
         guard displays.exists(.desktop), desktopLife.role == .virtualDesktop, !shuttingDown,
               case .remove(let why) = desktopLife.look(virtualDesktopSeen(), at: now) else { return }
         sayVirtualDesktopWaited(.remove(why), now: now)
+        _ = await takeVirtualDesktopAway(movesWindows: why != .offConsole) { moved, said in
+            VirtualDesktopLife.removedLine(why, moved: moved.moved, of: moved.of, to: moved.to, grace: self.desktopLife.graceSeconds)
+                + (said ? " (TEST ONLY: none was made.)" : "")
+        }
+    }
+
+    /// The Virtual Desktop taken away (a removal its rule said, or a follow in place that could not put it back at 2x):
+    /// the Desktop off it first, to the stop the catalog shows without it (the main display), so its capture never loses the
+    /// display under it; its windows to the main display (`movesWindows`; off console none, the screen being another
+    /// user's); then the display, and the line `line` gives for the windows moved (`said`: a test host's, none made).
+    /// False when it went meanwhile, or Sill quits. The caller holds `virtualDesktopChanging`.
+    private func takeVirtualDesktopAway(movesWindows: Bool, line: ((moved: Int, of: Int, to: String), Bool) -> String) async -> Bool {
         let made = headlessDisplay?.displayID
         catalog.sillsAsVirtualDesktop = false
         removeTestVirtualStop()
@@ -4140,21 +4186,22 @@ package final class StreamCoordinator {
             if active == .desktop, !switching { await select(.desktop) }
             for _ in 0..<100 where switching { try? await Task.sleep(for: .milliseconds(50)) }
         }
-        guard displays.exists(.desktop), !shuttingDown, headlessDisplay?.displayID == made else { return }
-        let moved = why == .offConsole ? (moved: 0, of: 0, to: "") : moveVirtualDesktopWindowsOut(waitsForFullScreen: true)
+        guard displays.exists(.desktop), !shuttingDown, headlessDisplay?.displayID == made else { return false }
+        let moved = !movesWindows ? (moved: 0, of: 0, to: "") : moveVirtualDesktopWindowsOut(waitsForFullScreen: true)
         displays.remove(.desktop)
         desktopLife.removed(at: CFAbsoluteTimeGetCurrent())
         virtualDesktopGone()
-        print(VirtualDesktopLife.removedLine(why, moved: moved.moved, of: moved.of, to: moved.to, grace: desktopLife.graceSeconds)
-              + (made == nil ? " (TEST ONLY: none was made.)" : ""))
+        print(line(moved, made == nil))
         lookAtDisplays(changed: true)
         refreshVirtualDesktop()
+        return true
     }
 
     /// Forgotten as it goes (removed, or by macOS): what it was, its follow, its rate, its status.
     private func virtualDesktopGone() {
         virtualDesktopNow = nil
         desktopFollow = nil
+        testVirtualDisplay = nil
         headlessHz = nil
         catalog.sillsAsVirtualDesktop = false
         status.update { $0.sillDisplay = nil }
@@ -4176,7 +4223,11 @@ package final class StreamCoordinator {
             catalog.keepsSills = false
             if let s = status.snapshot.sillDisplay {
                 let size = VirtualDesktopSize.Size(widthPt: s.widthPt, heightPt: s.heightPt, scale: s.scale)
-                virtualDesktopNow = (size, s.hz, [size], nil, s.device)
+                // The headless display was made at its own size alone (2a): its backing is its own pixels, so a size the
+                // device asks for later is taken at the next make.
+                let own = headlessDisplay?.backing ?? (wide: size.widthPt * size.scale, high: size.heightPt * size.scale)
+                virtualDesktopNow = VirtualDesktopNow(size: size, hz: s.hz, backing: VirtualDesktopSize.Backing(wide: own.wide, high: own.high),
+                                                      device: nil, deviceName: s.device, sizedFor: nil)
                 desktopFollow = VirtualDesktopSize.Follow(made: size, at: CFAbsoluteTimeGetCurrent())
             }
             status.update { $0.sillDisplay?.virtualDesktop = true }
@@ -4254,11 +4305,12 @@ package final class StreamCoordinator {
         Task { @MainActor in self.lookAtVirtualDesktop() }
     }
 
-    /// A viewport from a device: the Virtual Desktop follows the room of the device it was made for (plan §5): the size its
-    /// room asks for now (VirtualDesktopSize.device), taken after 1 s steady and at most every 3 s (`Follow`). And while
-    /// its switch is on, each device's own state says the size the Virtual Desktop would have for it (kind 16).
+    /// A viewport from a device: the Virtual Desktop follows the room of the device it is for (plan §5): the size its room
+    /// asks for now (VirtualDesktopSize.device), taken after 1 s steady and at most every 3 s (`Follow`). And while its
+    /// switch is on, each device's own state says the size the Virtual Desktop would have for it (kind 16).
     private func virtualDesktopViewport(_ v: Viewport, from id: ObjectIdentifier) {
         if target.virtualDesktop { publishSettings() }
+        adoptVirtualDesktopDevice()                     // the one it was for left: this device's room may be the one now
         // Only This device follows a device (a size the person chose, or the main display's, stays as chosen).
         guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device,
               var follow = desktopFollow, virtualDesktopNow?.device == id, desktopLife.role == .virtualDesktop,
@@ -4270,51 +4322,196 @@ package final class StreamCoordinator {
         if let due = followDue(now: CFAbsoluteTimeGetCurrent()) { scheduleVirtualDesktopCheck(at: due) }
     }
 
+    /// Plan §5's matched device, kept as devices come and go: a device that steps onto the Virtual Desktop's stop
+    /// (`stepper`, kind 47) is the one it is for; once the one it was for left, the device the make's own rule names now
+    /// (VirtualDesktopSize.matched: the one that asked for the Desktop last, as each device does as it connects, else the
+    /// one whose viewport came last), while a device shows it. Its room then feeds the follow (`Follow.saw`), taken in place
+    /// after 1 s steady when it fits the backing; the caller's look schedules it. Only This device follows a device.
+    private func adoptVirtualDesktopDevice(stepper: ObjectIdentifier? = nil) {
+        guard var vd = virtualDesktopNow, var follow = desktopFollow, desktopLife.role == .virtualDesktop,
+              VirtualDesktopSize.choice(config.virtualDesktopSize) == .device else { return }
+        let id: ObjectIdentifier
+        if let stepper {
+            id = stepper
+        } else if vd.device == nil, virtualDesktopShown,
+                  let m = VirtualDesktopSize.matched(asker: desktopAsker, newest: newestViewport, sent: Set(viewports.keys)) {
+            id = m
+        } else {
+            return
+        }
+        guard id != vd.device, let v = viewports[id],
+              let size = VirtualDesktopSize.device(room: v.room.map { CGSize(width: $0.width, height: $0.height) },
+                                                   panel: CGSize(width: v.width, height: v.height)) else { return }
+        vd.device = id
+        vd.deviceName = deviceName(id: id)
+        if size == vd.size { vd.sizedFor = id }         // its room is the size it has: nothing to follow
+        virtualDesktopNow = vd
+        follow.saw(size, at: CFAbsoluteTimeGetCurrent())
+        desktopFollow = follow
+    }
+
     /// When the follow is next due, if one waits.
     private func followDue(now: Double) -> Double? {
         guard let follow = desktopFollow, case .wait(let until) = follow.due(now: now) else { return nil }
         return until
     }
 
-    /// A follow due now (`Follow.due`): the way P2's verdict allows (`VirtualDesktopSize.followStep`): in place, by a mode
-    /// listed at its make or given to the live display (the Desktop then restarts at its new size: `followDesktopDisplay`),
-    /// or, by default, at its next make; nothing while the Mac is locked (asked again at the unlock's look). One line.
+    /// A follow due now (`Follow.due`), the way Noah's probes of 2026-11-23 allow (`VirtualDesktopSize.followStep`): in place
+    /// on the live display, inside its backing, for a device that sends its room (`followVirtualDesktopInPlace`, which
+    /// restarts the Desktop once, at the size it ends at); else at its next make, with one line (a device before phase 2b,
+    /// a size beyond the backing). Nothing while the Mac is locked (asked again at the unlock's look), nor while a make, a
+    /// removal or another follow is under way (each looks again at its end).
     private func followVirtualDesktop() {
-        guard var follow = desktopFollow, var vd = virtualDesktopNow, desktopLife.role == .virtualDesktop,
+        guard !virtualDesktopChanging, !shuttingDown, var follow = desktopFollow, let vd = virtualDesktopNow,
+              desktopLife.role == .virtualDesktop,
               case .follow(let size) = follow.due(now: CFAbsoluteTimeGetCurrent()) else { return }
         let from = vd.size
-        let step = VirtualDesktopSize.followStep(to: size, display: from, listed: vd.listed, way: VirtualDesktopSize.followWay,
-                                                 headless: false, locked: lockReading.locked)
-        var done = step
+        let sendsRoom = vd.device.flatMap { viewports[$0] }?.room != nil
+        let step = VirtualDesktopSize.followStep(to: size, display: from, backing: vd.backing, sendsRoom: sendsRoom,
+                                                 way: VirtualDesktopSize.followWay, headless: false, locked: lockReading.locked)
+        let why = VirtualDesktopSize.followWhy(from: from, to: size, newDevice: vd.device != nil && vd.device != vd.sizedFor)
+        let name = vd.deviceName ?? "its device"
         switch step {
         case .later:
             return
-        case .nothing, .nextMake:
-            break
-        case .switchMode, .newModes:
-            // P2's "yes" (the one line, VirtualDesktopSize.followWay): the live display takes the new size in place, and the
-            // Desktop restarts at it (`followDesktopDisplay`, from macOS's reconfiguration callback).
-            let mode = VirtualDisplay.ModeSize(width: size.widthPt, height: size.heightPt)
-            let modes = [mode] + vd.listed.map { VirtualDisplay.ModeSize(width: $0.widthPt, height: $0.heightPt) }
-            var switched = false
-            if let d = headlessDisplay, step == .switchMode || (try? d.applyModes(modes)) == true {
-                switched = d.switchMode(to: mode)
+        case .inPlace:
+            // The rate the device asks for (as at a make: the person's choice, else the device's, held to the Frame Rate limit).
+            let hz = virtualDesktopWanted(target: config, viewport: vd.device.flatMap { viewports[$0] }).hz
+            virtualDesktopChanging = true               // a look meanwhile is left to its end, which looks again
+            virtualDesktopResizing = true               // and the Desktop's display follower too
+            Task { @MainActor in
+                await self.followVirtualDesktopInPlace(to: size, from: from, why: why, hz: (to: hz, from: vd.hz), device: vd.device, name: name)
             }
-            if switched {
-                vd.size = size
-                if !vd.listed.contains(size) { vd.listed.append(size) }
-                virtualDesktopNow = vd
-                status.update { $0.sillDisplay?.widthPt = size.widthPt; $0.sillDisplay?.heightPt = size.heightPt }
-            } else {
-                done = .nextMake
-            }
-        case .remake:
+        case .nothing, .nextMake, .beyondBacking, .remake:
             // Phase 3's way (removed and made again, its windows kept) is not in 2b: the next make takes the size.
-            done = .nextMake
+            let done: VirtualDesktopSize.FollowStep = step == .remake ? .nextMake : step
+            if let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: done, backing: vd.backing) {
+                print(line)
+            }
+            follow.took(size, at: CFAbsoluteTimeGetCurrent())
+            desktopFollow = follow
         }
-        if let line = VirtualDesktopSize.followLine(device: vd.deviceName ?? "its device", from: from, to: size, step: done) { print(line) }
-        follow.took(size, at: CFAbsoluteTimeGetCurrent())
-        desktopFollow = follow
+    }
+
+    /// The follow in place (VirtualDesktopSize.InPlace, P2b's and P2c's way): applySettings: with the size alone, and a
+    /// CoreGraphics switch when it lands at 1x, each step read back with a bounded wait; a step refused or late, back to
+    /// the size it had, at 2x (the next make takes the new one, as before); and when even that does not land, the display
+    /// goes, its windows first to the main display, and the Desktop that still shows its stop makes it again at the new
+    /// size. The Desktop's capture restarts once, at the size it ends at (`virtualDesktopResizing` held the display's
+    /// follower meanwhile). A test host drives its said display, as the probes measured one (`testVirtualDisplay`).
+    /// Threading: the main actor, as every display's make, wait and removal: applySettings: holds it about 0.3 s and the
+    /// switch's CGCompleteDisplayConfiguration about 0.33 s (P2b, P2c), twice 0.3 s for a turn, as a make's own calls do.
+    /// The private object has only ever been called on the main thread (the probes too), so it stays there.
+    private func followVirtualDesktopInPlace(to size: VirtualDesktopSize.Size, from: VirtualDesktopSize.Size, why: VirtualDesktopSize.FollowWhy,
+                                             hz: (to: Int, from: Int), device: ObjectIdentifier?, name: String) async {
+        let display = headlessDisplay
+        var machine = VirtualDesktopSize.InPlace(from: from, to: size, at: CFAbsoluteTimeGetCurrent())
+        let outcome = await driveInPlace(&machine, display: display, hz: hz)
+        virtualDesktopResizing = false
+        defer {
+            virtualDesktopChanging = false
+            Task { @MainActor in self.lookAtVirtualDesktop() }
+        }
+        // Gone meanwhile (macOS removed it, switched off, Quit): its own line said so.
+        guard let outcome, !shuttingDown, displays.exists(.desktop), desktopLife.role == .virtualDesktop, headlessDisplay === display else { return }
+        print(machine.traceLine(said: display == nil))
+        let now = CFAbsoluteTimeGetCurrent()
+        let backing = virtualDesktopNow?.backing
+        switch outcome {
+        case .done:
+            let cameHz = display?.reading?.hz ?? hz.to
+            virtualDesktopNow?.size = size
+            virtualDesktopNow?.hz = cameHz
+            virtualDesktopNow?.sizedFor = device
+            headlessHz = Double(cameHz)
+            status.update {
+                $0.sillDisplay?.widthPt = size.widthPt
+                $0.sillDisplay?.heightPt = size.heightPt
+                $0.sillDisplay?.hz = cameHz
+                $0.sillDisplay?.device = name
+            }
+            if testVirtualDesktop { addTestVirtualStop(size, hz: cameHz) }
+            if let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
+                                                        hz: cameHz, backing: backing) { print(line) }
+            desktopFollow?.took(size, at: now)
+            if target.virtualDesktop { publishSettings() }
+            await restartDesktopOnVirtualDesktop(size)
+        case .fellBack:
+            if let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
+                                                        backing: backing) { print(line) }
+            desktopFollow?.took(size, at: now)
+            // A Mac's display went through other sizes on the way: compared, and restarted only if its size is not the
+            // capture's. A test host's said display never changed size.
+            if !testVirtualDesktop { await restartDesktopOnVirtualDesktop(from) }
+        case .remove:
+            let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
+                                                     backing: backing) ?? ""
+            _ = await takeVirtualDesktopAway(movesWindows: true) { moved, said in
+                line + (moved.moved > 0 ? " Moved \(moved.moved) of \(moved.of) windows to \(moved.to) first." : "")
+                    + (said ? " (TEST ONLY: none was made.)" : "")
+            }
+        case .apply, .switchTo, .wait:
+            break
+        }
+    }
+
+    /// Drives `machine` against the Desktop's display: a Mac's (`display`: VirtualDisplay's applyModes, reading,
+    /// listsUsable and switchToListed, `hz.to` asked with the new size and `hz.from` with the way back) or a test host's
+    /// said one (`testVirtualDisplay`). Looks every 20 ms. Nil when the display went meanwhile (macOS removed it, switched
+    /// off, Quit), whose own line says so.
+    private func driveInPlace(_ machine: inout VirtualDesktopSize.InPlace, display: VirtualDisplay?,
+                              hz: (to: Int, from: Int)) async -> VirtualDesktopSize.InPlace.Action? {
+        func mode(_ s: VirtualDesktopSize.Size) -> VirtualDisplay.ModeSize { VirtualDisplay.ModeSize(width: s.widthPt, height: s.heightPt) }
+        func read() -> VirtualDesktopSize.Size? {
+            if let d = display {
+                return d.reading.map { VirtualDesktopSize.Size(widthPt: $0.widthPt, heightPt: $0.heightPt, scale: $0.scale) }
+            }
+            return testVirtualDisplay?.read(at: CFAbsoluteTimeGetCurrent())
+        }
+        var action = machine.first
+        while true {
+            guard !shuttingDown, displays.exists(.desktop), headlessDisplay === display else { return nil }
+            switch action {
+            case .apply(let s):
+                let rate = s == machine.to ? hz.to : hz.from
+                let answered: Bool
+                if let d = display {
+                    answered = (try? d.applyModes([mode(s)], refreshHz: Double(rate))) ?? false
+                } else {
+                    answered = testVirtualDisplay?.apply(s, at: CFAbsoluteTimeGetCurrent()) ?? false
+                }
+                action = machine.applied(answered, reading: read(), at: CFAbsoluteTimeGetCurrent())
+            case .switchTo(let s):
+                let code = display.map { $0.switchToListed(mode(s)) } ?? testVirtualDisplay?.switchTo(s, at: CFAbsoluteTimeGetCurrent())
+                action = machine.switched(code, reading: read(), at: CFAbsoluteTimeGetCurrent())
+            case .wait:
+                try? await Task.sleep(for: .milliseconds(20))
+                let now = read()
+                let goal = machine.goal
+                let listed = now == machine.goalAtOneX
+                    && (display.map { $0.listsUsable(mode(goal)) } ?? testVirtualDisplay?.lists(goal, at: CFAbsoluteTimeGetCurrent()) ?? false)
+                action = machine.saw(now, listed: listed, at: CFAbsoluteTimeGetCurrent())
+            case .done, .fellBack, .remove:
+                return action
+            }
+        }
+    }
+
+    /// After a follow in place: the Desktop's capture once, at the size the display has now (`size`), if the Desktop
+    /// streams it. A Mac's display: once ScreenCaptureKit lists it at that size (a moment after CoreGraphics, at most 1.5
+    /// s), the display follower compares and restarts it ("Desktop: the display is … now; restarting at its size."). A
+    /// test host's said display: its test stop has the new size, and the Desktop on it starts again.
+    private func restartDesktopOnVirtualDesktop(_ size: VirtualDesktopSize.Size) async {
+        guard active == .desktop, !placeholderStreams, !shuttingDown else { return }
+        if testVirtualDesktop {
+            guard catalog.desktopDisplayUUID == DesktopDisplays.virtualDesktopChoice, catalog.virtualDesktopStop, !switching else { return }
+            await select(.desktop)
+            return
+        }
+        if let d = headlessDisplay {
+            _ = await displays.waitUntilListed(d, as: .desktop, timeout: 1.5, points: (width: size.widthPt, height: size.heightPt))
+        }
+        await followDesktopDisplay(look: true)
     }
 
     /// TEST ONLY (SILL_TEST_VIRTUAL_DESKTOP): the said Virtual Desktop as one more of SILL_TEST_DISPLAYS' stops, to the right of
