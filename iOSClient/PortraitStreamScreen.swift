@@ -204,8 +204,11 @@ struct PortraitStreamScreen: View {
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: hidden ? 0 : 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
     @Environment(\.duoFold) private var duoFold
-    /// Where the software keyboard is: the laptop pose's key row goes above its glass (#215).
+    /// Where the software keyboard is: the laptop pose's key row goes above its glass (#215), and a phone's
+    /// rows above its top (PhoneKeyboardLift).
     @ObservedObject private var keyboardFrame = KeyboardFrameMonitor.shared
+    /// Hide Thumbnails While Typing (PhoneKeyboardLift.switchKey): off unless turned on, never sent.
+    @AppStorage(PhoneKeyboardLift.switchKey) private var hideThumbnailsWhileTyping = PhoneKeyboardLift.defaultOn
 
     var body: some View {
         GeometryReader { geo in
@@ -495,22 +498,44 @@ struct PortraitStreamScreen: View {
     /// changes the arrangement and so sends one new viewport, as a rotation does.
     private func phone(_ layout: PhonePortraitLayout, origin: CGPoint) -> some View {
         let span = layout.trackpadSpan(video: client.videoSize)
-        return phoneStack(layout, span: span)
+        // The rows over the person's keyboard, whatever its height (PhoneKeyboardLift): placed from its real top,
+        // and with Hide Thumbnails While Typing in the thumbnails' place. Never in full screen or the swipe in's
+        // preview, whose rows are hidden or the layout's own.
+        let lift = PhoneKeyboardLift(layout, glass: hidden || preview ? nil : phoneGlass(origin: origin),
+                                     tuck: hideThumbnailsWhileTyping)
+        return phoneStack(layout, lift: lift, span: span)
+            // The rows go up and come back with the keyboard (its own animation carries the frame's reports;
+            // this one too a change that `keyboardShown` makes a moment after it).
+            .animation(.easeOut(duration: 0.25), value: [lift.lift, lift.tucked ? 1 : 0])
             // The viewport: the picture's pane, or with Larger Picture its whole room (never the pane
             // at the picture's shape, which would hold a window at the shape it has); full screen, the room.
+            // Never the lifted room: the Mac resizes nothing for a keyboard.
             .onChange(of: hidden ? room.size : layout.picture.size, initial: true) { _, size in onPanelSize(size) }
+            // A thumbnail's lights hang from the strip: as it tucks away they close, rather than wait unseen.
+            .onChange(of: lift.tucked) { _, tucked in if tucked, windowMenu != nil { windowMenu = nil } }
             #if DEBUG
-            .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin, quiet: preview || hidden))
+            .modifier(PhoneConsole(layout: layout, lift: lift, span: span, video: client.videoSize, origin: origin, quiet: preview || hidden))
             #endif
     }
 
-    private func phoneStack(_ layout: PhonePortraitLayout, span: CGFloat) -> some View {
+    /// The software keyboard's top in this screen (`origin`: this screen's in the window, as the keyboard's
+    /// frame is the screen's) while the person's own keyboard is up (`keyboardShown`: never the drawer's
+    /// search field's, never a hardware keyboard's hold), as UIKit last reported it (KeyboardFrameMonitor,
+    /// inside the keyboard's own animation); nil otherwise.
+    private func phoneGlass(origin: CGPoint) -> CGFloat? {
+        guard keyboardShown, let frame = keyboardFrame.frame else { return nil }
+        return frame.minY - origin.y
+    }
+
+    private func phoneStack(_ layout: PhonePortraitLayout, lift: PhoneKeyboardLift, span: CGFloat) -> some View {
         let larger = layout.largerPicture
         // In reading order, which is also top to bottom: the picture, row 1, the strip (none with
         // Larger Picture), the key row, the trackpad. Full screen: the picture alone, at the room; the rows keep
-        // their rects for the moment they slide out (and in), so none is ever placed anywhere else.
-        let rows: [CGRect] = larger ? [layout.row1, layout.keys, layout.trackpad] : [layout.row1, layout.strip, layout.keys, layout.trackpad]
-        let rects: [CGRect] = [hidden ? room : larger ? layout.pane(video: client.videoSize) : layout.picture] + rows
+        // their rects for the moment they slide out (and in), so none is ever placed anywhere else. With the
+        // keyboard up, where PhoneKeyboardLift puts them (the layout's own while nothing needs to move), the
+        // picture's frame at its shape in the room left above them.
+        let rows: [CGRect] = larger ? [lift.row1, lift.keys, lift.trackpad] : [lift.row1, lift.strip, lift.keys, lift.trackpad]
+        let rects: [CGRect] = [hidden ? room : lift.frame(video: client.videoSize)] + rows
         return ZStack(alignment: .topLeading) {
             // The swipe in's preview draws the rows with the black they sit on and nothing of the picture's place
             // (RevealCut.phone): the black from the bottom of the picture's room down, so the gap above row 1
@@ -535,6 +560,7 @@ struct PortraitStreamScreen: View {
                         phoneRow2(layout)
                             .opacity(drawerOpen || settingsOpen ? 0 : 1)
                             .accessibilityHidden(drawerOpen)
+                            .modifier(TuckedAway(tucked: lift.tucked))
                             .transition(chromeTransition)
                     }
                     keyRow(.phone).accessibilityHidden(drawerOpen)
@@ -544,13 +570,14 @@ struct PortraitStreamScreen: View {
                 }
             }
 
+            // The drawer and its dim follow row 1 when the keyboard lifts it (Apps leaves the keyboard up).
             if drawerOpen, !preview {
-                ForEach(layout.dim.indices, id: \.self) { index in
-                    dim.placed(layout.dim[index], in: layout.size)
+                ForEach(lift.dim.indices, id: \.self) { index in
+                    dim.placed(lift.dim[index], in: layout.size)
                 }
                 drawer
                     .modifier(AfterRow1(active: larger))
-                    .placed(layout.drawer, in: layout.size)
+                    .placed(lift.drawer, in: layout.size)
                     .transition(.opacity)
             }
 
@@ -841,6 +868,19 @@ private struct AfterRow1: ViewModifier {
     }
 }
 
+/// The thumbnails' row while Hide Thumbnails While Typing tucks it away (`PhoneKeyboardLift.tucked`): out of
+/// sight, touch and VoiceOver, and the same view, so its thumbnails' scroll is as it was when it comes back.
+private struct TuckedAway: ViewModifier {
+    let tucked: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(tucked ? 0 : 1)
+            .allowsHitTesting(!tucked)
+            .accessibilityHidden(while: tucked)
+    }
+}
+
 /// The phone's parts at their `PhonePortraitLayout` rects, each proposed exactly its rect, in the
 /// order they are declared (picture, row 1, strip, key row, trackpad; no strip with Larger Picture),
 /// which is the reading order VoiceOver takes.
@@ -866,9 +906,11 @@ private struct PhoneRows: Layout {
 /// tall, its top at 574 pt in the stream screen; the key row ends 10 pt above it, …` each time the
 /// software keyboard has moved (its frame is the screen's; `origin` is the stream screen's in the
 /// window). Once it has moved (the did-change notification): on fresh simulators the will-change
-/// one went unheard now and then.
+/// one went unheard now and then. And PhoneKeyboardLift's `keys: …` line each time the rows' places over the
+/// keyboard change (`keys: lifted 34 pt, the key row 10 pt above the keyboard at 414, …`).
 private struct PhoneConsole: ViewModifier {
     let layout: PhonePortraitLayout
+    let lift: PhoneKeyboardLift
     let span: CGFloat
     let video: CGSize
     let origin: CGPoint
@@ -884,6 +926,9 @@ private struct PhoneConsole: ViewModifier {
                 guard !quiet, let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
                 print(keyboardLine(end))
             }
+            .onChange(of: lift.line(video: video)) { _, line in
+                if !quiet { print(line) }
+            }
     }
 
     private var trackpadLine: String {
@@ -897,13 +942,16 @@ private struct PhoneConsole: ViewModifier {
         return line
     }
 
+    /// Where the key row and row 1 are as the keyboard's frame lands (PhoneKeyboardLift's, which is the
+    /// layout's own while nothing moved; the frame may come before the lift does, `keyboardShown` a moment
+    /// later: the `keys: …` line then says where they went).
     private func keyboardLine(_ end: CGRect) -> String {
         let top: CGFloat = end.minY - origin.y
         guard end.height > 0, top < layout.size.height else { return "keyboard: down" }
-        let clear: CGFloat = top - layout.keys.maxY
+        let clear: CGFloat = top - lift.keys.maxY
         var line = "keyboard: up, \(Self.points(end.height)) pt tall, its top at \(Self.points(top)) pt in the stream screen; "
         line += "the key row ends \(Self.points(abs(clear))) pt " + (clear >= 0 ? "above" : "under") + " it, "
-        line += "row 1 \(Self.points(top - layout.row1.maxY)) pt above it"
+        line += "row 1 \(Self.points(top - lift.row1.maxY)) pt above it"
         if let planned = layout.keyboard { line += " (Larger Picture, planned for a keyboard of \(Self.points(planned)) pt)" }
         return line
     }

@@ -985,6 +985,31 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// does) and no assistant groups; the system keyboard and its groups for the person's own.
     override var inputView: UIView? { holdsForHardwareKeyboard ? emptyInputView : nil }
 
+    #if DEBUG
+    /// `-SillTallKeyboard N` (the harness's; ContentView's contract): a band N pt tall over the software
+    /// keyboard, as this view's input accessory view, so UIKit's keyboard is N pt taller and its reports say
+    /// so, as a third-party keyboard with a bar of its own would be (a simulator installs none): a phone's
+    /// rows then have a taller keyboard to stay above (PhoneKeyboardLift). It says it is a stand-in, for the
+    /// photos. Never while the hardware keyboard holds the keyboard (nothing is drawn then).
+    private lazy var tallKeyboardStandIn: UIView? = {
+        let height = UserDefaults.standard.double(forKey: "SillTallKeyboard")
+        guard height > 0 else { return nil }
+        let band = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: height))
+        band.autoresizingMask = [.flexibleWidth]
+        band.backgroundColor = .systemGray3
+        let label = UILabel(frame: band.bounds)
+        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        label.text = "Stand-in: a keyboard \(Int(height)) pt taller"
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .label
+        label.textAlignment = .center
+        band.addSubview(label)
+        return band
+    }()
+
+    override var inputAccessoryView: UIView? { holdsForHardwareKeyboard ? nil : tallKeyboardStandIn }
+    #endif
+
     /// An input method is composing here (marked text): KeyboardFrameMonitor reloads no input views then.
     var isComposingText: Bool { composition.isComposing }
 
