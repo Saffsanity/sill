@@ -29,13 +29,21 @@ import Foundation
 ///       typing, a hardware key, the iPad's
 ///       own trackpad or mouse
 ///     this device, the Pencil                any         hidden (Q2)
+///     this device, the Pencil hovering        any         this device's own while the Mac's cursor is an
+///       as a pen (kind 29)                                app's own (a drawing app's brush outline);
+///                                                         hidden over a standard cursor (Q2)
+///
+/// The last row is Hunter's (2026-10-14, docs/pencil-pressure-plan.md Q1): a Pencil hovering as a pen
+/// shows a drawing app's brush preview under it, and still no arrow, I-beam or hand anywhere else, as
+/// Q2 wants (the Mac says which, kind 46: `cursorIsAppOwn`). It hides as the tip lands (`.pencil`
+/// again: a stroke draws nothing under the tip) until the next hover.
 ///
 /// Nothing shows while nothing streams. The shape is kind 14's in every row. A value; main thread.
 struct PointerPresence: Equatable {
     /// Who moved the pointer last: this device, or the Mac or another device.
     enum Control: Equatable { case here, elsewhere }
     /// What drew this device's own pointer.
-    enum Origin: Equatable { case trackpad, pencil, none }
+    enum Origin: Equatable { case trackpad, pencil, penHover, none }
 
     /// A new session: the Mac has the pointer until this device's first input (Q6).
     var control: Control = .elsewhere
@@ -53,6 +61,10 @@ struct PointerPresence: Equatable {
     /// Q2: the Pencil draws no pointer, hovering or touching (the request, by its letter). True draws
     /// it again, in any layout (the harness's `-SillPencilPointer 1`).
     var pencilShowsPointer = PointerPresence.pencilShowsPointerByDefault
+    /// The Mac's current cursor is an app's own, not one of macOS's standard ones (kind 46 said
+    /// `standard: false` for the kind 14 that made it the shape). False when nothing said so (a Mac
+    /// from before kind 46): a hovering Pencil then shows nothing, as Q2 has it.
+    var cursorIsAppOwn = false
     /// Q1: the trackpad's pointer stays until another input takes over: in the laptop layout it is the
     /// only way to aim a tap. A number of seconds hides it that long after the last finger lifts.
     var trackpadLinger = PointerPresence.trackpadLingerByDefault
@@ -78,6 +90,8 @@ struct PointerPresence: Equatable {
                 return own
             case .pencil:
                 return pencilShowsPointer ? own : nil
+            case .penHover:
+                return cursorIsAppOwn ? own : nil
             case .none:
                 return nil
             }
@@ -133,9 +147,11 @@ struct PointerPresence: Equatable {
     /// A new frame size (another source, an Aa resize) changes what a fraction means (§7.3): this
     /// device's own pointer, only while it shows under this device's control, starts again in the
     /// middle, and the Mac's pointer is moved there too, so the two agree (as before this plan). The
-    /// Mac's arrow needs nothing: the host's next report is in the new geometry.
+    /// Mac's arrow needs nothing: the host's next report is in the new geometry. Nor does a hovering
+    /// Pencil's: its next hover says where it is, and a move to the middle would pull the Mac's
+    /// pointer away from under it.
     func recentresOnNewFrame(now: Double) -> Bool {
-        control == .here && own != nil && sprite(now: now) != nil
+        control == .here && own != nil && origin != .penHover && sprite(now: now) != nil
     }
 
     /// §3.3: a report (kind 26) counts only if the Mac had read every input this device sent on the

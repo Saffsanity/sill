@@ -22,6 +22,8 @@ swift run -c release SillHost --print-reachability  # the addresses a device wou
 swift run -c release SillHost --pairing     # the home door speaks TLS, pairing required, a throwaway identity; the code and link print here (with --remote, one pairing for both doors)
 swift run -c release SillHost --print-cable # what the cable rule reads on each interface, and whether the console is unlocked; read-only, then exit
 swift run -c release SillHost --menu-selftest=TextEdit   # the menus a device would be sent for that app (a pid, or the start of its name), read once; read-only
+swift run -c release SillHost --pen-selftest   # what AppKit reads from the tablet events Sill would post for a Pencil (docs/pencil-pressure-plan.md, H0); posts nothing
+swift run -c release PenProbe                  # P0's tool: says what it would do; `--canvas` a window that draws what it receives; `--post-to-this-mac` POSTS three test strokes where the pointer is (a person runs it by hand at the Mac, never an agent)
 python3 Scripts/sillclient.py PORT 5 none --pair-ask --then-code=$T/code --identity=$T/a   # a device's ask at a TLS home door, then the code the host printed (saved in $T/code)
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_STILL_AFTER=3 .build/release/SillHost --synthetic   # the Desktop still from 3 s on: a device's picture comes back only through its keyframe request
@@ -32,6 +34,7 @@ SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
 SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # prints each event a dry run would post ("Test input: key 49 up (none)")
 python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5   # an older device's Spotlight key, then a tap
+python3 Scripts/sillclient.py PORT 5 desktop --pen=hover,0.3,0.5@1.5 --pen=down,0.3,0.5,0.2@2 --pen=move,0.4,0.5,0.8,1.0,0@2.2 --pen=up,0.4,0.5@2.4 --pen=leave@2.6   # an Apple Pencil's stroke (kind 45) to that host: the input log lists the pen entering, each point's pressure and tilt, the pen leaving
 python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (pinging four a second, as a device): with the input log, "Test input: key 123 down (none)", repeats from 0.5 s on ("… repeat (none)", 30 a second on this Mac), then its up
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
@@ -184,7 +187,12 @@ up: the table read again in 0.25 s for command"): what a device's keys and
 buttons leave for its next click (KeyStrokes), without posting anything; and
 where a device the Mac stops serving stops landing input ("Test input: iPad is
 no longer served: only the up of a key or a button it holds down goes from
-here on.", RevokedInput).
+here on.", RevokedInput). An
+Apple Pencil's messages (kind 45) print the same way: "Test input: pen enters",
+a point with its pressure and tilt ("Test input: left mouse drag (none) at
+484,475 pen 0.400 tilt 0.54,0.00"), "Test input: pen leaves" (it needs the
+scripted pointer, SILL_TEST_POINTER_PATH, as all input to the test pattern
+does).
 A sleeping display, headless: a test host declares no user activity and counts
 `disp.wakeDry` where a real one would declare (`sillclient.py`'s connect, a tap,
 a key; never a pick, nor a move right after a restart). TEST ONLY
@@ -352,8 +360,9 @@ vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|remove
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
-This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
-to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
+This iPad group; the mock Mac takes gestures, and a pen, in every case but `legacy`; `reverse`
+to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper; `pencil` to an
+iPad's Pencil Pressure row, `-Sill.pencilPressure 0` turning it off for one run, in the normal app too),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
 in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
 run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
@@ -457,7 +466,9 @@ key row, `gesture NAME[,FINGERS]` a three-finger gesture through
 (only while the input view takes Esc), `scroll DX,DY` a connected trackpad's
 two-finger scroll with its coast, `wheel DX,DY` a wheel's plain deltas, `keyboard
 attach|detach` a hardware keyboard coming or going, `orient landscape|portrait`
-the scene turned (an iPhone's); the console's "input script: …" and "pointer: …" lines say what
+the scene turned (an iPhone's), `pen hover|down|move|up,X,Y[,P[,ALT,AZ]]` and `pen
+away` an Apple Pencil over the stream, as a pen's (kind 45) or, with
+`-Sill.pencilPressure 0` or a Mac that takes no pen, the mouse's; the console's "input script: …" and "pointer: …" lines say what
 happened; it runs only when the session was dialled by `-SillConnect` to a
 loopback address, `127.0.0.1:P`, `::1:P` or `localhost:P`, and the host's first
 window list has no version: Sill.app's always has, and would post the input to
