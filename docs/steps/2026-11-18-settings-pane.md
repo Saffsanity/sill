@@ -103,7 +103,10 @@
   to the fold's band, the laptop pose's page the screen's width, out to the screen's edges through the safe
   area beside the stream screen (an iPhone on its side: 44 to 62 pt by its sensor housing and as much on the
   other side; the Duo's cover: its camera's 84), and the header, the rows and Disconnect keep to their column
-  inside it (HostSettingsPanel's `inColumn`). The pane is laid out in the safe area as before; each scroll view
+  inside it (HostSettingsPanel's `inColumn`; the rows that scroll by their scroll view's content margins, so the
+  scroll view lays them out at the column's width as it did when it was the column's: padded inside it instead,
+  Full Screen's footnote, which fitted its line with a point to spare, broke "them back." onto a second line in
+  the first photos, b3a9029b). The pane is laid out in the safe area as before; each scroll view
   reaches past it with `ignoresSafeArea(edges: .horizontal)`, as far as the pane's own reader says the safe
   area goes (`geo.safeAreaInsets`, in the same layout, so a turn moves both at once), and its rows are placed
   from its reached edge. The pure rule says both (`Layout.macScroll`, `deviceScroll`, `page(_:)`, the column

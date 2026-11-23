@@ -42,10 +42,10 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
     anywhere on the pane scrolls the rows (Noah, the same day, of the first build with one column: "on iPad
     in landscape, you have to touch the middle 3rd of the display to scroll instead of anywhere on the
     screen"; that build's scroll view was the column's 600 pt, of an iPad mini's 1,133). The header and
-    Disconnect keep to the column. Until that day a
-    screen with room for two columns (sideways from 652 pt, upright from 732: every iPhone on its side, an
-    iPad either way round, the Duo open flat sideways) had the two parts side by side, the Mac's in the
-    leading column; Noah tried that on his iPad mini and his iPhone 15 Pro and asked for one column.
+    Disconnect keep to the column. Until that day a screen with room for two columns (sideways from 652 pt,
+    upright from 732: every iPhone on its side, an iPad either way round, the Duo open flat sideways) had the
+    two parts side by side, the Mac's in the leading column; Noah tried that on his iPad mini and his iPhone
+    15 Pro and asked for one column.
   - *The book pose* (the Duo's inner display sideways, half-folded): a column on each page, centred there,
     16 pt from the page's edges, the Mac's part on the leading page and this device's on the trailing one,
     each page's scroll view across the page from the screen's edge to the fold's band; the band between them
@@ -68,8 +68,9 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   and bounce only when they do not fit. Each scroll view spans its page, the whole screen in one column, out
   to the screen's edges through the safe area beside it (the pane is laid out in the safe area and each
   scroll view reaches past it, `ignoresSafeArea`, as far as the pane's own reader says the safe area goes),
-  and the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`), so a
-  drag beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt
+  and the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`; the
+  column is the scroll view's content margins, so the rows are laid out at its width as before), so a drag
+  beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt
   where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
   laptop pose's fold left a sliver of a line); the fade runs the scroll view's width, which holds nothing
   beside the column, so it reads as before. The scroll indicator is the scroll view's, so it sits at the
@@ -170,3 +171,10 @@ and their behaviour are untouched.
    page and this device's on the trailing one, each scrolling on its own across its page), or one column there
    too: both parts in one scroll view on the leading page, the trailing page empty. A column centred on the
    screen would lie across the fold. The photos `book` and `book-end` show what is taken.
+8. **A short iPhone held on its side** (taken: the header and Disconnect stay pinned, as the panel had them, so
+   Done and Disconnect are always in reach). The header takes 63 pt and Disconnect with the room under it 70
+   to 77, so the rows get what is left: three rows at a time on the smallest, an SE with Display Zoom (320 pt
+   tall), three and a fourth under the fade on a 13 mini (375 pt with the home indicator's 21), four on an SE,
+   a 15 Pro and a Pro Max (440 pt; with a footnote more). Two ways out, on a short screen only: the header
+   scrolls away with the rows (Done with it), about a row and a half more; or Disconnect ends the list instead
+   of being pinned under it, as much again.
