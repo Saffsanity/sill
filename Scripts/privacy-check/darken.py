@@ -19,15 +19,22 @@ and is killed at the end. One verdict per rule:
   quit      SIGTERM while dark: lit before the host exits
   watchdog  SILL_TEST_PRIVACY_STALL=12 while dark: the main thread stops 12 s, the watchdog's dry run says once, 10 s
             into it, that it would quit Sill, and the host goes on after the stall (rule 12; Sill.app itself would end)
+  switch    Sill.app's own code for the switches and its Quit, in the bare SillMenuBar binary as a synthetic test host
+            (not Sill.app, so the dry run; -requirePairing NO, -virtualDisplay 0, a TLS test client at home): Darken
+            this Mac's screen turned on, off (lit at once), on, to only away with the device at home and keys passing
+            (lit at once), on again (the ⌃⌘Q hint), then Sill's own Quit while dark (lit, then its line); HostSettings
+            saves the three keys in the bare binary's defaults domain (SillMenuBar), which the case reads and removes
 
-    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|all]
+    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|switch|all]
 
-Needs .build/release/SillHost. Exits 1 when a verdict fails."""
+Needs .build/release/SillHost (and .build/release/SillMenuBar for switch). Exits 1 when a verdict fails."""
 import os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOST = os.path.join(ROOT, ".build/release/SillHost")
+APP = os.path.join(ROOT, ".build/release/SillMenuBar")
+APP_KEYS = ("darkenScreen", "darkenOnlyAway", "darkenKeysLock")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
             "SILL_TEST_LOCK_IGNORE_MAC": "1", "SILL_TEST_PRIVACY_DISPLAYS": "1"}
@@ -54,12 +61,13 @@ def write(path, text):
 
 
 class Host:
-    """One synthetic host: its stdout's lines with the time each was read, its port."""
-    def __init__(self, out, label, env, args=()):
+    """One synthetic host: its stdout's lines with the time each was read, its port. `binary`: SillHost (the CLI), or
+    the bare SillMenuBar binary, whose port is the one its "Status: Test Pattern Mode" line names (`port_line`)."""
+    def __init__(self, out, label, env, args=(), binary=HOST, port_line=None):
         self.lines, self.out, self.label = [], out, label
         e = dict(os.environ); e.update(BASE_ENV); e.update(env)
         self.start = time.time()
-        self.p = subprocess.Popen(["nice", "-n", "10", HOST, "--synthetic", *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        self.p = subprocess.Popen(["nice", "-n", "10", binary, "--synthetic", *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   env=e, start_new_session=True, text=True, bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
         self.port = None
@@ -68,7 +76,10 @@ class Host:
             r = subprocess.run(["lsof", "-nP", "-a", "-p", str(self.p.pid), "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True)
             if re.findall(r"(\*|\[::\]|0\.0\.0\.0):(\d+) \(LISTEN\)", r.stdout): self.stop(); raise SystemExit(f"{label}: a listener not on loopback")
             ports = re.findall(r"127\.0\.0\.1:(\d+) \(LISTEN\)", r.stdout)
-            if ports: self.port = ports[0]; break
+            if port_line:
+                named = [m.group(1) for _, l in list(self.lines) for m in [re.search(port_line, l)] if m]
+                if named and named[0] in ports: self.port = named[0]; break
+            elif ports: self.port = ports[0]; break
         if self.port is None: self.stop(); raise SystemExit(f"{label}: no listening port")
 
     def _read(self):
@@ -282,8 +293,61 @@ def case_watchdog(out):
             "the device's departure after the stall starts the wait and the screen is lit: the host still runs")
 
 
+def app_defaults():
+    """The darkening's keys the bare binary has saved in its defaults domain (SillMenuBar): {key: value}."""
+    out = {}
+    for k in APP_KEYS:
+        r = subprocess.run(["defaults", "read", "SillMenuBar", k], capture_output=True, text=True)
+        if r.returncode == 0: out[k] = r.stdout.strip()
+    return out
+
+
+def case_switch(out):
+    print("== switch: Settings' switches and Sill's own Quit, in the bare SillMenuBar binary (a synthetic test host: the dry run)", flush=True)
+    if not os.path.exists(APP):
+        verdict(False, f"no {APP}: swift build -c release first"); return
+    before = app_defaults()
+    if before:
+        verdict(False, f"the bare binary's defaults already hold {before} (another run's?): left alone, case not run"); return
+    steps = "2 darkenScreen=any; 8 darkenScreen=off; 10 darkenScreen=any; 13 darkenScreen=away,darkenKeysLock=0; 16 darkenScreen=any"
+    try:
+        h = Host(out, "switch", {}, ["-requirePairing", "NO", "-virtualDisplay", "0", "-SillLogFile", os.path.join(out, "switch.sill.log"),
+                                     "-SillSetAfter", steps, "-SillQuitAfter", "19"], binary=APP, port_line=r"test clients connect to port (\d+)")
+    except SystemExit as e:
+        verdict(False, f"the bare binary as a test host: {e}")
+        h = None
+    if h is not None:
+        c = client(h, "switch", 16, 4.0, ["--tls", "--identity=" + os.path.join(out, "switch.id"), "--pin=none"])
+        h.at(23); h.stop(); c.join()
+    saved = app_defaults()
+    for k in saved: subprocess.run(["defaults", "delete", "SillMenuBar", k], capture_output=True)
+    left = app_defaults()
+    if h is None: return
+    set_lines = h.find("SillSetAfter ")
+    verdict(len(set_lines) == 5, f"the bare binary took the five changes (not Sill.app, which ignores them): {len(set_lines)}")
+    dark = h.find(DARK)
+    verdict(len(dark) == 3 and dark[0][0] >= 4.0, f"dark at the connect, and again at each switch back on: {[round(t, 2) for t, _, _ in dark]}")
+    off_t, off_i, _ = h.first("Privacy: Darken this Mac’s screen is off; this Mac’s screen is lit again.")
+    _, off_lit_i, _ = h.first(LIGHT, after=off_t or 0)
+    verdict(off_t is not None and 8.0 <= off_t < 9.5 and off_lit_i is not None and off_lit_i > off_i,
+            f"turned off: lit at once, its line, then the dry curtain lifts ({off_t})")
+    scope_t, scope_i, _ = h.first("Privacy: Darken this Mac’s screen changed, and no device it darkens for is connected; this Mac’s screen is lit again.")
+    _, scope_lit_i, _ = h.first(LIGHT, after=scope_t or 0)
+    verdict(scope_t is not None and 13.0 <= scope_t < 14.5 and scope_lit_i is not None and scope_lit_i > scope_i,
+            f"only away with the device at home: lit at once, with its line ({scope_t})")
+    verdict(bool(h.find(HINT_PASS, after=15.9)), "keys passing: the hint at the next dark says ⌃⌘Q")
+    quit_t, quit_i, _ = h.first("Privacy: Sill is quitting; this Mac’s screen is lit again.")
+    _, quit_lit_i, _ = h.first(LIGHT, after=17.5)
+    verdict(quit_t is not None and quit_t >= 19.0 and quit_lit_i is not None and quit_lit_i < quit_i,
+            f"Sill's own Quit while dark: lit first, then its line ({quit_t})")
+    verdict(len(h.find(LIGHT)) == 3, f"lit three times in all: {[round(t, 2) for t, _, _ in h.find(LIGHT)]}")
+    verdict(saved == {"darkenScreen": "1", "darkenOnlyAway": "0", "darkenKeysLock": "0"},
+            f"HostSettings saved the switches as Settings would (on; whenever, so only away off; keys passing): {saved}")
+    verdict(not left, f"and the case removed them from the bare binary's defaults: {left}")
+
+
 CASES = {"order": case_order, "home": case_home, "away": case_away, "wait": case_wait, "keys": case_keys, "pass": case_pass,
-         "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog}
+         "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog, "switch": case_switch}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: raise SystemExit(__doc__)
