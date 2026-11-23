@@ -508,7 +508,18 @@ the ruler's release does, whatever streams, so a synthetic host's `[1s]` lines
 show `win.fitOff` for a scale then Off). The console
 prints `viewport: 386×241 pt, scale off, 60 fps` for each viewport sent, and on
 a phone upright `trackpad: …, vertical span …` and, once the keyboard has moved,
-`keyboard: up, 301 pt tall, its top at …; the key row ends 10 pt above it`.
+`keyboard: up, 301 pt tall, its top at …; the key row ends 10 pt above it`, and
+`keys: …` each time the rows move over the person's keyboard (PhoneKeyboardLift:
+`keys: lifted 34 pt, the key row 10 pt above the keyboard at 414, …`, `keys: the
+thumbnails tucked away, …`, `keys: as laid out, …`, `keys: no keyboard`).
+`-SillTallKeyboard N` puts a band N pt tall over the software keyboard (the stream's
+input view's input accessory view, labelled a stand-in), so UIKit's keyboard is N pt
+taller and says so, as a third-party keyboard's would be (a simulator installs none);
+with `-SillKeyboardToggle 1 -SillHardwareKeyboard 0` on the iPhone Duo's cover
+(`-SillLayout 466x678 -SillHinge closed`, `--pose=closed-upright` in a cases file) the
+harness photographs the rows over it. `-Sill.hideThumbnailsWhileTyping 1` turns Hide
+Thumbnails While Typing on for one run (the normal app too), `-SillSettingsScroll
+typing` scrolls the Settings panel to it.
 `-SillAXDump <s>` lists the stream screen's accessibility elements in the
 tree's order (VoiceOver's), on a private simulator once `xcrun simctl spawn
 UDID defaults write com.apple.Accessibility ApplicationAccessibilityEnabled

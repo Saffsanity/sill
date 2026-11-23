@@ -121,6 +121,12 @@ struct ContentView: View {
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen, but where
 ///   the fake screen is the simulator's own: `-SillLayout 669x951 -SillHinge half` on the iPhone Duo
 ///   simulator folded into the laptop pose draws the key row above the real keyboard, #215).
+/// * `-SillTallKeyboard N` — a band N pt tall over the software keyboard (the stream's input view's input
+///   accessory view, labelled a stand-in), so UIKit's keyboard is N pt taller and says so, as a third-party
+///   keyboard with a bar of its own would be: a simulator installs none. With `-SillKeyboardToggle` on the
+///   iPhone Duo's cover (`-SillLayout 466x678 -SillHinge closed`, the cover's own size) or a phone, the rows
+///   stay above it (PhoneKeyboardLift; the console's `keys: …` lines). `-Sill.hideThumbnailsWhileTyping 1`
+///   turns Hide Thumbnails While Typing on for one run, in the normal app too.
 /// * `-SillKeyboardProbe 1` — every software keyboard notification on the console ("keyboard probe
 ///   12.345: UIKeyboardWillChangeFrameNotification: begin 0,555 669×396, end 0,455.5 669×495.5; a reading"),
 ///   and the keyboard's views when a look tells nothing: how the inner display's numbers were measured
