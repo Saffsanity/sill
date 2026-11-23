@@ -89,13 +89,17 @@ merged main and checked that the move's claim still holds: the library's code be
   - Work in flight (`git merge-tree`, 39 open pull requests against main and against e7ff9a84): 36 conflict exactly
     where they conflict with main. #175, #411 and #195 conflict in the Xcode project alone, as they did against
     98f234d5. The microphone (#415) and recording (#407) conflict only in #402's files and docs/LAYOUT.md.
+  - CI again on f8ad3fe8 merged with main 5d062a3c (run 45195459376): the build, all 76 pure checks (main's new one
+    among them) with the same three counts, the iOS app for the simulator.
   - GitHub: mergeable and clean, also once main moved on to 5d062a3c during the run (#389, #418: the site and the
     iOS key row, no file of this branch's; not merged here).
-  - **Not yet run here: the local hold** (`next/sill-audio/run-1123/hold1.sh`): H2 against main's CLI, #396's
-    `retry_gate.py` on both CLIs, the sound harness's every case (with #396's `retry`), `audio-packetizer`'s 42
-    mutants, the three sound checks' output against main's, the pacing build and `run-all.sh`. The 0.7 set had the
-    lock until 19:23, and from 17:15 on this Mac had 24.2 to 24.4 GiB free, under the 25 GB floor; it is queued for
-    when the space comes back (`run-1123/queue.sh`).
+- **Not run in this run: the local hold** (`next/sill-audio/run-1123/hold1.sh`, about 50 minutes in slot A). It holds
+  H2 against main's CLI, #396's `retry_gate.py` on both CLIs, the sound harness's every case (with #396's `retry`),
+  `audio-packetizer`'s 42 mutants on the merged tree, the three sound checks' output against main's, the pacing build
+  and `run-all.sh`. The 0.7 set had the lock until 19:23 (this run's waiter was paused from 16:23). When the lock came,
+  the hold's guard stopped it at once: 24.4 GiB free, under the 25 GB floor. The disk stayed between 24.0 and 24.4 GiB
+  until 20:30, with no heavy job left running. The next run runs the hold first: with 25.5 GiB or more free, through
+  `heavy.sh` in slot A, as `run-1123/queue.sh` queues it.
 - **Not run.**
   - The live simulator gate S2, as before: it needs `-SillLive`, which the agents' simulators refuse.
   - The encode bench of 2026-11-18. Its inputs did not change: main's packetizer and encoder are unchanged since
