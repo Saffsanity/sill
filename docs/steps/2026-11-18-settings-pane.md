@@ -123,3 +123,31 @@
   which holds nothing beside the column, so they look as before; its indicator is at the page's trailing edge
   (the screen's in one column), as in iOS's own Settings; VoiceOver's order is the same (no element added or
   moved); right to left mirrors it all from the leading edge.
+- **Verified (2026-11-23, on this Mac; nothing on a device).** On 0fe6f77a, whose iOSClient, Tests and Scripts the head
+  has byte for byte: `settings-pane` 373 checks (708,590 layouts on the grid, side strips on both sides, the
+  leading alone and the trailing alone) and 42 of 42 mutants; CI's iOS line BUILD SUCCEEDED, no new warning
+  (StreamClient.swift:4527's is main's); `swift build -c release`; `run-all.sh` 77 of 77; GitHub's CI passed on
+  0fe6f77a. Photos (`Scripts/harness-photos.sh`, the agents' Duo on iOS 27.1, standing in for an iPhone too, and
+  iPad on iOS 27.0) of 0fe6f77a against feda62ff (the branch before 2026-11-23, two columns), 48 cases, the
+  iPad's `ipad-mini-side` and the five `-area` cases new: the 7 stream screens and the cover on its side (its
+  camera's 84 pt strip on the leading side) are feda62ff's pixel for pixel; the cover's other three, the iPad's
+  narrow windows, the upright iPhone at the largest text, the laptop pose at it and an SE with Display Zoom on
+  its side differ only by one or two levels in a few pixels; the upright iPhone, the laptop pose and the book
+  pose (also scrolled to their ends, the book right to left) have every line of text at the same place within
+  one pixel (their columns' half-point edges are rasterised differently inside the wider scroll views); the Duo
+  open flat upright and its long list differ by Full Screen's footnote, above. Changed as meant: one column on
+  the iPads either way round, on every iPhone on its side and on the Duo open flat sideways, and the `-area`
+  outlines, which show each scroll view across its page out to the screen's edges (an iPhone 15 Pro on its
+  side: through its 59 pt strips, the column centred, 160 and 159 px each side). In the harness alone, the
+  13-inch iPad on its side (`ipad-side`, `-end`, `-ax3`), whose sideways screen is drawn a quarter turn round
+  and fills the upright simulator, shows the upper two thirds of its rows blurred, as iOS's scroll-edge effect
+  blurs: not right to left (turned the other way), not on the iPad mini on its side (which does not fill the
+  simulator), not upright, not on the Duo's sideways screen (which the simulator itself turns); untested on a
+  device. Rows visible without scrolling on an iPhone on its side (decision 8): 3 on an SE with Display Zoom
+  (320 pt tall), 3 and a fourth under the fade on a 13 mini (375 pt with the home indicator), 4 on an SE, a
+  15 Pro and a Pro Max. Photos: `~/Downloads/sill-handoff/next/settings-pane/run-one-column/photos-0fe6f77a/`
+  (the sideways iPad ones turned upright in `ipad/after-upright/`).
+- **Not tested here** (2026-11-23): a drag beside the rows on a device (a still cannot show one: step 1 of the
+  pull request's list), the strips by an iPhone's sensor housing on a device, the scroll indicator's place
+  (stills are taken after its flash), the 13-inch iPad's blur on a device, and the content margins (b3a9029b,
+  reverted).
