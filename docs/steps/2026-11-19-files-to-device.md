@@ -115,3 +115,44 @@ a transfer; H8's pacing cases for the Mac's sending.
   where one row does not fit), and photographed again (08:09, 6 cases against 7bd9ddc0): the cover's question now
   whole above Decline and Accept, the five others (the question on the inner display and upright, received, sending,
   sending on the cover) identical.
+
+**Second run (2026-11-23): `files` merged in twice, with main at c33d1057 and then at 5d062a3c.** GitHub reported
+#391 in conflict with main, so main went into `files` first (cf965192: #399 native tab switches followed in a staged
+window, #396 sound from a window on Sill's display, #402 Lock this Mac when the last device leaves; seven conflicts,
+each two additions side by side, settled in that branch's step file), then `git fetch origin files`, `git merge
+FETCH_HEAD` here: b7fd8bca. main moved on during the run (#389 the support page, #418 keys above any keyboard on an
+iPhone held upright), went into `files` too (23b26345: one conflict, the Settings panel's This ‹device›), and so here
+again: d4097661. Neither merge conflicted here: git merged StreamCoordinator.swift (the Mac's sending beside the
+privacy lock's lines), TestHooks.swift (the lock's variables, the files', then SILL_TEST_FILES_PICK and
+SILL_TEST_FILES_OFFER), HostSettingsPanel.swift (main's Hide Thumbnails While Typing beside Larger Picture, then the
+Files rows with Get Files and its two switches), ContentView.swift, the pbxproj (PhoneKeyboardLift's A0B0/F0B0 beside
+A188 to A18E: no id twice, `plutil -lint` OK) and docs/BUILD-AND-RUN.md, DEVELOPMENT.md and LAYOUT.md by itself, each
+with both sides kept. No product decision was needed: nothing of #399, #396, #402, #389 or #418 meets the Mac's
+sending (a transfer belongs to a connected session; the lock's wait runs only once none is). Before each hold, with no
+build: every mutant pattern a script lists plainly (1,574 in 63 checks) is found exactly once in the merged tree;
+against this branch's last head only away-quality's AQ-O1 changed (found nowhere before: the branch had never had the
+lock's arguments).
+
+**Verified** (two holds of the agents' build lock, slot A, in this worktree):
+- At b7fd8bca (15:57 to 16:49, with `files`' own part first): `swift build -c release` in 70 s, only the known
+  CaptureProbe warning; the gates H3 to H6 (`Scripts/files-check/live.py all`), 56 of 56 in 235 s, H6's among them;
+  H2 against main's c33d1057 SillHost, built from `git archive` and run in the same hold: the same lines, masked, and
+  no per-second counter main never prints (2 of 2); mutants of the checks whose rules or patterns the merge touched,
+  every one: away-quality 58 of 58, stage-release 25 of 25 (files', file-hub's and device-files' own were not run
+  again: the merges changed no file they compile or read); `Tests/checks/run-all.sh` 79 of 79 in 906 s; the worktree
+  clean afterwards.
+- At d4097661 (17:34 to 17:50): this branch's Mac sources (Sources/, Scripts/files-check, Scripts/sillclient.py) are
+  byte for byte b7fd8bca's, and main's Mac sources did not change from c33d1057 to 5d062a3c, so the build, the gates,
+  H2 and the mutants above stand for it; `swift build -c release` (incremental, 30 s) and run-all 80 of 80 in 923 s
+  (main's new phone-keyboard-lift 184 among them), the worktree clean afterwards.
+- CI green at b7fd8bca (run 45150805503) and at d4097661 (run 45164183752): the release build, run-all (files 496,
+  file-hub 80, device-files 105), the iOS app for the simulator, the CLI's paths. GitHub reports #417 mergeable.
+- Not run on Noah's Mac: the iOS app's build (CI's simulator build is green at d4097661) and harness photos. This
+  branch's photo cases show nothing the merges changed (the Settings cases start at the Files rows; the chips and the
+  stream are untouched); a photo of the merged group with the mock Mac giving files (`next/files/run4/merge-f2d.cases`
+  in the handoff folder) was queued after the second hold and not started: 26 GB free, under the 27 GB this run asked
+  before two iOS builds. The second hold's first two turns of the lock (17:07, 17:12) had stopped before running
+  anything, with 23 and 21 GB free (other jobs' builds), as the floor says.
+- Known visible defect, carried from `files` (Noah's own test of #391 on 2026-11-20): the row "Send Photos to ‹Mac›…"
+  takes two lines in the floating Settings panel with a long Mac name; "Get Files from ‹Mac›…" sits in the same panel
+  and was never photographed with a long name. Named in #417's description; not fixed in this run.
