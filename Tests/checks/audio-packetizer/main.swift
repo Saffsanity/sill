@@ -239,6 +239,38 @@ check(rule(safari, .running, .none) == .stop && rule(safari, .starting, .none) =
       "none wanted: stop, whatever the phase")
 check(R.retryInterval == 10, "the retry is 10 s")
 check(safari == safariRenamed && safari != music && AudioKey.desktop != .test && AudioKey.none != .desktop, "keys: an app by its pid")
+let safariStaged = AudioKey.app(pid: 501, display: 77, name: "Safari")
+let safariRemade = AudioKey.app(pid: 501, display: 78, name: "Safari")
+check(safari != safariStaged && safariStaged != safariRemade && safariStaged == AudioKey.app(pid: 501, display: 77, name: "Safari TP"),
+      "#365: an app moved to Sill's display, or Sill's display remade under a new ID, is a new source")
+check(rule(safari, .running, safariStaged) == .start && rule(safari, .ended, since: 0.2, safariStaged) == .start,
+      "#365: moving to Sill's display starts the sound there at once, even 0.2 s after an ended start")
+check(rule(safariStaged, .running, AudioKey.app(pid: 501, display: 77, name: "Safari")) == .keep
+      && rule(safariStaged, .ended, since: 3, AudioKey.app(pid: 501, display: 77, name: "Safari")) == .keep,
+      "#365: the same app on the same display: kept running, and not started again 3 s after it ended")
+check(AudioKey.app(pid: 501, name: "Safari") == AudioKey.app(pid: 501, display: 0, name: "Safari"), "#365: no display given is display 0")
+func retryIn(_ phase: R.Phase = .ended, _ wanted: AudioKey = safari, failures: Int = 1, now: Double) -> Double? {
+    R.retryIn(phase: phase, wanted: wanted, lastStartAt: 100, failures: failures, now: now)
+}
+check(near(retryIn(now: 100.3) ?? -1, 9.7) && retryIn(now: 100.25) == 9.75, "#365: failed 0.3 s in: retry in 9.7 s")
+check(retryIn(now: 125) == 0 && retryIn(now: 110) == 0, "#365: ended after 25 s of running: retry at once (and at exactly 10 s)")
+check(retryIn(now: 90) == 10, "#365: a start stamped after now waits the whole wait, never more")
+check(retryIn(.running, now: 102) == nil && retryIn(.starting, now: 102) == nil && retryIn(.idle, now: 102) == nil
+      && retryIn(.ended, .none, now: 102) == nil,
+      "#365: only an ended source that is still wanted schedules a retry")
+check(retryIn(failures: 0, now: 101) == 9 && retryIn(failures: -2, now: 101) == 9, "#365: no failure counted is the first's wait, 10 s")
+check(retryIn(failures: 2, now: 100) == 20 && retryIn(failures: 3, now: 100) == 40 && retryIn(failures: 4, now: 100) == 80
+      && retryIn(failures: 5, now: 100) == 160, "#365: the wait doubles with each failure in a row: 20, 40, 80, 160 s")
+check(retryIn(failures: 6, now: 100) == 160 && retryIn(failures: 60, now: 100) == 160 && retryIn(failures: Int.max, now: 100) == 160,
+      "#365: and is never more than 160 s, however many")
+check(R.retryCap == 160, "#365: the cap is 160 s")
+check(retryIn(failures: 3, now: 130) == 10 && retryIn(failures: 3, now: 140) == 0 && retryIn(failures: 5, now: 90) == 160,
+      "#365: the wait counts from the last start")
+check(R.failures(after: 0, ranFor: nil) == 1 && R.failures(after: 3, ranFor: nil) == 4, "#365: a start that failed is one more")
+check(R.failures(after: 2, ranFor: 0.4) == 3 && R.failures(after: 2, ranFor: 9.99) == 3, "#365: an end within 10 s of the start is one more")
+check(R.failures(after: 4, ranFor: 10) == 1 && R.failures(after: 4, ranFor: 600) == 1 && R.failures(after: 0, ranFor: 25) == 1,
+      "#365: an end after 10 s or more of running is the first of a new run")
+check(R.failures(after: -3, ranFor: nil) == 1, "#365: a count below 0 is none")
 
 // MARK: - PCMLayout
 

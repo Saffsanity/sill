@@ -89,7 +89,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   client leaves, takes live settings between pipelines (`setTarget`, from the
   app and from devices' kind 17, at most four a second per connection,
   answered and published as kind 16; a pick made during a restart runs after
-  it), keeps each connection's route (home or the remote door's: kind 21 only
+  it), follows the streamed window's native tab switch to the tab that shows
+  (`followTabSwap`, #366: the stage's placement and a fit's record go with it,
+  a device's pick of a listed window drops one held for it), keeps each
+  connection's route (home or the remote door's: kind 21 only
   from near the Mac, Direct Wireless never from away), sends kind 18 with the
   catalog, says goodbye (kind 22) at quit, sends the streamed app's menus to
   the devices that ask (`MenuMirror`; a window source's app made active and
@@ -135,7 +138,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   landed, `lookAge`; the Desktop's stops from that look, `desktopCandidates`,
   the one shown, `display` and `desktopDisplayID`, the choice a device stepped
   to and its span, `mainOnly` while locked, `mainDisplay` for the sound;
-  DesktopDisplays), `DesktopDisplaysHook` (TEST ONLY: SILL_TEST_DISPLAYS, a
+  DesktopDisplays; the native tab switches still to follow, `tabSwaps`, none
+  from before a spell with no device), `DesktopDisplaysHook` (TEST ONLY: SILL_TEST_DISPLAYS, a
   synthetic host's stops in place of this Mac's), `CatalogLook` (whether a capture may be built from that
   look or the catalog looks again first: its display no longer active, none, no
   look, or older than two polls; the Desktop's lines and its one more try's;
@@ -145,6 +149,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   LayerProbeParent, macOS's own interface (Stage Manager's WindowManager, the
   Dock, Control Center, SystemUIServer, Notification Center, the screenshot
   tools), a tool's untitled window; one log line per owner it leaves out, #114;
+  and macOS's native tab switches, #366: a window gone and a new one of its
+  app at its frame, ±2 pt, `tabSwaps`, the new tab in its tile's slot,
+  `orderedIDs`, and the switches still to follow, `mergedSwaps`;
   pure, `Tests/checks/catalog-windows`), `InstalledApps`
   (where those are found: each applications folder and the folders inside it,
   at any depth (#135's), never inside a bundle, another package or a
@@ -237,7 +244,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   record and `movedSince`, the decision at the stop, the sequences that fit a
   window and put it back over `WindowRestore.Access` (`fit`, `stop`,
   `stageHome`), `keepsStreaming` and `coversDisplay` for a window off the list
-  on its way into or out of full screen, the ledger, the lines; pure,
+  on its way into or out of full screen, the ledger (`transfer`: a native tab
+  switch's record to the tab that shows, #366), the lines; pure,
   `Tests/checks/window-restore`), `VirtualDisplay` (private-API wrapper; its
   `TypeEncoding` says which type encodings the runtime may report for each method
   it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
@@ -245,7 +253,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
   on classes it makes at run time),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
-  geometry, prepare/release, emergency restore), `HostShutdown` (signal
+  geometry, prepare/release, emergency restore; a native tab switch's new tab
+  taken as the staged window with the group's way home, `adoptTab`, #366, and
+  the app's own windows on the display no strangers while the staged tab is
+  hidden), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
   default path: a device's keys let go and a sized window goes back, then the
@@ -359,17 +370,22 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   state table's flags from before it (`KeyStrokes.chord`;
   `in.gestureModifiersLeft` if some stay).
   The Mac's sound (docs/audio-plan.md; a beta since 2026-10-20): `AudioPipeline` (the source it follows
-  from `active`'s didSet, one transition at a time; on `sill.audio` the
+  from `active`'s didSet, one transition at a time; a source that failed or
+  ended by itself asked for again by itself, through the coordinator's
+  `audioFollow` and never during a select, 10 s after its start and up to 160 s
+  apart while it keeps failing (`onRetry`, issue #365); on `sill.audio` the
   packetizer, the encoder, the epochs and the stamps; the status and kind 16's
   note; `prepare`, AAC-ELD's codec loaded once off `sill.audio` when Send Audio
-  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, or of
-  every app but Sill's, bounded start and stop, the running stream under a
-  lock; never run by a test),
+  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, on
+  Sill's virtual display while its window is staged there, else on the main
+  display (`appAudioDisplay`, #365), or of every app but Sill's, bounded start
+  and stop, the running stream under a lock; never run by a test),
   `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
-  `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
+  `SILL_TEST_AUDIO_CHUNK`, `SILL_TEST_AUDIO_PAUSE` and `SILL_TEST_AUDIO_END`, a
+  start that ends by itself or fails), `TestTone` (440 Hz and a
   click at each whole second of the stamps' clock; pure), `AudioPacketizer`
-  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
-  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
+  (blocks, stamps and segments, `AudioSourceRule` with the retry's wait,
+  `PCMLayout`, `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
   (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`

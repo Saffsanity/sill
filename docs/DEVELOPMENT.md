@@ -642,7 +642,14 @@ streamed window's app (every window of it: macOS captures sound per app), or
 every app but Sill for the Desktop. The Mac keeps playing it too. It comes
 from a second, audio-only ScreenCaptureKit stream, so rotating, Aa, a quality
 change or the encoder's fallback never interrupt it, and it needs no
-permission beyond Screen Recording. AAC-ELD at 128 kbps, 10 ms packets, as
+permission beyond Screen Recording. A window staged on Sill's virtual display
+has its app's sound taken on that display (issue #365), so when that display
+is made again (a frame rate change, a larger window) the sound starts again on
+the new one, a short break. A capture that fails or ends by itself is tried
+again by itself, 10 s after its start and then less often while it keeps
+failing (20, 40, 80, then every 160 s), each try logged as "Audio: trying
+Safari's sound again."; a pick, a rotation or Send Audio off and on tries at
+once, once 10 s have passed. AAC-ELD at 128 kbps, 10 ms packets, as
 kind 43 on the session's own connection, only to a device whose hello lists
 the codec (a device from before 2026-09-27 is sent none); away from home the
 sound's bytes count in remote pacing's backlog, which drops frames and never
