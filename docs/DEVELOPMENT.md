@@ -702,7 +702,14 @@ streamed window's app (every window of it: macOS captures sound per app), or
 every app but Sill for the Desktop. The Mac keeps playing it too. It comes
 from a second, audio-only ScreenCaptureKit stream, so rotating, Aa, a quality
 change or the encoder's fallback never interrupt it, and it needs no
-permission beyond Screen Recording. AAC-ELD at 128 kbps, 10 ms packets, as
+permission beyond Screen Recording. A window staged on Sill's virtual display
+has its app's sound taken on that display (issue #365), so when that display
+is made again (a frame rate change, a larger window) the sound starts again on
+the new one, a short break. A capture that fails or ends by itself is tried
+again by itself, 10 s after its start and then less often while it keeps
+failing (20, 40, 80, then every 160 s), each try logged as "Audio: trying
+Safari's sound again."; a pick, a rotation or Send Audio off and on tries at
+once, once 10 s have passed. AAC-ELD at 128 kbps, 10 ms packets, as
 kind 43 on the session's own connection, only to a device whose hello lists
 the codec (a device from before 2026-09-27 is sent none); away from home the
 sound's bytes count in remote pacing's backlog, which drops frames and never
@@ -1615,6 +1622,49 @@ one): every verdict on one line. Never lock this Mac or
 switch its user to test it, and never post a notification by those names: other
 apps listen to them. The iOS harness's `-SillMacLocked 1|2|unlocking` draws the
 mock Mac locked, switched, or just unlocked.
+
+## Lock this Mac when the last device leaves
+
+Settings › Devices' Lock this Mac when the last device leaves (off by default; `lockAfterSession` in
+`me.saffer.sill.mac`; docs/privacy-mode-plan.md, part 1, issues #283 and #275) is for a Mac you unlock from afar:
+30 seconds after the last session of any kind ends, unless one comes back, Sill locks the Mac (login.framework's
+`SACLockScreenImmediate`, the call macOS's own Lock Screen makes) and puts its display to sleep (`pmset
+displaysleepnow`). A paired device unlocks it again by typing the password at the lock screen (A locked Mac, above).
+Two switches show under it while it is on: Turn off its display too (`lockSleepsDisplay`, on by default; off, the lock
+screen stays lit until macOS turns the display off) and Only after a device away from home (`lockOnlyAfterAway`, off
+by default; on, a visit whose sessions were all at home, such as an iPad beside the Mac, never locks it: a session away
+from home, through a VPN, over the internet or through a relay on the Mac, has to be among the visit's, and a device
+back within a wait goes on with the same visit).
+What counts: every registered session, of either door, paired or not, and one cut off as it leaves; never a
+connection that only pairs, one the device gate refuses or one an update's hold sends away. A device's move to
+another route never reaches zero sessions, and a reconnect within the 30 s ends the wait ("Privacy: a device
+connected again within 30 s; this Mac won’t be locked."). At the wait's end nothing is locked when the Mac is locked
+already, another user (or the login window) is on its screen, or it has no display a lock screen could take a
+password at (#298: Sill's own displays and macOS's stand-in for a Mac with no screen don't count; the switch's
+warning says so). The lock is confirmed by SessionLock's reading (A locked Mac, above) within 3 seconds; when macOS
+has no such call, or the Mac still reads unlocked, the log says so, Settings shows "Sill couldn’t lock this Mac the
+last time: …", and the display sleeps instead, whatever Turn off its display too says (which locks a Mac that asks for
+its password at once after display sleep). A quit, a logout or an update's restart never locks; a crash or a force
+quit leaves nothing behind that locks later. The switches apply at once (turning the first off ends a wait under way,
+and so does turning on Only after a device away from home for a visit with none away), no device can change them, and
+while a wait runs Sill.app holds App Nap off so the wait keeps its time. Sill.log says each step with "Privacy:".
+
+Only Sill.app itself ever locks a Mac or puts its display to sleep (`PrivacyPolicy.locksForReal`: Sill.app's own
+executable, not `--synthetic`). The CLI, the bare `SillMenuBar` binary and every test host make the dry run, whatever
+the switch says: "Privacy (dry run): would lock this Mac now; nothing is locked." and its start line says so. The bare
+app takes `-SillSetAfter '<s> lockAfterSession=1'` (and `lockSleepsDisplay=0|1`, `lockOnlyAfterAway=0|1`), which it
+saves in its own domain like any change (`defaults delete SillMenuBar lockAfterSession` puts it back), and draws the
+switches' states in `-SillRenderPreviews` (`pane-devices-lock*`). Try the real lock only in Sill.app, as the step
+file's list for Noah says, never on a Mac someone else is using.
+
+Headless, on test hosts only (`--synthetic`): `SillHost --synthetic --lock-after-session[=away][,nosleep]` is the dry
+run (`away`: only after a device away from home; `nosleep`: its display left on); without `--synthetic` the CLI
+ignores the flag with one line. TEST ONLY: `SILL_TEST_PRIVACY_GRACE=<s>` (the wait, 0.5 to 600 s),
+`SILL_TEST_PRIVACY_DISPLAYS=<n>` (the displays a password could be typed at) and `SILL_TEST_PRIVACY_NO_SYMBOL=1` (the
+call answers as on a macOS without it); the lock's confirmation is `SILL_TEST_LOCKED_FILE`'s (`echo 1 > $F` once the
+host says it would lock). `Scripts/privacy-check/live.py OUT` runs every case (`all`, or `wait back move locked
+offconsole nodisplay nosymbol quit crash pairing gate off nosleep away`), each host under a minute; `away` pairs a test
+client at `--remote`'s door by its link, a session from this Mac there being a relay on it, away from home.
 
 ## Direct Wireless Connection
 

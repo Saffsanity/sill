@@ -96,4 +96,82 @@ enum CatalogWindows {
         }
         return lines
     }
+
+    // MARK: Native tab switches (#366)
+
+    /// An on-screen window's identity and frame, for spotting a macOS native tab switch (issue #366):
+    /// in a group of macOS's own window tabs (Ghostty's, the issue's; any app that uses them) each tab
+    /// is its own NSWindow with its own CGWindowID, and only the active tab is on screen, at the same
+    /// frame. A browser that draws its own tabs (Chrome) keeps one window and needs none of this.
+    struct Tab: Equatable {
+        var id: UInt32
+        var pid: Int32
+        var x: Double
+        var y: Double
+        var width: Double
+        var height: Double
+
+        func sameFrame(as other: Tab) -> Bool {
+            abs(x - other.x) <= 2 && abs(y - other.y) <= 2
+                && abs(width - other.width) <= 2 && abs(height - other.height) <= 2
+        }
+    }
+
+    /// Native tab switches between two looks (`oldID -> newID`, issue #366): an on-screen window that
+    /// left the list while a new on-screen window of the same process appeared at the same frame
+    /// (±2 pt). Paired one-to-one in list order.
+    static func tabSwaps(from previous: [Tab], to current: [Tab]) -> [UInt32: UInt32] {
+        let currentIDs = Set(current.map(\.id))
+        let previousIDs = Set(previous.map(\.id))
+        let gone = previous.filter { !currentIDs.contains($0.id) }
+        let arrived = current.filter { !previousIDs.contains($0.id) }
+        var used = Set<UInt32>()
+        var swaps: [UInt32: UInt32] = [:]
+        for old in gone {
+            if let next = arrived.first(where: { !used.contains($0.id) && $0.pid == old.pid && $0.sameFrame(as: old) }) {
+                swaps[old.id] = next.id
+                used.insert(next.id)
+            }
+        }
+        return swaps
+    }
+
+    /// The bar's window order (`seenOrder`) updated for `currentIDs`, keeping a swapped tab in the
+    /// slot its previous tab held (#366) and appending genuinely new windows at the end.
+    static func orderedIDs(seenOrder: [UInt32], currentIDs: [UInt32], swaps: [UInt32: UInt32]) -> [UInt32] {
+        let live = Set(currentIDs)
+        var replaced: [UInt32] = []
+        for id in seenOrder {
+            let mapped = swaps[id] ?? id
+            if live.contains(mapped), !replaced.contains(mapped) {
+                replaced.append(mapped)
+            }
+        }
+        for id in currentIDs where !replaced.contains(id) {
+            replaced.append(id)
+        }
+        return replaced
+    }
+
+    /// The tab switches still to follow after a look (`old -> newest`), from those the coordinator has
+    /// not taken (`existing`) and this look's (`next`). A chain leads to the tab that shows now (`A -> B`
+    /// then `B -> C`: `A -> C`, and `B -> C` for a device that picked B meanwhile); a switch back is the
+    /// switch it is (`A -> B` then `B -> A`: `B -> A`, so a device that streams B follows it to A), and
+    /// none goes from a tab to itself. One is kept only while its new tab is on the screen (`onScreen`,
+    /// this look's: one closed or minimized is nothing to follow) and its old window off it, but for the
+    /// window that streams (`streaming`), whose switch is owed to it while a switch in flight holds the
+    /// coordinator back. A window on the screen again that streams nothing was not replaced after all (a
+    /// tab moved into a window of its own): a device that picks it later must not follow a switch from
+    /// before. A switch owed stands against a later one of the same window, which it can make only once it
+    /// is on the screen again: when the tab it switched to was moved into a window of its own, the person
+    /// went with that tab, not with the group the window shows in again. Without these, a switch made
+    /// while another window streamed lost the one back to it (`A -> B` then `B -> A` came to nothing), and
+    /// a window picked after it was moved out of its tabs followed the switch made before (#368's review).
+    static func mergedSwaps(existing: [UInt32: UInt32], next: [UInt32: UInt32], onScreen: Set<UInt32>,
+                            streaming: UInt32?) -> [UInt32: UInt32] {
+        var out: [UInt32: UInt32] = [:]
+        for (old, mid) in existing { out[old] = next[mid] ?? mid }
+        for (old, new) in next where out[old] == nil { out[old] = new }
+        return out.filter { $0.key != $0.value && onScreen.contains($0.value) && ($0.key == streaming || !onScreen.contains($0.key)) }
+    }
 }

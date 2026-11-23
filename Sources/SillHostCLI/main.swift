@@ -56,6 +56,25 @@ config.sendAudio = audioFlag
 // acts on it. Off by default, as in Sill.app (Settings › Devices): such a Mac shows nothing of this session.
 config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
 
+// `SillHost --lock-after-session[=away][,nosleep]`, with --synthetic only: Lock this Mac when the last device leaves for
+// this run, as a dry run (docs/privacy-mode-plan.md, part 1): 30 s after the last session ends the host says it would
+// lock this Mac and put its display to sleep, and does neither. `away`: only after a device away from home; `nosleep`:
+// Turn off its display too off. The switches are Sill.app's (Settings › Devices), whose lock is the only one that locks
+// a Mac (PrivacyPolicy.locksForReal: the CLI's never does); without --synthetic this run ignores the flag with one line,
+// and a value it doesn't know too. Without it the output is what it always was.
+if let lockFlag = CommandLine.arguments.first(where: { $0 == "--lock-after-session" || $0.hasPrefix("--lock-after-session=") }) {
+    let values = lockFlag.split(separator: "=", maxSplits: 1).dropFirst().first.map { $0.split(separator: ",").map(String.init) } ?? []
+    if !synthetic {
+        print("--lock-after-session ignored: it is Sill.app's (Settings › Devices). SillHost takes it only with --synthetic, where it locks nothing and says what it would do.")
+    } else if values.allSatisfy({ $0 == "away" || $0 == "nosleep" }) {
+        config.lockAfterSession = true
+        config.lockOnlyAfterAway = values.contains("away")
+        config.lockSleepsDisplay = !values.contains("nosleep")
+    } else {
+        print("\(lockFlag) ignored: --lock-after-session takes away and nosleep (--lock-after-session=away,nosleep).")
+    }
+}
+
 // `SillHost --no-headless-display`: with --virtual-display, make no display of Sill's own when this Mac has no working
 // screen (PR #200, issues #61 and #298; HostConfig.headlessDisplay). On by default, as in Sill.app (Settings › Virtual
 // Display): a device's Desktop on a closed-lid Mac with nothing attached, or a Mac mini with no monitor, gets a display
