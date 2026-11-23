@@ -61,3 +61,46 @@ decoder in StreamRecorder and its rig) can both take it, before either starts.
   playout is Noah's to hear: Send Audio on, the Mac's sound plays as before.
 - **Proposed words** for What's New, the site and the review notes: none, since nothing a person sees
   or hears changes.
+
+**2026-11-23: main brought in (c33d1057: #399, #396, #402; merge e7ff9a84).** GitHub reported #394 in conflict
+with main after #396 (`pr367-ready`, addhumal's #367 for issue #365) changed the Mac's sound: an app's sound is
+captured on Sill's display while its window is staged there, `AudioKey.app` names that display (so Sill's display
+made anew is a new capture), and the pipeline tries a failed source again by itself, at most every 160 s. This run
+merged main and checked that the move's claim still holds: the library's code behaves exactly as main's.
+- **The conflict.** One file, docs/LAYOUT.md (the sound's host files). This branch's `AudioSourceRule` entry is kept,
+  with #396's words: `SILL_TEST_AUDIO_END`, and "with the retry's wait".
+- **Where #396 landed.** All of #396's changes to the old `Sources/SillHost/AudioPacketizer.swift` were in its host
+  half: the display in `AudioKey`, plus `retryCap`, `retryIn` and `failures`. Git followed the rename, so they are in
+  `Sources/SillHost/AudioSourceRule.swift`. That file's 200 lines from `AudioKey` on are now main's byte for byte.
+  - #396 did not touch the packetizer, the encoder, the decoder or the playout. So `Sources/SillAudio` is byte for
+    byte the old head's (98f234d5), and no iOSClient file changed.
+  - `AudioPipeline`, `AudioCapture` and `SyntheticAudio` are main's, plus `import SillAudio`.
+  - `audio-packetizer` is main's check (106 checks, 42 mutants), compiling the two files. Each mutant's pattern is
+    found exactly once in them: 15 in the library, 27 in the host's file.
+  - #399 and #402 touch no sound file.
+- **The move, as text** (`next/sill-audio/run-1123/movecheck.sh`). With `public ` removed, each of the library's
+  three whole files differs from main's only in three header comment lines. The packetizer's two halves together are
+  main's whole file, except for `PCMChunk`'s written-out initializer and one blank line.
+- **Verified.**
+  - CI on the merge (run 45149223674, e7ff9a84 merged with main): `swift build -c release` (140.5 s); all 75 pure
+    checks, among them `audio-packetizer` 106, `audio-codec` 21 and `audio-playout` 218, the counts main's checks
+    print; the iOS app for the simulator (`** BUILD SUCCEEDED **`); the CLI's `--internet` (exit 2) and
+    `--print-reachability`. No new warning: only CaptureProbe's and StreamClient's known capture warning.
+  - Work in flight (`git merge-tree`, 39 open pull requests against main and against e7ff9a84): 36 conflict exactly
+    where they conflict with main. #175, #411 and #195 conflict in the Xcode project alone, as they did against
+    98f234d5. The microphone (#415) and recording (#407) conflict only in #402's files and docs/LAYOUT.md.
+  - GitHub: mergeable and clean, also once main moved on to 5d062a3c during the run (#389, #418: the site and the
+    iOS key row, no file of this branch's; not merged here).
+  - **Not yet run here: the local hold** (`next/sill-audio/run-1123/hold1.sh`): H2 against main's CLI, #396's
+    `retry_gate.py` on both CLIs, the sound harness's every case (with #396's `retry`), `audio-packetizer`'s 42
+    mutants, the three sound checks' output against main's, the pacing build and `run-all.sh`. The 0.7 set had the
+    lock until 19:23, and from 17:15 on this Mac had 24.2 to 24.4 GiB free, under the 25 GB floor; it is queued for
+    when the space comes back (`run-1123/queue.sh`).
+- **Not run.**
+  - The live simulator gate S2, as before: it needs `-SillLive`, which the agents' simulators refuse.
+  - The encode bench of 2026-11-18. Its inputs did not change: main's packetizer and encoder are unchanged since
+    eb48ac9f, and the library since 98f234d5.
+  - `audio-codec`'s and `audio-playout`'s mutants. The merge touched neither check nor any file they compile; on
+    these same files they were 9 of 9 and 38 of 38.
+  - #396's ScreenCaptureKit behaviours (a filter on Sill's display, its end when that display goes). These are
+    Noah's on main too, and this branch changes none of that code.
