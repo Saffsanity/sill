@@ -642,3 +642,54 @@ that never lands removing it and making it again.
   the iPhone within 30 s: its Desktop comes back onto the Virtual Desktop, which takes the iPhone's shape. Sill.log:
   "Virtual Desktop: iPhone shows it now; followed in place in … ms: 1496×800 pt @2× at 120 Hz." (at 60 Hz if macOS keeps
   the rate it had). A failure: "not followed in place: …" or "beyond the backing", or the iPhone letterboxed.
+
+**Verified in the fourth part** (2026-11-23; nothing made a display, posted input, locked, slept or switched anything;
+every live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtual Desktop only said to be made;
+the probes only as dry runs):
+- `virtual-desktop-2a` with main 5d062a3c (87367adc), light, as the task asked, in the heavy lock (hold 1, 18:08–18:24):
+  `swift build -c release` 67 s (CaptureProbe's known warning only), `SillHost --internet` exits 2,
+  `--print-reachability` 0; `Tests/checks/run-all.sh` all 77 passed (749 s; main's phone-keyboard-lift 184,
+  phone-portrait 484, tour 732,447, text-composition 194, repo-rules 11 of 11); the iOS app as CI builds it: BUILD
+  SUCCEEDED (28 s, the known capture warning only). GitHub's CI on 87367adc (run 45170315810) and on this branch's merge
+  4f14b58f (run 45170399117): every step of Build and check passed; both pull requests read mergeable.
+- The same hold built 94b84331 (the coordinator's commit) from a snapshot: 66 s, no new warning; virtual-display-api
+  316 checks and sill-displays 55 passed; virtual-desktop failed 126 of 109,264, all the check's own (its random follows
+  that start on a turned display placed it with `late` already on; `applied` took an answer after the end): fixed in
+  b9733f66, with one more mutant. ae797ee9 then wrote out the test hook's variable, since `away-quality` compiles
+  VirtualDesktopSize.swift without VirtualDesktopLife.swift (found by reading the checks' compile lists before the holds).
+- Hold A (slot A, 18:26–18:47) on ae797ee9, the code's head: `swift build -c release` 54 s, no warning; `SillHost
+  --internet` exits 2, `--print-reachability` 0, `--virtual-desktop=999x999@2` exits 2 naming the sizes it takes. The live
+  gates on its CLI: `Scripts/desktop-check/live.py` 69 of 69 on its first run (24 of the stops; the Virtual Desktop's
+  first host 24, its turn now followed in place in 664 ms, 1x at +335 ms then the switch, the Desktop restarted once at
+  800×1218, back in one step in 338 ms and once at 1218×800, a turn and back within the settle nothing, its grace, made
+  again, locked, off console, the span, never two changes within 3 s; the `--pairing` host 7; the new `vd-in` host 11:
+  the refused switch fell back to 1218×800 at 2x in 658 ms with no picture at the turn, the iPad gone, the iPhone that
+  came took it over in place in 341 ms at 1496×800 with no switch and the Desktop at its size, a room 1900×800 pt wide
+  beyond the 3072×3072 backing waited for the next make, made once in all; the `vd-stuck` host 3: removed at 10.5 s when
+  the way back never landed, made again at 800×1218 at 13.5 s, the Desktop on it upright); `Scripts/headless-check/live.py
+  OUT all` 66 of 66; `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26;
+  `Scripts/privacy-check/live.py OUT all` 48 of 48; #396's sound gate 17 of 17; #399's loopback smoke 6 of 6.
+- H2 in the same hold, against main's CLI (main's host sources are the same at 5d062a3c as at c33d1057, whose binary
+  #395's hold built), run one right after the other, every line but the statistics masked and sorted, the statistics by
+  name: idle identical (7 distinct lines, 3 statistics), with a test client identical (14 and 11), with
+  `--virtual-display` and a test client identical (17 and 11); started locked, #395's one line, "Displays: N online, …"
+  (11 and 10). So the follow in place adds nothing on these paths.
+- Sill for Mac's previews from the bare binary (its own log file, its defaults deleted after): 353 files, the Virtual
+  Desktop's pane looked at (unchanged: this run changes no word of Sill for Mac's).
+- The probes, as dry runs and refusals only: P2's dry run built and printed its plan; `--make` from an agent's shell
+  answered "REFUSED: no terminal"; P2b and P2c: `--dry-run` with no build refused to build, `--build` built each (linking
+  AppKit, CoreGraphics and Foundation, no VideoToolbox or ScreenCaptureKit), `--dry-run` printed each plan with nothing
+  made (P2c's reads the rotation setting's type on a settings object given to no display, as when Noah ran it), the
+  real run from an agent's shell answered "REFUSED: no terminal", P2c's `--quarter-turn 90` "REFUSED". Their dry runs end
+  with the handoff folder's run.sh, as the sources Noah ran print it.
+- The iOS app as CI builds it: BUILD SUCCEEDED (32 s, the known capture warning only). No device-side code changed this
+  run, so no harness photo was retaken.
+- Hold B (slot B, 18:26–19:59), on a `git archive` snapshot of ae797ee9: `virtual-desktop` 109,301 checks and 236 of
+  236 mutants caught (64 minutes); `virtual-display-api` 316 checks and 108 of 108; `sill-displays` 55 checks and 46 of 46;
+  then `Tests/checks/run-all.sh`, all 78 checks passed (797 s; away-quality, desktop-displays 213, full-screen 101,607,
+  ledger, compatibility 193, lock-policy 1,420, stage-release 847, virtual-desktop 109,190, repo-rules 11 of 11 among
+  them). Every other check's mutant patterns are found exactly once in this run's files (a text check, nothing compiled:
+  vd-main's `patterns3.py` against 4f14b58f; its few flags were short generic strings in files those checks never
+  mutate, and two replacement strings of this run's own mutants); `stage-release` and `away-quality`, which read or
+  compile files of this run's, mutate none of them, and both passed in run-all.
+- GitHub's CI on ae797ee9 (run 45179138167): every step of Build and check passed; #408 read mergeable with its base.
