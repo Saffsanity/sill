@@ -1,0 +1,18 @@
+# The keys above any keyboard (PhoneKeyboardLift, docs/steps/2026-11-19-keys-above-keyboard.md) on the iPhone Duo's
+# cover, which draws an iPhone's arrangement upright: the real keyboard raised by -SillKeyboardToggle (the fake screen is
+# the cover's own 466x678), -SillHardwareKeyboard 0 so it is drawn, -SillTallKeyboard 60 standing in for a taller one.
+# The first case folds the Duo, so the keyboard cases launch on the cover already closed. Against main (eb48ac9f):
+#   Scripts/harness-photos.sh Scripts/harness-photos/keys-above-keyboard.cases --baseline eb48ac9f
+cover-no-keyboard         -SillLayout 466x678 -SillHinge closed --pose=closed-upright --wait=5
+cover-keyboard            -SillLayout 466x678 -SillHinge closed -SillHardwareKeyboard 0 -SillKeyboardToggle 2 --pose=closed-upright --wait=6
+cover-tall-keyboard       -SillLayout 466x678 -SillHinge closed -SillHardwareKeyboard 0 -SillKeyboardToggle 2 -SillTallKeyboard 60 --pose=closed-upright --wait=6
+cover-hide-keyboard       -SillLayout 466x678 -SillHinge closed -SillHardwareKeyboard 0 -SillKeyboardToggle 2 -Sill.hideThumbnailsWhileTyping 1 --pose=closed-upright --wait=6
+cover-hide-tall-keyboard  -SillLayout 466x678 -SillHinge closed -SillHardwareKeyboard 0 -SillKeyboardToggle 2 -SillTallKeyboard 60 -Sill.hideThumbnailsWhileTyping 1 --pose=closed-upright --wait=6
+cover-hide-no-keyboard    -SillLayout 466x678 -SillHinge closed -Sill.hideThumbnailsWhileTyping 1 --pose=closed-upright --wait=5
+cover-drawer-tall         -SillLayout 466x678 -SillHinge closed -SillHardwareKeyboard 0 -SillKeyboardToggle 2 -SillTallKeyboard 60 -SillDrawer 1 --pose=closed-upright --wait=6
+cover-settings            -SillLayout 466x678 -SillHinge closed -SillSettings 1 -SillSettingsScroll typing --pose=closed-upright --wait=5
+# Without -SillHinge the harness knows no hinge, so Larger Picture applies on the cover (above the 233 pt estimate).
+cover-larger-keyboard     -SillLayout 466x678 -Sill.largerPicture 1 -SillHardwareKeyboard 0 -SillKeyboardToggle 2 --pose=closed-upright --wait=6
+cover-larger-tall         -SillLayout 466x678 -Sill.largerPicture 1 -SillHardwareKeyboard 0 -SillKeyboardToggle 2 -SillTallKeyboard 60 --pose=closed-upright --wait=6
+# The inner display upright, open flat, keeps #215's row over the keyboard: as on main.
+inner-flat-keyboard       -SillLayout 669x951 -SillHinge flat -SillHardwareKeyboard 0 -SillKeyboardToggle 2 --wait=6
