@@ -14,6 +14,7 @@ swift run -c release SillHost --virtual-display-selftest   # create/destroy one 
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
 swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device's Settings panel turns it on or off too)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_AUDIO_END=3,0 .build/release/SillHost --synthetic --audio   # TEST ONLY: the tone ends by itself 3 s in and its next start fails: "Audio: trying the test tone again." 10 s after its start, then 20 s after that (#365)
 Scripts/audio/run.sh                        # the encoder-free sound harness and its gates (~7 min; no encoder, capture, speaker or device)
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
@@ -36,6 +37,7 @@ python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDow
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_GRACE=5 .build/release/SillHost --synthetic --lock-after-session   # TEST ONLY dry run of Lock this Mac when the last device leaves (=away, =nosleep, =away,nosleep for its two switches): "would lock", nothing locked; only Sill.app itself ever locks (SILL_TEST_PRIVACY_DISPLAYS, SILL_TEST_PRIVACY_NO_SYMBOL; Scripts/privacy-check/live.py)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
 python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
@@ -76,7 +78,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck,
+virtualDisplay, directWireless, sendAudio, shareClipboard, lockAfterSession, lockSleepsDisplay, lockOnlyAfterAway, updateCheck,
 showPairingWindowToScreenSharing; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
@@ -500,7 +502,18 @@ the ruler's release does, whatever streams, so a synthetic host's `[1s]` lines
 show `win.fitOff` for a scale then Off). The console
 prints `viewport: 386×241 pt, scale off, 60 fps` for each viewport sent, and on
 a phone upright `trackpad: …, vertical span …` and, once the keyboard has moved,
-`keyboard: up, 301 pt tall, its top at …; the key row ends 10 pt above it`.
+`keyboard: up, 301 pt tall, its top at …; the key row ends 10 pt above it`, and
+`keys: …` each time the rows move over the person's keyboard (PhoneKeyboardLift:
+`keys: lifted 34 pt, the key row 10 pt above the keyboard at 414, …`, `keys: the
+thumbnails tucked away, …`, `keys: as laid out, …`, `keys: no keyboard`).
+`-SillTallKeyboard N` puts a band N pt tall over the software keyboard (the stream's
+input view's input accessory view, labelled a stand-in), so UIKit's keyboard is N pt
+taller and says so, as a third-party keyboard's would be (a simulator installs none);
+with `-SillKeyboardToggle 1 -SillHardwareKeyboard 0` on the iPhone Duo's cover
+(`-SillLayout 466x678 -SillHinge closed`, `--pose=closed-upright` in a cases file) the
+harness photographs the rows over it. `-Sill.hideThumbnailsWhileTyping 1` turns Hide
+Thumbnails While Typing on for one run (the normal app too), `-SillSettingsScroll
+typing` scrolls the Settings panel to it.
 `-SillAXDump <s>` lists the stream screen's accessibility elements in the
 tree's order (VoiceOver's), on a private simulator once `xcrun simctl spawn
 UDID defaults write com.apple.Accessibility ApplicationAccessibilityEnabled
