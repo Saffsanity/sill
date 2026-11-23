@@ -234,8 +234,9 @@ used)"; #323: "as a toggle".
      password: about 2 seconds later the screens light, and stay lit until every device has left.
   3. Still black 15 seconds after the unlock: Sill has stopped answering, and its watchdog quits it (the black goes with
      it) and opens it again; wait those 15 seconds.
-  4. Still black: quit Sill from a device that still shows the Mac (Sill's menu › Quit Sill), or from another Mac or an
-     SSH session with `killall Sill` (`killall -9 Sill` if that does nothing): the black goes at once with the process.
+  4. Still black: quit Sill. A device that still shows the Mac can open Terminal on it (a device never sees Sill's own
+     menu or windows: every capture leaves them out) and run `osascript -e 'quit app "Sill"'`, or `killall -9 Sill` if
+     that does nothing; so can another Mac or an SSH session. The black goes at once with the process.
   5. Last resort: hold the power button to turn the Mac off; nothing of the black survives a restart.
 - **Known visible behaviour, each a default or a question for Noah:** the pointer shows and moves on the black (hiding
   it while Sill is in the background needs a private window-server property: not built; the plan's open decision 14
@@ -265,18 +266,20 @@ used)"; #323: "as a toggle".
      Connect the iPad: every screen of the Mac turns black within 2 seconds, before the iPad shows the Mac, with "This
      Mac is in use from another device. Press any key or click to lock it." for 10 seconds; the iPad shows the Mac as
      always. Close Sill on the iPad: about 30 seconds later the Mac's screens come back.
-  2. Connect again; on the iPad open Sill's Settings › Devices on the Mac and turn Darken this Mac's screen off: lit at
-     once. Turn it on: black at once. (The switch.)
-  3. Black again: press a letter key on the Mac: the lock screen shows over the black; unlock with Touch ID: about 2
-     seconds later the screens light and stay lit while the iPad is connected. Close Sill on the iPad, connect again,
-     and do it with a click. (The Mac locks; its own unlock.)
-  4. Turn off A key or click on this Mac locks it. Black: press Command-Space, F3 and the volume keys: nothing shows
-     over the black (G0 saw that at 1000; Sill's 1501 is above it). Press Control-Command-Q: the lock screen; unlock at
-     the Mac: lit. (macOS's own lock.)
-  5. Black: from the iPad, quit Sill (its menu bar item on the Mac, Quit Sill): lit at once. Open Sill again. (Sill
-     quits.)
-  6. Black: from the iPad, open Terminal on the Mac and run `killall -9 Sill`: lit at once. Open Sill again. (Sill
-     crashes.)
+  2. Turn off A key or click on this Mac locks it and leave Settings › Devices open in front on the Mac. Connect again
+     (black), and click on the Mac where the Darken this Mac's screen switch is (the click reaches Settings under the
+     black; a device never sees Sill's own windows): lit at once. Turn it on again: black. (The switch.)
+  3. With the iPad connected (black), from the iPad open Terminal on the Mac and run `osascript -e 'quit app "Sill"'`:
+     lit at once (the iPad's session ends). Open Sill again. (Sill quits.)
+  4. Connect again (black); from the iPad, in Terminal on the Mac, run `killall -9 Sill`: lit at once. Open Sill again.
+     (Sill crashes.)
+  5. Keys still passing; connect again (black). On the Mac press Command-Space, F3 and the volume keys: nothing shows
+     over the black (G0 saw that at 1000; Sill's 1501 is above it). Press Control-Command-Q: the lock screen over the
+     black; unlock at the Mac: lit about 2 seconds later. Close Sill on the iPad. (macOS's own lock; the Mac's own
+     unlock.)
+  6. Turn A key or click on this Mac locks it on again. Connect (black) and press a letter key on the Mac: the lock
+     screen shows over the black; unlock with Touch ID: lit about 2 seconds later, and lit while the iPad stays. Close
+     Sill on the iPad, connect again, and do it with a click. (A key or click locks.)
   7. Black: plug a monitor in, then out (or connect Sidecar): the new screen turns black within a moment (say how long
      its picture showed first); the others stay black. (A display while dark.)
   8. Black: from the iPad put the Mac to sleep (Apple menu › Sleep), wake it at the Mac and unlock there: lit. Then
