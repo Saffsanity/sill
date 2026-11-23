@@ -248,7 +248,7 @@ struct HostSettingsPanel: View {
     /// below it. Nothing on the fold's band. Each part is laid out on its page (`page(macScroll)`, the whole
     /// screen in one column) and its scroll view goes on into the safe area beside the screen, so it takes a drag
     /// anywhere on the pane (`macScroll`, `deviceScroll`); the header, the rows and Disconnect keep to their
-    /// column inside it (`inColumn`).
+    /// column inside it (`inColumn`, and the scroll view's content margins).
     @ViewBuilder private func arranged(_ l: SettingsPane.Layout) -> some View {
         let macPage = l.page(l.macScroll), devicePage = l.page(l.deviceScroll)
         switch l.arrangement {
@@ -322,24 +322,28 @@ struct HostSettingsPanel: View {
     /// scrolls them too (Noah, 2026-11-23: "on iPad in landscape, you have to touch the middle 3rd of the display
     /// to scroll instead of anywhere on the screen"). The pane lays the scroll view out on its page and
     /// `ignoresSafeArea` takes it on to the screen's edge wherever the page meets one: inside, no safe area is
-    /// left, so the rows are placed from `scroll`'s leading edge. Its indicator is at its trailing edge, as in a
-    /// system list whose rows keep a readable width. `bottom`: the room kept under the rows where the scroll view
+    /// left, so the column's place is measured from `scroll`'s leading edge, as the scroll view's content margins.
+    /// Its indicator is at its trailing edge, as in a system list whose rows keep a readable width. `bottom`: the room kept under the rows where the scroll view
     /// reaches the screen's bottom edge (the home indicator's), so they scroll under it and their last line rests
     /// above it. Its edges fade (`ScrollEdgeFade`), so a row cut by the header, Disconnect or the fold reads as
     /// scrolled away; the rows begin under the top's fade.
     private func part<Content: View>(bottom: CGFloat, column: CGRect, scroll: CGRect,
                                      @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
+        // The column as the scroll view's content margins at its sides, not as padding round the rows: the scroll
+        // view lays the rows out at the column's width and places them, as it did when it was the column's width
+        // (with padding inside the scroll view, a footnote line that fitted with a point to spare broke a word early).
+        let margins = EdgeInsets(top: 0, leading: max(0, column.minX - scroll.minX), bottom: bottom,
+                                 trailing: max(0, scroll.maxX - column.maxX))
         return ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) { rows }
                     .padding(.top, ScrollEdgeFade.height)
-                    .inColumn(x: column.minX - scroll.minX, width: column.width)
             }
             .scrollIndicatorsFlash(onAppear: true)
             .scrollBounceBehavior(.basedOnSize)
             .modifier(StartAnchor(atEnd: Self.startsAtEnd))
-            .contentMargins(.bottom, bottom, for: .scrollContent)
+            .contentMargins([.leading, .bottom, .trailing], margins, for: .scrollContent)
             .modifier(ScrollEdgeFade())
             .modifier(ScrollAreaOutline())
             .ignoresSafeArea(edges: .horizontal)
@@ -1471,9 +1475,9 @@ private extension View {
     }
 
     /// This view as wide as a column `x` from its container's leading edge, the container's whole width taken
-    /// (SettingsPane.Layout's column inside its part's scroll view): the rest is empty, so the scroll view around
-    /// it spans its page while the rows, the header and Disconnect keep to the column. From the leading edge,
-    /// so right to left mirrors it.
+    /// (SettingsPane.Layout's column on its part's page): the header, Disconnect, and the rows where they fit
+    /// without scrolling keep to the column while the part spans its page (the rows that scroll keep to it by
+    /// their scroll view's content margins, `part`). From the leading edge, so right to left mirrors it.
     func inColumn(x: CGFloat, width: CGFloat) -> some View {
         frame(width: max(0, width))
             .padding(.leading, max(0, x))
