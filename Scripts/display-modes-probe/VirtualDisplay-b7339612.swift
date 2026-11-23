@@ -1,0 +1,790 @@
+import Foundation
+import CoreGraphics
+import ObjectiveC
+
+/// A virtual monitor on the Mac, made with CoreGraphics' **private** `CGVirtualDisplay` API.
+///
+/// Why: milestone 3 gives each client device its own display at the device's HiDPI size,
+/// so the streamed window renders crisp at device scale and keeps repainting no matter what
+/// covers the Mac's real screen (window capture freezes when the window is occluded).
+///
+/// Private API, read before shipping:
+/// - `CGVirtualDisplay`, `CGVirtualDisplayDescriptor`, `CGVirtualDisplaySettings` and
+///   `CGVirtualDisplayMode` live in CoreGraphics.framework but are in no public header.
+///   They have existed since macOS 11 and are used by shipping apps (DeskPad, BetterDisplay,
+///   Chromium's test harness), but Apple can rename or remove them in any release.
+/// - Every class and selector is looked up through the Objective-C runtime and its type
+///   encoding is checked before the call, so a missing or changed API becomes a thrown
+///   `VirtualDisplay.Failure`, never a crash. Callers must treat a throw as "fall back to
+///   streaming the real window" (docs/BRIEF.md risk 3).
+/// - App Store: guideline 2.5.1 forbids non-public API, and App Review scans binaries for
+///   private symbols. The runtime lookups here reference no private *symbols* (only strings),
+///   so the linker and a notarization scan see nothing, but using it in an App Store build
+///   is still a guideline violation. The Mac companion ships outside the Mac App Store
+///   (Developer ID + notarization), where this is allowed; notarization checks signing and
+///   malware, not API usage. No entitlement is needed and SIP is not involved.
+///
+/// Identity: macOS remembers a display's arrangement (where it sits relative to the main
+/// display) and chosen mode by vendorID/productID/serial. Keep those stable per client device
+/// (e.g. serial derived from the device's identifier) so the display comes back in the same
+/// place every session instead of piling up new entries in System Settings › Displays.
+///
+/// Lifetime: the display exists exactly as long as this object holds the `CGVirtualDisplay`
+/// instance. `destroy()` (or deinit) releases it and the display disappears; windows on it
+/// are moved back to a real display by the window server. If the process dies the display
+/// goes with it.
+///
+/// Event loop (measured on macOS 27): the owning process must run an AppKit event loop,
+/// `NSApplication.shared.run()` with activation policy `.accessory` or `.prohibited`. The
+/// window server delivers display reconfiguration through the app's event port, which
+/// `dispatchMain()` or a bare `RunLoop` never drains. Without it the display still works
+/// (other processes and the window server see it at the right mode) but *this* process's
+/// CoreGraphics never learns about it: `CGDisplayCopyDisplayMode` returns nil,
+/// `CGDisplayCopyAllDisplayModes` is empty, so the HiDPI mode can't be selected, and
+/// reconfiguration callbacks never fire. SillHost's `dispatchMain()` has to become
+/// `NSApplication.run()` before it adopts this type.
+///
+/// Threading: create, wait and destroy on the main thread / main actor.
+final class VirtualDisplay {
+    enum Failure: Error, CustomStringConvertible {
+        case classMissing(String)
+        case selectorMissing(cls: String, selector: String)
+        case signatureChanged(cls: String, selector: String, expected: String, found: String)
+        case initReturnedNil(String)
+        case applySettingsFailed
+        case noDisplayID
+        case invalidSize(String)
+
+        var description: String {
+            switch self {
+            case .classMissing(let c):
+                return "private class \(c) not found in CoreGraphics (API removed or renamed)"
+            case .selectorMissing(let c, let s):
+                return "private class \(c) does not respond to \(s)"
+            case .signatureChanged(let c, let s, let e, let f):
+                return "\(c) \(s) changed signature: expected \(e), found \(f)"
+            case .initReturnedNil(let c):
+                return "\(c) init returned nil"
+            case .applySettingsFailed:
+                return "CGVirtualDisplay applySettings: returned NO (mode rejected)"
+            case .noDisplayID:
+                return "CGVirtualDisplay was created but reported displayID 0"
+            case .invalidSize(let why):
+                return "invalid size: \(why)"
+            }
+        }
+    }
+
+    /// A mode's size in points, as `init` lists it and `switchMode`, `applyModes` and the modes probe ask for it.
+    struct ModeSize: Equatable, CustomStringConvertible {
+        var width: Int
+        var height: Int
+        init(width: Int, height: Int) { self.width = width; self.height = height }
+        var description: String { "\(width)×\(height)" }
+        /// The same size turned a quarter (a device held the other way).
+        var turned: ModeSize { ModeSize(width: height, height: width) }
+    }
+
+    let name: String
+    /// The mode asked for now, in points: the one `init` was given, until `switchMode` asks for another listed one.
+    private(set) var widthPt: Int
+    private(set) var heightPt: Int
+    let scale: Int
+    let refreshHz: Double
+    let vendorID: UInt32
+    let productID: UInt32
+    let serialNum: UInt32
+    /// The modes the display was made with (`init`'s, the asked one first), or given since (`applyModes`), in points.
+    private(set) var modesListed: [ModeSize]
+
+    /// Zero after `destroy()`.
+    private(set) var displayID: CGDirectDisplayID = 0
+
+    /// Called (on an internal queue) if the window server tears the display down on its own.
+    var onTerminated: (() -> Void)?
+
+    /// The display in global points, as CoreGraphics and window frames use them.
+    /// Can read as zero for a moment right after creation, until the window server
+    /// finishes reconfiguring; `waitUntilOnline` covers that.
+    var bounds: CGRect { displayID == 0 ? .zero : CGDisplayBounds(displayID) }
+
+    /// Backing pixels of the current mode (points × scale when HiDPI took effect).
+    var pixelSize: (width: Int, height: Int) {
+        guard displayID != 0, let mode = CGDisplayCopyDisplayMode(displayID) else { return (0, 0) }
+        return (mode.pixelWidth, mode.pixelHeight)
+    }
+
+    var isAlive: Bool { object != nil }
+
+    /// The current mode's pixels a point, whole: 2 at the HiDPI mode asked for, 1 at a mode macOS
+    /// chose instead (VirtualStage's creation line). 0 before the display is online.
+    var currentScale: Int {
+        let b = bounds, px = pixelSize
+        guard b.width > 0, px.width > 0 else { return 0 }
+        return Int((Double(px.width) / Double(b.width)).rounded())
+    }
+
+    /// The retained CGVirtualDisplay instance. Releasing it removes the display.
+    private var object: AnyObject?
+    private let queue = DispatchQueue(label: "sill.virtualdisplay")
+
+    /// - Parameters:
+    ///   - widthPt, heightPt: the size windows see, in points.
+    ///   - scale: 2 for HiDPI (backing store is widthPt×2 by heightPt×2 pixels), 1 for not.
+    ///   - vendorID, productID, serialNum: display identity; keep stable (see type docs).
+    ///   - otherModes: more sizes listed beside the one asked for (`modeList`), each a mode `switchMode` can move the live
+    ///     display to without removing it (a device's room turned a quarter: docs/virtual-desktop-plan.md §5 as revised
+    ///     2026-11-18, the modes probe P2 decides whether macOS does). None by default: one mode, as every display Sill
+    ///     made before.
+    init(name: String,
+         widthPt: Int,
+         heightPt: Int,
+         scale: Int = 2,
+         refreshHz: Double = 60,
+         vendorID: UInt32 = 0x5111,
+         productID: UInt32 = 0x0001,
+         serialNum: UInt32 = 1,
+         otherModes: [ModeSize] = []) throws {
+        let modes = Self.modeList(asked: ModeSize(width: widthPt, height: heightPt), others: otherModes)
+        for m in modes {
+            guard m.width >= 320, m.height >= 240, m.width <= 8192, m.height <= 8192 else {
+                throw Failure.invalidSize("\(m.width)×\(m.height) pt is outside 320×240…8192×8192")
+            }
+        }
+        guard scale == 1 || scale == 2 else { throw Failure.invalidSize("scale must be 1 or 2") }
+        self.name = name
+        self.widthPt = widthPt
+        self.heightPt = heightPt
+        self.scale = scale
+        self.refreshHz = refreshHz
+        self.vendorID = vendorID
+        self.productID = productID
+        self.serialNum = serialNum
+        self.modesListed = modes
+
+        // The largest mode's pixels each way: the window server sizes the display's backing for the largest mode listed.
+        let maxPx = Self.maxPixels(modes, scale: scale)
+
+        // --- Descriptor ---------------------------------------------------------------
+        let descriptor = try Runtime.newObject("CGVirtualDisplayDescriptor")
+        try Runtime.setObject(descriptor, "setName:", name as NSString)
+        try Runtime.setUInt32(descriptor, "setMaxPixelsWide:", UInt32(maxPx.wide))
+        try Runtime.setUInt32(descriptor, "setMaxPixelsHigh:", UInt32(maxPx.high))
+        // Physical size drives the DPI macOS reports. ~110 pt per inch is what Apple's own
+        // Retina panels use, which keeps the default "looks like" choice sensible.
+        let mm = CGSize(width: Double(widthPt) / 110 * 25.4, height: Double(heightPt) / 110 * 25.4)
+        try Runtime.setSize(descriptor, "setSizeInMillimeters:", mm)
+        try Runtime.setUInt32(descriptor, "setVendorID:", vendorID)
+        try Runtime.setUInt32(descriptor, "setProductID:", productID)
+        try Runtime.setUInt32(descriptor, "setSerialNum:", serialNum)
+        // sRGB-ish primaries (same values Chromium uses); without them some macOS versions
+        // build a display with a degenerate colour profile.
+        try? Runtime.setPoint(descriptor, "setRedPrimary:", CGPoint(x: 0.6797, y: 0.3203))
+        try? Runtime.setPoint(descriptor, "setGreenPrimary:", CGPoint(x: 0.2559, y: 0.6983))
+        try? Runtime.setPoint(descriptor, "setBluePrimary:", CGPoint(x: 0.1494, y: 0.0557))
+        try? Runtime.setPoint(descriptor, "setWhitePoint:", CGPoint(x: 0.3125, y: 0.3291))
+        do {
+            try Runtime.setObject(descriptor, "setQueue:", queue)
+        } catch {
+            try Runtime.setObject(descriptor, "setDispatchQueue:", queue)
+        }
+        // The handler's real signature is believed to be ^(id, CGVirtualDisplay *). The
+        // arguments are taken as raw pointers so a different arity can't cause a bad retain.
+        let terminated: @convention(block) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void = { [weak self] _, _ in
+            self?.onTerminated?()
+        }
+        try Runtime.setBlock(descriptor, "setTerminationHandler:", terminated)
+
+        // --- Display ------------------------------------------------------------------
+        let display = try Runtime.allocInit("CGVirtualDisplay", "initWithDescriptor:", descriptor)
+
+        // --- Settings: the modes, given in points (one unless `otherModes`). With hiDPI = 1
+        // macOS derives two modes from each, widthPt×heightPt at 1× and at 2× (backing
+        // widthPt×scale by heightPt×scale, which is why maxPixels is the 2× size). Measured on
+        // macOS 27: which of the two is current at creation depends on what macOS remembered for
+        // this vendor/product/serial, so `waitUntilOnline` selects the requested one explicitly
+        // with public API.
+        let settings = try Self.newSettings(modes, scale: scale, refreshHz: refreshHz)
+        guard try VirtualDisplay.applySettings(settings, to: display) else { throw Failure.applySettingsFailed }
+
+        let id = try Runtime.getUInt32(display, "displayID")
+        guard id != 0 else { throw Failure.noDisplayID }
+        self.object = display
+        self.displayID = id
+    }
+
+    deinit { destroy() }
+
+    /// True when the current mode is the requested point size at the requested scale.
+    var hasRequestedMode: Bool {
+        let b = bounds, px = pixelSize
+        return Int(b.width) == widthPt && Int(b.height) == heightPt && px.width == widthPt * scale
+    }
+
+    /// Waits until the display is online at the requested point size and scale, selecting
+    /// that mode with public CoreGraphics calls if macOS brought it up in another one.
+    /// Returns false on timeout (the display may still be usable at whatever mode it has;
+    /// check `bounds` and `pixelSize`). Needs the NSApplication event loop running (see the
+    /// type docs), so call it from an async context on the main actor, not by blocking main.
+    @discardableResult
+    func waitUntilOnline(timeout: TimeInterval = 3) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var nextSelect = Date()
+        while Date() < deadline {
+            if hasRequestedMode { return true }
+            if bounds.width > 0, Date() >= nextSelect {
+                selectRequestedMode()
+                nextSelect = Date().addingTimeInterval(0.5)
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return hasRequestedMode
+    }
+
+    /// Picks the mode whose point size and pixel size match the request. Public API.
+    @discardableResult
+    func selectRequestedMode() -> Bool {
+        guard displayID != 0 else { return false }
+        let opts = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+        guard let modes = CGDisplayCopyAllDisplayModes(displayID, opts) as? [CGDisplayMode] else { return false }
+        guard let want = modes.first(where: {
+            $0.width == widthPt && $0.height == heightPt && $0.pixelWidth == widthPt * scale
+        }) else { return false }
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success else { return false }
+        CGConfigureDisplayWithDisplayMode(config, displayID, want, nil)
+        return CGCompleteDisplayConfiguration(config, .forSession) == .success
+    }
+
+    /// Every mode macOS offers for this display, for diagnostics.
+    func availableModes() -> [String] {
+        guard displayID != 0 else { return [] }
+        let opts = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+        let modes = (CGDisplayCopyAllDisplayModes(displayID, opts) as? [CGDisplayMode]) ?? []
+        return modes.map { "\($0.width)×\($0.height) pt @ \($0.pixelWidth)×\($0.pixelHeight) px, \(Int($0.refreshRate)) Hz" }
+    }
+
+    // MARK: Modes in place (phase 2b's probe P2; nothing in Sill calls these before it has run)
+
+    /// Asks the live display for another of the modes it was made with (`modesListed`), in place: the same display, the
+    /// same ID, with public CoreGraphics (`selectRequestedMode`, CGConfigureDisplayWithDisplayMode), as `waitUntilOnline`
+    /// already selects the mode asked at creation. False, with nothing changed, for a size not listed; else the select's
+    /// own answer, with the size now the one asked for, so `waitUntilOnline` and `hasRequestedMode` judge it (macOS may
+    /// apply a mode a moment after the call returns). Main actor, as every call here.
+    @discardableResult
+    func switchMode(to size: ModeSize) -> Bool {
+        guard displayID != 0, modesListed.contains(size) else { return false }
+        widthPt = size.width
+        heightPt = size.height
+        return selectRequestedMode()
+    }
+
+    /// Gives the live display a new list of modes (`applySettings:` sent again, with the scale and rate it was made
+    /// with): the other way the probe P2 tries to change a display's size without removing it. The private call's own
+    /// answer; on YES the list is `sizes`, and `switchMode` takes one of them. Its backing stays the one `init` sized
+    /// (`maxPixels`), so a mode larger than every mode made with it may be refused or clipped: the probe says which.
+    /// Throws if a private class or method is missing, or the display has gone.
+    func applyModes(_ sizes: [ModeSize]) throws -> Bool {
+        guard let display = object, displayID != 0 else { throw Failure.noDisplayID }
+        let list = Self.modeList(asked: sizes.first ?? ModeSize(width: widthPt, height: heightPt), others: Array(sizes.dropFirst()))
+        let settings = try Self.newSettings(list, scale: scale, refreshHz: refreshHz)
+        guard try VirtualDisplay.applySettings(settings, to: display) else { return false }
+        modesListed = list
+        return true
+    }
+
+    /// The modes a display is made with: the one asked for first, then each of `others` in order, a size given twice
+    /// listed once. Pure; Tests/checks/virtual-display-api.
+    static func modeList(asked: ModeSize, others: [ModeSize]) -> [ModeSize] {
+        var list = [asked]
+        for m in others where !list.contains(m) { list.append(m) }
+        return list
+    }
+
+    /// The display's largest backing, in pixels each way: the widest mode's width and the tallest mode's height, at
+    /// `scale` (a room listed both ways, 1376×1032 and 1032×1376 at 2×, needs 2752 × 2752). The descriptor's maximum,
+    /// which the window server sizes the display's backing for. Pure; Tests/checks/virtual-display-api.
+    static func maxPixels(_ modes: [ModeSize], scale: Int) -> (wide: Int, high: Int) {
+        (wide: (modes.map(\.width).max() ?? 0) * scale, high: (modes.map(\.height).max() ?? 0) * scale)
+    }
+
+    /// A `CGVirtualDisplaySettings` listing `modes` (each at `refreshHz`), HiDPI when `scale` is 2: what `init` applies,
+    /// and `applyModes` again on the live display. Each mode is made before the settings object, as `init` always did.
+    private static func newSettings(_ modes: [ModeSize], scale: Int, refreshHz: Double) throws -> AnyObject {
+        let made = try modes.map { try Runtime.newMode(width: UInt32($0.width), height: UInt32($0.height), refreshRate: refreshHz) }
+        let settings = try Runtime.newObject("CGVirtualDisplaySettings")
+        try Runtime.setUInt32(settings, "setHiDPI:", scale == 2 ? 1 : 0)
+        try Runtime.setObject(settings, "setModes:", made as NSArray)
+        return settings
+    }
+
+    /// Every private class/selector/type encoding this file calls, in the order it calls them.
+    /// Encodings are Objective-C type strings with the frame offsets stripped, and a `BOOL` return
+    /// is written "B", which `TypeEncoding.accepted` also takes spelled "c".
+    static let privateAPISurface: [(cls: String, selector: String, encoding: String)] = [
+        ("CGVirtualDisplayDescriptor", "init", "@@:"),
+        ("CGVirtualDisplayDescriptor", "setName:", "v@:@"),
+        ("CGVirtualDisplayDescriptor", "setMaxPixelsWide:", "v@:I"),
+        ("CGVirtualDisplayDescriptor", "setMaxPixelsHigh:", "v@:I"),
+        ("CGVirtualDisplayDescriptor", "setSizeInMillimeters:", "v@:{CGSize=dd}"),
+        ("CGVirtualDisplayDescriptor", "setVendorID:", "v@:I"),
+        ("CGVirtualDisplayDescriptor", "setProductID:", "v@:I"),
+        ("CGVirtualDisplayDescriptor", "setSerialNum:", "v@:I"),
+        ("CGVirtualDisplayDescriptor", "setQueue:", "v@:@"),
+        ("CGVirtualDisplayDescriptor", "setTerminationHandler:", "v@:@?"),
+        ("CGVirtualDisplay", "initWithDescriptor:", "@@:@"),
+        ("CGVirtualDisplay", "applySettings:", "B@:@"),
+        ("CGVirtualDisplay", "displayID", "I@:"),
+        ("CGVirtualDisplayMode", "initWithWidth:height:refreshRate:", "@@:IId"),
+        ("CGVirtualDisplaySettings", "init", "@@:"),
+        ("CGVirtualDisplaySettings", "setHiDPI:", "v@:I"),
+        ("CGVirtualDisplaySettings", "setModes:", "v@:@"),
+    ]
+
+    /// Checks the whole private surface without creating anything. Empty means every class
+    /// and selector is present with the expected signature; otherwise one line per problem.
+    /// Cheap enough to call at launch to decide between virtual display and window fallback.
+    /// (The colour primaries setters are optional and not listed; `setDispatchQueue:` is
+    /// accepted in place of `setQueue:`.)
+    static func checkPrivateAPI() -> [String] {
+        privateAPISurface.compactMap { entry -> String? in
+            let problem = methodProblem(cls: entry.cls, selector: entry.selector, encoding: entry.encoding)
+            guard problem != nil, entry.selector == "setQueue:" else { return problem }
+            return methodProblem(cls: entry.cls, selector: "setDispatchQueue:", encoding: entry.encoding)
+        }
+    }
+
+    /// `Runtime.method`'s decision for one entry of the surface: nil when the class named `cls` has
+    /// an instance method `selector` whose type encoding, without its offsets, is one that
+    /// `TypeEncoding.accepted(encoding)` takes; else the problem, as `checkPrivateAPI` lists it.
+    /// Tests/checks/virtual-display-api asks it about classes it makes at run time, so the check
+    /// runs this decision rather than a copy of it.
+    static func methodProblem(cls: String, selector: String, encoding: String) -> String? {
+        do {
+            _ = try Runtime.method(Runtime.cls(cls), selector, encoding)
+            return nil
+        } catch {
+            return "\(error)"
+        }
+    }
+
+    /// `[display applySettings:settings]`, as `init` sends it to its `CGVirtualDisplay`. The method
+    /// is checked first (`Runtime.method`) against "B@:@", a `BOOL` return, which the runtime
+    /// spells "B" or "c" (`TypeEncoding.accepted` has where each was seen). Either way it is one
+    /// byte in the return register, read here as `ObjCBool`, which is `BOOL` on each architecture:
+    /// C99 `bool` on arm64, the same code a Swift `Bool` gives there, and `signed char` on x86_64,
+    /// where any byte but 0 is YES; a Swift `Bool` there would take the byte as it comes, which is
+    /// safe only for a 0 or a 1. Tests/checks/virtual-display-api sends it to classes it makes at
+    /// run time.
+    static func applySettings(_ settings: AnyObject, to display: AnyObject) throws -> Bool {
+        let (fn, sel) = try Runtime.imp(display, "applySettings:", "B@:@", as: Runtime.ApplyFn.self)
+        return fn(display, sel, settings).boolValue
+    }
+
+    /// How a method's type encoding, as the Objective-C runtime reports it, is matched against the
+    /// one `privateAPISurface` gives. Pure: `Tests/checks/virtual-display-api` holds it, and the
+    /// surface, to the encodings measured on Apple silicon, natively and under Rosetta, and
+    /// reported from Intel machines.
+    enum TypeEncoding {
+        /// `v24@0:8@16` → `v@:@`. Offsets vary by architecture; the types are what matter.
+        static func normalized(_ encoding: String) -> String {
+            String(encoding.filter { !$0.isNumber })
+        }
+
+        /// The spellings that count as `expected`: itself and, for a `BOOL` return (written "B",
+        /// C99 `bool`), the same with "c" (`signed char`).
+        ///
+        /// The runtime spells a `BOOL` return as the Mac's CoreGraphics was built, and on x86_64
+        /// `applySettings:` has been spelled both ways: "c@:@" on an Intel Mac mini with macOS
+        /// 15.7.3 (#87), where "B@:@" alone made `Runtime.method` throw `Failure.signatureChanged`
+        /// and every virtual display fall back to the real window, though the method was there and
+        /// worked; "B@:@" on an Intel machine running macOS 26.7.1 through OpenCore, going by #62's
+        /// report, where an x86_64 build of 985a733 (build 585), which expected "B@:@" alone,
+        /// passed the self test (the encoding itself was not printed); and "c@:@" again under
+        /// Rosetta on macOS 27.0.1 (c24@0:8@16). arm64 reads "B@:@" (B24@0:8@16 on macOS 27.0.1).
+        /// So both are taken on every architecture, with no `#if arch`, and the arm64 build CI
+        /// makes compiles the only path. Either is one byte in the return register, which
+        /// `applySettings(_:to:)` reads as `ObjCBool`.
+        static func accepted(_ expected: String) -> [String] {
+            expected.first == "B" ? [expected, "c" + expected.dropFirst()] : [expected]
+        }
+    }
+
+    /// Releases the CGVirtualDisplay; the display disappears. Safe to call twice.
+    func destroy() {
+        object = nil
+        displayID = 0
+    }
+}
+
+// MARK: - Objective-C runtime access
+
+/// Looks up private classes and methods by name and checks each method's type encoding
+/// against what this code was written for before calling its IMP. Anything unexpected
+/// throws instead of sending a message with the wrong ABI.
+private enum Runtime {
+    static func cls(_ name: String) throws -> AnyClass {
+        guard let c = NSClassFromString(name) else { throw VirtualDisplay.Failure.classMissing(name) }
+        return c
+    }
+
+    /// Finds an instance method and checks its type encoding (`VirtualDisplay.TypeEncoding`). Used
+    /// on classes (for init selectors, before an instance exists, and by `VirtualDisplay.methodProblem`)
+    /// and via `imp` on live objects.
+    static func method(_ c: AnyClass, _ selector: String, _ encoding: String) throws -> (IMP, Selector) {
+        let sel = NSSelectorFromString(selector)
+        guard let method = class_getInstanceMethod(c, sel) else {
+            throw VirtualDisplay.Failure.selectorMissing(cls: NSStringFromClass(c), selector: selector)
+        }
+        let found = method_getTypeEncoding(method).map { VirtualDisplay.TypeEncoding.normalized(String(cString: $0)) } ?? "?"
+        let accepted = VirtualDisplay.TypeEncoding.accepted(encoding)
+        guard accepted.contains(found) else {
+            throw VirtualDisplay.Failure.signatureChanged(cls: NSStringFromClass(c), selector: selector,
+                                                         expected: accepted.joined(separator: " or "), found: found)
+        }
+        return (method_getImplementation(method), sel)
+    }
+
+    static func imp<F>(_ target: AnyObject, _ selector: String, _ encoding: String, as: F.Type) throws -> (F, Selector) {
+        let (imp, sel) = try method(object_getClass(target)!, selector, encoding)
+        return (unsafeBitCast(imp, to: F.self), sel)
+    }
+
+    /// `[[Class alloc] init]`.
+    static func newObject(_ className: String) throws -> NSObject {
+        guard let type = try cls(className) as? NSObject.Type else {
+            throw VirtualDisplay.Failure.classMissing("\(className) (not an NSObject)")
+        }
+        return type.init()
+    }
+
+    typealias AllocFn = @convention(c) (AnyClass, Selector) -> UnsafeMutableRawPointer?
+    typealias InitObjFn = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
+    typealias InitModeFn = @convention(c) (UnsafeMutableRawPointer, Selector, UInt32, UInt32, Double) -> UnsafeMutableRawPointer?
+
+    /// `[[Class alloc] <initSelector>:arg]` for an init taking one object.
+    /// alloc returns +1; init consumes it and returns +1, which `takeRetainedValue` adopts.
+    static func allocInit(_ className: String, _ initSelector: String, _ arg: AnyObject) throws -> AnyObject {
+        let c: AnyClass = try cls(className)
+        let raw = try alloc(c)
+        let (initFn, sel) = try initIMP(c, initSelector, "@@:@", as: InitObjFn.self)
+        guard let obj = initFn(raw, sel, arg) else { throw VirtualDisplay.Failure.initReturnedNil(className) }
+        return Unmanaged<AnyObject>.fromOpaque(obj).takeRetainedValue()
+    }
+
+    /// `[[CGVirtualDisplayMode alloc] initWithWidth:height:refreshRate:]`.
+    static func newMode(width: UInt32, height: UInt32, refreshRate: Double) throws -> AnyObject {
+        let name = "CGVirtualDisplayMode"
+        let c: AnyClass = try cls(name)
+        let (initFn, sel) = try initIMP(c, "initWithWidth:height:refreshRate:", "@@:IId", as: InitModeFn.self)
+        let raw = try alloc(c)
+        guard let obj = initFn(raw, sel, width, height, refreshRate) else { throw VirtualDisplay.Failure.initReturnedNil(name) }
+        return Unmanaged<AnyObject>.fromOpaque(obj).takeRetainedValue()
+    }
+
+    private static func alloc(_ c: AnyClass) throws -> UnsafeMutableRawPointer {
+        let sel = NSSelectorFromString("alloc")
+        guard let method = class_getClassMethod(c, sel) else {
+            throw VirtualDisplay.Failure.selectorMissing(cls: NSStringFromClass(c), selector: "+alloc")
+        }
+        let fn = unsafeBitCast(method_getImplementation(method), to: AllocFn.self)
+        guard let raw = fn(c, sel) else { throw VirtualDisplay.Failure.initReturnedNil(NSStringFromClass(c)) }
+        return raw
+    }
+
+    private static func initIMP<F>(_ c: AnyClass, _ selector: String, _ encoding: String, as: F.Type) throws -> (F, Selector) {
+        let (imp, sel) = try method(c, selector, encoding)
+        return (unsafeBitCast(imp, to: F.self), sel)
+    }
+
+    typealias SetObjFn = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+    typealias SetUIntFn = @convention(c) (AnyObject, Selector, UInt32) -> Void
+    typealias SetSizeFn = @convention(c) (AnyObject, Selector, CGSize) -> Void
+    typealias SetPointFn = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    typealias SetBlockFn = @convention(c) (AnyObject, Selector, @convention(block) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void) -> Void
+    typealias GetUIntFn = @convention(c) (AnyObject, Selector) -> UInt32
+    typealias ApplyFn = @convention(c) (AnyObject, Selector, AnyObject) -> ObjCBool
+
+    static func setObject(_ target: AnyObject, _ selector: String, _ value: AnyObject) throws {
+        let (fn, sel) = try imp(target, selector, "v@:@", as: SetObjFn.self)
+        fn(target, sel, value)
+    }
+
+    static func setUInt32(_ target: AnyObject, _ selector: String, _ value: UInt32) throws {
+        let (fn, sel) = try imp(target, selector, "v@:I", as: SetUIntFn.self)
+        fn(target, sel, value)
+    }
+
+    static func setSize(_ target: AnyObject, _ selector: String, _ value: CGSize) throws {
+        let (fn, sel) = try imp(target, selector, "v@:{CGSize=dd}", as: SetSizeFn.self)
+        fn(target, sel, value)
+    }
+
+    static func setPoint(_ target: AnyObject, _ selector: String, _ value: CGPoint) throws {
+        let (fn, sel) = try imp(target, selector, "v@:{CGPoint=dd}", as: SetPointFn.self)
+        fn(target, sel, value)
+    }
+
+    static func setBlock(_ target: AnyObject, _ selector: String,
+                         _ block: @escaping @convention(block) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void) throws {
+        let (fn, sel) = try imp(target, selector, "v@:@?", as: SetBlockFn.self)
+        fn(target, sel, block)
+    }
+
+    static func getUInt32(_ target: AnyObject, _ selector: String) throws -> UInt32 {
+        let (fn, sel) = try imp(target, selector, "I@:", as: GetUIntFn.self)
+        return fn(target, sel)
+    }
+}
+
+/// Headless Mac / closed-lid MacBook fallback display for Desktop mode (issue #61).
+/// Pure: compiled and checked by `Tests/checks/virtual-display-api`.
+enum HeadlessDesktopPolicy {
+    /// Whether the Desktop gets Sill's display now. `screenRecording`: this process may capture the screen
+    /// (CGPreflightScreenCaptureAccess). Without it no display is made, as VirtualStage.prepare refuses to make
+    /// one: measured 2026-09-22, SCShareableContent never returns in a process without Screen Recording once a
+    /// virtual display exists, and the catalog's look (`WindowCatalog.refreshWindows`, no timeout) right after
+    /// the display is made would hold the Desktop's select, and every select after it, for good. `onConsole`: this
+    /// session is the one on the screen (the lock's reading is not off console). A display made from a session
+    /// another user has the screen from would join that user's displays; the off-console view of #340 lets the
+    /// Desktop stream off console, and makes no virtual display there for that reason. `guardHolds`: Sill stopped while
+    /// making a display two runs in a row (DisplayMakeGuard, #380), and makes none by itself until Try Again.
+    /// `switchOn`: the Mac's user has it on (HostConfig.headlessDisplay: Settings › Virtual Display's "A Mac with no
+    /// screen", on by default; the CLI's --no-headless-display turns it off), so a Mac whose user turned it off, after
+    /// #380's stops or with a monitor that #333's display changes turn off, gets none.
+    static func needsVirtualDesktop(
+        hasDisplay: Bool,
+        clientCount: Int,
+        appKitLoop: Bool,
+        synthetic: Bool,
+        apiAvailable: Bool,
+        screenRecording: Bool,
+        onConsole: Bool,
+        guardHolds: Bool,
+        switchOn: Bool
+    ) -> Bool {
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole && !guardHolds
+            && switchOn
+    }
+
+    /// No real screen, a device, and only the person's switch keeps Sill's display from being made: once a run until
+    /// the switch is turned on again.
+    static let switchedOffLine = "Headless display: no real screen, but Sill's display for a Mac with no screen is turned off; none made."
+
+    /// Its switch turned off (Settings › Virtual Display, Sill.app's alone at run time) while Sill's display exists: it
+    /// goes at once, and the Desktop starts again on what macOS shows.
+    static let switchedOffRemovedLine = "Headless display: turned off in Settings; removed Sill's display."
+
+    /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
+    /// and Sill's own are none). When it is made, and when it goes, is `Watch`'s.
+    static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
+
+    /// The real displays that keep Sill's display from being made: the online ones, a display asleep among them,
+    /// whatever the lid. A display reads asleep in macOS's display sleep, which takes every screen at once, Sill's own
+    /// with them: nothing is drawn on any until they wake (Noah's test of 2026-11-12, 03:56: the lid closed, two
+    /// monitors, the iPad connected; the lock screen's idle timer put the screens to sleep, and Sill's display, made
+    /// then because a monitor asleep with the lid closed counted as none, got no frame for 73 s, until a key at the
+    /// Mac woke them; then the monitors worked and it went again). They wake with a person's activity, which
+    /// DisplayWake declares for a person at a device: its connect, a tap or a key (#151, the waking click #228), as
+    /// for the lid open. An asleep monitor also keeps its windows and stays the main display, where the lock screen's
+    /// password field is, so Sill's display beside it would show neither, awake or not (0a0e84d, the review of
+    /// 2026-11-11's risk 1). The other choice, a closed-lid monitor that macOS still reads asleep once the screens
+    /// have woken counted as none (#298's first reading; no such monitor has been seen), is `lidClosed ? active :
+    /// online`; `Watch.make` never makes the display while the screens sleep, so it is safe at a display sleep.
+    static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { online }
+
+    /// Whether the screens sleep (macOS's display sleep), for `Watch.saw`: what macOS last said (NSWorkspace's
+    /// screensDidSleep, until screensDidWake, a person's declared activity, an unlock or a return to the console; a
+    /// test host's `screens asleep` line), and no display works now: `active` counts the real ones and macOS's
+    /// stand-in that read active (Sill's own is no witness: WindowServer turned on the one made while they slept, and
+    /// it drew nothing; Noah's test of 2026-11-12). A display working means they are awake whatever macOS said last,
+    /// so a lid closed with nothing attached, where macOS may say they slept while its stand-in draws, still gets
+    /// Sill's display (#61).
+    static func screensAsleep(said: Bool, active: Int) -> Bool { said && active == 0 }
+
+    /// The lid closed and every real display online asleep, none gone: how many, for the line a Desktop that would
+    /// have had Sill's display in 0.6.1 (1414) prints instead, once until a real display works again; nil otherwise.
+    static func asleepNotGone(lidClosed: Bool, online: Int, active: Int) -> Int? {
+        lidClosed && online > 0 && active == 0 ? online : nil
+    }
+
+    static func asleepNotGoneLine(asleep: Int) -> String {
+        asleep == 1
+            ? "Headless display: the screen is asleep, not gone; none made (a tap on a device wakes it)."
+            : "Headless display: the \(asleep) screens are asleep, not gone; none made (a tap on a device wakes them)."
+    }
+
+    /// No real screen, and the screens asleep (`Watch.Make.asleep`): once a sleep.
+    static let waitsForWakeLine = "Headless display: no real screen, and the screens are asleep; none made until they wake."
+
+    /// The screens woke while a device's Desktop streams with no real screen and no Sill's display (macOS's stand-in:
+    /// Sill's display waited for the wake, `Watch.Make.asleep`): the Desktop starts again, so Sill's display is made as
+    /// `Watch` says, two seconds after the wake. `gate`: `needsVirtualDesktop` now (no real screen, a device, on the
+    /// console…).
+    static func desktopAgainAtWake(streamsDesktop: Bool, sills: Bool, gate: Bool) -> Bool { streamsDesktop && !sills && gate }
+
+    /// What a display is to these rules (`kind(_:online:)`, HeadlessDisplayKind.swift: from its role,
+    /// DesktopDisplays.role, never from its vendor alone):
+    /// - `real`: a screen of the Mac's (its own, a monitor, a Sidecar iPad, another app's virtual display);
+    /// - `sills`: Sill's own Desktop display (this one, product 0x0002);
+    /// - `standIn`: macOS's own 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a Mac has no
+    ///   screen at all (the lid closed and nothing attached, seen on macOS 27): no screen shows it, and Sill's Retina
+    ///   one is made in its place;
+    /// - `stage`: the display Sill makes for a picked window (VirtualStage): it holds that window alone, so the Desktop
+    ///   is never built on it and it is no screen;
+    /// - `gone`: a display that has gone (offline) while a look still lists it: none of the Desktop's (a stage display
+    ///   just removed read vendor 0xFFFFFFFF and counted as a real screen under #200's vendor test).
+    enum Kind: Equatable { case real, sills, standIn, stage, gone }
+
+    /// The displays as Sill has looked at them over time, and the two rules that read them: when Sill's display may
+    /// be made, and when it goes. Times are seconds on one clock (the coordinator's); nothing here reads a clock or a
+    /// display.
+    ///
+    /// Noah's test of 2026-11-12 (a MacBook Pro with its lid closed and two monitors, an iPad connected): back from a
+    /// fast user switch, this session saw only macOS's stand-in for about a second before its monitors returned;
+    /// Sill's display, made in that second, then stayed beside both monitors as the main display, because the rule
+    /// before this kept it while a device worked with the lid shut. Now:
+    /// - It is made only once the display list has been unchanged for `settle` (1 s) since the later of its last
+    ///   change and the first look that wanted it, and no real screen has worked for `hysteresis` (2 s) since the
+    ///   later of the last one's going and this session's return (back on the console, unlocked, woken: `cameBack`),
+    ///   so a return always waits the two seconds; never later than `settleCap` (3 s) after that first look. The
+    ///   coordinator looks again when `make` says, and makes the display on that look alone.
+    /// - It goes once a real screen has worked for `hysteresis` (2 s), the lid closed and a device connected too: it
+    ///   exists only while no real screen works. The two seconds both ways keep a monitor that flickers from making
+    ///   and removing it in a loop.
+    /// - It is never made while the screens sleep (macOS's display sleep, `asleep`): nothing would be drawn on it until
+    ///   they woke (Noah's test of 2026-11-12, 03:56: 73 s without a frame), and a monitor that drops off as it sleeps
+    ///   (a Mac mini's, some USB-C ones) comes back as they wake, so it would go again two seconds later. The wake is a
+    ///   return (`cameBackAt`): the coordinator's Desktop asks again then (`desktopAgainAtWake`), and it is made two
+    ///   seconds after the wake if no real screen came back. Nothing here wakes the screens: a person at a device does
+    ///   (DisplayWake), and a device left alone lets them sleep.
+    struct Watch: Equatable {
+        static let settle: Double = 1
+        static let settleCap: Double = 3
+        static let hysteresis: Double = 2
+
+        /// The real screens the last look found, as `realDisplays` counts them.
+        private(set) var real = 0
+        /// The whole list the last look found (each display's ID, kind and state), so a change shows where the count
+        /// stays; nil before the first look.
+        private(set) var list: [String]?
+        /// When the list last changed: a look that found it different, or macOS's reconfiguration callback.
+        private(set) var listChangedAt: Double?
+        /// When the real screens last went from some to none, and from none to some (nil: not seen).
+        private(set) var realGoneAt: Double?
+        private(set) var realBackAt: Double?
+        /// When this session last came back on the console, was unlocked, or woke (the screens too).
+        private(set) var cameBackAt: Double?
+        /// Whether the screens slept at the last look (`screensAsleep`): nothing is drawn on any display, Sill's own
+        /// included, until they wake.
+        private(set) var asleep = false
+
+        init() {}
+
+        /// A look at the displays at `now`. The first look changes nothing but what it found. `asleep`: the screens
+        /// sleep (`screensAsleep`); a look that finds them awake after asleep is a return, as a wake is.
+        mutating func saw(real: Int, list: [String], asleep: Bool = false, at now: Double) {
+            if let before = self.list, before != list { listChangedAt = now }
+            if self.list != nil, self.real > 0, real == 0 { realGoneAt = now }
+            if self.list != nil, self.real == 0, real > 0 { realBackAt = now }
+            if self.list != nil, self.asleep, !asleep { cameBackAt = now }
+            self.list = list
+            self.real = real
+            self.asleep = asleep
+        }
+
+        /// macOS said the display configuration changed (its reconfiguration callback), with or before a look.
+        mutating func changed(at now: Double) { listChangedAt = now }
+
+        /// This session came back on the console, was unlocked, or woke: what it sees may still be changing.
+        mutating func cameBack(at now: Double) { cameBackAt = now }
+
+        enum Make: Equatable { case no, asleep, wait(until: Double), make }
+
+        /// Whether Sill's display is made now, for a Desktop that first wanted it at `wantedSince`: `.no` while a real
+        /// screen works, `.asleep` while the screens sleep (the wake asks again), else `.wait` until the time to look
+        /// again, or `.make` on this look.
+        func make(wantedSince: Double, now: Double) -> Make {
+            guard HeadlessDesktopPolicy.stillNeeded(physicalDisplays: real) else { return .no }
+            guard !asleep else { return .asleep }
+            let settled = max(listChangedAt ?? -Double.infinity, wantedSince) + Self.settle
+            let noScreen = max(realGoneAt ?? -Double.infinity, cameBackAt ?? -Double.infinity) + Self.hysteresis
+            let ready = min(max(settled, noScreen), wantedSince + Self.settleCap)
+            return now >= ready ? .make : .wait(until: ready)
+        }
+
+        enum Release: Equatable { case keep, wait(until: Double), release }
+
+        /// Whether Sill's display goes now: `.keep` while no real screen works, else `.wait` until a real screen has
+        /// worked `hysteresis`, then `.release`.
+        func release(now: Double) -> Release {
+            guard real > 0 else { return .keep }
+            let ready = (realBackAt ?? -Double.infinity) + Self.hysteresis
+            return now >= ready ? .release : .wait(until: ready)
+        }
+    }
+
+    /// TEST ONLY (SILL_TEST_HEADLESS): one display of a test host's scripted list.
+    struct TestDisplay: Equatable {
+        var kind: Kind
+        var active: Bool
+    }
+
+    /// TEST ONLY: the variable whose file a test host reads its displays from instead of this Mac's (and makes and
+    /// removes no display: it says what it would do). Honoured only by a test host (`--synthetic`, and never Sill.app's
+    /// own executable: DoorPolicy.isTestHost). Not SILL_TEST_DISPLAYS, which is the Desktop's stops'
+    /// (DesktopDisplaysHook, #355); the local fixes of 2026-11-12 named this one so before #355 landed.
+    static let testHeadlessVariable = "SILL_TEST_HEADLESS"
+
+    /// The file the variable names, and the one line it prints at start (nil when it is not set).
+    static func testHeadless(environment: [String: String], testHost: Bool) -> (path: String?, line: String?) {
+        guard let value = environment[testHeadlessVariable], !value.isEmpty else { return (nil, nil) }
+        guard testHost else { return (nil, "\(testHeadlessVariable) ignored: only a --synthetic test host takes it, never Sill.app.") }
+        return (value, "Test displays: this host's displays are what \(value) lists, read at each look; Sill's display is never made or removed here, only said.")
+    }
+
+    /// The file's list: one display a line, `real` (a screen that works), `real asleep` (online, not active), `standin`
+    /// (macOS's stand-in) or `standin asleep` (the stand-in, dark in a display sleep); a line `lid closed` says the lid
+    /// is closed, and `screens asleep` that macOS said the screens sleep (its display sleep, as NSWorkspace says it on a
+    /// Mac: the line's coming and going are its two notifications); `#` starts a comment; anything else is left out
+    /// (a test writes the file).
+    static func testHeadlessList(_ text: String) -> (displays: [TestDisplay], lidClosed: Bool, screensAsleep: Bool) {
+        var displays: [TestDisplay] = []
+        var lidClosed = false
+        var screensAsleep = false
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let words = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                .split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
+            switch words {
+            case ["real"]: displays.append(TestDisplay(kind: .real, active: true))
+            case ["real", "asleep"]: displays.append(TestDisplay(kind: .real, active: false))
+            case ["standin"]: displays.append(TestDisplay(kind: .standIn, active: true))
+            case ["standin", "asleep"]: displays.append(TestDisplay(kind: .standIn, active: false))
+            case ["lid", "closed"]: lidClosed = true
+            case ["screens", "asleep"]: screensAsleep = true
+            default: break
+            }
+        }
+        return (displays, lidClosed, screensAsleep)
+    }
+
+    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while it
+    /// exists and is not being released (the coordinator's `catalog.keepsSills`), so the Desktop stays on it through
+    /// `Watch`'s two seconds and moves once, when the display goes. Never the stage's display, which holds a picked
+    /// window alone, nor one that has gone: with nothing else, none. `virtualDesktop`: Sill's display is the Virtual
+    /// Desktop (phase 2b, VirtualDesktopLife's role), one more screen after the real ones, so it joins them, after them,
+    /// among the displays the Desktop may stream (its stop is the last: DesktopDisplays.candidates); with no real one, or
+    /// kept as the headless display (`sillsFirst`), as before.
+    static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false, virtualDesktop: Bool = false) -> [T] {
+        let desktops = displays.filter { kind($0) != .stage && kind($0) != .gone }
+        if virtualDesktop, !sillsFirst {
+            let real = desktops.filter { kind($0) == .real }
+            if !real.isEmpty { return real + desktops.filter { kind($0) == .sills } }
+        }
+        for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
+            let some = desktops.filter { kind($0) == wanted }
+            if !some.isEmpty { return some }
+        }
+        return desktops
+    }
+}

@@ -21,6 +21,15 @@
 // It ends with one verdict line for each way ("P2 in place …"). It never moves the pointer, posts no event, never
 // activates (accessory app), and links no VideoToolbox. Exit 0 when it ran to the end, whatever macOS answered; 1 when
 // the display could not be made; 2 for a bad argument.
+//
+// Corrected 2026-11-23, after Noah's two runs of that day (macOS 27.2.1) and the probes that followed them, P2b and P2c
+// (p2b/, p2c/; docs/steps/2026-11-18-virtual-desktop-2b.md, fourth part): each verdict now says what the display did, read
+// back, beside what the call answered. Noah's output said "new modes on the live display …: no" although his display was
+// at the new size 333 and 339 ms later with the same ID: the verdict wanted switchMode to answer true, and switchMode
+// had looked for the new mode in the list macOS gave before it applied the new settings (about a third of a second
+// later), found none and asked nothing; macOS took the size by itself (P2b: a size of the display's orientation, given
+// alone, is taken at 2x in about 300 ms). "In place by the modes listed at creation: no" stands: a mode listed beside
+// another is not usable for the desktop, and CoreGraphics refuses a switch to it (P2b: complete 1001).
 import AppKit
 import CoreGraphics
 import Foundation
@@ -159,7 +168,7 @@ func run() async -> Int32 {
     do { applied = try d.applyModes([room, turned, smaller]) } catch { print("  step 2: applySettings: threw \(error)") }
     print("  step 2: applySettings: with \(smaller) answered \(applied ? "YES" : "NO"); \(state(d))")
     for c in changes.take() { print("    callback \(c)") }
-    var newModes = false
+    var newModes = Change(answered: false, seen: false)
     if applied {
         print("  macOS lists now: \(d.availableModes().joined(separator: "; "))")
         newModes = await change("step 2: switch to \(smaller)", d, id, window, want: smaller) { d.switchMode(to: smaller) }
@@ -171,7 +180,7 @@ func run() async -> Int32 {
     do { largerApplied = try d.applyModes([room, larger]) } catch { print("  step 3: applySettings: threw \(error)") }
     print("  step 3: applySettings: with \(larger) answered \(largerApplied ? "YES" : "NO"); \(state(d))")
     for c in changes.take() { print("    callback \(c)") }
-    var largerTaken = false
+    var largerTaken = Change(answered: false, seen: false)
     if largerApplied {
         largerTaken = await change("step 3: switch to \(larger)", d, id, window, want: larger) { d.switchMode(to: larger) }
     }
@@ -185,17 +194,28 @@ func run() async -> Int32 {
     print("  step 4: removed; gone from the online list after \(ms(t4)) ms: \(!online().contains(id)); displays after: \(online())")
     for c in changes.take() { print("    callback \(c)") }
 
-    print("P2 in place by the modes listed at creation: \(inPlace && back ? "yes" : "no")")
-    print("P2 new modes on the live display (applySettings: again, inside its backing): \(applied && newModes ? "yes" : "no")")
-    print("P2 a mode beyond the backing it was made with: \(largerApplied ? (largerTaken ? "taken" : "listed, not taken") : "refused")")
+    print("P2 in place by the modes listed at creation: \(verdict(inPlace, back: back))")
+    print("P2 new modes on the live display (applySettings: again, inside its backing): \(applied ? verdict(newModes) : "no: applySettings: answered NO")")
+    print("P2 a mode beyond the backing it was made with: \(largerApplied ? (largerTaken.seen ? "taken" : "listed, not taken") : "refused")")
     return 0
 }
+
+/// What a change did, in words: "yes" when the display was at the size asked with the same ID, read back, whatever the
+/// call answered (and the answer said when it was false: macOS took the size by itself); "no" otherwise.
+func verdict(_ c: Change, back: Change? = nil) -> String {
+    guard c.seen else { return "no" }
+    if let back, !back.seen { return "no: it went, and did not come back" }
+    return c.answered ? "yes" : "yes, by macOS itself after applySettings: (the switch answered false: it read the list from before)"
+}
+
+/// A change's call answer, and whether the display was seen at the size asked, with the same ID.
+struct Change { var answered: Bool; var seen: Bool }
 
 /// One change, timed: the call's answer, whether the display reads `want` within 3 s, its ID and state, the callbacks
 /// since the last step and where the probe's window is half a second later.
 @MainActor
 func change(_ what: String, _ d: VirtualDisplay, _ id: CGDirectDisplayID, _ window: NSWindow?,
-            want: VirtualDisplay.ModeSize, _ call: () -> Bool) async -> Bool {
+            want: VirtualDisplay.ModeSize, _ call: () -> Bool) async -> Change {
     let t = Date()
     let answered = call()
     let took = await d.waitUntilOnline(timeout: 3)
@@ -205,7 +225,7 @@ func change(_ what: String, _ d: VirtualDisplay, _ id: CGDirectDisplayID, _ wind
     print("  \(what): answered \(answered), at \(want) after \(tookMs) ms: \(took); the same ID \(id) online: \(sameID); \(state(d))")
     for c in changes.take() { print("    callback \(c)") }
     print("    the probe's window: \(whereIs(window, id))")
-    return answered && took && sameID
+    return Change(answered: answered, seen: took && sameID)
 }
 
 func state(_ d: VirtualDisplay) -> String {
