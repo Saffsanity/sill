@@ -42,6 +42,23 @@ MUTANTS = {
     "M35 two columns again on a screen held sideways": ("arrangement = .oneColumn", "arrangement = W > H ? .twoColumns : .oneColumn"),
     "M36 a fold made up down the middle of every screen": ("if let down = fold.verticalBand {",
                                                           "if let down = fold.verticalBand ?? Optional(CGRect(x: W / 2 - 10, y: 0, width: 20, height: H)) {"),
+    # Each scroll view across its page, the whole screen in one column (Noah, 2026-11-23: "on iPad in landscape, you
+    # have to touch the middle 3rd of the display to scroll instead of anywhere on the screen"): a scroll view
+    # narrowed back to its column, or one onto the fold, must fail the check.
+    "M37 one column's scroll view narrowed back to its column": ("macScroll = CGRect(x: 0, y: 0, width: W, height: H)", "macScroll = mac"),
+    "M38 one column's device part in a scroll view of its own, at the column": ("deviceScroll = macScroll", "deviceScroll = device"),
+    "M39 the book pose's leading scroll view narrowed to its column": ("macScroll = CGRect(x: 0, y: 0, width: leadingPage, height: H)",
+                                                                       "macScroll = mac"),
+    "M40 the book pose's trailing scroll view narrowed to its column": ("deviceScroll = CGRect(x: b.maxX, y: 0, width: trailingPage, height: H)",
+                                                                        "deviceScroll = device"),
+    "M41 the book pose's leading scroll view across the fold's band": ("macScroll = CGRect(x: 0, y: 0, width: leadingPage, height: H)",
+                                                                       "macScroll = CGRect(x: 0, y: 0, width: b.maxX, height: H)"),
+    "M42 the laptop pose's upper scroll view narrowed to its column": ("macScroll = CGRect(x: 0, y: 0, width: W, height: across.minY)",
+                                                                       "macScroll = mac"),
+    "M43 the laptop pose's lower scroll view narrowed to its column":
+        ("deviceScroll = CGRect(x: 0, y: across.maxY, width: W, height: max(0, H - across.maxY))", "deviceScroll = device"),
+    "M44 the laptop pose's upper scroll view onto the fold": ("macScroll = CGRect(x: 0, y: 0, width: W, height: across.minY)",
+                                                              "macScroll = CGRect(x: 0, y: 0, width: W, height: across.maxY)"),
     # The header.
     "M23 the header over the Mac's column only": ("arrangement == .twoColumns ? (mac.minX, device.maxX - mac.minX) : (mac.minX, mac.width)",
                                                    "(mac.minX, mac.width)"),

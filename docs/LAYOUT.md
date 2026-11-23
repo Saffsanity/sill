@@ -936,14 +936,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `SettingsPane.Layout`: in one column both in one scroll view with Disconnect
   under them (right under the rows where they all fit, else pinned at the
   foot), and around the iPhone Duo's fold each in a scroll view of its own
-  with Disconnect under the Mac's; a feature's group goes into the part whose
-  it is), `SettingsPane` (where the pane's two parts go: one column on every
-  screen without a fold to keep to, an iPad's and an iPhone's either way round
-  (Noah, 2026-11-23), a column on each page of the book pose, the laptop
-  pose's two pages, nothing on the fold, right to left mirrored, the room
-  under Disconnect, the home indicator's (`footBottom`); and `Close`, what
-  each way of closing it brings; pure, `Tests/checks/settings-pane`; pbxproj
-  A5E1/F5E1), `AwayCopy` (every
+  with Disconnect under the Mac's; each scroll view across its page, the
+  whole screen in one column, the header, the rows and Disconnect in their
+  column inside it (`inColumn`), so a drag anywhere scrolls; a feature's group
+  goes into the part whose it is), `SettingsPane` (where the pane's two parts
+  go: one column on every screen without a fold to keep to, an iPad's and an
+  iPhone's either way round (Noah, 2026-11-23), a column on each page of the
+  book pose, the laptop pose's two pages, each part's scroll view across its
+  page (`macScroll`, `deviceScroll`: the whole screen in one column), nothing
+  on the fold, right to left mirrored, the room under Disconnect, the home
+  indicator's (`footBottom`); and `Close`, what each way of closing it
+  brings; pure, `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`

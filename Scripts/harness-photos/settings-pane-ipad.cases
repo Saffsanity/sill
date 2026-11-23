@@ -1,7 +1,8 @@
 # Settings as a whole-screen pane (docs/settings-pane-plan.md) on the agents' iPad (iPad Pro 13-inch (M5), iOS
-# 27.0, upright: a sideways screen is drawn a quarter turn round): either way round, an iPad mini's, half of a
-# Split View, a Slide Over's width (one column on each since 2026-11-23), scrolled to the end, large type, right
-# to left; and the stream screen without it, which must be main's pixel for pixel.
+# 27.0, upright: a sideways screen is drawn a quarter turn round): either way round, an iPad mini's either way
+# round (Noah's own, on its side), half of a Split View, a Slide Over's width (one column on each since
+# 2026-11-23, its scroll view the whole screen), scrolled to the end, large type, right to left; and the stream
+# screen without it, which must be main's pixel for pixel.
 #   Scripts/harness-photos.sh Scripts/harness-photos/settings-pane-ipad.cases --device ipad --baseline origin/main
 ipad-upright               -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1
 ipad-upright-end           -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1
@@ -12,6 +13,7 @@ ipad-side-ax3              -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSe
 ipad-side-rtl              -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
 ipad-side-stream           -SillLayout 1376x1032 -SillSafeArea 24,0,20,0
 ipad-mini-upright          -SillLayout 744x1133 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-mini-side             -SillLayout 1133x744 -SillSafeArea 24,0,20,0 -SillSettings 1
 ipad-split-half            -SillLayout 683x1032 -SillSafeArea 24,0,20,0 -SillSettings 1
 ipad-slide-over            -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1
 ipad-slide-over-end        -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1

@@ -16,7 +16,8 @@
   device's (`devicePart`: This iPad's group, Take the Tour, the version). `SettingsPane.Layout` (pure,
   `Tests/checks/settings-pane`) places them: one column (phones upright, the Duo's cover, the Duo open flat
   upright, narrow iPad windows), two columns side by side (sideways from 652 pt, upright from 732: phones on
-  their side, iPads, the Duo open flat sideways), a column on each page in the book pose, and in the laptop pose
+  their side, iPads, the Duo open flat sideways; one column there too since 2026-11-23, below), a column on
+  each page in the book pose, and in the laptop pose
   the Mac's part above the fold and this device's below it; nothing on the fold; at most 600 pt a column; right
   to left mirrored. The rows grow to the third accessibility text size (the header and Disconnect stop at
   xxLarge). It comes up from the bottom edge (0.35 s) and goes down (0.25 s), a fade under Reduce Motion.
@@ -85,3 +86,26 @@
   and its escape gesture, Esc and ⌘. on a hardware keyboard; Picture in Picture started with Settings open;
   rotating and folding with Settings open; the keyboard coming back after Done; Take the Tour and Full Screen
   from the pane.
+- **2026-11-23: one column, and the scroll view across the screen.** Noah tried #393 on his iPad mini and his
+  iPhone 15 Pro: "Settings should not be 2 columns, please make it 1 column" (the plan's open decision 1). So
+  `SettingsPane.Layout` puts the two parts in one column on every screen without a fold to keep to (an iPad
+  either way round, an iPhone on its side, the Duo open flat sideways, as an upright iPhone already was): the
+  header pinned at the top, both parts in one scroll view, Disconnect under them, the column at most 600 pt and
+  centred. Gone with the side-by-side columns: `gap`, `minUprightColumn`, `twoColumnsFrom` and
+  `twoColumnsUprightFrom` (`minColumn` now only says when a book pose's pages are kept to), and the mutants of
+  that code (M2, M4, M5, M19, M20, M22); M35 and M36 bring two columns back without a fold and must fail. The
+  Duo's folded poses keep theirs: a column on each page of the book pose (one centred column would lie across
+  the fold), the laptop pose's two pages; whether the book pose should change too is the plan's decision 7.
+  Half an hour later, having seen one column on both devices in a test build, Noah: "Everything looks good
+  except that on iPad in landscape, you have to touch the middle 3rd of the display to scroll instead of
+  anywhere on the screen": the scroll view was only the column's width (600 of an iPad mini's 1,133 pt). Now
+  each scroll view spans its page, the whole screen in one column, the book pose's page from the screen's edge
+  to the fold's band, the laptop pose's page the screen's width, and the header, the rows and Disconnect keep to
+  their column inside it (HostSettingsPanel's `inColumn`). The pure rule says both (`Layout.macScroll`,
+  `deviceScroll`, the column inside), the console's `settings:` line says the scroll views ("one column 600 pt
+  wide at 266.5, its scroll view 0–1133 (1133×720, 20 pt kept at the bottom)" on an iPad mini on its side), and
+  the check holds them at every real size and over the grid, with mutants M37 to M44 (a scroll view narrowed
+  back to its column, or one onto the fold). What a wider scroll view changes: its edge fades run its width,
+  which holds nothing beside the column, so they look as before; its indicator is at the page's trailing edge
+  (the screen's in one column), as in iOS's own Settings; VoiceOver's order is the same (no element added or
+  moved); right to left mirrors it all from the leading edge.

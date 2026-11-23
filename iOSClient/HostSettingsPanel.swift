@@ -15,7 +15,9 @@ import StreamProtocol
 /// under the pinned header with Done, then Disconnect, `withDisconnect`) and this device's (`devicePart`): one
 /// column on every screen without a fold to keep to (Noah, 2026-11-23), both parts in one scroll view with
 /// Disconnect under them; around the iPhone Duo's fold a column on each page in the book pose, or the laptop
-/// pose's two pages, each part scrolling on its own and nothing on the fold (`SettingsPane.Layout`). A
+/// pose's two pages, each part scrolling on its own and nothing on the fold (`SettingsPane.Layout`). Each scroll
+/// view spans its page, the whole screen in one column, its column inside it, so a drag anywhere scrolls the
+/// rows (Noah, 2026-11-23). A
 /// feature's rows go into the part whose they are: a group is a `Rows` with its `Footnote`, and a group that
 /// begins a topic carries a header as Away from home and This iPad do.
 ///
@@ -238,42 +240,45 @@ struct HostSettingsPanel: View {
     /// across both (its words over the leading page's column, Done at the trailing page's column's end), the
     /// Mac's part with Disconnect under it on the leading page and this device's on the trailing one; or the
     /// laptop pose's two pages, the header, the Mac's part and Disconnect above the fold and this device's part
-    /// below it. Nothing on the fold's band.
+    /// below it. Nothing on the fold's band. Each part spans its page (`macScroll`, `deviceScroll`: the whole
+    /// screen in one column), so its scroll view takes a drag anywhere on it; the header, the rows and
+    /// Disconnect keep to their column inside it (`inColumn`).
     @ViewBuilder private func arranged(_ l: SettingsPane.Layout) -> some View {
         switch l.arrangement {
         case .oneColumn:
             VStack(spacing: 0) {
-                header(words: nil)
-                withDisconnect(footBottom: l.footBottom) {
+                header(words: nil).inColumn(x: l.header.x - l.macScroll.minX, width: l.header.width)
+                withDisconnect(footBottom: l.footBottom, column: l.mac, in: l.macScroll) {
                     macPart
                     devicePart
                 }
             }
-            .frame(width: l.mac.width, height: l.size.height)
-            .paneAt(x: l.mac.minX, y: 0, in: l.size)
+            .frame(width: l.macScroll.width, height: l.macScroll.height)
+            .paneAt(x: l.macScroll.minX, y: l.macScroll.minY, in: l.size)
         case .twoColumns:
+            // The book pose: the header across both pages, each page's scroll view up to the fold's band.
             VStack(spacing: 0) {
-                header(words: l.headerWords)
-                HStack(alignment: .top, spacing: l.device.minX - l.mac.maxX) {
-                    withDisconnect(footBottom: l.footBottom) { macPart }
-                        .frame(width: l.mac.width)
-                    part(bottom: l.bottom) { devicePart }
-                        .frame(width: l.device.width)
+                header(words: l.headerWords).inColumn(x: l.header.x - l.macScroll.minX, width: l.header.width)
+                HStack(alignment: .top, spacing: l.deviceScroll.minX - l.macScroll.maxX) {
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, in: l.macScroll) { macPart }
+                        .frame(width: l.macScroll.width)
+                    part(bottom: l.bottom, column: l.device, in: l.deviceScroll) { devicePart }
+                        .frame(width: l.deviceScroll.width)
                 }
             }
-            .frame(width: l.header.width, height: l.size.height)
-            .paneAt(x: l.header.x, y: 0, in: l.size)
+            .frame(width: l.deviceScroll.maxX - l.macScroll.minX, height: l.size.height)
+            .paneAt(x: l.macScroll.minX, y: 0, in: l.size)
         case .twoPages:
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
-                    header(words: nil)
-                    withDisconnect(footBottom: l.footBottom) { macPart }
+                    header(words: nil).inColumn(x: l.header.x - l.macScroll.minX, width: l.header.width)
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, in: l.macScroll) { macPart }
                 }
-                .frame(width: l.mac.width, height: l.mac.height)
-                .paneAt(x: l.mac.minX, y: l.mac.minY, in: l.size)
-                part(bottom: l.bottom) { devicePart }
-                    .frame(width: l.device.width, height: l.device.height)
-                    .paneAt(x: l.device.minX, y: l.device.minY, in: l.size)
+                .frame(width: l.macScroll.width, height: l.macScroll.height)
+                .paneAt(x: l.macScroll.minX, y: l.macScroll.minY, in: l.size)
+                part(bottom: l.bottom, column: l.device, in: l.deviceScroll) { devicePart }
+                    .frame(width: l.deviceScroll.width, height: l.deviceScroll.height)
+                    .paneAt(x: l.deviceScroll.minX, y: l.deviceScroll.minY, in: l.size)
             }
         }
     }
@@ -282,33 +287,43 @@ struct HostSettingsPanel: View {
     /// (an iPad's tall column), else pinned under the rows' scroll view; `footBottom` under it either way
     /// (SettingsPane.Layout's: the home indicator's room at the screen's foot, 12 pt over the laptop pose's
     /// fold), so it never sits in that room or on the fold: the rows fit only if it is left under Disconnect too.
-    private func withDisconnect<Content: View>(footBottom: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
+    /// The rows and Disconnect in `column`, inside the part's span (`span`, its scroll view's).
+    private func withDisconnect<Content: View>(footBottom: CGFloat, column: CGRect, in span: CGRect,
+                                               @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
+        let x = column.minX - span.minX
         return ViewThatFits(in: .vertical) {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) { rows }
                     .padding(.top, ScrollEdgeFade.height)
                     .dynamicTypeSize(...Self.largestRowType)
-                foot
+                    .inColumn(x: x, width: column.width)
+                foot.inColumn(x: x, width: column.width)
                 Spacer(minLength: footBottom)
             }
             VStack(spacing: 0) {
-                part(bottom: 0) { rows }
-                foot.padding(.bottom, footBottom)
+                part(bottom: 0, column: column, in: span) { rows }
+                foot.inColumn(x: x, width: column.width).padding(.bottom, footBottom)
             }
         }
     }
 
-    /// One part's rows in a scroll view of their own, which bounces only where they do not fit. `bottom`: the
-    /// room kept under the rows where the scroll view reaches the screen's bottom edge (the home indicator's),
-    /// so they scroll under it and their last line rests above it. Its edges fade (`ScrollEdgeFade`), so a row
-    /// cut by the header, Disconnect or the fold reads as scrolled away; the rows begin under the top's fade.
-    private func part<Content: View>(bottom: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
+    /// One part's rows in a scroll view of their own, which bounces only where they do not fit. The scroll view
+    /// spans the part's page (`span`: the whole screen in one column), and the rows keep to `column` inside it,
+    /// so a drag beside them scrolls them too (Noah, 2026-11-23: "on iPad in landscape, you have to touch the
+    /// middle 3rd of the display to scroll instead of anywhere on the screen"); its indicator is at the page's
+    /// trailing edge, as in a system list whose rows keep a readable width. `bottom`: the room kept under the
+    /// rows where the scroll view reaches the screen's bottom edge (the home indicator's), so they scroll under it
+    /// and their last line rests above it. Its edges fade (`ScrollEdgeFade`), so a row cut by the header,
+    /// Disconnect or the fold reads as scrolled away; the rows begin under the top's fade.
+    private func part<Content: View>(bottom: CGFloat, column: CGRect, in span: CGRect,
+                                     @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         return ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) { rows }
                     .padding(.top, ScrollEdgeFade.height)
+                    .inColumn(x: column.minX - span.minX, width: column.width)
             }
             .scrollIndicatorsFlash(onAppear: true)
             .scrollBounceBehavior(.basedOnSize)
@@ -1440,6 +1455,16 @@ private extension View {
         padding(.leading, x)
             .padding(.top, y)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    /// This view as wide as a column `x` from its container's leading edge, the container's whole width taken
+    /// (SettingsPane.Layout's column inside its part's scroll view): the rest is empty, so the scroll view around
+    /// it spans its page while the rows, the header and Disconnect keep to the column. From the leading edge,
+    /// so right to left mirrors it.
+    func inColumn(x: CGFloat, width: CGFloat) -> some View {
+        frame(width: max(0, width))
+            .padding(.leading, max(0, x))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

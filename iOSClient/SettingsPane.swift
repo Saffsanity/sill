@@ -31,7 +31,10 @@ enum SettingsPane {
     /// down to its bottom edge: the layouts' own space, in which the fold is given). One column on every screen
     /// without a fold to keep to, an iPad's and an iPhone's either way round (Noah, 2026-11-23: "Settings should
     /// not be 2 columns, please make it 1 column"); around the iPhone Duo's fold, so that nothing lies across
-    /// it, a column on each page in the book pose and a page each side of it in the laptop pose.
+    /// it, a column on each page in the book pose and a page each side of it in the laptop pose. Each part's
+    /// scroll view spans its page, the whole screen in one column, and its column lies inside it, so a drag
+    /// anywhere on the pane scrolls the rows (Noah, 2026-11-23: "on iPad in landscape, you have to touch the
+    /// middle 3rd of the display to scroll instead of anywhere on the screen").
     struct Layout: Equatable {
         enum Arrangement: String, Equatable {
             /// One scroll view under the header, Disconnect under it: both parts in one column.
@@ -50,6 +53,15 @@ enum SettingsPane {
         let mac: CGRect
         /// This device's part in that space: the trailing page's column, the lower page, or `mac` in one column.
         let device: CGRect
+        /// The Mac's part's scroll view in that space, its column `mac` inside it: the whole screen in one
+        /// column, the book pose's leading page from the screen's edge to the fold's band, the laptop pose's page
+        /// above the fold, the screen's width. x and width are the scroll view's own; y and height its part's,
+        /// whose top the pinned header takes and whose foot Disconnect does, where the part has them.
+        let macScroll: CGRect
+        /// This device's part's: the book pose's trailing page from the fold's band to the screen's edge, the
+        /// laptop pose's page below the fold, the screen's width; in one column `macScroll`, the scroll view both
+        /// parts share.
+        let deviceScroll: CGRect
         /// The fold's band in that space, when the parts keep off it; nil otherwise.
         let band: CGRect?
         /// What the content keeps clear of at the screen's bottom edge (the home indicator).
@@ -66,16 +78,20 @@ enum SettingsPane {
             self.rightToLeft = rightToLeft
             let column = min(SettingsPane.maxColumn, max(0, W - 2 * m))
             let centred = (W - column) / 2
-            // The laptop pose: a page above the fold for the Mac's part, a page below it for this device's.
+            // The laptop pose: a page above the fold for the Mac's part, a page below it for this device's, each
+            // scroll view the page's width.
             if let across = fold.horizontalBand, across.minY >= SettingsPane.minPage,
                H - across.maxY - max(0, bottomInset) >= SettingsPane.minPage {
                 arrangement = .twoPages
                 mac = CGRect(x: centred, y: 0, width: column, height: across.minY)
                 device = CGRect(x: centred, y: across.maxY, width: column, height: max(0, H - across.maxY))
+                macScroll = CGRect(x: 0, y: 0, width: W, height: across.minY)
+                deviceScroll = CGRect(x: 0, y: across.maxY, width: W, height: max(0, H - across.maxY))
                 band = Self.leading(across, width: W, rightToLeft: rightToLeft)
                 return
             }
-            // The book pose: a column on each page, centred there; the band between them holds nothing.
+            // The book pose: a column on each page, centred there, each scroll view its page up to the band; the
+            // band between them holds nothing.
             if let down = fold.verticalBand {
                 let b = Self.leading(down, width: W, rightToLeft: rightToLeft)
                 let leadingPage = b.minX, trailingPage = W - b.maxX
@@ -85,15 +101,20 @@ enum SettingsPane {
                     arrangement = .twoColumns
                     mac = CGRect(x: (leadingPage - first) / 2, y: 0, width: first, height: H)
                     device = CGRect(x: b.maxX + (trailingPage - second) / 2, y: 0, width: second, height: H)
+                    macScroll = CGRect(x: 0, y: 0, width: leadingPage, height: H)
+                    deviceScroll = CGRect(x: b.maxX, y: 0, width: trailingPage, height: H)
                     band = b
                     return
                 }
             }
             // No fold to keep to: one column, both parts in it, whatever the screen's width or which way round it
-            // is held (Noah, 2026-11-23: "Settings should not be 2 columns, please make it 1 column").
+            // is held (Noah, 2026-11-23: "Settings should not be 2 columns, please make it 1 column"), in one
+            // scroll view across the whole screen.
             arrangement = .oneColumn
             mac = CGRect(x: centred, y: 0, width: column, height: H)
             device = mac
+            macScroll = CGRect(x: 0, y: 0, width: W, height: H)
+            deviceScroll = macScroll
             band = nil
         }
 
@@ -107,7 +128,8 @@ enum SettingsPane {
 
         /// The header's span, x and width in the leading-edge space: the Mac's column (one column, the laptop
         /// pose's upper page), and in the book pose from the leading page's column across the fold to the
-        /// trailing page's column's far edge, where Done goes.
+        /// trailing page's column's far edge, where Done goes. Pinned over the scroll view, it keeps to the column,
+        /// as the rows and Disconnect do, however wide the scroll view.
         var header: (x: CGFloat, width: CGFloat) {
             arrangement == .twoColumns ? (mac.minX, device.maxX - mac.minX) : (mac.minX, mac.width)
         }
@@ -129,25 +151,29 @@ enum SettingsPane {
             arrangement == .twoColumns ? max(0, mac.width - 2 * Self.headerInset) : nil
         }
 
-        /// The DEBUG console's line: "one column 600 pt wide at 67 (734×393, 21 pt kept at the bottom)" (an
-        /// iPhone 15 Pro on its side), "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the fold
-        /// 455.5–495.5 between (951×669, 34 pt kept at the bottom)" (the book pose). The bottom is the home
-        /// indicator's room the pane was given, so a gate sees it arrive (none said where there is none).
+        /// The DEBUG console's line: "one column 600 pt wide at 67, its scroll view 0–734 (734×393, 21 pt kept at
+        /// the bottom)" (an iPhone 15 Pro on its side), "two columns 423.5 pt wide, the Mac's at 16, this device's
+        /// at 511.5, their scroll views 0–455.5 and 495.5–951, the fold 455.5–495.5 between (951×669, 34 pt kept at
+        /// the bottom)" (the book pose). The columns and scroll views from the leading edge, the fold on the screen
+        /// (as `onScreen` gives it). The bottom is the home indicator's room the pane was given, so a gate sees it
+        /// arrive (none said where there is none).
         var description: String {
             func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", Double(v)) }
+            func across(_ r: CGRect) -> String { "\(n(r.minX))–\(n(r.maxX))" }
             let kept = bottom > 0 ? ", \(n(bottom)) pt kept at the bottom" : ""
             let screen = "(\(n(size.width))×\(n(size.height))\(kept)\(rightToLeft ? ", right to left" : ""))"
             switch arrangement {
             case .oneColumn:
-                return "one column \(n(mac.width)) pt wide at \(n(mac.minX)) \(screen)"
+                return "one column \(n(mac.width)) pt wide at \(n(mac.minX)), its scroll view \(across(macScroll)) \(screen)"
             case .twoColumns:
                 // The book pose's columns: its fold is always between them.
                 let fold = band.map { b in ", the fold \(n(onScreen(b).minX))–\(n(onScreen(b).maxX)) between" } ?? ""
                 let widths = mac.width == device.width ? "\(n(mac.width)) pt wide" : "\(n(mac.width)) and \(n(device.width)) pt wide"
-                return "two columns \(widths), the Mac's at \(n(mac.minX)), this device's at \(n(device.minX))\(fold) \(screen)"
+                return "two columns \(widths), the Mac's at \(n(mac.minX)), this device's at \(n(device.minX)), their scroll views "
+                    + "\(across(macScroll)) and \(across(deviceScroll))\(fold) \(screen)"
             case .twoPages:
                 return "two pages \(n(mac.width)) pt wide at \(n(mac.minX)), the Mac's to \(n(mac.maxY)), this device's from "
-                    + "\(n(device.minY)) \(screen)"
+                    + "\(n(device.minY)), their scroll views \(across(macScroll)) \(screen)"
             }
         }
     }

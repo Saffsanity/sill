@@ -32,34 +32,50 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
     SillHost note, Away from home; then Disconnect;
   - this device's: This iPad (This iPhone) and its switches, Take the Tour, the version.
 - **Arranged by the screen and the fold** (the rule is `SettingsPane.Layout`'s):
-  - *One column* (an iPhone upright, the Duo's cover either way, the Duo open flat upright, an iPad window
-    narrower than two columns): the header pinned at the top, both parts in one scroll view, Disconnect
-    under them, as the panel had them. At most 600 pt wide, centred, 16 pt from the safe area.
-  - *Two columns* (a screen held sideways with room for two of 300 pt: every iPhone on its side, the SE's
-    667 pt included; the Duo open flat sideways; an iPad sideways; and upright where two of 340 pt fit: an
-    iPad upright, the mini's 744 included, but never the Duo's 669): the Mac's part in the leading column
-    with Disconnect under it, this device's in the trailing one, each scrolling on its own; each at
-    most 600 pt, 20 pt apart, the pair centred. The header runs over both: the Mac's name and lines over the
-    Mac's column, Done at the far column's trailing end. Why: a phone on its side is 375 to 440 pt tall and
-    shows twice as much; an iPad has room for both parts side by side; and the book pose needs exactly this.
-  - *The book pose* (the Duo's inner display sideways, half-folded): the two columns one on each page,
-    centred there, 16 pt from the page's edges; the fold's band between them holds nothing (the header's
-    words stay on the leading page, Done is on the trailing one).
+  - *One column* on every screen without a fold to keep to (Noah, 2026-11-23: "Settings should not be 2
+    columns, please make it 1 column"): an iPhone upright and on its side, an iPad either way round and in
+    its narrow windows, the Duo's cover either way, and its inner display open flat either way. The header
+    pinned at the top, both parts in one scroll view (the Mac's, then this device's), Disconnect under them,
+    as the panel had them. The column is at most 600 pt wide, centred, 16 pt from the safe area; the scroll
+    view spans the whole screen with the column inside it, so a drag anywhere on the pane scrolls the rows
+    (Noah, the same day, of the first build with one column: "on iPad in landscape, you have to touch the
+    middle 3rd of the display to scroll instead of anywhere on the screen"; that build's scroll view was the
+    column's 600 pt, of an iPad mini's 1,133). The header and Disconnect keep to the column. Until that day a
+    screen with room for two columns (sideways from 652 pt, upright from 732: every iPhone on its side, an
+    iPad either way round, the Duo open flat sideways) had the two parts side by side, the Mac's in the
+    leading column; Noah tried that on his iPad mini and his iPhone 15 Pro and asked for one column.
+  - *The book pose* (the Duo's inner display sideways, half-folded): a column on each page, centred there,
+    16 pt from the page's edges, the Mac's part on the leading page and this device's on the trailing one,
+    each page's scroll view across the page from the screen's edge to the fold's band; the band between them
+    holds nothing (the header's words stay on the leading page, Done is on the trailing one). One centred
+    column would lie across the fold, so each page keeps its column: the alternative this plan gave ("one
+    centred column everywhere but the book pose"). Whether the book pose should change too is open (decision
+    7). A fold whose pages could not hold a column of 300 pt (no device has one: the Duo's hold 423.5) is not
+    kept to.
   - *The laptop pose* (upright, half-folded): two pages, the Mac's part above the fold (the header, its
-    groups and Disconnect at the page's foot) and this device's below it, each scrolling on its own;
-    nothing on the band. A fold whose pages could not hold a column (no device has one) is not kept to.
+    groups and Disconnect at the page's foot) and this device's below it, each scrolling on its own, each
+    scroll view the screen's width with the column inside it; nothing on the band. A fold whose pages could
+    not hold a column (no device has one) is not kept to.
   - Right to left (Arabic, Hebrew): the Mac's part is on the leading side, the right, Done on the left; a
     fold's pages are the right page and the left one.
-- **Disconnect**, in every arrangement, comes right under the Mac's rows while they fit without scrolling
-  (an iPad's tall column) and is pinned under their scroll view where they do not, as the panel had it: in
-  reach either way.
-- **Scrolling**: each part scrolls on its own and bounces only when it does not fit; its edges fade over
-  12 pt where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply,
-  which at the laptop pose's fold left a sliver of a line).
+- **Disconnect** ends the Mac's part, as the panel had it: in one column after both parts, right under the
+  rows while they all fit without scrolling and pinned under their scroll view where they do not; on the
+  book pose's leading page and the laptop pose's upper page the same way under the Mac's rows. In reach
+  either way.
+- **Scrolling**: the rows scroll (in one column both parts together; around the fold each part on its own)
+  and bounce only when they do not fit. Each scroll view spans its page, the whole screen in one column, and
+  the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`), so a drag
+  beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt where
+  rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
+  laptop pose's fold left a sliver of a line); the fade runs the scroll view's width, which holds nothing
+  beside the column, so it reads as before. The scroll indicator is the scroll view's: at the trailing edge of
+  the screen in one column (of the page around the fold, beside the band on the book pose's leading page),
+  away from the rows on a wide screen, as in iOS's own Settings, whose lists run the screen's width while their
+  rows keep a readable one.
 - **For the rows to come**: a feature of the Mac (Virtual Desktop, privacy mode) adds its group to the Mac's
   part, a feature of this device (microphone and camera passthrough, recording, files and photos) to this
   device's: a group is a `Rows` with its `Footnote`, and a group that begins a topic of its own carries a
-  header the way Away from home and This iPad do. Each part scrolls on its own, so neither runs out of room.
+  header the way Away from home and This iPad do. The rows scroll, so neither part runs out of room.
 - **Large type**: the parts' rows grow with Dynamic Type to the third accessibility size (the panel stopped
   at xxLarge for want of room; a whole screen has it, and every row stacks its control under its words when
   the words need the width); the pinned header and Disconnect stay at most at xxLarge, so on a phone on its
@@ -80,10 +96,14 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   down: a whole-screen page closes with Done. No ⌘W: the app has none, and under Sill's hold ⌘W is the
   Mac's own Close Window.
 - VoiceOver: the pane is one modal element, as the panel was: its focus starts on the Mac's name, then the
-  header's lines, Done, the Mac's part, and this device's part, with Disconnect after the Mac's part in two
-  columns and pages and last in one column, where it is pinned at the bottom (the panel's order); the
-  stream screen under it is hidden from VoiceOver (iOS 18 and later; before, the modal trait alone keeps
-  VoiceOver in the pane, as it did in the panel) and takes no touch.
+  header's lines, Done, the Mac's part, and this device's part, with Disconnect last in one column, where it
+  ends both parts (the panel's order), and after the Mac's part on the book pose's and the laptop pose's
+  pages; a scroll view wider than its rows adds no element and moves none, and VoiceOver's three-finger
+  scroll takes the whole page. The stream screen under it is hidden from VoiceOver (iOS 18 and later; before,
+  the modal trait alone keeps VoiceOver in the pane, as it did in the panel) and takes no touch.
+- A hardware keyboard: Esc and ⌘. close the pane. The scroll view's width changes nothing for the keyboard:
+  the same one scroll view (one per page around the fold) holds the same rows; whether iPadOS's own keys
+  scroll it is untested on a device, as it was before.
 
 ## The stream underneath
 
@@ -119,11 +139,20 @@ Its placement only: the tap catcher, the transition from the gear's corner, its 
 (`PhonePortraitLayout.settings` and `settingsAnchor`); the checks that held them changed with them. The rows
 and their behaviour are untouched.
 
+## Decided
+
+1. **One column; Noah, 2026-11-23**, having tried the pane on his iPad mini and his iPhone 15 Pro: "Settings
+   should not be 2 columns, please make it 1 column". One centred column on every screen without a fold to
+   keep to, the iPhone Duo's folded poses as they were (a column on each page of the book pose, a page each
+   side of the laptop pose's fold). Until then the default taken was two columns on wide screens, sideways
+   from 652 pt and upright from 732. Half an hour later, having seen one column on both devices in a test
+   build: "Everything looks good except that on iPad in landscape, you have to touch the middle 3rd of the
+   display to scroll instead of anywhere on the screen". So one column stands on the iPad and the iPhone,
+   both ways round, and each scroll view now spans its page (the whole screen in one column), the rows, the
+   header and Disconnect keeping to their column inside it.
+
 ## Open decisions for Noah, and the default taken for each
 
-1. **Two columns on wide screens** (taken: sideways from 652 pt, upright from 732 pt) or one centred column
-   everywhere but the book pose. Two columns show twice as much on a phone on its side and use an iPad's
-   width; one column would read the same on every device. One constant (`SettingsPane.minColumn`) changes it.
 2. **Disconnect in the laptop pose**: at the foot of the Mac's page, above the fold (taken), with the Mac's
    things and away from the palms on the lower page; or at the screen's bottom, under this device's part.
 3. **Large type to the third accessibility size** (taken) or kept at xxLarge as the panel was.
@@ -131,3 +160,7 @@ and their behaviour are untouched.
 5. **The Mac's name as the page's title** (taken: 20 pt semibold, the panel's was 17) or as it was.
 6. **No swipe down to close** (taken): a whole-screen page closes with Done; a swipe down from the header
    could be added for one-handed use.
+7. **The book pose** after decision 1 (taken: as it was, a column on each page, the Mac's part on the leading
+   page and this device's on the trailing one, each scrolling on its own across its page), or one column there
+   too: both parts in one scroll view on the leading page, the trailing page empty. A column centred on the
+   screen would lie across the fold. The photos `book` and `book-end` show what is taken.

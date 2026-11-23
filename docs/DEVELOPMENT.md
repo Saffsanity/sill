@@ -2207,8 +2207,10 @@ simulator:
   the connect screen in a given state. Settings is a whole-screen pane
   (docs/settings-pane-plan.md): the console's `settings: …` line says how it
   sits on the screen ("two columns 423.5 pt wide, the Mac's at 16, this
-  device's at 511.5, the fold 455.5–495.5 between (951×669, 34 pt kept at the
-  bottom)", the last the home indicator's room it was given), and
+  device's at 511.5, their scroll views 0–455.5 and 495.5–951, the fold
+  455.5–495.5 between (951×669, 34 pt kept at the bottom)" in the book pose;
+  "one column 600 pt wide at 266.5, its scroll view 0–1133 (…)" on an iPad
+  mini on its side; the last the home indicator's room it was given), and
   `-SillSettingsEnd 1` starts each of its parts at its end. Large type and
   right to left need no flag of Sill's: the system's own launch arguments,
   `-UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL`
