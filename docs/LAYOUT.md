@@ -667,7 +667,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and runs nothing; S5 is Sill's own level, for a step re-run with
   `--candidate S5`. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST
   ONLY) runs darkening's dry run on synthetic test hosts on loopback, the
-  watchdog's among its cases. `Scripts/lock-check/` (TEST ONLY;
+  watchdog's among its cases, and in `switch` Sill.app's own code for the
+  switches and its Quit in the bare SillMenuBar binary as one (`-SillSetAfter`,
+  `-SillQuitAfter`; the three keys it saves in the bare binary's defaults are
+  read and removed). `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to
   another user, the unlock's settle, the flap and a start while locked, with the
