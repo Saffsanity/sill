@@ -139,8 +139,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// The finger pan opened the Mac's scroll (its stroke was the Mac's when it began): its steps and its
     /// end go out. A pan whose stroke the picture took sends nothing at all.
     private var fingerScroll = false
-    /// A finger held on the picture: a right click at once, or with Hold, Then Drag on, a right click at
-    /// its lift or a left drag once it moves (TouchHold).
+    /// A finger held on the picture: with Hold, Then Drag on (the default), a right click at its lift or a
+    /// left drag once it moves; off, a right click at once (TouchHold).
     private var hold = TouchHold()
 
     override init(frame: CGRect) {
@@ -290,11 +290,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         sendPointer(.leftUp, at: point, clamped: false)
     }
 
-    /// Long press: the right button, since there is no second finger to spare for it, at once, as before
-    /// #178; with this device's Hold, Then Drag on (TouchHold, read as each hold begins), at the lift if
-    /// it lifts where it was pressed, and moved on, a drag with the left button instead. The pointer goes
-    /// there as the hold begins; what is composed goes, and what was typed is forgotten, only past the
-    /// letterbox's guard, as for a tap.
+    /// Long press: the right button, since there is no second finger to spare for it. With this device's
+    /// Hold, Then Drag on (the default since Noah's 2026-11-20; TouchHold, read as each hold begins), at the
+    /// lift if it lifts where it was pressed, and moved on, a drag with the left button instead; off, at
+    /// once, as before #178. The pointer goes there as the hold begins; what is composed goes, and what was
+    /// typed is forgotten, only past the letterbox's guard, as for a tap.
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         let point = gesture.location(in: self)
         switch gesture.state {

@@ -187,8 +187,9 @@ struct TourFeatures: Equatable {
     /// This device's Three-Finger Gestures are on, and the Mac takes them (its window list says so).
     var gestures: Bool
     /// This device's Hold, Then Drag is on (TouchHold, PR #292): a hold on the picture right-clicks at its
-    /// lift, or drags once it moves; off unless turned on, a hold right-clicks at once.
-    var holdThenDrag = false
+    /// lift, or drags once it moves; off, a hold right-clicks at once. On unless set, as the switch itself
+    /// (`TouchHold.defaultOn`; Noah, 2026-11-20); StreamScreen always passes the switch.
+    var holdThenDrag = true
     /// The Mac's Virtual Display setting is on.
     var virtualDisplay: Bool
     /// The Mac shares its clipboard (its window list says so).
@@ -586,8 +587,9 @@ enum TourPolicy {
         switch t {
         case .touch:
             var rows = [row("hand.tap", [strong("Tap"), plain(" to click.")]),
-                        // The hold's row follows this device's Hold, Then Drag (TouchHold, PR #292): off, a right
-                        // click, as before; on, the drag beside it. Not "New:": it shows once its owner turned it on.
+                        // The hold's row follows this device's Hold, Then Drag (TouchHold, PR #292): on, the default
+                        // since Noah's 2026-11-20, the drag beside the right click; off, the right click, as before.
+                        // Not "New:", as before the default changed: which of 0.7's rows carry it is the 0.7 tour's.
                         features.holdThenDrag
                             ? row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click, or hold, then drag, to move a window or select text.")])
                             : row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),

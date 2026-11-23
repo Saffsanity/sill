@@ -11,9 +11,9 @@
 #   Tests/touchrig/run.sh --switch off NAME    sendGesture answers false, as with the device's switch off
 #   Tests/touchrig/compare.py BASE.log NEW.log [OFF.log]   H7's verdict
 #   RIG_ONLY=zoom Tests/touchrig/run.sh NAME   the overlay's zoom strokes alone (#65), where the sources have the zoom
-#   RIG_ONLY=hold Tests/touchrig/run.sh NAME   the overlay's touch and hold alone (#178): Hold, Then Drag off, as on a
-#                                              fresh install, a right click at the hold, as before; with RIG_HOLD=drag
-#                                              on (#292): a right click at the lift, or a drag once it moves
+#   RIG_ONLY=hold Tests/touchrig/run.sh NAME   the overlay's touch and hold alone (#178): Hold, Then Drag on, as on a
+#                                              fresh install (#292): a right click at the lift, or a drag once it moves;
+#                                              with RIG_HOLD=off (any run) off: a right click at the hold, as before
 #   RIG_ONLY=edge Tests/touchrig/run.sh NAME   the strokes at the left edge alone (full screen, docs/full-screen-plan.md):
 #                                              the controls shown on both surfaces, then hidden with the swipe in listening
 #   RIG_ONLY=reveal Tests/touchrig/run.sh NAME the hidden strokes alone; with RIG_ORIENT=landscape the scene is turned
@@ -78,6 +78,8 @@ if grep -q "var sendGesture" TrackpadView.swift; then flags+=(-D GESTURES); fi
 if grep -q "StreamZoom" InputOverlay.swift; then flags+=(-D ZOOM); fi
 # Full screen's swipe in from the left edge (docs/full-screen-plan.md), where the sources have it: on the rig's window.
 if [ -f RevealEdgePan.swift ]; then flags+=(-D REVEAL); fi
+# Hold, Then Drag (#292), where the overlay asks it: the rig then says in its log whether it was on (RIG_HOLD).
+if grep -q "holdThenDragOn" InputOverlay.swift; then flags+=(-D HOLD); fi
 cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth.m" "$here/Bridging.h" .
 
 target=arm64-apple-ios17.0-simulator

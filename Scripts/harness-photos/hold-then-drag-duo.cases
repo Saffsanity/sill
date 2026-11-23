@@ -1,13 +1,14 @@
 # Hold, Then Drag (#178, PR #292; docs/steps/2026-11-19-ready-292.md) on the agents' Duo (iOS 27.1): the Settings panel
-# at its switch, off (the default) and on, sideways and upright, large type; the tour's picture card with the switch off
-# (main's words: it must be main's pixel for pixel) and on (the drag in the hold's row); and the stream screen with the
-# switch on, which must be main's (the switch draws nothing there). Main ignores -Sill.holdThenDrag and
-# -SillSettingsScroll holddrag (its panel then opens at the top).
+# at its switch, at its default (on since Noah's 2026-11-20, no argument) and turned off, sideways, and on by name
+# upright and in large type; the tour's picture card at the default (the drag in the hold's row) and with the switch
+# off (main's words: it must be main's pixel for pixel); and the stream screen at the default, which must be main's
+# (the switch draws nothing there). Main ignores -Sill.holdThenDrag and -SillSettingsScroll holddrag (its panel then
+# opens at the top).
 #   Scripts/harness-photos.sh Scripts/harness-photos/hold-then-drag-duo.cases --baseline origin/main
-duo-holddrag-off        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag
-duo-holddrag-on         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag -Sill.holdThenDrag 1
+duo-holddrag-off        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag -Sill.holdThenDrag 0
+duo-holddrag-on         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag
 duo-holddrag-upright    -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag -Sill.holdThenDrag 1
 duo-holddrag-ax         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll holddrag -Sill.holdThenDrag 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
-duo-tour-holddrag-off   -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch --wait=6
-duo-tour-holddrag-on    -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.holdThenDrag 1 --wait=6
-duo-stream-holddrag-on  -SillLayout 951x669 -SillHinge flat -Sill.holdThenDrag 1
+duo-tour-holddrag-off   -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.holdThenDrag 0 --wait=6
+duo-tour-holddrag-on    -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch --wait=6
+duo-stream-holddrag-on  -SillLayout 951x669 -SillHinge flat

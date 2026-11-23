@@ -4059,13 +4059,13 @@ final class StreamClient: ObservableObject {
     static var reverseScrollOn: Bool { UserDefaults.standard.bool(forKey: reverseScrollKey) }
 
     /// This device's switch for Hold, Then Drag (the Settings panel's This iPad group; issue #178, PR #292):
-    /// `TouchHold.defaultOn` (off) unless set. On, a finger held on the picture and then moved drags with
-    /// the left button, and one lifted where it was pressed right-clicks at the lift; off, the hold
-    /// right-clicks at once, as before. The device's own preference, never sent to the Mac; read as each
-    /// hold on the picture begins (`InputOverlayView`).
+    /// `TouchHold.defaultOn` (on, Noah 2026-11-20) unless set, so never set is on and turned off stays off.
+    /// On, a finger held on the picture and then moved drags with the left button, and one lifted where it
+    /// was pressed right-clicks at the lift; off, the hold right-clicks at once, as before. The device's
+    /// own preference, never sent to the Mac; read as each hold on the picture begins (`InputOverlayView`).
     static var holdThenDragOn: Bool {
-        // `bool(forKey:)`, not `as? Bool`: a launch argument's "1" is a string, which it reads as @AppStorage
-        // does, so the switch and the picture always agree.
+        // `bool(forKey:)`, not `as? Bool`: a launch argument's "0" or "1" is a string, which it reads as
+        // @AppStorage does, so the switch and the picture always agree.
         let defaults = UserDefaults.standard
         return defaults.object(forKey: TouchHold.key) == nil ? TouchHold.defaultOn : defaults.bool(forKey: TouchHold.key)
     }

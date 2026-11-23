@@ -35,8 +35,8 @@ MUTANTS = [
     # The state.
     ("R1 reset keeps the drag", "        start = nil\n        isDragging = false\n    }", "        start = nil\n    }"),
     ("R2 reset keeps the hold", "        start = nil\n        isDragging = false\n    }", "        isDragging = false\n    }"),
-    # The switch, Hold, Then Drag (PR #292): off by default, a right click at once while off.
-    ("G1 on by default", "static let defaultOn = false", "static let defaultOn = true"),
+    # The switch, Hold, Then Drag (PR #292): on by default (Noah, 2026-11-20), a right click at once while off.
+    ("G1 off by default", "static let defaultOn = true", "static let defaultOn = false"),
     ("G2 another key", 'static let key = "Sill.holdThenDrag"', 'static let key = "Sill.holdDrag"'),
     ("G3 the switch ignored (always the drag)", "guard drags else { return [.rightClick(point)] }", "guard drags || true else { return [.rightClick(point)] }"),
     ("G4 off: no right click at the hold", "guard drags else { return [.rightClick(point)] }", "guard drags else { return [] }"),

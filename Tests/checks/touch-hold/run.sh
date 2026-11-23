@@ -1,9 +1,9 @@
 #!/bin/bash
 # TouchHold (iOSClient/TouchHold.swift) on its own: the picture's touch and hold in Direct Touch (issue
-# #178), behind this device's Hold, Then Drag (PR #292, off unless turned on: a right click at once, as
-# before). On: lifted where it was pressed, a right click at the lift; moved past the slop, a left drag from
-# where it was pressed; a cancel lets the button up and clicks nothing; then 20,000 random holds, the switch
-# on or off, against a model.
+# #178), behind this device's Hold, Then Drag (PR #292, on unless turned off: Noah, 2026-11-20). On: lifted
+# where it was pressed, a right click at the lift; moved past the slop, a left drag from where it was
+# pressed; a cancel lets the button up and clicks nothing. Off: a right click at once, as before. Then 20,000
+# random holds, the switch on or off, against a model.
 #   Tests/checks/touch-hold/run.sh             compile and run the check
 #   Tests/checks/touch-hold/run.sh --mutants   one-line mutants of TouchHold.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

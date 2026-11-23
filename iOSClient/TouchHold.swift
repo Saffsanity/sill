@@ -8,11 +8,12 @@ import Foundation
 /// The right click came at the hold itself before this, 0.45 s in; it waits for the lift now, as only the
 /// lift tells a right click from a drag.
 ///
-/// Behind a switch of this device's own, Settings › This iPad (This iPhone) › Hold, Then Drag (`key`), off
-/// unless turned on (`defaultOn`): it moves the right click from the hold to the lift, so nobody gets it
-/// without asking (Noah, 2026-11-18: community pull requests get toggles, new behaviour off by default;
-/// docs/steps/2026-11-19-ready-292.md). Off, the hold is a right click at once, as before #178, and the
-/// finger's moves and lift send nothing (`began(at:drags:)`).
+/// Behind a switch of this device's own, Settings › This iPad (This iPhone) › Hold, Then Drag (`key`), on
+/// unless turned off (`defaultOn`; Noah, 2026-11-20, having tried it on his iPad mini: "hold and drag works
+/// as expect it, make it on by default", over the rule that new behaviour is off unless turned on;
+/// docs/steps/2026-11-19-ready-292.md). It moves the right click from the hold to the lift, so an owner who
+/// wants the right click at once turns it off. Off, the hold is a right click at once, as before #178, and
+/// the finger's moves and lift send nothing (`began(at:drags:)`).
 ///
 /// Pure: CoreGraphics only, checked in Tests/checks/touch-hold. InputOverlay's long press feeds it, with
 /// the switch as each hold begins (`StreamClient.holdThenDragOn`), and sends what it returns.
@@ -23,12 +24,14 @@ struct TouchHold {
     /// How far the held finger moves, in points, before it drags rather than right-clicks.
     static let slop: CGFloat = 8
 
-    /// The UserDefaults key of Hold, Then Drag (`@AppStorage` in the Settings panel). `-Sill.holdThenDrag 1`
-    /// turns it on for one run, in the normal app too. Never sent to the Mac.
+    /// The UserDefaults key of Hold, Then Drag (`@AppStorage` in the Settings panel). `-Sill.holdThenDrag 0`
+    /// turns it off for one run, `1` on, in the normal app too. Never sent to the Mac.
     static let key = "Sill.holdThenDrag"
-    /// The switch's default: off, so a hold right-clicks at once as it always did, until this device's
-    /// owner turns it on. The one place the default is written.
-    static let defaultOn = false
+    /// The switch's default: on (Noah, 2026-11-20), so a hold that moves drags and one lifted in place
+    /// right-clicks at the lift, until this device's owner turns it off; one who turned it off keeps it off.
+    /// What the Settings panel and `StreamClient.holdThenDragOn` take while the switch was never set
+    /// (`TourFeatures.holdThenDrag`'s own default, for the tour's other callers, is the same).
+    static let defaultOn = true
 
     // MARK: Words
 

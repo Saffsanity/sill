@@ -79,8 +79,8 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
-    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on
-    /// (`TouchHold.defaultOn`), read by the picture's input view as each hold begins, never sent.
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off
+    /// (`TouchHold.defaultOn`, Noah 2026-11-20), read by the picture's input view as each hold begins, never sent.
     @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
@@ -759,7 +759,8 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
-        // Hold, Then Drag (issue #178, PR #292; TouchHold): off unless turned on, this device's own, never sent.
+        // Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off (Noah, 2026-11-20), this device's
+        // own, never sent.
         // The first of the rows about touch; under Touch Mode's Direct Touch once #222's row is here (in Trackpad
         // mode the pad over the picture takes the fingers, and has its own hold, then drag), and in the
         // whole-screen Settings pane's Touch and Zoom group once #393 is.

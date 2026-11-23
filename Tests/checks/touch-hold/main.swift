@@ -1,9 +1,9 @@
 // iOSClient/TouchHold.swift on its own: the picture's touch and hold in Direct Touch (issue #178). With this
-// device's Hold, Then Drag off (the default, PR #292) a hold right-clicks at once, as before #178, and its
-// moves, lift and cancel send nothing. On, a hold lifted where it was pressed right-clicks at the lift; a hold
-// that then moves past the slop drags with the left button from where it was pressed, to the lift; a cancel
-// lets the button up and clicks nothing; input before a hold, or after its end, sends nothing. Then 20,000
-// random holds, the switch on or off, against a model written here.
+// device's Hold, Then Drag on (PR #292; the default, Noah 2026-11-20), a hold lifted where it was pressed
+// right-clicks at the lift; a hold that then moves past the slop drags with the left button from where it was
+// pressed, to the lift; a cancel lets the button up and clicks nothing; input before a hold, or after its end,
+// sends nothing. Off, a hold right-clicks at once, as before #178, and its moves, lift and cancel send
+// nothing. Then 20,000 random holds, the switch on or off, against a model written here.
 //   swiftc -O iOSClient/TouchHold.swift Tests/checks/touch-hold/main.swift -o check && ./check
 import CoreGraphics
 import Foundation
@@ -20,10 +20,10 @@ func at(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: o.x + dx, y: o.y +
 check(H.press == 0.45, "the hold is 0.45 s, the right click's as before: \(H.press)")
 check(H.slop == 8, "the slop is 8 pt: \(H.slop)")
 
-// MARK: - The switch: Hold, Then Drag, this device's own, off unless turned on (PR #292)
+// MARK: - The switch: Hold, Then Drag, this device's own, on unless turned off (PR #292; Noah, 2026-11-20)
 
 check(H.key == "Sill.holdThenDrag", "the switch's key: \(H.key)")
-check(H.defaultOn == false, "off unless turned on: a hold right-clicks at once until its owner asks for the drag")
+check(H.defaultOn == true, "on unless turned off (Noah, 2026-11-20): a hold drags or right-clicks at the lift until its owner asks for the right click at once")
 check(H.title == "Hold, Then Drag", "the switch's title: \(H.title)")
 check(H.footnote == "Touch and hold a moment, then move your finger to drag what’s under it: a window, a slider or a selection. Lift without moving to right-click. Off, touch and hold right-clicks at once.",
       "the words under the switch: \(H.footnote)")

@@ -967,8 +967,9 @@ check(duoGrid == 3360, "the Duo's grid: \(duoGrid) placements (five screens of f
 
 /// Every feature there (an up-to-date Mac with menus, gestures on, Virtual Display on, an iPhone that
 /// offers Larger Picture), none of it (an older Mac on a device with gestures off), and all 128 ways.
+/// Hold, Then Drag at its default, on (Noah, 2026-11-20), in all but `allOff`, where it is turned off.
 let allOn = TourFeatures(menus: true, gestures: true, virtualDisplay: true, clipboard: true, pasteRightAway: true, sound: true, largerPicture: true)
-let allOff = TourFeatures(menus: false, gestures: false, virtualDisplay: false, clipboard: false, pasteRightAway: false, sound: false, largerPicture: false)
+let allOff = TourFeatures(menus: false, gestures: false, holdThenDrag: false, virtualDisplay: false, clipboard: false, pasteRightAway: false, sound: false, largerPicture: false)
 let everyFeatures: [TourFeatures] = (0..<128).map { i in
     TourFeatures(menus: i & 1 != 0, gestures: i & 2 != 0, virtualDisplay: i & 4 != 0, clipboard: i & 8 != 0,
                  pasteRightAway: i & 16 != 0, sound: i & 32 != 0, largerPicture: i & 64 != 0)
@@ -989,6 +990,8 @@ func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 // Every row of every card, as the plan's table has it (docs/first-run-walkthrough-plan.md, "The tour
 // once more, for 0.6"), for Mac mini and an iPad unless said.
 let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
+/// The hold's row with Hold, Then Drag on, the default (Noah, 2026-11-20); T2 with it off, as before.
+let T2drag = "Touch and hold to right-click, or hold, then drag, to move a window or select text."
 let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Mac mini."
 let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
 let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
@@ -1022,46 +1025,48 @@ func onIPhone(_ s: String) -> String { s.replacingOccurrences(of: "this iPad", w
 // The picture's card: a fifth row, the pinch, for everyone; the gestures' only while on and taken.
 let touchPad = words(.touch, L, first: true)
 check(touchPad.title == "Tap, Hold, Drag and Pinch" && touchPad.subtitle == "What you do here happens on Mac mini.", "touch: title and subtitle")
-check(texts(touchPad) == [T1, T2, T3, T4, T5, T6], "touch on iPad: \(texts(touchPad))")
+check(texts(touchPad) == [T1, T2drag, T3, T4, T5, T6], "touch on iPad: \(texts(touchPad))")
 check(touchPad.rows.map(\.symbol) == ["hand.tap", "contextualmenu.and.cursorarrow", "hand.draw", "applepencil", "plus.magnifyingglass", "hand.raised.fingers.spread"],
       "touch's symbols")
 check(touchPad.rows[0].spans == [TourSpan(text: "Tap", strong: true), TourSpan(text: " to click.", strong: false)], "the control's name semibold")
 check(touchPad.hint == "The picture of Mac mini fills the screen below the bar.", "touch's hint sideways")
 check(words(.touch, P).hint == "The picture of Mac mini fills the top half of the screen.", "touch's hint upright")
-check(texts(words(.touch, L, device: "iPhone")) == [T1, T2, T3, T5, T6], "no Pencil row on iPhone, the pinch's for both")
-check(texts(words(.touch, L, features: with { $0.gestures = false })) == [T1, T2, T3, T4, T5], "the gestures off, or a Mac that takes none: no swipe row")
+check(texts(words(.touch, L, device: "iPhone")) == [T1, T2drag, T3, T5, T6], "no Pencil row on iPhone, the pinch's for both")
+check(texts(words(.touch, L, features: with { $0.gestures = false })) == [T1, T2drag, T3, T4, T5], "the gestures off, or a Mac that takes none: no swipe row")
 check(texts(words(.touch, F, device: "iPhone", features: allOff)) == [T1, T2, T3, T5], "the pinch row whatever the Mac")
 check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Studio."),
       "the Mac's name in the pinch row")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")
-// Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, off unless turned on (the
-// right click, as before), on the drag beside it; the same symbol and place, never "New:", read whole; nothing
-// else on any card changes with it, in every layout, on either device, under VoiceOver or not, for all 128.
-let T2drag = "Touch and hold to right-click, or hold, then drag, to move a window or select text."
-let holdDrag = with { $0.holdThenDrag = true }
-check(!allOn.holdThenDrag && !allOff.holdThenDrag && everyFeatures.allSatisfy { !$0.holdThenDrag }, "Hold, Then Drag off unless turned on")
-check(texts(words(.touch, L, features: holdDrag)) == [T1, T2drag, T3, T4, T5, T6], "Hold, Then Drag on: the drag in the hold's row: \(texts(words(.touch, L, features: holdDrag)))")
-check(words(.touch, L, features: holdDrag).rows[1].spans == [TourSpan(text: "Touch and hold", strong: true),
-                                                             TourSpan(text: " to right-click, or hold, then drag, to move a window or select text.", strong: false)],
-      "Hold, Then Drag on: the control's name semibold, as off")
+// Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, on unless turned off (Noah,
+// 2026-11-20: the drag beside the right click, what a new person sees), off the right click alone, as before; the
+// same symbol and place, never "New:", read whole; nothing else on any card changes with it, in every layout, on
+// either device, under VoiceOver or not, for all 128.
+let holdOff = with { $0.holdThenDrag = false }
+check(TourFeatures(menus: false, gestures: false, virtualDisplay: false, clipboard: false, pasteRightAway: false, sound: false, largerPicture: false).holdThenDrag
+      && allOn.holdThenDrag && everyFeatures.allSatisfy { $0.holdThenDrag } && !allOff.holdThenDrag, "Hold, Then Drag on unless turned off (Noah, 2026-11-20)")
+check(texts(words(.touch, L, features: holdOff)) == [T1, T2, T3, T4, T5, T6], "Hold, Then Drag off: the right click alone in the hold's row, as before: \(texts(words(.touch, L, features: holdOff)))")
+check(touchPad.rows[1].spans == [TourSpan(text: "Touch and hold", strong: true),
+                                 TourSpan(text: " to right-click, or hold, then drag, to move a window or select text.", strong: false)]
+      && words(.touch, L, features: holdOff).rows[1].spans == [TourSpan(text: "Touch and hold", strong: true), TourSpan(text: " to right-click.", strong: false)],
+      "the hold's row, on and off: the control's name semibold")
 check(texts(words(.touch, F, device: "iPhone", features: with(allOff) { $0.holdThenDrag = true })) == [T1, T2drag, T3, T5], "Hold, Then Drag on, on a phone with nothing else on")
 for f in everyFeatures {
-    let on = with(f) { $0.holdThenDrag = true }
+    let off = with(f) { $0.holdThenDrag = false }
     for layout in [L, P, F] {
         for device in ["iPad", "iPhone"] {
             let label = "\(layout) \(device) \(f)"
-            let before = words(.touch, layout, device: device, first: true, features: f), after = words(.touch, layout, device: device, first: true, features: on)
-            check(before.rows[1].text == T2 && after.rows[1].text == T2drag, "the hold's row follows Hold, Then Drag: \(label)")
-            check(after.rows[1].symbol == before.rows[1].symbol && !after.rows[1].isNew && after.rows[1].spoken == T2drag,
+            let drag = words(.touch, layout, device: device, first: true, features: f), right = words(.touch, layout, device: device, first: true, features: off)
+            check(drag.rows[1].text == T2drag && right.rows[1].text == T2, "the hold's row follows Hold, Then Drag, on unless turned off: \(label)")
+            check(drag.rows[1].symbol == right.rows[1].symbol && !drag.rows[1].isNew && drag.rows[1].spoken == T2drag,
                   "the drag's row: the hold's symbol, no New, read whole: \(label)")
-            var same = after
-            same.rows[1] = before.rows[1]
-            check(same == before, "nothing else on the picture's card changes with it: \(label)")
+            var same = drag
+            same.rows[1] = right.rows[1]
+            check(same == right, "nothing else on the picture's card changes with it: \(label)")
             for voiceOver in [false, true] {
                 for step in TourPolicy.steps(layout, voiceOver: voiceOver) where step != .touch {
-                    check(words(step, layout, device: device, voiceOver: voiceOver, first: true, features: on)
-                          == words(step, layout, device: device, voiceOver: voiceOver, first: true, features: f),
+                    check(words(step, layout, device: device, voiceOver: voiceOver, first: true, features: f)
+                          == words(step, layout, device: device, voiceOver: voiceOver, first: true, features: off),
                           "no other card changes with Hold, Then Drag: \(step) vo \(voiceOver) \(label)")
                 }
             }

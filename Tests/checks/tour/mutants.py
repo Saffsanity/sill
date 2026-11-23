@@ -144,7 +144,9 @@ MUTANTS = [
     ("Reverse Scrolling and the hold under VoiceOver", "if !voiceOver {\n                rows.append(row(\"arrow.up.arrow.down\"", "if true {\n                rows.append(row(\"arrow.up.arrow.down\""),
     ("Larger Picture's row where it is not offered", "if layout == .phone && features.largerPicture {", "if layout == .phone {"),
     ("Larger Picture's row in the halves", "if layout == .phone && features.largerPicture {", "if features.largerPicture {"),
-    # …Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch.
+    # …Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, on unless turned off
+    # (Noah, 2026-11-20), so a new person's card has the drag.
+    ("Hold, Then Drag off unless set (a new person's hold row the right click alone)", "var holdThenDrag = true", "var holdThenDrag = false"),
     ("the hold's row with the drag while Hold, Then Drag is off", 'features.holdThenDrag\n                            ? row("contextualmenu', 'true\n                            ? row("contextualmenu'),
     ("the hold's row ignoring Hold, Then Drag (the right click alone, as before #292)", 'features.holdThenDrag\n                            ? row("contextualmenu', 'false\n                            ? row("contextualmenu'),
     ("the drag's row marked New", 'then drag, to move a window or select text.")])\n', 'then drag, to move a window or select text.")], new: true)\n'),
