@@ -379,6 +379,8 @@ check_app() {
     value="$(plist_value NSBonjourServices "$plist")" || value=""
     grep -F '_sill._tcp' >/dev/null <<<"$value" || fail "$app's NSBonjourServices lacks _sill._tcp: the device would find no Mac."
     plist_value NSCameraUsageDescription "$plist" >/dev/null || fail "$app has no NSCameraUsageDescription: Add a Mac…'s scanner would crash it."
+    # Share Microphone (docs/microphone-plan.md): iOS ends an app that asks for the microphone without saying why.
+    plist_value NSMicrophoneUsageDescription "$plist" >/dev/null || fail "$app has no NSMicrophoneUsageDescription: Share Microphone's permission prompt would crash it."
     [ -f "$app/PrivacyInfo.xcprivacy" ] || fail "$app has no PrivacyInfo.xcprivacy: App Store Connect refuses an upload whose required-reason APIs aren't declared (ITMS-91053)."
     plutil -lint -s "$app/PrivacyInfo.xcprivacy" || fail "$app/PrivacyInfo.xcprivacy is not a valid property list."
     value="$(plist_value DTPlatformVersion "$plist")" || value=""

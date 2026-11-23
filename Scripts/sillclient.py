@@ -150,6 +150,25 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
   --expect-pair=R    the pairing's last kind 20 must be R: ok (a proof checked), cable, shown, openOnMac,
                      locked, closed, code, busy, expired or stopped; prints EXPECT-PAIR ok or EXPECT-PAIR
                      FAIL (exit 1). A match that is not a pairing ends the run with exit 0
+A device's microphone (kind 48; docs/microphone-plan.md): the window list's line ends in microphone=N when
+the host says it, and each kind 16's line in mic=STATE (mic=- for none). As a device, this client sends:
+  --mic=FILE@T       from T, its offer (type 1, the first with {"claim":true}) while the last kind 16 takes one (none
+                     yet, idle, another or inUse) and again each time it comes back to one, then while it says
+                     inUse a recording: a new epoch's format (type 1 with FILE's codec, cookie and priming), then
+                     FILE's packets (Scripts/mic-check/tone.swift makes it) ten a message every 100 ms, the
+                     first message's sample 0 on a whole second of this Mac's clock, each header stamped with its
+                     first packet's capture time, as a device's capture buffers send them; a kind 16 that stops
+                     saying inUse stops it, and a later one starts the next epoch. Prints "mic epoch E: sample 0
+                     at W (wall)" and, at exit, a MIC line: messages and packets sent, epochs, the states seen
+  --mic-claim@T      the offer again, with its claim (the person turned Share Microphone off and on)
+  --mic-end@T        the end (type 3: Share Microphone off); no more recording
+  --mic-flood@T      from T, the recording's messages three times as fast as their sound (a hostile client)
+  --mic-formats=N@T  N new epochs' formats back to back (a hostile client)
+  --raw48=HEX@T      this literal kind 48 payload (hex) T seconds in
+  --expect-mic=STATE at exit, the last kind 16's microphone state (none: no state): EXPECT-MIC ok or
+                     EXPECT-MIC FAIL, exits 1 on failure
+                     --mic and the rest go only to a --synthetic host on this Mac: a real one would hand the
+                     sound to Sill Microphone, which every app on it can hear
 A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
 and against the Mac ID), 20 and 22 (its reason, then message, minimumVersion and reconnect when sent)
 are printed one line each; a session prints the order of the
@@ -184,12 +203,15 @@ AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale
 LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display",
+         "mic", "mic-claim", "mic-end", "mic-flood", "mic-formats", "raw48")
+# A device's microphone (kind 48): the flags that send it, only to a --synthetic host on this Mac.
+MIC_SENDS = ("mic", "mic-claim", "mic-end", "mic-flood", "mic-formats", "raw48")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "expect-mic")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -493,6 +515,22 @@ def check_expect_pair():
     if got == expect_pair: print("EXPECT-PAIR ok"); return True
     print(f"EXPECT-PAIR FAIL: want {expect_pair}, got {got}"); sys.exit(1)
 
+def mic_file(path):
+    """Scripts/mic-check/tone.swift's packets: "SILLMIC1", then big endian UInt32 frames a packet, priming and
+    bitrate, a UInt16 cookie length and the cookie, a UInt32 count, and each packet as a UInt16 length and its bytes."""
+    try:
+        d = open(path, "rb").read()
+    except OSError as e:
+        raise ValueError(f"--mic: {e}")
+    if d[:8] != b"SILLMIC1": raise ValueError(f"--mic: {path} is not a packets file (Scripts/mic-check/tone.swift)")
+    fpp, priming, bitrate = struct.unpack(">III", d[8:20]); (cl,) = struct.unpack(">H", d[20:22])
+    cookie = d[22:22 + cl]; i = 22 + cl; (count,) = struct.unpack(">I", d[i:i + 4]); i += 4
+    packets = []
+    for _ in range(count):
+        (n,) = struct.unpack(">H", d[i:i + 2]); packets.append(d[i + 2:i + 2 + n]); i += 2 + n
+    if len(packets) != count or not packets: raise ValueError(f"--mic: {path} is cut short")
+    return {"fpp": fpp, "priming": priming, "bitrate": bitrate, "cookie": cookie, "packets": packets}
+
 args = sys.argv[1:]
 pos = [a for a in args if not a.startswith("--")]
 flags = [a for a in args if a.startswith("--")]
@@ -506,12 +544,12 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe|next-display|mic-claim|mic-end|mic-flood)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe", "next-display", "mic-claim", "mic-end", "mic-flood") and text: raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -531,7 +569,10 @@ try:
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
                           else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
-                          else held_key(text) if name == "key" else text)
+                          else held_key(text) if name == "key"
+                          else mic_file(text) if name == "mic"
+                          else number(text, "--mic-formats") if name == "mic-formats"
+                          else bytes.fromhex(text) if name == "raw48" else text)
             at_t = number(t, f"--{name}'s @T", float)
             if name == "key" and parsed[1] is not None:
                 # A held key: its down now and its up HOLD seconds later, pinging as a device meanwhile.
@@ -624,6 +665,10 @@ try:
     if any(e[2] == "raw15" for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--raw15 only goes to a --synthetic host on this Mac; nothing on port {port} is one.")
+    # A microphone likewise: a --synthetic host plays it into its test sink at most; a real one into Sill Microphone.
+    if any(e[2] in MIC_SENDS for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--mic and the other microphone flags only go to a --synthetic host on this Mac; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -759,6 +804,11 @@ def describe(d):
         suggested = "-" if link.get("suggestedBitrate") is None else f"{link.get('suggestedBitrate')}/{dash(link.get('suggestedCaptureScale'))}"
         extra += (f" link={link.get('state')},withheld={link.get('withheldPerSecond')},bitrate={link.get('bitrate')},"
                   f"carried={dash(link.get('carriedKbps'))},suggested={suggested}")
+    mic = d.get("microphone")
+    if isinstance(mic, dict):
+        extra += f" mic={mic.get('state')}" + (f",device={mic.get('device')}" if mic.get("device") else "") + (f",codecs={','.join(mic.get('codecs') or [])}" if mic.get("codecs") else "")
+    else:
+        extra += " mic=-"
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
             f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
@@ -791,6 +841,55 @@ last_list = None       # the last window list (--expect=desktopDisplay checks it
 # when the host runs on this Mac).
 aud_sec = 0; aud_total = 0; aud_epochs = []; aud_next = {}; aud_gaps = 0; aud_starts = 0; aud_first = None; aud_last = None; aud_ages = []
 aud_formats = 0; aud_orphans = 0
+# A device's microphone (kind 48): the offer, the recording's epoch and schedule, and what went.
+mic = None; mic_offered = False; mic_recording = False; mic_epoch = 0; mic_w0 = None; mic_next = 0
+mic_claim_owed = False; mic_offer_sent = False
+mic_flood = None       # (when the flood began, the message it began at)
+mic_msgs = 0; mic_pkts = 0; mic_epochs = []; mic_states = []
+def mic_state():
+    st = (last_state or {}).get("microphone")
+    return st.get("state") if isinstance(st, dict) else None
+def mic_send(payload, stamp=None):
+    s.sendall(struct.pack(">BdBI", 48, stamp if stamp is not None else time.time(), 0, len(payload)) + payload)
+def mic_format(epoch):
+    return {"codec": "aac-eld", "sampleRate": 48000, "channels": 1, "framesPerPacket": mic["fpp"], "primingFrames": mic["priming"],
+            "bitrate": mic["bitrate"], "epoch": epoch & 0xFFFF, "cookie": base64.b64encode(mic["cookie"]).decode()}
+def mic_due(m):
+    """When message m's sound is all captured, so it can go: 100 ms apart from the epoch's sample 0, or three
+    times as fast from a flood's start."""
+    period = 10 * mic["fpp"] / 48000
+    if mic_flood is not None and m >= mic_flood[1]: return mic_flood[0] + (m - mic_flood[1] + 1) * period / 3
+    return mic_w0 + (m + 1) * period
+def mic_step(now):
+    """As a device's link and capture: the offer goes while kind 16 takes one (none yet, idle, another, inUse), again
+    each time it comes back to taking one, with the claim the first time; a kind 16 saying inUse starts a recording
+    (a new epoch, its sample 0 on the next whole second), one that does not stops it; each message goes once its sound
+    is captured, stamped with its first packet's capture time."""
+    global mic_recording, mic_epoch, mic_w0, mic_next, mic_msgs, mic_pkts, mic_claim_owed, mic_offer_sent
+    if mic is None or not mic_offered: return
+    takes = mic_state() in (None, "idle", "another", "inUse")
+    if takes and (not mic_offer_sent or mic_claim_owed):
+        mic_send(b"\x01" + json.dumps({"claim": True} if mic_claim_owed else {}).encode())
+        print(f"  sent mic offer{' (claim)' if mic_claim_owed else ''} at {now - t0:.3f}s")
+        mic_claim_owed = False; mic_offer_sent = True
+    elif not takes:
+        mic_offer_sent = False
+    wanted = mic_state() == "inUse"
+    if wanted and not mic_recording:
+        mic_epoch += 1; mic_epochs.append(mic_epoch)
+        mic_w0 = float(int(now) + 1); mic_next = 0; mic_recording = True
+        mic_send(b"\x01" + json.dumps(mic_format(mic_epoch)).encode())
+        print(f"  mic epoch {mic_epoch}: sample 0 at {mic_w0:.6f} (wall), its format sent at {now - t0:.3f}s")
+    elif not wanted and mic_recording:
+        mic_recording = False
+        print(f"  mic epoch {mic_epoch} stopped at {now - t0:.3f}s after {mic_next} messages")
+    while mic_recording and now >= mic_due(mic_next):
+        first = mic_next * 10; F = mic["fpp"]; n = len(mic["packets"])
+        packets = [mic["packets"][(first + i) % n] for i in range(10)]
+        body = struct.pack(">BHIBB", 2, mic_epoch & 0xFFFF, first & 0xFFFFFFFF, 1 if mic_next == 0 else 0, 10)
+        body += b"".join(struct.pack(">H", len(x)) + x for x in packets)
+        mic_send(body, mic_w0 + (first * F - mic["priming"]) / 48000)
+        mic_next += 1; mic_msgs += 1; mic_pkts += 10
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
@@ -860,6 +959,31 @@ def fire(e, now):
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
     elif name in ("raw7", "raw15"):
         s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
+    elif name == "mic":
+        global mic, mic_offered, mic_claim_owed, mic_offer_sent
+        mic = parsed; mic_offered = True; mic_claim_owed = True; mic_offer_sent = False
+        print(f"  mic on at {at}: {len(parsed['packets'])} packets of {parsed['fpp']} frames ready")
+        mic_step(now)
+    elif name == "mic-claim":
+        mic_send(b"\x01" + json.dumps({"claim": True}).encode()); print(f"  sent mic offer (claim) at {at}")
+        if mic is not None: mic_offered = True; mic_offer_sent = True
+    elif name == "mic-end":
+        global mic_recording
+        mic_send(b"\x03"); mic_offered = False; mic_recording = False; print(f"  sent mic end at {at}")
+    elif name == "mic-flood":
+        global mic_flood
+        mic_flood = (now, mic_next); print(f"  mic flood from message {mic_next} at {at}")
+    elif name == "mic-formats":
+        global mic_epoch
+        base = mic if mic is not None else {"fpp": 480, "priming": 240, "bitrate": 64000, "cookie": b"\xf8\xf0\x21\x2c\x00\xbc\x00"}
+        for _ in range(parsed):
+            mic_epoch += 1
+            f = {"codec": "aac-eld", "sampleRate": 48000, "channels": 1, "framesPerPacket": base["fpp"], "primingFrames": base["priming"],
+                 "bitrate": base["bitrate"], "epoch": mic_epoch & 0xFFFF, "cookie": base64.b64encode(base["cookie"]).decode()}
+            mic_send(b"\x01" + json.dumps(f).encode())
+        print(f"  sent {parsed} mic formats at {at}")
+    elif name == "raw48":
+        mic_send(parsed); print(f"  sent raw kind 48 {parsed.hex()[:80]} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     try:
@@ -876,6 +1000,10 @@ while time.time() - t0 < dur:
             s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
     except OSError as e:
         print(f"send failed at {now - t0:.2f}s: {e}"); break
+    try:
+        mic_step(now)
+    except OSError as e:
+        print(f"send failed at {now - t0:.2f}s: {e}"); break
     if not reading:
         # A client that stopped draining: nothing is read, so the host's queue to it fills.
         time.sleep(0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now)))
@@ -884,6 +1012,7 @@ while time.time() - t0 < dur:
     # Wake in time for the next timed send (a few ms matter for the race checks).
     wait = 0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now))
     if (holds or ping_every < 1) and pinging: wait = min(wait, max(0.001, nextping - now))    # pings on time
+    if mic_recording: wait = min(wait, max(0.001, mic_due(mic_next) - now))                  # the microphone's messages on time
     s.settimeout(wait)
     try:
         chunk = s.recv(1 << 20)
@@ -934,7 +1063,8 @@ while time.time() - t0 < dur:
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
                   + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
-                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else "")
+                  + (f" microphone={d['microphone']}" if "microphone" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
@@ -1015,6 +1145,10 @@ while time.time() - t0 < dur:
                 print(f"  settings at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
             last_state = d
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
+            ms = mic_state()
+            if not mic_states or mic_states[-1][1] != ms:
+                mic_states.append((round(time.time() - t0, 3), ms))
+                print(f"  mic state at {time.time()-t0:.3f}s: {ms or 'none'}" + (f" device={d['microphone'].get('device')}" if ms == "another" else ""))
     if now - last >= 1:
         f = per.get("frame", 0)
         # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
@@ -1045,7 +1179,15 @@ if plays_audio:
     print(f"AUDIO {aud_total} packets, {aud_formats} formats, epochs {aud_epochs}, {aud_starts} segment starts, {aud_gaps} seq gaps, "
           f"{aud_orphans} before their format; first at {first_at}, last at {last_at}; "
           f"age p50 {pct(aud_ages, .5):.2f} p95 {pct(aud_ages, .95):.2f} max {max(aud_ages) if aud_ages else float('nan'):.2f} ms")
+if mic is not None or mic_states or valued("expect-mic") is not None:
+    seen = " ".join(f"{t}:{m or 'none'}" for t, m in mic_states) or "none"
+    print(f"MIC sent {mic_msgs} messages ({mic_pkts} packets) in epochs {mic_epochs}; states {seen}")
 s.close()
+mic_failed = False
+if valued("expect-mic") is not None:
+    want = valued("expect-mic"); got = mic_state() or "none"
+    mic_failed = got != want
+    print("EXPECT-MIC ok" if not mic_failed else f"EXPECT-MIC FAIL: want {want}, got {got}")
 menus_failed = False
 if expect_menus is not None:
     menus_failed = menu_top != expect_menus
@@ -1073,4 +1215,4 @@ if expect is not None:
             if not same: problems.append(f"{k}: want {want}, got {got}")
     print("EXPECT ok" if not problems else "EXPECT FAIL " + "; ".join(problems))
     if problems: sys.exit(1)
-if menus_failed: sys.exit(1)
+if menus_failed or mic_failed: sys.exit(1)

@@ -95,6 +95,10 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
+        // `-SillMicCase <state>` (docs/microphone-plan.md §10.3): Share Microphone's row in one of its states, the
+        // mock Mac a Sill.app that takes the microphone (its list's `microphone` and kind 16's `microphone` as the
+        // case has them). Without it the mock Mac lists no microphone and has no version: no row, as before.
+        if let c = UserDefaults.standard.string(forKey: "SillMicCase") { seedMicrophone(client, c) }
         // `-SillMacLocked 1|2|unlocking|view` (docs/locked-mac-plan.md, docs/off-console-plan.md): the mock Mac's screen is locked (1), it is
         // switched to another user (2), as its LockPolicy sends it (no windows, thumbnails, apps or clipboard,
         // its placeholder streaming as the Desktop, the cover over it), or it was just unlocked and its
@@ -164,6 +168,43 @@ enum MockCatalog {
         if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }   // the view too: no app's menus
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
+    }
+
+    /// Share Microphone's states for the harness's photos: `ready` (off, the Mac ready), `waiting` (on, no app on
+    /// the Mac uses Sill Microphone), `inuse`, `another` (on, another device took it), `anotheroff` (off, another
+    /// device's in use), `off` (the Mac's switch off), `setup` (Sill Microphone not set up), `unpaired`, `refused`,
+    /// `older` (a Sill.app without the field), `denied` (the permission refused), `interrupted` (a call), `noinput`
+    /// and `window` (another window sends it).
+    private static func seedMicrophone(_ client: StreamClient, _ c: String) {
+        client.hostVersion = "0.7.0"
+        let codecs = MicrophoneCodec.hostTakes
+        var list: Int? = MicrophoneCodec.generation
+        var state: MicrophoneState? = MicrophoneState(state: MicrophoneState.idle, codecs: codecs)
+        var on = false
+        var permission = MicrophonePolicy.Permission.granted
+        switch c {
+        case "ready": break
+        case "waiting": on = true
+        case "inuse": on = true; state = MicrophoneState(state: MicrophoneState.inUse, codecs: codecs)
+        case "another": on = true; state = MicrophoneState(state: MicrophoneState.another, codecs: codecs, device: "Noah’s iPhone")
+        case "anotheroff": state = MicrophoneState(state: MicrophoneState.another, codecs: codecs, device: "Noah’s iPhone")
+        case "off": list = 0; state = MicrophoneState(state: MicrophoneState.off)
+        case "setup": list = 0; state = MicrophoneState(state: MicrophoneState.notReady)
+        case "unpaired": state = MicrophoneState(state: MicrophoneState.unpaired)
+        case "refused": on = true; state = MicrophoneState(state: MicrophoneState.refused)
+        case "older": list = nil; state = nil
+        case "denied": permission = .denied
+        case "interrupted": on = true; client.micInterrupted = true
+        case "noinput": on = true; MicrophoneHub.debugNoInput = true
+        case "window": on = true; MicrophoneHub.debugOtherWindow = true
+        default: print("-SillMicCase \(c): not a case")
+        }
+        MicrophoneSwitch.shared.debugSet(on: on, permission: permission)
+        client.hostMicrophone = list
+        client.micState = state
+        #if DEBUG
+        print("mic: mock case \(c): list \(list.map(String.init) ?? "none"), state \(state?.state ?? "none"), switch \(on ? "on" : "off"), permission \(permission)")
+        #endif
     }
 
     /// `-SillPointer <state>`: the mock's pointer in one of the plan's states (see the harness's

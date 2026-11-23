@@ -6,6 +6,9 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "StreamProtocol", targets: ["StreamProtocol"]),
+        // The sound's code both apps share: AAC-ELD's encoder and decoder, the packetizer and the
+        // playout. The iOS project links it beside StreamProtocol; SillHostCore depends on it.
+        .library(name: "SillAudio", targets: ["SillAudio"]),
         // The CLI keeps the product name SillHost, so `swift run -c release SillHost …` and
         // .build/release/SillHost are what they always were.
         .executable(name: "SillHost", targets: ["SillHostCLI"]),
@@ -15,11 +18,14 @@ let package = Package(
     ],
     targets: [
         .target(name: "StreamProtocol"),
+        // AudioToolbox and Foundation only, and nothing of the wire, so the checks and the sound's
+        // harness compile its files as they are (Tests/checks/audio-*, Scripts/audio).
+        .target(name: "SillAudio"),
         // The Mac host itself (capture, encode, network, input, virtual display), shared by the CLI
         // and the menu bar app; they reach it through `package` access. The folder keeps its old
         // name (Sources/SillHost) so the paths in the docs and the VirtualDisplayProbe symlink to
         // ../SillHost/VirtualDisplay.swift stay valid.
-        .target(name: "SillHostCore", dependencies: ["StreamProtocol"], path: "Sources/SillHost"),
+        .target(name: "SillHostCore", dependencies: ["StreamProtocol", "SillAudio"], path: "Sources/SillHost"),
         // The command-line host: flags, the run loop, the Terminal permission hint.
         .executableTarget(name: "SillHostCLI", dependencies: ["SillHostCore", "StreamProtocol"]),
         // The menu bar app: status item, Settings and Log windows (AppKit lifecycle, SwiftUI panes).

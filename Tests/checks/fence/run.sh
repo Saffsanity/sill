@@ -14,7 +14,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
 swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/*.swift "$here/main.swift" -o "$out/check"
-modes=(ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count remotehome remotedead)
+modes=(microphone ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count remotehome remotedead)
 if [ $# -gt 0 ]; then modes=("$@"); fi
 failed=()
 for mode in "${modes[@]}"; do

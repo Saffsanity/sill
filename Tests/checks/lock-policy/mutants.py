@@ -295,5 +295,8 @@ M = [
     ("list: a locked list keeps the displays", F, "        l.desktopDisplays = nil\n", ""),
     ("list: a locked list keeps which display", F, "        l.desktopDisplay = nil\n", ""),
     ("list: a locked list keeps the displays' names", F, "        l.desktopDisplayNames = nil\n", ""),
+    # A device's microphone (kind 48, docs/microphone-plan.md §3.3).
+    ("decide: a device's microphone taken while locked", F, "        case .microphone: return .refuse(.microphone)", "        case .microphone: return .take"),
+    ("list: a locked list keeps the microphone", F, "        l.microphone = nil\n", ""),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)

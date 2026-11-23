@@ -81,6 +81,8 @@ final class SessionLink {
     /// Input messages counted for the session's connection: those handed to it since it became the
     /// session's, and those waiting to go out on it (see `inputsOnSession`).
     private var inputs = 0
+    /// The microphone's packets messages handed to a connection and not yet taken by it (`.contentProcessed`).
+    private var micUnsent = 0
 
     /// The number of input messages (kind 8) counted for the session's connection: those `send` handed
     /// to it since it became the session's, and those waiting to go out on it once the fences and the
@@ -119,6 +121,27 @@ final class SessionLink {
         }
         current?.send(content: data, completion: .contentProcessed { _ in })
         if current != nil, Self.isInput(data) { inputs += 1 }
+    }
+
+    /// What became of a microphone's packets message (`sendMicrophone`).
+    enum MicrophoneSend: Equatable { case sent, fenced, behind, noConnection }
+
+    /// A microphone's packets message (kind 48 type 2; docs/microphone-plan.md §3.3, rule 7): on the session's
+    /// connection while at most `unsentAtMost` of them are handed and not yet taken there; skipped, never
+    /// queued, past that (`behind`) and while a fence or a hold stands (`fenced`): stale sound is worth nothing,
+    /// and the Mac starts its decoder afresh at the seq's gap. Its offers and ends go by `send`, in order.
+    func sendMicrophone(_ data: Data, unsentAtMost: Int) -> MicrophoneSend {
+        lock.lock(); defer { lock.unlock() }
+        guard fences.isEmpty, holding == nil else { return .fenced }
+        guard let c = current else { return .noConnection }
+        guard micUnsent < unsentAtMost else { return .behind }
+        micUnsent += 1
+        c.send(content: data, completion: .contentProcessed { [weak self] _ in self?.microphoneTaken() })
+        return .sent
+    }
+
+    private func microphoneTaken() {
+        lock.lock(); micUnsent = max(0, micUnsent - 1); lock.unlock()
     }
 
     /// Whether `c` is still read: the session's connection, or the old one of a hand-over until its

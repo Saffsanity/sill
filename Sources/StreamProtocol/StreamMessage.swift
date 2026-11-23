@@ -91,14 +91,23 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
-    // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which open pull requests
-    // hold (the microphone and the pen; the camera). Older hosts map it to `.unknown` and skip it.
+    // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which are held for the pen
+    // and the camera. Older hosts map it to `.unknown` and skip it.
     case nextDisplay = 47    // device → host, empty payload: the Desktop button tapped while the Desktop
                              // streams, so the Desktop moves to the Mac's next stop (DesktopDisplays: the
                              // main display first, then each display to its right, wrapping). Only to a host
                              // whose window list says `desktopDisplays` 2 or more; ignored unless the Desktop
                              // streams, refused while the Mac is locked. A person at the device (DisplayWake).
                              // `{"number": n}` is kept for PR #296's list
+    // The device's microphone as a microphone on the Mac (Microphone.swift, docs/microphone-plan.md; #191's
+    // feature, redone, on the number the 2026-11-18 overview holds for it). Older hosts map it to `.unknown`
+    // and skip it.
+    case microphone = 48     // device → host: MicrophoneMessage. Type 1 (JSON MicrophoneFormat: the offer, its
+                             // claim and pause, an epoch's format: kind 43's AudioFormat keys), type 2 (binary
+                             // AudioPackets, kind 43's layout: ten AAC-ELD packets, the header's timestamp the
+                             // capture time), type 3 (the single byte 3: Share Microphone off). Only to a host
+                             // whose window list says `microphone` 1 or more, packets only while kind 16's
+                             // `microphone` says `inUse`. Never a person (DisplayWake)
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

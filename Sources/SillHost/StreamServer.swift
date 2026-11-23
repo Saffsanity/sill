@@ -204,6 +204,11 @@ final class StreamServer {
     /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
+    /// Kind 48 from a client (MicrophoneReceiver, docs/microphone-plan.md §6), with the lock's reading as it
+    /// arrived, in arrival order, after the revoked check and never through `onMessage` or the main actor. Nil
+    /// (the CLI, which takes no microphone, and the harnesses): kind 48 goes to `onMessage`, which ignores it.
+    /// Called on the network queue.
+    var onMicrophoneMessage: ((StreamMessage, NWConnection, LockPolicy.Reading) -> Void)?
     /// A device's link changed (LinkJudge, docs/remote-bundle-plan.md §6): behind, stalled, fine again,
     /// fine because the stream restarted at another quality (`reset`), or the same state once its
     /// carried rate is first measured. Called on the network queue, from the once-a-second sweep and
@@ -1602,6 +1607,10 @@ final class StreamServer {
                     }
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.
+                } else if header.kind == .microphone, let onMicrophone = self.onMicrophoneMessage {
+                    // A device's microphone (MicrophoneReceiver): off this queue at once, in order; it drops packets
+                    // rather than queue too much of them, so this loop never waits for it.
+                    onMicrophone(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 } else {
                     self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 }

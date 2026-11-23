@@ -1,4 +1,4 @@
-"""H3 (docs/audio-plan.md §7.2, §11): each mutant changes iOSClient/AudioPlayout.swift in one place and must
+"""H3 (docs/audio-plan.md §7.2, §11): each mutant changes Sources/SillAudio/AudioPlayout.swift in one place and must
 fail the check (main.swift, with 1,000 random runs, which catch what the scenarios do not). The plan's
 list first (the floor, the dedupe, the guard, the late test, the jump, the steps, the fades, the need
 rising at once, the output latency in the need, the IO buffer in the late test, a segment's priming, a
@@ -9,7 +9,7 @@ SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
 OUT = os.path.join(ROOT, ".build", "checks", "audio-playout")
 os.makedirs(OUT, exist_ok=True)
-SRC = os.path.join(ROOT, "iOSClient/AudioPlayout.swift")
+SRC = os.path.join(ROOT, "Sources/SillAudio/AudioPlayout.swift")
 orig = open(SRC).read()
 MUTANTS = {
     # The plan's.
@@ -20,7 +20,7 @@ MUTANTS = {
     "M3 no guard": ("        return max(need(now: now), guardDelay)", "        return need(now: now)"),
     "M4 the late test's sign": ("            if time(ofSample: start) - now < ioBuffer + Self.margin {",
                                 "            if time(ofSample: start) - now > ioBuffer + Self.margin {"),
-    "M5 the jump at 400 ms": ("    static let jumpOver = 0.040", "    static let jumpOver = 0.400"),
+    "M5 the jump at 400 ms": ("    public static let jumpOver = 0.040", "    public static let jumpOver = 0.400"),
     "M6 no step below": ("            if raw < floor - Self.stepBelow {", "            if false {"),
     "M7 no step above": ("            if raw - floor > max(Self.stepAbove, 2 * (rttMedian ?? 0)) {", "            if false {"),
     "M8 no fades": ("        guard n > 0 else { return }\n        for i in 0..<n {", "        guard n < 0 else { return }\n        for i in 0..<n {"),
@@ -54,7 +54,7 @@ MUTANTS = {
     "M20 the session's first 2 s counted in the cover": (
         "        guard let begun = sessionStart, arrival - begun >= Self.coverGrace else { return nil }",
         "        guard let begun = sessionStart, arrival - begun >= 0 else { return nil }"),
-    "M21 the cover's start at home 20 ms": ("    static let coverStartHome = 0.040", "    static let coverStartHome = 0.020"),
+    "M21 the cover's start at home 20 ms": ("    public static let coverStartHome = 0.040", "    public static let coverStartHome = 0.020"),
     "M22 home's bounds away": ("        let bounds = away ? Self.coverAway : Self.coverHome", "        let bounds = Self.coverHome"),
     "M23 the tail's deadline without the IO buffer": ("        return time(ofSample: h.tailStart) - ioBuffer - Self.margin",
                                                       "        return time(ofSample: h.tailStart) - Self.margin"),
@@ -70,7 +70,7 @@ MUTANTS = {
                                                    "            // Rule 9: a clean start.\n            plan.resetFirst = false"),
     "M29 a join decoded without a reset": ("            plan.resetFirst = true\n            plan.dropFront = framesPerPacket",
                                            "            plan.resetFirst = false\n            plan.dropFront = framesPerPacket"),
-    "M30 the floor's window 1 s": ("    static let floorSeconds = 10", "    static let floorSeconds = 1"),
+    "M30 the floor's window 1 s": ("    public static let floorSeconds = 10", "    public static let floorSeconds = 1"),
     "M31 no body: the whole packet held": ("            guard bodyCount > 0 else { return nil }", "            guard bodyCount < 0 else { return nil }"),
     "M32 the hand's deadline from the packet's start (no headroom)": (
         "        return time(ofSample: h.tailStart) - ioBuffer - Self.margin",
@@ -88,6 +88,21 @@ MUTANTS = {
         "        if hand != nil, let d = deadline, now >= d { out.add(handOver(fadeOut: true)) }\n", ""),
     "M38 a packet that waited behind the engine counted when the playout took it": (
         "        let arrival = came ?? now\n", "        let arrival = now\n"),
+    # The microphone's mode (docs/microphone-plan.md §3.4).
+    "M39 the microphone's cover starts at 40 ms at home": (
+        "    public static let microphoneCoverStartHome = 0.110", "    public static let microphoneCoverStartHome = 0.040"),
+    "M40 the microphone's start away as at home": (
+        "let start = away ? Self.coverStartAway : mode == .microphone ? Self.microphoneCoverStartHome : Self.coverStartHome",
+        "let start = mode == .microphone ? Self.microphoneCoverStartHome : away ? Self.coverStartAway : Self.coverStartHome"),
+    "M41 frames taken in the microphone's mode": ("        guard mode == .sound else { return }\n", ""),
+    "M42 the picture's guard in the microphone's mode": (
+        "let guardDelay = mode == .sound ? lag.map { $0 + 1 / streamFPS } ?? -.infinity : -.infinity",
+        "let guardDelay = lag.map { $0 + 1 / streamFPS } ?? -.infinity"),
+    "M43 a message counts nothing before its packets": (
+        "            record(raw: arrival - (stamp + Double(i * framesPerPacket) / Self.rate), arrival: arrival)\n", ""),
+    "M44 a message counts its duplicates": ("            guard !recentSet.contains(key) else { continue }\n", ""),
+    "M45 a message counted in the sound's mode alone": (
+        "        guard mode == .microphone, let playing = self.epoch,", "        guard mode == .sound, let playing = self.epoch,"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

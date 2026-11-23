@@ -1,0 +1,23 @@
+# Share Microphone's row (docs/microphone-plan.md §10.3) in the Settings panel's This iPad / This iPhone group, each
+# state the mock Mac can be in (-SillMicCase), on the agents' Duo (iOS 27.1). With --baseline (main): the cases with
+# -SillMicCase differ where the row is; the last three, without it, must be identical to main's (no row, no change).
+mic-ready          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase ready --wait=5
+mic-waiting        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase waiting --wait=5
+mic-inuse          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase inuse --wait=5
+mic-another        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase another --wait=5
+mic-anotheroff     -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase anotheroff --wait=5
+mic-off            -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase off --wait=5
+mic-setup          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase setup --wait=5
+mic-unpaired       -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase unpaired --wait=5
+mic-refused        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase refused --wait=5
+mic-older          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase older --wait=5
+mic-denied         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase denied --wait=5
+mic-interrupted    -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase interrupted --wait=5
+mic-noinput        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase noinput --wait=5
+mic-window         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase window --wait=5
+mic-inuse-portrait -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll mic -SillMicCase inuse --wait=5
+mic-locked         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillMicCase inuse -SillMacLocked 1 --wait=5
+# Unchanged against main: no -SillMicCase, no row.
+settings-gestures  -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll gestures --wait=5
+settings-end       -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsEnd 1 --wait=5
+stream             -SillLayout 951x669 -SillHinge flat

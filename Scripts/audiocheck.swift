@@ -2,8 +2,8 @@ import Foundation
 import Network
 
 // The encoder-free sound harness's device (docs/audio-plan.md §11, H5–H8; Scripts/audio/build.sh
-// compiles it with Sources/StreamProtocol, iOSClient/AudioDecoder.swift, iOSClient/AudioPlayout.swift and
-// Sources/SillHost/TestTone.swift as one module, so nothing here imports StreamProtocol). What the device's StreamClient does with the
+// compiles it with Sources/StreamProtocol, SillAudio's AudioDecoder.swift and AudioPlayout.swift, and
+// Sources/SillHost/TestTone.swift as one module, so nothing here imports StreamProtocol or SillAudio). What the device's StreamClient does with the
 // Mac's sound, minus a speaker: a hello that lists "aac-eld" first, pings every 0.25 s and stats every
 // second (so a remote door never takes it for gone), every message read, every kind 43 parsed, each
 // epoch's decoder made from its format, every packet decoded, and each decoded sample placed by its

@@ -45,6 +45,17 @@ package final class Stats {
         if wake { DispatchQueue.main.async { self.goFast() } }
     }
 
+    /// `n` at once (the microphone's test sink counts frames).
+    func bump(_ key: String, by n: Int) {
+        guard n != 0 else { return }
+        lock.lock()
+        counts[key, default: 0] += n
+        let wake = armed
+        armed = false
+        lock.unlock()
+        if wake { DispatchQueue.main.async { self.goFast() } }
+    }
+
     /// Connected clients. With any, the line prints every second even when nothing is counted.
     var activeClients: Int {
         get { lock.lock(); defer { lock.unlock() }; return clients }

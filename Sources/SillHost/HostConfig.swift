@@ -94,12 +94,21 @@ package struct HostConfig: Equatable, Sendable {
     /// away from home (AwayPolicy.isAway), so an iPad used beside the Mac never locks it. Off in both `standard` and
     /// `app`: every session counts (#283's words). The Mac's alone, applied at once, like `lockAfterSession`.
     package var lockOnlyAfterAway: Bool
+    /// Use iPhone and iPad microphones (docs/microphone-plan.md §3.3): a paired device whose Share Microphone
+    /// is on may be Sill Microphone, the microphone other apps on this Mac choose (MicrophoneReceiver, kind 48).
+    /// Off in both `standard` and `app`: a switch that installs something into macOS starts off (the 2026-11-18
+    /// overview, §2.1). The Mac's alone, like Share clipboard: absent from StreamSettings, HostSettingsChange,
+    /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on; applied at once
+    /// (`StreamCoordinator.setTarget`). Counts only where a receiver runs: the CLI has none (it cannot feed
+    /// Sill Microphone, so it never says `microphone`), a test host has one under SILL_TEST_MIC_SINK, and
+    /// Sill.app gets its own with Sill Microphone, the plan's next part.
+    package var deviceMicrophone: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
                  internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool) {
+                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool, deviceMicrophone: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -118,6 +127,7 @@ package struct HostConfig: Equatable, Sendable {
         self.lockAfterSession = lockAfterSession
         self.lockSleepsDisplay = lockSleepsDisplay
         self.lockOnlyAfterAway = lockOnlyAfterAway
+        self.deviceMicrophone = deviceMicrophone
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -138,7 +148,8 @@ package struct HostConfig: Equatable, Sendable {
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
                                              offConsoleView: false, lockAfterSession: false,
-                                             lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                                             lockSleepsDisplay: true, lockOnlyAfterAway: false,
+                                             deviceMicrophone: false)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -206,6 +217,7 @@ package struct HostConfig: Equatable, Sendable {
         if lockOnlyAfterAway != new.lockOnlyAfterAway {
             parts.append("lock only after a device away from home \(onOff(lockOnlyAfterAway)) → \(onOff(new.lockOnlyAfterAway))")
         }
+        if deviceMicrophone != new.deviceMicrophone { parts.append("device microphones \(onOff(deviceMicrophone)) → \(onOff(new.deviceMicrophone))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

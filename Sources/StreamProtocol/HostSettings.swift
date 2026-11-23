@@ -178,6 +178,50 @@ public struct LinkReport: Codable, Hashable, Sendable {
     public var isBehind: Bool { state == Self.behind }
 }
 
+/// Kind 16's microphone, per connection (`HostSettingsState.microphone`, docs/microphone-plan.md §4; kind 48
+/// is Microphone.swift's): what this Mac does with this connection's device's microphone now, and why not.
+/// Sent at connect and on every change, by a host whose window list says `microphone`; nil from every other
+/// and while the list leaves `microphone` out (a locked Mac). The device's Share Microphone row and its
+/// capture read only this and the window list: a device records and sends packets only while `state` is
+/// `inUse`, so nothing records before an app on the Mac uses Sill Microphone.
+public struct MicrophoneState: Codable, Hashable, Sendable {
+    /// `state`'s values. A string, never an enum: a device reads one it does not know as `off`.
+    /// This Mac's Use iPhone and iPad microphones is off.
+    public static let off = "off"
+    /// The switch is on, but Sill Microphone is not set up (or not loaded yet) on this Mac.
+    public static let notReady = "notReady"
+    /// This connection's key is not on the Mac's trust list (Require pairing off, a plain door): no microphone.
+    public static let unpaired = "unpaired"
+    /// This connection sent more than the Mac takes (too much sound a second, too many formats, one it cannot
+    /// decode): refused for a minute.
+    public static let refused = "refused"
+    /// Nothing on the Mac uses Sill Microphone now, or this device has not offered its microphone: it may.
+    public static let idle = "idle"
+    /// Another device is Sill Microphone's; `device` names it.
+    public static let another = "another"
+    /// An app on the Mac uses Sill Microphone and this device is it: record and send now.
+    public static let inUse = "inUse"
+    public static let states = [off, notReady, unpaired, refused, idle, another, inUse]
+
+    public var state: String
+    /// With `idle`, `another` and `inUse`: the codecs the Mac takes, best first (`["aac-eld"]`); a device
+    /// picks the first it makes (`MicrophoneCodec.choose`), and sends nothing without one.
+    public var codecs: [String]?
+    /// With `another`: that device's name, cleaned (SafeText.label, at most 64 characters).
+    public var device: String?
+
+    public init(state: String, codecs: [String]? = nil, device: String? = nil) {
+        self.state = state; self.codecs = codecs; self.device = device
+    }
+
+    /// The state as this build reads it: one of `states`, an unknown one as `off`.
+    public var knownState: String { Self.states.contains(state) ? state : Self.off }
+    /// The device records and sends its packets.
+    public var wanted: Bool { state == Self.inUse }
+    /// The device may offer its microphone: the Mac takes one, from this session, now or once an app uses it.
+    public var takesOffers: Bool { [Self.idle, Self.another, Self.inUse].contains(state) }
+}
+
 /// Host → device (`.hostSettings`): on connect (right after the window list), whenever it changes,
 /// and, with `answering` set, as the reply to one device's `HostSettingsChange`. Each connection gets
 /// its own (`away`, `link` and `sessionPaired` are the connection's, and so are `settings.bitrate`
@@ -222,6 +266,11 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     /// device that pairs during its session hears true. Nil from hosts before 2026-10-29, which took
     /// Direct Wireless from any session at home. The connection's own, like `away` and `link`.
     public var sessionPaired: Bool?
+    /// This connection's microphone (`MicrophoneState`, Microphone.swift): whether the Mac wants its sound
+    /// now, and why not. From a host whose window list says `microphone`, at connect and on every change;
+    /// nil from every other and while the list leaves `microphone` out. The connection's own, like
+    /// `sessionPaired`. Set after the initializer, whose parameters stay as they were.
+    public var microphone: MicrophoneState?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,

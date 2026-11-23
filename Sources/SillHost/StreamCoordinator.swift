@@ -376,6 +376,15 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    /// The devices' microphones (kind 48, MicrophoneReceiver on its own queue `sill.mic`; docs/microphone-plan.md):
+    /// nil on the CLI, which cannot feed Sill Microphone and never says `microphone`, and in Sill.app until Sill
+    /// Microphone (the plan's next part); a TEST ONLY output's on a test host (SILL_TEST_MIC_SINK).
+    private let microphone: MicrophoneReceiver?
+    /// What the window list says of the microphone: the receiver's word (1, or 0 while the switch is off or Sill
+    /// Microphone is not set up), nil without a receiver. LockPolicy.list leaves it out while locked.
+    private var micAdvertised: Int?
+    /// Each connection's kind 16 microphone as the receiver last said it (absent: none).
+    private var micStates: [ObjectIdentifier: MicrophoneState] = [:]
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -423,6 +432,10 @@ package final class StreamCoordinator {
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
         let displaysHook = DesktopDisplaysHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                     environment: env)
+        // TEST ONLY: a test host's Sill Microphone (MicrophoneTestHook), with its switch on.
+        let micHook = MicrophoneTestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                              environment: env)
+        if micHook.hook != nil { config.deviceMicrophone = true; self.config = config }
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
@@ -437,7 +450,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, micHook.line].compactMap { $0 }
         status = HostStatus()
         privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
@@ -467,6 +480,13 @@ package final class StreamCoordinator {
         launchID = launch
         // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
         clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
+        if let hook = micHook.hook {
+            let micQueue = DispatchQueue(label: "sill.mic", qos: .userInteractive)
+            microphone = MicrophoneReceiver(queue: micQueue, output: MicrophoneTestOutput(hook: hook, queue: micQueue),
+                                            gate: lockGate, testLog: hook.log)
+        } else {
+            microphone = nil
+        }
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -590,6 +610,9 @@ package final class StreamCoordinator {
                 // A sleeping display gives black frames: the session's start wakes it, as a key would
                 // (not at a locked Mac, which streams none of it: DisplayWake's gate in `deviceActive`).
                 if !cut { self.deviceActive(.connect, connection) }
+                // The microphone knows the session before its catalog says `microphone`, so before any kind 48 of it.
+                self.microphone?.joined(connection, key: route.fingerprint, paired: !cut && self.sessionPaired(id),
+                                        name: route.pairedName ?? "\(connection.endpoint)", away: route.isAway)
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come. A locked
                 // Mac's has no windows, icons or apps from the first (the gate's reading now, LockPolicy).
                 self.catalog.thumbnailsWanted = true
@@ -635,6 +658,8 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.microphone?.left(connection)
+                self.micStates[id] = nil
                 self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
@@ -688,6 +713,16 @@ package final class StreamCoordinator {
             guard let self else { return }
             self.server.broadcast(StreamMessage(kind: .appList, timestamp: Date().timeIntervalSince1970,
                                                 isKeyframe: false, payload: Wire.encode(apps)))
+        }
+        // The devices' microphones (MicrophoneReceiver): kind 48 straight from the network queue to `sill.mic`, the
+        // receiver's word on kind 16 and the list back here when it changes, never per packet.
+        if let microphone {
+            server.onMicrophoneMessage = { [microphone] message, connection, arrived in
+                microphone.received(message, from: connection, arrived: arrived)
+            }
+            microphone.onStates = { [weak self] states in Task { @MainActor in self?.micStatesChanged(states) } }
+            microphone.onAdvertised = { [weak self] value in Task { @MainActor in self?.micAdvertisedChanged(value) } }
+            microphone.start(switchOn: config.deviceMicrophone)
         }
         // Each message with the gate's reading as it arrived (the network queue's): judged by the more
         // restrictive of that and the reading when it is handled (LockPolicy.restrictive).
@@ -969,6 +1004,8 @@ package final class StreamCoordinator {
         // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
         // out now, not after a restart. The lists say `clipboard` again (or no longer).
         if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
+        // Use iPhone and iPad microphones, at once too (MicrophoneReceiver: the lists and kind 16 follow its word).
+        microphone?.setSwitch(new.deviceMicrophone)
         // Show this account while another user is on the screen (docs/off-console-plan.md), at once too: the
         // gate takes it now (off stops this session's pictures before the next frame), the stream follows.
         let view = lockGate.setOffConsoleView(new.offConsoleView)
@@ -1540,6 +1577,8 @@ package final class StreamCoordinator {
         privacy.readingChanged()
         let now = lockReading
         guard lockGate.established else { return }
+        // A device's microphone is refused at any lock (LockPolicy); the receiver hears every reading.
+        microphone?.setUnlocked(now == .unlocked)
         let was = lockActedOn, wasView = lockActedView
         let view = lockGate.offConsoleView
         lockActedOn = now
@@ -2612,6 +2651,8 @@ package final class StreamCoordinator {
         guard revoked.insert(id).inserted else { return }
         // A menu choice or fetch of it still waiting for its turn is neither made nor read.
         menus.clientRevoked(id)
+        // Its microphone is no longer Sill Microphone's (its kind 48 was dropped as revoked already).
+        if let c = connections[id] { microphone?.revoked(c) }
         // TEST ONLY (SILL_TEST_INPUT_LOG, a synthetic host): where its input stops landing, so a test
         // reads what was posted for it after this line.
         if injector.testLog {
@@ -3670,6 +3711,9 @@ package final class StreamCoordinator {
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // The devices' microphones: 1 while this host takes them, 0 while its switch is off or Sill Microphone is
+        // not set up, nothing from a host without a receiver (the CLI); never while locked (LockPolicy.list).
+        list.microphone = micAdvertised
         // The Desktop's stops (DesktopDisplays), with two or more: a device's button reads "Desktop 2" and
         // steps with kind 47, and VoiceOver names the stop. None from a synthetic host, whose Desktop is the
         // test pattern, but under SILL_TEST_DISPLAYS; none while locked or off console (LockPolicy.list).
@@ -3772,7 +3816,7 @@ package final class StreamCoordinator {
                         awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),
                         thisConnectionAway: thisAway, awayRunning: awayWanted)
         }
-        return HostSettingsState(settings: t.streamSettings(away: thisAway),
+        var state = HostSettingsState(settings: t.streamSettings(away: thisAway),
                                  persistent: onDeviceSettingsChange != nil,
                                  virtualDisplayAvailable: appKitLoop,
                                  virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
@@ -3783,6 +3827,23 @@ package final class StreamCoordinator {
                                  link: link,
                                  audioNote: t.sendAudio ? s.audio?.note : nil,
                                  sessionPaired: sessionPaired(id))
+        // The microphone's word for this connection (MicrophoneReceiver), while the list says `microphone`.
+        if micAdvertised != nil { state.microphone = micStates[id] }
+        return state
+    }
+
+    /// The receiver's kind 16 microphone for the connections whose microphone changed.
+    private func micStatesChanged(_ states: [ObjectIdentifier: MicrophoneState?]) {
+        for (id, s) in states { micStates[id] = s }
+        publishSettings()
+    }
+
+    /// The receiver's word for the window list: the devices hear it at once.
+    private func micAdvertisedChanged(_ value: Int) {
+        guard micAdvertised != value else { return }
+        micAdvertised = value
+        broadcastList()
+        publishSettings()
     }
 
     /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it
@@ -3817,6 +3878,8 @@ package final class StreamCoordinator {
     /// To every device whose catalog went out, its own state, when that differs from the last one
     /// it was sent. Prints nothing, so the CLI's output only changes when a device sends a change.
     private func publishSettings() {
+        // The microphone follows the trust list (a device removed, or paired during its session) as kind 16 does.
+        if let microphone { microphone.syncPaired(Dictionary(uniqueKeysWithValues: connections.keys.map { ($0, sessionPaired($0)) })) }
         var messages: [(NWConnection, StreamMessage)] = []
         for (id, connection) in connections {
             let state = settingsState(for: id)

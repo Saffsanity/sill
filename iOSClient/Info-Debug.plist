@@ -33,6 +33,8 @@
 	<!-- Add a Mac: the embedded scanner reads the pairing code the Mac shows. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Sill scans the code on your Mac to pair with it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Sill sends what your microphone hears to your Mac while Share Microphone is on in Sill’s settings, so apps there can use it as a microphone.</string>
 	<!-- sill://pair links from the Camera or Messages. Never acted on without a confirmation, since
 	     another app could claim the scheme too; the in-app scanner is the main path. -->
 	<key>CFBundleURLTypes</key>

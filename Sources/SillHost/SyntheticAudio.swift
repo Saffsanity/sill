@@ -1,4 +1,5 @@
 import Foundation
+import SillAudio
 
 /// A synthetic host's sound (`--synthetic`, docs/audio-plan.md §4.2): the test tone (TestTone), paced
 /// as a capture would deliver it, so the whole path from the source to the device runs without

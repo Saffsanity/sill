@@ -37,6 +37,8 @@ import StreamProtocol
 /// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
+    /// Share Microphone, the app's one switch (MicrophoneSwitch; docs/microphone-plan.md).
+    @ObservedObject private var microphoneSwitch = MicrophoneSwitch.shared
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
     let close: () -> Void
     /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
@@ -125,6 +127,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `mic`, to Share Microphone's row and its footnote (docs/microphone-plan.md; `-SillMicCase` sets its state).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -137,6 +140,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "mic"?: return microphoneRowID
         default: return nil
         }
         #else
@@ -151,6 +155,7 @@ struct HostSettingsPanel: View {
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
     private static let hideThumbnailsRowID = "hideThumbnails"
+    private static let microphoneRowID = "microphone"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -677,6 +682,42 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
+    /// Share Microphone (docs/microphone-plan.md §7, §8; #191's name): this device's microphone as Sill Microphone
+    /// on the Mac, a beta. After the clipboard's rows, with the other Share switch, until the whole-screen
+    /// Settings (#393) gives it its place in This ‹device›. Shown as MicrophonePolicy.row says: none for a Mac
+    /// that cannot take it (the CLI) or a locked one (the header says why); off and dimmed with the Mac's word
+    /// while it cannot; "Update Sill" for an older Sill.app. Turning it on asks for the permission the first time;
+    /// refused, the switch goes back off and the footnote says so, with Open Settings.
+    @ViewBuilder private var microphoneRows: some View {
+        if case .shown(let enabled, let footnote) = client.microphoneRow {
+            Rows {
+                Toggle(isOn: Binding(get: { microphoneSwitch.on || microphoneSwitch.asking },
+                                     set: { on in client.noteAction(); microphoneSwitch.set(on) })) {
+                    HStack(spacing: 8) {
+                        Text(MicrophonePolicy.Copy.rowTitle).foregroundStyle(Palette.text)
+                        BetaTag()
+                    }
+                }
+                .disabled(!enabled)
+                .accessibilityLabel("\(MicrophonePolicy.Copy.rowTitle), beta")
+                .accessibilityInputLabels([MicrophonePolicy.Copy.rowTitle])
+                .accessibilityHint(MicrophonePolicy.Copy.rowSpoken(mac: mac, device: device))
+                .rowFrame()
+                if microphoneSwitch.permission == .denied {
+                    RowDivider()
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    } label: {
+                        Text(MicrophonePolicy.Copy.openSettings).foregroundStyle(Palette.accent)
+                    }
+                    .rowFrame()
+                }
+            }
+            .id(Self.microphoneRowID)
+            Footnote(text: footnote)
+        }
+    }
+
     /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture and Hide Thumbnails While Typing (PhoneKeyboardLift), then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
@@ -770,6 +811,7 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        microphoneRows
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)

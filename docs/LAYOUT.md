@@ -4,9 +4,19 @@ Where everything is, file by file: CLAUDE.md's "Layout" until 2026-11-18, moved 
 Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-AND-RUN.md.
 
 - `Package.swift` — SwiftPM. Products: `StreamProtocol` (shared wire format,
-  iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
+  iOS + macOS), `SillAudio` (the sound's shared code, iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
   (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
   is a library target with no product, so the iOS project never sees it.
+- `Sources/SillAudio/` — the sound's code both apps link (AudioToolbox and Foundation only, public, nothing of
+  the wire; #394): `AudioEncoder` (AAC-ELD, 48 kHz stereo in, a packet a block; mono at 64 kbps for a device's
+  microphone, `channels` and `bitrate` at init; `Tests/checks/audio-codec`),
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time, a mono one's buffer as both; the
+  `audio-codec` check and the sound harness's device compile it too), `AudioPacketizer` (`PCMChunk` in,
+  `AudioBlock`s out: blocks, stamps and segments; `Tests/checks/audio-packetizer`) and `AudioPlayout` (the
+  device's timing of the Mac's sound, and in its `.microphone` mode the Mac's timing of a device's microphone:
+  no picture's guard, a 110 ms first cover, a message's ten packets counted whole; pure,
+  `Tests/checks/audio-playout`); SillHostCore depends on it and the iOS project links its product (pbxproj
+  AA05, DA01).
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
@@ -72,7 +82,22 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
   `AudioPackets` (epoch, seq, the segment flag, 1–255 packets); `AudioCodec`
   ("aac-eld", and `choose`: the first of a device's `Hello.audio` the host
-  makes); only to a device whose hello lists one. `ScrollDirection.swift` —
+  makes); only to a device whose hello lists one. `Microphone.swift` — the
+  device's microphone as Sill Microphone on the Mac (kind 48, device → host
+  only; docs/microphone-plan.md §4, #191's feature redone): `MicrophoneMessage`,
+  type 1 a JSON `MicrophoneFormat` (kind 43's `AudioFormat` keys with `claim`
+  and `pause` beside: the offer, and with a codec an epoch's format), type 2
+  kind 43's `AudioPackets` (the header's stamp the capture time), type 3 the
+  end; `MicrophoneCodec` (generation 1: AAC-ELD 48 kHz mono, 480 frames, 64
+  kbps, ten packets a message; `choose`); only to a host whose
+  `WindowList.microphone` is 1 or more, packets only while kind 16's
+  `MicrophoneState` (HostSettings.swift) says `inUse`. `MicrophonePolicy.swift`
+  — both ends' rules and every word: the device's (`Device`: when it offers,
+  pauses and records; `DeviceLink`: the offers, claims and ends each step
+  sends; `chosen`: the window it records from; `row`: the Settings row's
+  words) and the Mac's (`Host`, a reducer: who holds Sill Microphone, claims,
+  takeovers, the grace, refusals, limits, kind 16 per session, the playout's
+  source, the lines); pure, `Tests/checks/microphone`. `ScrollDirection.swift` —
   which way a scroll on the device moves the Mac's content: the device's
   Reverse Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a
   finger's drag over the picture and two fingers on the on-screen trackpad
@@ -383,14 +408,29 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
   `SILL_TEST_AUDIO_CHUNK`, `SILL_TEST_AUDIO_PAUSE` and `SILL_TEST_AUDIO_END`, a
   start that ends by itself or fails), `TestTone` (440 Hz and a
-  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
-  (blocks, stamps and segments, `AudioSourceRule` with the retry's wait,
-  `PCMLayout`, `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
-  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  click at each whole second of the stamps' clock; pure) and `AudioSourceRule`
+  (`AudioKey`, `AudioSourceRule` with the retry's wait, `PCMLayout`,
+  `AudioBufferTally`: the host's rules around SillAudio's `AudioPacketizer` and
+  `AudioEncoder`; pure, `Tests/checks/audio-packetizer`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
   and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
   drops only frames).
+  A device's microphone (kind 48, docs/microphone-plan.md; the first part, before Sill Microphone itself):
+  `MicrophoneReceiver` (its queue `sill.mic`: kind 48 straight from StreamServer's network queue
+  (`onMicrophoneMessage`, after the revoked check, never `onMessage` or the main actor), judged by LockPolicy's
+  `.microphone` at its arrival and now, then StreamProtocol's `MicrophonePolicy.Host`; the holder's packets
+  through SillAudio's decoder (mono) and `AudioPlayout` in its microphone mode to the output; kind 16's
+  microphone per connection and the list's `microphone` to the coordinator only when they change; a 256 KiB
+  backlog past which packets are dropped; `mic.*` counts), `MicrophoneOutput` (the seam where Sill Microphone
+  takes the sound: its readiness, the apps that read it, a timeline, `schedule`; with `MicrophoneClock`, the
+  host clock both read) and the TEST ONLY `MicrophoneTestOutput` (a test host's Sill Microphone: its setup and
+  apps from the hook's files, a stand-in timeline counting `mic.dry` and, with `file:PATH`, a WAV of exactly
+  what Sill Microphone would hear; no audio device) and `MicrophoneTestHook` (`SILL_TEST_MIC_SINK`, `_APP`,
+  `_SETUP`, `_LOG`, honoured only by a test host; pure, `Tests/checks/mic-host`). Only a test host makes a
+  receiver in this part: the CLI never says `microphone`, and Sill.app gets its receiver with Sill Microphone.
+  `HostConfig.deviceMicrophone` (Use iPhone and iPad microphones, the Mac's alone, off in `standard` and `app`;
+  Sill.app's key `deviceMicrophone`) is its switch.
   A sleeping display (issue #134): `DisplayWake` (which of a device's messages
   are a person at it, so the host declares user activity on the Mac for it, as
   a key press would: a session's connect every time, kinds 7, 8, 15, 25 and 28
@@ -627,7 +667,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
   127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
-  harness's device: every kind 43 decoded with iOSClient/AudioDecoder.swift and
+  harness's device: every kind 43 decoded with Sources/SillAudio/AudioDecoder.swift and
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
@@ -651,7 +691,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,
   a return, a move, locked already, another user, no display, no lock call, a quit,
   a crash, a pairing connection, a refused device, its display left on, only after a
-  device away from home. `Scripts/sillrelay.py` is a
+  device away from home.
+  `Scripts/mic-check/` (TEST ONLY; docs/microphone-plan.md §10.2): `build.sh [OUT]` makes
+  `tone` (`tone.swift`: the host's test tone, its left channel, through SillAudio's packetizer and encoder as a
+  device's microphone, into the packets file `sillclient.py --mic` sends, 120 s of it as `OUT/tone.packets`)
+  and `analyze` (`analyze.swift`: each click of that tone found in a test host's file sink against the second it
+  was stamped at: the delay, its spread, gaps); `live.py OUT [nohook|live|two|lock|unpaired|hostile|setup|all]`
+  runs paired test clients against synthetic test hosts on loopback with the file sink (each under 60 s) and
+  prints a verdict per rule. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -1026,15 +1073,31 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   black where the video is; Disconnect waits up to 300 ms for a fresh keyframe
   first (kind 44, every Mac; one that skips it, Sill for Mac 0.5.1, costs that
   pause, its picture the keyframe kept).
-  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
-  AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
-  `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
+  `AudioOutput` (its queue, SillAudio's `AudioDecoder` and `AudioPlayout`, and the
   engine; no video frame handed to its queue before the session's first format, the last 32 kept
   for the guard) and `StreamClient+Audio` (this device's mute, `soundMuted`, the Settings panel's
-  Mute; `macHasSound`, whether it shows): pbxproj AA01–AA04; the host's `audio-codec` check and
-  the sound harness's device compile AudioDecoder too. The Settings panel (`HostSettingsPanel`)
+  Mute; `macHasSound`, whether it shows): pbxproj AA03–AA04, and AA05/DA01 for SillAudio's product
+  (AA01 and AA02 were the decoder's and the playout's). The Settings panel (`HostSettingsPanel`)
   holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
   tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
+  This device's microphone as Sill Microphone on the Mac (docs/microphone-plan.md, the first part):
+  `MicrophoneSender` (a capture buffer's 48 kHz mono frames in, kind 48's messages out: SillAudio's
+  packetizer and its encoder, mono at 64 kbps, ten packets a message, the epoch and seq, each stamp the
+  capture time on the wall clock; no AVFAudio; pbxproj A190/F190), `MicrophoneCapture` (its queue
+  `sill.mic`: the tap's buffers copied off AVFAudio's tap thread, converted to 48 kHz if the route gives
+  another rate, through the sender to the session's link; the test tone in the simulator, whose
+  microphone is never opened, and in DEBUG with `-SillMicSource tone`; A191/F191; both checked on the
+  Mac, `Tests/checks/mic-send`) and `StreamClient+Microphone` (A192/F192: `MicrophoneSwitch`, Share
+  Microphone, the app's one switch, off at every launch, and the permission, asked only as it is turned
+  on; `MicrophoneHub`, the window the microphone goes from; the glue that steps MicrophonePolicy's
+  DeviceLink on every change and starts or stops the recording; an interruption's pause). AudioOutput's
+  engine runs in its voice mode while the window's microphone records (`setMicrophone`: voice
+  processing, the tap on its input, other audio ducked as little as iOS allows), and `SharedSession`
+  holds two needs, playing (`.playback`, mixing) and recording (`.playAndRecord`, `.voiceChat`, mixing,
+  to the speaker, Bluetooth in call quality). `SessionLink.sendMicrophone` sends its packets only while
+  no fence or hold stands and at most two are unsent, never queued (`Tests/checks/fence`'s `microphone`
+  mode). The Settings panel's Share Microphone row (with a "Beta" tag) follows the clipboard's, its
+  words MicrophonePolicy's; Info.plist's `NSMicrophoneUsageDescription`, which release-ios.sh checks.
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
