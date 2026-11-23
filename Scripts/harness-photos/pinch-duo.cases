@@ -1,0 +1,17 @@
+# Pinch and Rotate on ‹Mac› (#261, its review; docs/steps/2026-11-19-ready-261.md) on the agents' Duo (iOS 27.1): the
+# Settings panel at the rows (Zoom Picture, the default; Zoom on ‹Mac› with Rotate on ‹Mac› under it, off and on; a
+# Mac that cannot take the pinch, dimmed with Zoom Picture shown whatever is stored; a long Mac name, "the Mac" in the
+# segment; large type; upright), the tour's picture card under Zoom on ‹Mac› and Rotate on ‹Mac›, and the stream
+# screen under Zoom on ‹Mac›, which must be main's pixel for pixel. Main ignores -Sill.pinchZoomsMac,
+# -Sill.rotateOnMac and -SillSettingsScroll pinch.
+#   Scripts/harness-photos.sh Scripts/harness-photos/pinch-duo.cases --baseline origin/main
+duo-pinch-picture       -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch
+duo-pinch-mac           -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1
+duo-pinch-rotate        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1 -Sill.rotateOnMac 1
+duo-pinch-legacy        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -SillSettingsCase legacy -Sill.pinchZoomsMac 1 --wait=6
+duo-pinch-longname      -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1 -SillMockMacName "Noah’s MacBook Pro"
+duo-pinch-large         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+duo-pinch-upright       -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1 -Sill.rotateOnMac 1
+duo-tour-pinch-mac      -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.pinchZoomsMac 1 --wait=6
+duo-tour-pinch-rotate   -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.pinchZoomsMac 1 -Sill.rotateOnMac 1 --wait=6
+duo-stream-pinch-mac    -SillLayout 951x669 -SillHinge flat -Sill.pinchZoomsMac 1 -Sill.rotateOnMac 1

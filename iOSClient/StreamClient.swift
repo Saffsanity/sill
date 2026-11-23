@@ -938,6 +938,10 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// Whether this session's Mac takes a two-finger pinch and turn as its own trackpad gestures
+    /// (`WindowList.pinch`: `InputEvent.magnify` and `.rotate`, PinchRouting); nil from a Mac before it,
+    /// which is sent neither. Cleared with the session.
+    @Published var hostPinch: Int?
     /// Whether this session's Mac repeats a key held down (`WindowList.keyRepeat`, KeyRepeat on the host):
     /// 1 from a Mac with key repeat, nil from one before it. The stream's input view sends a hardware
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
@@ -3728,6 +3732,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostPinch = nil
         hostKeyRepeat = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
@@ -3994,6 +3999,12 @@ final class StreamClient: ObservableObject {
     /// `byPerson` false: the device's own input (its pointer's move to a new frame's middle), which
     /// the device's auto-lock hold does not count as the person's use.
     private func sendInput(_ event: InputEvent, byPerson: Bool) {
+        // A two-finger pinch or turn for the Mac goes only to a Mac whose window list says it takes it
+        // (`pinch`, PinchRouting): an older Mac could not decode it. The surfaces ask first; this is the last word.
+        switch event {
+        case .magnify, .rotate: guard PinchRouting.macTakes(hostPinch) else { return }
+        default: break
+        }
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
@@ -4226,7 +4237,8 @@ final class StreamClient: ObservableObject {
         let sent: PointerFeedState.Sent
         switch event {
         case .pointer(_, let x, let y): sent = .pointer(CGPoint(x: x, y: y))
-        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): sent = .scroll(CGPoint(x: x, y: y))
+        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y), .magnify(_, let x, let y, _), .rotate(_, let x, let y, _):
+            sent = .scroll(CGPoint(x: x, y: y))
         case .text, .key: sent = .other
         }
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
@@ -4237,6 +4249,8 @@ final class StreamClient: ObservableObject {
         case .pointer(let action, _, _): what = "a pointer \(action)"
         case .scroll: what = "a scroll"
         case .scrollGesture(let phase, _, _): what = "a scroll's \(phase)"
+        case .magnify(let phase, _, _, _): what = "a pinch's \(phase)"
+        case .rotate(let phase, _, _, _): what = "a turn's \(phase)"
         case .text: what = "text"
         case .key(let usage, let down, _): what = "key \(usage) \(down ? "down" : "up")"
         }
@@ -4437,6 +4451,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                if self.hostPinch != list.pinch { self.hostPinch = list.pinch }
                 self.hostKeyRepeat = list.keyRepeat
                 self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the

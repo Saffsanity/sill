@@ -1033,6 +1033,23 @@ check(texts(words(.touch, L, features: with { $0.gestures = false })) == [T1, T2
 check(texts(words(.touch, F, device: "iPhone", features: allOff)) == [T1, T2, T3, T5], "the pinch row whatever the Mac")
 check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Studio."),
       "the Mac's name in the pinch row")
+// Pinch's Zoom on ‹Mac› (PinchRouting, PR #261): the pinch row says what a pinch does there, and with Rotate on ‹Mac›
+// a turn too; Rotate alone, or a Mac that cannot take the pinch (StreamScreen.withPinch), keeps the picture's row.
+let T5mac = "New: Pinch to zoom what’s under your fingers on Mac mini, as its trackpad would."
+let T5turn = "New: Pinch or turn two fingers to zoom or rotate what’s under them on Mac mini, as its trackpad would."
+check(!allOn.pinchOnMac && !allOn.rotateOnMac && !allOff.pinchOnMac, "Zoom Picture and Rotate off unless chosen")
+check(texts(words(.touch, L, features: with { $0.pinchOnMac = true })) == [T1, T2, T3, T4, T5mac, T6], "Zoom on Mac: \(texts(words(.touch, L, features: with { $0.pinchOnMac = true })))")
+let turnCard = words(.touch, L, features: with { $0.pinchOnMac = true; $0.rotateOnMac = true })
+check(texts(turnCard) == [T1, T2, T3, T4, T5turn, T6], "Zoom on Mac and Rotate on Mac: \(texts(turnCard))")
+check(turnCard.rows[4].symbol == "plus.magnifyingglass" && turnCard.rows[4].isNew
+      && Array(turnCard.rows[4].spans.filter(\.strong).map(\.text).suffix(2)) == ["Pinch", "turn two fingers"]
+      && turnCard.rows[4].spoken == T5turn, "the turn's row: its symbol, New, the gestures semibold, read whole: \(turnCard.rows[4].spans)")
+check(texts(words(.touch, L, features: with { $0.rotateOnMac = true })) == [T1, T2, T3, T4, T5, T6], "Rotate on Mac alone: the picture's pinch row")
+check(texts(words(.touch, P, mac: "Studio", features: with { $0.pinchOnMac = true })).contains("New: Pinch to zoom what’s under your fingers on Studio, as its trackpad would."),
+      "the Mac's name in the Mac's pinch row")
+check(texts(words(.touch, F, device: "iPhone", features: with(allOff) { $0.pinchOnMac = true })) == [T1, T2, T3, T5mac], "Zoom on Mac on an iPhone with nothing else: four rows")
+check(words(.touch, L, features: with { $0.pinchOnMac = true }).title == touchPad.title && words(.touch, L, features: with { $0.pinchOnMac = true }).rows.count == touchPad.rows.count,
+      "Zoom on Mac: the same card, the same count")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")
 for f in everyFeatures {

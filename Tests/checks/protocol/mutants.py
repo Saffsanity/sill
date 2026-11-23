@@ -16,6 +16,8 @@ MUTANTS = [
      "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .finger, .pad, .trackpad: return true\n        case .wheel: return false"),
     ("reverse scrolling turns a wheel around", "ScrollDirection.swift",
      "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .finger, .pad, .wheel: return true\n        case .trackpad: return false"),
+    ("a pinch's phase spelled otherwise on the wire", "Input.swift", "    case began, changed, ended\n}\n\npublic enum Pinch {", "    case began = \"begin\", changed, ended\n}\n\npublic enum Pinch {"),
+    ("the pinch's generation 2", "Input.swift", "    public static let generation = 1\n}\n\npublic enum ScrollPhase", "    public static let generation = 2\n}\n\npublic enum ScrollPhase"),
     ("Off is not offered", "TextScale.swift", "offered ? [off] + scales : scales", "scales"),
     ("Off is always offered", "TextScale.swift", "offered ? [off] + scales : scales", "[off] + scales"),
     ("an untouched Aa reads 1×", "TextScale.swift", "scale ?? (offered ? off : 1.0)", "scale ?? 1.0"),

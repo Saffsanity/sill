@@ -494,6 +494,313 @@ do {
     check("two fingers on top of each other: no scale read from them", u.zoom == Z())
 }
 
+// MARK: - The stroke under Zoom on ‹Mac›: the Mac's own pinch and turn (PR #261; Stroke.Target)
+
+/// A stroke as the input view feeds it under Pinch's Zoom on ‹Mac› (`Target.mac`): every call's steps for the
+/// Mac collected in order, as the input view sends them after each call.
+struct MacRig {
+    var r: Rig
+    let target: S.Target
+    var steps: [S.MacStep] = []
+    init(turns: Bool, zoom: Z = Z()) { r = Rig(zoom); target = .mac(turns: turns) }
+    mutating func take() { steps += r.stroke.macSteps }
+    mutating func down(_ id: Int, _ x: CGFloat, _ y: CGFloat) { r.stroke.down(id, at: CGPoint(x: x, y: y), zoom: r.zoom, target: target); take() }
+    mutating func moves(_ m: [Int: (CGFloat, CGFloat)]) { r.moves(m); take() }
+    mutating func up(_ id: Int) { r.up(id); take() }
+    mutating func pan() { r.pan(); take() }
+    mutating func silence() { r.silence(); take() }
+    var magnify: [(S.MacStep.Phase, Double)] { steps.compactMap { if case .magnify(let p, let v) = $0 { return (p, v) }; return nil } }
+    var rotate: [(S.MacStep.Phase, Double)] { steps.compactMap { if case .rotate(let p, let v) = $0 { return (p, v) }; return nil } }
+    /// The pinch's changes multiplied: the spacing's ratio over the whole pinch.
+    var scale: Double { magnify.filter { $0.0 == .changed }.reduce(1) { $0 * (1 + $1.1) } }
+    /// The turn's changes added up, in the Mac's degrees.
+    var degrees: Double { rotate.filter { $0.0 == .changed }.reduce(0) { $0 + $1.1 } }
+}
+func phases(_ s: [(S.MacStep.Phase, Double)]) -> [S.MacStep.Phase] { s.map(\.0) }
+func nearD(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Bool { abs(a - b) <= tolerance }
+/// Two fingers `spacing` apart about `c`, at `angle` (radians, the pane's: clockwise on screen as it grows).
+func pair(_ c: CGPoint, _ spacing: CGFloat, _ angle: CGFloat) -> [Int: (CGFloat, CGFloat)] {
+    let dx = cos(angle) * spacing / 2, dy = sin(angle) * spacing / 2
+    return [0: (c.x - dx, c.y - dy), 1: (c.x + dx, c.y + dy)]
+}
+
+do {
+    check("a stroke's pinch is the picture's unless told (the default target)", S().target == .picture)
+    // A spread about a still midpoint, 60 pt apart to 150: the Mac's pinch, the picture as it was.
+    var m = MacRig(turns: false)
+    m.down(0, 470, 300); m.down(1, 530, 300)
+    m.moves([0: (466, 300), 1: (534, 300)])
+    check("Zoom on Mac: a spread of 8 pt: undecided still, nothing for the Mac", m.r.stroke.owner == .undecided && m.steps.isEmpty)
+    m.moves([0: (463, 300), 1: (537, 300)])
+    check("Zoom on Mac: a spread of 14 pt about a still midpoint: the Mac's pinch, never the picture's", m.r.stroke.owner == .macPinch && !m.r.stroke.scrollsMac)
+    check("Zoom on Mac: the pinch begins, then catches up from where the fingers landed (74 ÷ 60)",
+          phases(m.magnify) == [.began, .changed] && m.magnify[0].1 == 0 && nearD(m.magnify[1].1, 74.0 / 60.0 - 1))
+    check("Zoom on Mac: at the point between the fingers where they landed", m.r.stroke.macAt == CGPoint(x: 500, y: 300))
+    check("Zoom on Mac: the picture untouched", m.r.zoom == Z())
+    for x in stride(from: 460, through: 425, by: -5) { m.moves([0: (CGFloat(x), 300), 1: (CGFloat(1000 - x), 300)]) }
+    check("Zoom on Mac: each step its own change, together the whole spread (150 ÷ 60)", nearD(m.scale, 150.0 / 60.0) && m.r.zoom == Z())
+    check("Zoom on Mac: no turn with Rotate off", m.rotate.isEmpty)
+    m.pan()
+    check("Zoom on Mac: the pan beginning late changes nothing (the stroke is the pinch's: no scroll)", !m.r.scrolling && m.r.stroke.owner == .macPinch)
+    m.up(0)
+    check("Zoom on Mac: one of the pair lifting ends the pinch", phases(m.magnify).last == .ended && phases(m.magnify).filter { $0 == .ended }.count == 1)
+    m.up(1)
+    check("Zoom on Mac: the last lift: over, nothing more, the picture still whole",
+          m.r.stroke.owner == .none && phases(m.magnify).filter { $0 == .ended }.count == 1 && m.r.zoom == Z() && m.r.stroke.macAt == nil)
+    // A pinch in, the last step's lift ending it.
+    var n = MacRig(turns: false)
+    n.down(0, 400, 300); n.down(1, 600, 300)
+    for k in 1...10 { n.moves([0: (400 + CGFloat(k) * 5, 300), 1: (600 - CGFloat(k) * 5, 300)]) }
+    n.up(1); n.up(0)
+    check("Zoom on Mac: a pinch in: smaller (100 ÷ 200), began…ended", nearD(n.scale, 0.5) && phases(n.magnify).first == .began && phases(n.magnify).last == .ended)
+    check("Zoom on Mac: every change a number, none zero", n.magnify.filter { $0.0 == .changed }.allSatisfy { $0.1.isFinite && $0.1 != 0 })
+}
+
+do {
+    // Two fingers scrolling in parallel: the Mac's scroll, as before, and nothing for its pinch.
+    var m = MacRig(turns: true)
+    m.down(0, 460, 400); m.down(1, 540, 400)
+    for k in 1...3 { m.moves([0: (460, 400 - CGFloat(k) * 4), 1: (540, 400 - CGFloat(k) * 4)]) }
+    m.pan()
+    for k in 4...30 { m.moves([0: (460, 400 - CGFloat(k) * 4), 1: (540, 400 - CGFloat(k) * 4)]) }
+    m.up(0); m.up(1)
+    check("Zoom on Mac: two fingers scrolling in parallel: the Mac's scroll, no pinch, no turn", m.r.scrolling && m.steps.isEmpty)
+    // The same with the fingers drifting apart, and turning a little, once it scrolls.
+    var d = MacRig(turns: true)
+    d.down(0, 460, 400); d.down(1, 540, 400)
+    for k in 1...3 { d.moves([0: (460 - CGFloat(k) * 0.66, 400 - CGFloat(k) * 4), 1: (540 + CGFloat(k) * 0.66, 400 - CGFloat(k) * 4)]) }
+    d.pan()
+    for k in 4...30 { d.moves([0: (460 - CGFloat(k) * 0.5, 400 - CGFloat(k) * 4 + CGFloat(k) * 0.3), 1: (540 + CGFloat(k) * 0.5, 400 - CGFloat(k) * 4 - CGFloat(k) * 0.3)]) }
+    check("Zoom on Mac: a scroll whose fingers drift apart and turn: still the Mac's scroll, never its pinch (one or the other)",
+          d.r.scrolling && d.r.stroke.owner == .mac && d.steps.isEmpty)
+    // One finger: the Mac's, as ever.
+    var o = MacRig(turns: true)
+    o.down(0, 500, 300); o.moves([0: (520, 300)]); o.pan(); o.moves([0: (600, 340)]); o.up(0)
+    check("Zoom on Mac: one finger: the Mac's scroll, nothing for its pinch", o.r.scrolling && o.steps.isEmpty)
+}
+
+do {
+    // A turn about a still midpoint, 100 pt apart, 2° a step clockwise on screen.
+    let c = CGPoint(x: 500, y: 300)
+    var off = MacRig(turns: false)
+    off.down(0, 450, 300); off.down(1, 550, 300)
+    for k in 1...30 { off.moves(pair(c, 100, CGFloat(k) * 2 * .pi / 180)) }
+    check("Rotate off: a turn about a still midpoint stays undecided and sends nothing", off.r.stroke.owner == .undecided && off.steps.isEmpty)
+    var on = MacRig(turns: true)
+    on.down(0, 450, 300); on.down(1, 550, 300)
+    for k in 1...6 { on.moves(pair(c, 100, CGFloat(k) * 2 * .pi / 180)) }
+    check("Rotate on: 12° turned (each finger 10.5 pt round): undecided still", on.r.stroke.owner == .undecided && on.steps.isEmpty)
+    on.moves(pair(c, 100, 14 * .pi / 180))
+    check("Rotate on: 14° (12.2 pt round): the Mac's pinch, by its turn", on.r.stroke.owner == .macPinch && !on.r.stroke.scrollsMac)
+    check("Rotate on: the turn begins and catches up: clockwise on screen is the Mac's negative, 14°",
+          phases(on.rotate) == [.began, .changed] && nearD(on.rotate[1].1, -14, 0.001))
+    check("Rotate on: a turn alone opens no pinch", on.magnify.isEmpty)
+    for k in 8...45 { on.moves(pair(c, 100, CGFloat(k) * 2 * .pi / 180)) }
+    check("Rotate on: the turn's changes add up to the whole turn, 90° clockwise: -90", nearD(on.degrees, -90, 0.001))
+    on.up(0); on.up(1)
+    check("Rotate on: the lift ends the turn once", phases(on.rotate).filter { $0 == .ended }.count == 1 && phases(on.rotate).last == .ended && on.r.zoom == Z())
+    // A turn whose midpoint moves as the pan begins: the pan's start decides it by the turn too, with Rotate on.
+    var t = MacRig(turns: true)
+    t.down(0, 450, 300); t.down(1, 550, 300)
+    t.moves(pair(CGPoint(x: 500, y: 290), 100, 12 * .pi / 180))   // each finger 10.5 pt round, the midpoint 10 up
+    check("Rotate on: a turn of 10.5 pt moving 10: undecided as it moves", t.r.stroke.owner == .undecided)
+    t.pan()
+    check("Rotate on: the pan's start with the turn more than the midpoint moved: the Mac's pinch, no scroll", t.r.stroke.owner == .macPinch && !t.r.scrolling)
+    var u = MacRig(turns: false)
+    u.down(0, 450, 300); u.down(1, 550, 300)
+    u.moves(pair(CGPoint(x: 500, y: 290), 100, 12 * .pi / 180))
+    u.pan()
+    check("Rotate off: the same stroke is the Mac's scroll", u.r.stroke.owner == .mac && u.r.scrolling && u.steps.isEmpty)
+    // Counterclockwise on screen: the Mac's positive.
+    var ccw = MacRig(turns: true)
+    ccw.down(0, 450, 300); ccw.down(1, 550, 300)
+    for k in 1...20 { ccw.moves(pair(c, 100, -CGFloat(k) * 2 * .pi / 180)) }
+    check("Rotate on: counterclockwise on screen is the Mac's positive (40°)", nearD(ccw.degrees, 40, 0.001))
+    // Across the pair's ±180°: the right finger first (id 0 on the right), turning through the left-pointing angle.
+    var wrap = MacRig(turns: true)
+    wrap.down(0, 550, 300); wrap.down(1, 450, 300)
+    for k in 1...20 { wrap.moves([0: (c.x + 50 * cos(CGFloat(k) * 2 * .pi / 180), c.y + 50 * sin(CGFloat(k) * 2 * .pi / 180)),
+                                  1: (c.x - 50 * cos(CGFloat(k) * 2 * .pi / 180), c.y - 50 * sin(CGFloat(k) * 2 * .pi / 180))]) }
+    check("Rotate on: a pair whose angle crosses ±180° turns the short way: -40, every step small",
+          nearD(wrap.degrees, -40, 0.001) && wrap.rotate.allSatisfy { abs($0.1) < 20 })
+    // The other way across it: landed just past -180° (1° round), turning back through +180°.
+    var back = MacRig(turns: true)
+    func turnedTo(_ deg: CGFloat) -> [Int: (CGFloat, CGFloat)] {
+        let a = deg * .pi / 180
+        return [0: (c.x + 50 * cos(a), c.y + 50 * sin(a)), 1: (c.x - 50 * cos(a), c.y - 50 * sin(a))]
+    }
+    back.down(0, turnedTo(1)[0]!.0, turnedTo(1)[0]!.1); back.down(1, turnedTo(1)[1]!.0, turnedTo(1)[1]!.1)
+    for k in 1...20 { back.moves(turnedTo(1 - CGFloat(k) * 2)) }
+    check("Rotate on: the other way across ±180°: +40 (counterclockwise on screen), every step small",
+          nearD(back.degrees, 40, 0.001) && back.rotate.allSatisfy { abs($0.1) < 20 })
+    // (Not an infinite angle here: were its guard gone, the check itself would never end.)
+    check("a turn between angles that are not numbers is none; a whole turn none; the short way round",
+          S.turned(from: 0, to: .nan) == 0 && S.turned(from: .nan, to: 1) == 0
+          && near(S.turned(from: 3, to: 3 + 2 * .pi), 0) && near(S.turned(from: 3.1, to: -3.1), 2 * .pi - 6.2))
+}
+
+do {
+    // A pinch that turns as it spreads, Rotate on: both, each from where the pair landed, the pinch first in a step.
+    let c = CGPoint(x: 500, y: 300)
+    var m = MacRig(turns: true)
+    m.down(0, 450, 300); m.down(1, 550, 300)
+    for k in 1...20 { m.moves(pair(c, 100 + CGFloat(k) * 4, CGFloat(k) * 1.5 * .pi / 180)) }
+    check("Rotate on, a spread that turns: the Mac's pinch, both open", m.r.stroke.owner == .macPinch && phases(m.magnify).first == .began && phases(m.rotate).first == .began)
+    check("Rotate on, a spread that turns: the whole spread (180 ÷ 100) and the whole turn (-30°)", nearD(m.scale, 1.8) && nearD(m.degrees, -30, 0.001))
+    let firstTurn = m.steps.firstIndex { if case .rotate = $0 { return true }; return false }!
+    let firstPinch = m.steps.firstIndex { if case .magnify = $0 { return true }; return false }!
+    check("Rotate on, a spread that turns: the pinch opened first (its 12 pt came first)", firstPinch < firstTurn)
+    m.silence()
+    check("three fingers: both end, the pinch first, and the picture as it was",
+          Array(m.steps.suffix(2)) == [.magnify(.ended, amount: 0), .rotate(.ended, degrees: 0)] && m.r.stroke.owner == .gesture && m.r.zoom == Z())
+    m.moves([0: (300, 300), 1: (700, 300)])
+    m.up(0); m.up(1)
+    check("three fingers: nothing more for the Mac, to the stroke's end", phases(m.magnify).filter { $0 == .ended }.count == 1 && phases(m.rotate).filter { $0 == .ended }.count == 1)
+    // Rotate off, a spread that turns: the pinch, and no turn at all.
+    var spreadOff = MacRig(turns: false)
+    spreadOff.down(0, 450, 300); spreadOff.down(1, 550, 300)
+    for k in 1...20 { spreadOff.moves(pair(c, 100 + CGFloat(k) * 4, CGFloat(k) * 1.5 * .pi / 180)) }
+    check("Rotate off, a spread that turns: the pinch alone, no turn", !spreadOff.magnify.isEmpty && spreadOff.rotate.isEmpty)
+    // Rotate on, a spread alone: no turn.
+    var s = MacRig(turns: true)
+    s.down(0, 450, 300); s.down(1, 550, 300)
+    for k in 1...20 { s.moves([0: (450 - CGFloat(k) * 3, 300), 1: (550 + CGFloat(k) * 3, 300)]) }
+    check("Rotate on, a spread alone: the pinch, no turn", !s.magnify.isEmpty && s.rotate.isEmpty)
+}
+
+do {
+    // One of the pair lifts and another lands: the pinch ends, then begins afresh from the new pair's landing, at the
+    // stroke's place.
+    var m = MacRig(turns: false)
+    m.down(0, 470, 300); m.down(1, 530, 300)
+    m.moves([0: (460, 300), 1: (540, 300)])
+    check("a new pair: the first pinch open", phases(m.magnify) == [.began, .changed])
+    m.up(0)
+    check("a new pair: its lift ends it", phases(m.magnify) == [.began, .changed, .ended])
+    m.down(2, 300, 500)
+    m.moves([1: (540, 300), 2: (300, 500)])
+    check("a new pair: nothing until it pinches", phases(m.magnify).count == 3)
+    m.moves([1: (560, 300), 2: (280, 500)])
+    check("a new pair: it pinches: a new began and its catch-up, at the stroke's place",
+          phases(m.magnify) == [.began, .changed, .ended, .began, .changed] && m.r.stroke.macAt == CGPoint(x: 500, y: 300))
+    m.up(1); m.up(2)
+    check("a new pair: the lift ends it: two of each", phases(m.magnify).filter { $0 == .began }.count == 2 && phases(m.magnify).filter { $0 == .ended }.count == 2)
+    // A pinch whose midpoint moves as it begins: the pan's start decides it by the same rule.
+    var p = MacRig(turns: false)
+    p.down(0, 470, 300); p.down(1, 530, 300)
+    p.moves([0: (461, 306), 1: (539, 306)])   // spacing +18, midpoint 6
+    check("a pinch moving as it spreads: decided as it moves", p.r.stroke.owner == .macPinch)
+    var q = MacRig(turns: false)
+    q.down(0, 470, 300); q.down(1, 530, 300)
+    q.moves([0: (464.5, 290), 1: (535.5, 290)])   // spacing +11, midpoint 10: undecided as it moves
+    check("a pinch of 11 pt moving 10: undecided as it moves", q.r.stroke.owner == .undecided)
+    q.pan()
+    check("the pan's start with the spacing changed more than the midpoint moved: the Mac's pinch, no scroll, nothing sent yet (under 12 pt)",
+          q.r.stroke.owner == .macPinch && !q.r.scrolling && q.steps.isEmpty)
+    q.moves([0: (450, 290), 1: (550, 290)])
+    check("…and it opens once it has pinched 12 pt", phases(q.magnify) == [.began, .changed] && nearD(q.scale, 100.0 / 60.0))
+    // Zoom on Mac on a zoomed picture (the choice made while zoomed: StreamScreen undoes the zoom, but were it not):
+    // two fingers are not the picture's at once, and nothing zooms.
+    let start = zoomed(2, at: CGPoint(x: 300, y: 300), in: CGSize(width: 1000, height: 650))
+    var z = MacRig(turns: false, zoom: start)
+    z.down(0, 460, 400); z.down(1, 540, 400)
+    check("Zoom on Mac on a zoomed picture: two fingers undecided, not the picture's", z.r.stroke.owner == .undecided)
+    for k in 1...20 { z.moves([0: (460 - CGFloat(k) * 3, 400), 1: (540 + CGFloat(k) * 3, 400)]) }
+    z.up(0); z.up(1)
+    check("Zoom on Mac on a zoomed picture: the pinch is the Mac's and the zoom stays as it was", z.r.zoom == start && !z.magnify.isEmpty)
+}
+
+do {
+    // 20,000 random strokes under Zoom on ‹Mac›, turns or not: the invariants of a stroke that sends the Mac's pinch.
+    var rng = SystemRandomNumberGenerator()
+    var ok1 = true, ok2 = true, ok3 = true, ok4 = true, ok5 = true, ok6 = true
+    var pinched = 0, turned = 0, scrolled = 0
+    for _ in 0..<20_000 {
+        let turns = Bool.random(using: &rng)
+        var m = MacRig(turns: turns)
+        let fingers = Int.random(in: 1...3, using: &rng)
+        let landed: [CGPoint] = (0..<fingers).map { _ in CGPoint(x: .random(in: 100...900, using: &rng), y: .random(in: 100...550, using: &rng)) }
+        let dir = CGPoint(x: .random(in: -8...8, using: &rng), y: .random(in: -8...8, using: &rng))
+        let spread = CGFloat.random(in: 0.9...1.1, using: &rng)
+        let spin = CGFloat.random(in: -0.08...0.08, using: &rng)
+        let kind = Int.random(in: 0...2, using: &rng)   // 0 parallel, 1 spread, 2 turn and spread
+        for (i, p) in landed.enumerated() {
+            if i == 2 { m.silence() }
+            m.down(i, p.x, p.y)
+        }
+        let c = CGPoint(x: landed.map(\.x).reduce(0, +) / CGFloat(fingers), y: landed.map(\.y).reduce(0, +) / CGFloat(fingers))
+        let steps = Int.random(in: 1...30, using: &rng)
+        let lift = Int.random(in: 0...steps, using: &rng)
+        var lifted: Set<Int> = []
+        var positions = landed
+        for step in 1...steps {
+            if step == lift, fingers >= 2 { lifted.insert(0); m.up(0) }
+            var event: [Int: (CGFloat, CGFloat)] = [:]
+            for i in 0..<fingers where !lifted.contains(i) {
+                let v = CGPoint(x: landed[i].x - c.x, y: landed[i].y - c.y)
+                let a = spin * CGFloat(step), s = pow(spread, CGFloat(step))
+                let p: CGPoint
+                switch kind {
+                case 0: p = CGPoint(x: landed[i].x + dir.x * CGFloat(step), y: landed[i].y + dir.y * CGFloat(step))
+                case 1: p = CGPoint(x: c.x + v.x * s, y: c.y + v.y * s)
+                default: p = CGPoint(x: c.x + (v.x * cos(a) - v.y * sin(a)) * s, y: c.y + (v.x * sin(a) + v.y * cos(a)) * s)
+                }
+                positions[i] = p
+                event[i] = (p.x, p.y)
+            }
+            m.moves(event)
+            let down = (0..<fingers).filter { !lifted.contains($0) }
+            if !down.isEmpty {
+                let now = CGPoint(x: down.map { positions[$0].x }.reduce(0, +) / CGFloat(down.count), y: down.map { positions[$0].y }.reduce(0, +) / CGFloat(down.count))
+                let then = CGPoint(x: down.map { landed[$0].x }.reduce(0, +) / CGFloat(down.count), y: down.map { landed[$0].y }.reduce(0, +) / CGFloat(down.count))
+                if hypot(now.x - then.x, now.y - then.y) >= 10 { m.pan() }
+            }
+            if m.r.stroke.owner == .picture { ok1 = false }
+        }
+        for i in 0..<fingers where !lifted.contains(i) { m.up(i) }
+        // 1: never the picture's, and the picture never changes.
+        if m.r.zoom != Z() { ok1 = false }
+        // 2: a stroke is the Mac's scroll or its pinch, never both.
+        if m.r.scrolling && !m.steps.isEmpty { ok2 = false }
+        // 3: each of the two in order (began, changed…, ended), every began ended by the stroke's end.
+        for list in [m.magnify, m.rotate] {
+            var open = false
+            for (phase, _) in list {
+                switch phase {
+                case .began: if open { ok3 = false }; open = true
+                case .changed: if !open { ok3 = false }
+                case .ended: if !open { ok3 = false }; open = false
+                }
+            }
+            if open { ok3 = false }
+        }
+        // 4: no turn with Rotate off.
+        if !turns && !m.rotate.isEmpty { ok4 = false }
+        // 5: every value a number; a began and an ended carry 0.
+        if !m.steps.allSatisfy({ s in
+            switch s {
+            case .magnify(let p, let v), .rotate(let p, let v): return v.isFinite && (p == .changed || v == 0)
+            }
+        }) { ok5 = false }
+        // 6: three fingers send the Mac no pinch: whatever a third finger found open ends, and nothing begins after.
+        if fingers == 3 && !m.steps.allSatisfy({ s in
+            switch s { case .magnify(let p, _), .rotate(let p, _): return p != .began && p != .changed }
+        }) { ok6 = false }
+        if m.r.stroke.owner != .none { ok2 = false }
+        if !m.magnify.isEmpty { pinched += 1 }
+        if !m.rotate.isEmpty { turned += 1 }
+        if m.r.scrolling { scrolled += 1 }
+    }
+    print("  (Zoom on Mac: \(pinched) strokes pinched, \(turned) turned, \(scrolled) the Mac's scroll)")
+    check("20,000 random strokes under Zoom on Mac: never the picture's, the picture never changed", ok1)
+    check("20,000 random strokes under Zoom on Mac: the Mac's scroll or its pinch, never both, and over at the last lift", ok2)
+    check("20,000 random strokes under Zoom on Mac: each gesture began, changed…, ended, and ended by the stroke's end", ok3)
+    check("20,000 random strokes under Zoom on Mac: no turn with Rotate off", ok4)
+    check("20,000 random strokes under Zoom on Mac: every value a number, a began's and an ended's 0", ok5)
+    check("20,000 random strokes under Zoom on Mac: three fingers (silenced before they move) send no pinch", ok6)
+    check("20,000 random strokes under Zoom on Mac: some pinched, some turned, some scrolled", pinched > 1000 && turned > 500 && scrolled > 1000)
+}
+
 // MARK: - 20,000 random strokes
 
 do {

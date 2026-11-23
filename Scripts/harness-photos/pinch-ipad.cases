@@ -1,0 +1,8 @@
+# Pinch and Rotate on ‹Mac› (#261; docs/steps/2026-11-19-ready-261.md) on the agents' iPad (iPad Pro 13-inch (M5), iOS
+# 27.0, upright: a sideways screen is drawn a quarter turn round): the Settings panel at the rows, sideways and upright,
+# and the tour's picture card (the Pencil's row and the Mac's pinch row); the stream screen, main's pixel for pixel.
+#   Scripts/harness-photos.sh Scripts/harness-photos/pinch-ipad.cases --device ipad --baseline origin/main
+ipad-pinch-rotate       -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pinch -Sill.pinchZoomsMac 1 -Sill.rotateOnMac 1
+ipad-upright-pinch      -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll pinch
+ipad-tour-pinch-mac     -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillTourState fresh -SillTour touch -Sill.pinchZoomsMac 1 --wait=6
+ipad-stream-pinch-mac   -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -Sill.pinchZoomsMac 1

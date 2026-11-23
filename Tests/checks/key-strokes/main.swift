@@ -170,7 +170,7 @@ struct Mac {
             for s in keys.text(from: d) { post(s) }
             for _ in string { log.append(.text); table = 0; real = 0 }   // a character's down, with no flags
             judge("after text")
-        case .pointer, .scroll, .scrollGesture:
+        case .pointer, .scroll, .scrollGesture, .magnify, .rotate:
             log.append(.pointer(table))
             let stray = table & (modifierBits | fn) & ~accounted
             if stray != 0 { broken.append("a pointer event carries \(names(stray)), which no key down accounts for") }
@@ -752,7 +752,7 @@ struct Glue {
                 log.append("key \(s.virtualKey) \(s.down ? "down" : "up") (\(names(s.flags)))")
             }
         case .text: log.append("text")
-        case .scroll, .scrollGesture: log.append("scroll")
+        case .scroll, .scrollGesture, .magnify, .rotate: log.append("scroll")
         }
     }
     mutating func send(_ events: [InputEvent], placed: Bool, from c: Conn) { for e in events { input(e, placed: placed, from: c) } }
@@ -894,7 +894,7 @@ struct Board {
         case .text:
             for s in keys.text(from: d) { post(s, for: d) }
             posted.append(Posted(what: "text", device: d, up: false, thing: "text"))
-        case .scroll, .scrollGesture: posted.append(Posted(what: "scroll", device: d, up: false, thing: "scroll"))
+        case .scroll, .scrollGesture, .magnify, .rotate: posted.append(Posted(what: "scroll", device: d, up: false, thing: "scroll"))
         }
     }
     /// A gesture's shortcut (InputInjector.chord): none of a device's keys, down and up at once.
@@ -1688,7 +1688,7 @@ struct OldMac {
             log.append(.key(k, isDown, f)); table = f
             if isDown { down[k] = f } else { down[k] = nil }
         case .text: log.append(.text); table = 0
-        case .pointer, .scroll, .scrollGesture: log.append(.pointer(table))
+        case .pointer, .scroll, .scrollGesture, .magnify, .rotate: log.append(.pointer(table))
         }
     }
     mutating func send(_ events: [InputEvent]) { for e in events { input(e) } }

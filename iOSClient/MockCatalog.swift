@@ -442,6 +442,8 @@ enum MockCatalog {
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
+        // …and a two-finger pinch and turn (`WindowList.pinch` 1): the Settings panel's Pinch row, which `legacy` dims.
+        client.hostPinch = c == .legacy ? nil : Pinch.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's

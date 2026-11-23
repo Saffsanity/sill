@@ -929,6 +929,7 @@ while time.time() - t0 < dur:
             last_list = d
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
                   + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
+                  + (f" pinch={d['pinch']}" if "pinch" in d else "")
                   + (f" desktopDisplays={d['desktopDisplays']}" if "desktopDisplays" in d else "")
                   + (f" desktopDisplay={d['desktopDisplay']}" if "desktopDisplay" in d else "")
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")

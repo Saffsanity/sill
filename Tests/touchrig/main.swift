@@ -30,6 +30,8 @@ func describe(_ e: InputEvent) -> String {
     case .pointer(let a, let x, let y): return "pointer.\(a.rawValue)(\(f(x)),\(f(y)))"
     case .scroll(_, _, let dx, let dy): return "scroll(\(f(dx)),\(f(dy)))"
     case .scrollGesture(let p, _, _): return "scrollGesture.\(p.rawValue)"
+    case .magnify(let p, _, _, let a): return "magnify.\(p.rawValue)(\(f(a)))"
+    case .rotate(let p, _, _, let d): return "rotate.\(p.rawValue)(\(f(d)))"
     case .key(let u, let d, let m): return "key(0x\(String(u, radix: 16)) \(d ? "down" : "up") mods=0x\(String(m, radix: 16)))"
     case .text(let s): return "text(\(s.debugDescription))"
     }

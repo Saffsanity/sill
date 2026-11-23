@@ -115,6 +115,10 @@ final class InputInjector {
             scrollGesture(phase, at: point(x, y, in: rect))
         case .key(let hidUsage, let down, let modifiers):
             key(hidUsage: hidUsage, down: down, modifiers: modifiers, from: device)
+        case .magnify(let phase, let x, let y, let amount):
+            pinch(.magnify, phase, at: point(x, y, in: rect), value: amount)
+        case .rotate(let phase, let x, let y, let degrees):
+            pinch(.rotate, phase, at: point(x, y, in: rect), value: degrees)
         }
     }
 
@@ -166,6 +170,14 @@ final class InputInjector {
         case .rightMouseUp: what = "right mouse up"
         case .rightMouseDragged: what = "right mouse drag"
         case .scrollWheel: what = Self.scrollTestText(event)
+        case Self.gestureEventType:
+            // A pinch or a turn (`postGesture`): its value, its phase (1 began, 2 changed, 4 ended) and where.
+            let rotate = event.getIntegerValueField(Self.gestureSubtypeField) == Self.subtype(.rotate)
+            what = rotate ? "rotate \(event.getDoubleValueField(Self.rotationField))"
+                : "magnify \(event.getDoubleValueField(Self.magnificationField))"
+            print("Test input: \(what) (phase \(event.getIntegerValueField(Self.gesturePhaseField))) "
+                  + "at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))")
+            return
         default: what = "event \(event.type.rawValue)"
         }
         // A button's event says where it goes: a button's up with no source goes where the pointer is.
@@ -206,6 +218,64 @@ final class InputInjector {
         guard synthetic else { return (false, "SILL_TEST_INPUT_LOG ignored: only a --synthetic host takes it.") }
         guard value == "1" else { return (false, "SILL_TEST_INPUT_LOG=\(value) ignored: 1 turns it on.") }
         return (true, "Test input log: each event this host would post is printed; a --synthetic host posts none.")
+    }
+
+    // MARK: A pinch and a turn (PinchGestures)
+
+    /// The trackpad's magnify and rotate gestures have no public CGEvent constructor. Each is the window
+    /// server's gesture event (NSEventTypeGesture, 29) with its subtype (8 magnify, 5 rotate), its value
+    /// (field 113, the magnification; field 114, the turn in degrees) and a phase around it (field 132:
+    /// 1 began, 2 changed, 4 ended), the fields AppKit reads for `NSEvent.magnification` and
+    /// `NSEvent.rotation`: private numbers, as `SymbolicHotKeys` and the virtual display are private API.
+    /// The magnify's were tried by the PR's author on macOS 27.2 (Maps, Safari, Figma); the rotate's are
+    /// the same table's and wait for a device test (docs/steps/2026-11-19-ready-261.md).
+    private static let gestureEventType = CGEventType(rawValue: 29)!
+    private static let gestureSubtypeField = CGEventField(rawValue: 110)!
+    private static let magnificationField = CGEventField(rawValue: 113)!
+    private static let rotationField = CGEventField(rawValue: 114)!
+    private static let gesturePhaseField = CGEventField(rawValue: 132)!
+    private static func subtype(_ kind: PinchGestures.Kind) -> Int64 { kind == .magnify ? 8 : 5 }
+    private static func phaseValue(_ phase: PinchPhase) -> Int64 {
+        switch phase { case .began: return 1; case .changed: return 2; case .ended: return 4 }
+    }
+    /// What a device's pinch and turn have open on the Mac, and where (PinchGestures, pure).
+    private var pinches = PinchGestures()
+    private var pinchWatchdog: Task<Void, Never>?
+
+    /// One event of a device's pinch or turn: the pointer under it first when it begins, then its gesture
+    /// event, every event of one gesture where it began (PinchGestures).
+    private func pinch(_ kind: PinchGestures.Kind, _ phase: PinchPhase, at location: CGPoint, value: Double) {
+        Stats.shared.bump("in.pinchPhase")
+        let step = pinches.apply(kind, phase, value: value, at: location, pointer: pointerNow())
+        for p in step.ending { postGesture(p) }
+        if let to = step.movePointerTo { pointer(.move, at: to) }
+        for p in step.posts { postGesture(p) }
+        rearmPinchWatchdog()
+    }
+
+    private func postGesture(_ p: PinchGestures.Post) {
+        guard let event = CGEvent(source: source) else { return }
+        event.type = Self.gestureEventType
+        event.location = p.at
+        event.setIntegerValueField(Self.gestureSubtypeField, value: Self.subtype(p.kind))
+        event.setIntegerValueField(Self.gesturePhaseField, value: Self.phaseValue(p.phase))
+        event.setDoubleValueField(p.kind == .magnify ? Self.magnificationField : Self.rotationField, value: p.value)
+        watch?.sillMoved(to: p.at)   // before the post, as every pointer and scroll event (`watch`)
+        lastPointerLocation = p.at
+        if post(event) { Stats.shared.bump(p.kind == .magnify ? "in.magnify" : "in.rotate") }
+    }
+
+    /// `PinchGestures.idleTimeout` with no event while a gesture is open: it ends there (a device that
+    /// dropped off mid-pinch). Main actor, inherited from this method, as the scroll watchdog's.
+    private func rearmPinchWatchdog() {
+        pinchWatchdog?.cancel()
+        guard pinches.isOpen else { pinchWatchdog = nil; return }
+        pinchWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(PinchGestures.idleTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.pinches.isOpen else { return }
+            for p in self.pinches.idle() { self.postGesture(p) }
+            Stats.shared.bump("in.pinchTimeout")
+        }
     }
 
     // MARK: Pointer
@@ -557,9 +627,12 @@ final class InputInjector {
         }
     }
 
-    /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
-    /// button still down, where the pointer is, so nothing a device pressed outlives Sill on the Mac.
+    /// The host is going: a pinch or a turn a device left open ends (PinchGestures.releaseAll), every key
+    /// any device holds down goes up (KeyStrokes.releaseAll), then a button still down, where the pointer
+    /// is, so nothing a device pressed outlives Sill on the Mac.
     func releaseAll() {
+        for p in pinches.releaseAll() { postGesture(p) }
+        pinchWatchdog?.cancel()
         post(keys.releaseAll(), letGo: true)
         stopRepeating()
         if left.isDown { pointer(.leftUp, at: pointerNow()) }

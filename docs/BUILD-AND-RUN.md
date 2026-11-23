@@ -550,3 +550,16 @@ test does not look at which host it reached, so point it only at a synthetic
 host, or put a relay in front that reads the device's frames (the 14-byte
 header: kind, then the payload's length at bytes 10–13) and drops kind 8
 (`sillrelay.py` passes everything).
+A pinch and a turn for the Mac (PR #261, PinchRouting, docs/DEVELOPMENT.md): `-Sill.pinchZoomsMac 1` (this
+device's Pinch at Zoom on ‹Mac› for one run, in the normal app too: two fingers on the picture, on the on-screen
+trackpad and on a connected trackpad pinch on a Mac whose window list says `pinch`, and the picture never zooms)
+and `-Sill.rotateOnMac 1` (Rotate on ‹Mac›: a turn too); `-SillSettingsScroll pinch` opens the Settings panel at
+their rows; the mock Mac takes the pinch in every settings case but `legacy`, whose row is dimmed and says to
+update Sill; the tour's picture card says what a pinch does. On a host, `SILL_TEST_INPUT_LOG=1` prints each
+gesture event a dry run would post, `Test input: magnify 0.05 (phase 2) at 756,474` and `Test input: rotate -3.0
+(phase 1) at 756,474` (phase 1 began, 2 changed, 4 ended; every event of a gesture where it began, the pointer
+moved there first), and the stats count `in.pinchPhase` and `in.pinchTimeout`; `sillclient.py`'s list line says
+`pinch=1`, and `--input='{"magnify":{"_0":"began","x":0.5,"y":0.5,"amount":0}}@2'` (or `"rotate"` with
+`"degrees"`) sends one, to a `--synthetic` host on this Mac only. From the device, `-SillInputScript '<t> pinch 1.5'`
+(the picture's pinch through the stroke rule's own path) sends the Mac's pinch under `-Sill.pinchZoomsMac 1`, with
+`-SillLive 1` against such a host only (not yet run: it needs a live simulator). Photos: `Scripts/harness-photos/pinch-duo.cases` and `pinch-ipad.cases`.
