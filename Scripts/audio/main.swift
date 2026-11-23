@@ -91,6 +91,8 @@ var second = false   // the source switched to the second tone
     }
 }
 server.onAudioListenersChanged = { n in Task { @MainActor in listeners = n; follow() } }
+// A tone that failed or ended by itself (SILL_TEST_AUDIO_END) is asked for again, as the coordinator does.
+audio.onRetry = { follow() }
 
 server.onKeyframeNeeded = { encoder.requestKeyframe() }
 server.onClientCountChanged = { n in Stats.shared.activeClients = n }

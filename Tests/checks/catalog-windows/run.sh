@@ -3,7 +3,8 @@
 # tiles in a device's window strip (issue #114): an app's window by owner, layer, size and process, and
 # the helpers' windows left out (LayerProbeParent, macOS's own interface, a tool's untitled window);
 # this Mac's list as a read-only probe saw it, Stage Manager's strip, the lines Sill.log gets, and
-# 20,000 seeded random windows.
+# 20,000 seeded random windows; native tab switches (#366) and the switches still to follow, and a
+# stand-in Mac with tab groups, the catalog's looks and the coordinator's follow (4,000 sessions).
 #   Tests/checks/catalog-windows/run.sh             compile and run
 #   Tests/checks/catalog-windows/run.sh --mutants   one-line mutants of CatalogWindows.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

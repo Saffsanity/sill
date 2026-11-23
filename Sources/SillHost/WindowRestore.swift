@@ -331,6 +331,14 @@ enum WindowRestore {
         /// Window `id` went onto the virtual display, whose stage now keeps its way home.
         mutating func take(_ id: CGWindowID) -> Entry? { entries.removeValue(forKey: id) }
 
+        /// Window `oldID` was replaced in place by another tab of the same window (`newID`, issue #366):
+        /// the new tab inherits the fit record (the window's original frame before Sill sized it) with
+        /// its own Accessibility handle.
+        mutating func transfer(from oldID: CGWindowID, to newID: CGWindowID, handle: Handle) {
+            guard oldID != newID, let old = entries.removeValue(forKey: oldID) else { return }
+            entries[newID] = Entry(record: old.record, handle: handle)
+        }
+
         /// Every window that stops streaming when `keep` streams next (`stopping`) put back
         /// (`WindowRestore.stop`), but the one the virtual display holds (`staged`: only when Quit or a
         /// signal lands while the stage takes it), which goes home with the stage.
