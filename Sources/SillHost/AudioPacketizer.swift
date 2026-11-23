@@ -137,20 +137,22 @@ struct AudioPacketizer {
     }
 }
 
-/// What the sound should be of, as `AudioPipeline.follow` is asked for it: one app's (by pid; the
-/// name is for the log and the format), the whole Mac's (the Desktop), the test tone (a synthetic
-/// host's Desktop), or none.
+/// What the sound should be of, as `AudioPipeline.follow` is asked for it: one app's (by pid, and the
+/// ID of the display its capture is built on, 0 for none; the name is for the log and the format),
+/// the whole Mac's (the Desktop), the test tone (a synthetic host's Desktop), or none.
 enum AudioKey: Equatable, CustomStringConvertible {
     case none
     case desktop
     case test
-    case app(pid: Int32, name: String)
+    case app(pid: Int32, display: UInt32 = 0, name: String)
 
-    /// The same source: an app is the same by its pid (the name is only shown).
+    /// The same source: an app is the same by its pid and the display its capture is built on
+    /// (the name is only shown; when its window moves to Sill's virtual display, or Sill's display
+    /// is remade under a new ID, #365, it is a new capture).
     static func == (a: AudioKey, b: AudioKey) -> Bool {
         switch (a, b) {
         case (.none, .none), (.desktop, .desktop), (.test, .test): return true
-        case (.app(let p, _), .app(let q, _)): return p == q
+        case (.app(let p, let d1, _), .app(let q, let d2, _)): return p == q && d1 == d2
         default: return false
         }
     }
@@ -160,7 +162,7 @@ enum AudioKey: Equatable, CustomStringConvertible {
         case .none: return "none"
         case .desktop: return "desktop"
         case .test: return "test"
-        case .app(let pid, let name): return "\(name) (pid \(pid))"
+        case .app(let pid, _, let name): return "\(name) (pid \(pid))"
         }
     }
 }
@@ -181,11 +183,15 @@ enum AudioSourceRule {
     }
     /// A source that ended by itself or failed to start is tried again at most this often.
     static let retryInterval: TimeInterval = 10
+    /// The longest the pipeline waits, after a start, before it tries a source that keeps failing
+    /// again by itself (`retryIn`).
+    static let retryCap: TimeInterval = 160
 
-    /// The same source (an app by its pid) running or starting: keep it (a resize, a rotation,
-    /// another window of the same app). The same one ended by itself or failed: start it again, at
-    /// most once every `retryInterval` since its last start. Another app, the Desktop, the test tone:
-    /// a new stream and a new epoch. None: stop.
+    /// The same source (an app by its pid and its display) running or starting: keep it (a resize, a
+    /// rotation, another window of the same app on the same display). The same one ended by itself or
+    /// failed: start it again, at most once every `retryInterval` since its last start. Another app,
+    /// the same app on another display, the Desktop, the test tone: a new stream and a new epoch.
+    /// None: stop.
     static func decide(current: AudioKey, phase: Phase, lastStartAt: TimeInterval, wanted: AudioKey,
                        now: TimeInterval) -> Action {
         if wanted == .none { return current == .none && phase == .idle ? .keep : .stop }
@@ -195,6 +201,29 @@ enum AudioSourceRule {
         case .ended: return now - lastStartAt >= retryInterval ? .start : .keep
         case .idle: return .start
         }
+    }
+
+    /// How long from `now` until the pipeline tries a source that ended by itself or failed to start
+    /// again on its own (issue #365): `retryInterval` after its last start (`lastStartAt`), twice as
+    /// long for each failure in a row before the last (`failures`, at least 1), at most `retryCap`:
+    /// 10, 20, 40, 80, then 160 s, so a source that keeps failing is not started and logged every
+    /// 10 s for the rest of a stream. 0 once that time has passed, never more than the whole wait (a
+    /// start stamped after `now`). Nil unless the source ended (`phase == .ended`) and one is still
+    /// wanted.
+    static func retryIn(phase: Phase, wanted: AudioKey, lastStartAt: TimeInterval, failures: Int,
+                        now: TimeInterval) -> TimeInterval? {
+        guard phase == .ended, wanted != .none else { return nil }
+        let doublings = min(max(failures, 1), 8) - 1
+        let wait = min(retryCap, retryInterval * Double(1 << doublings))
+        return max(0, wait - max(0, now - lastStartAt))
+    }
+
+    /// The failures in a row once a try of a source has failed to start (`ranFor` nil) or ended by
+    /// itself after `ranFor` seconds: one more than `previous`, but an end after `retryInterval` or
+    /// more of running is the first of a new run of them.
+    static func failures(after previous: Int, ranFor: TimeInterval?) -> Int {
+        if let ranFor, ranFor >= retryInterval { return 1 }
+        return max(previous, 0) + 1
     }
 }
 
