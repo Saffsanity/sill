@@ -295,6 +295,26 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// Kind 34, a part of a file (#66's FileChunk, kept from #189), and kind 49, the rest of a transfer (FileTransfer;
+// Tests/checks/files has their rules): its layout packs and unpacks.
+check(StreamMessageKind.fileChunk.rawValue == 34 && StreamMessageKind(rawValue: 34) == .fileChunk, "kind 34 is fileChunk")
+check(StreamMessageKind.fileTransfer.rawValue == 49 && StreamMessageKind(rawValue: 49) == .fileTransfer, "kind 49 is fileTransfer")
+check(StreamMessageKind(rawValue: 35) == nil && StreamMessageKind(rawValue: 48) == nil, "kind 35 not this build's (#66's FileDrop), nor 48 (the microphone's)")
+var takesFiles = shares
+takesFiles.files = FilePolicy.takes
+check(json(takesFiles).contains(#""files":1"#) && !json(shares).contains(#""files""#), "the list's files: 1, left out when nil")
+check(decodedOld != nil && decodedOld?.files == nil, "an older host's list decodes, files nil")
+check(Hello(appVersion: "0.7.0", files: 1).files == 1 && !json(Hello(appVersion: "0.7.0")).contains("files"), "the hello's files: additive")
+check(FileChunk.maxBytes == 512 * 1024, "FileChunk's cap: 512 KiB a part")
+let packedChunk = FileChunk.pack(id: 7, name: "report.pdf", total: 10, offset: 4, bytes: Data([1, 2, 3, 4, 5, 6]))
+if let u = FileChunk.unpack(packedChunk) {
+    check(u.id == 7 && u.name == "report.pdf" && u.total == 10 && u.offset == 4 && u.bytes == Data([1, 2, 3, 4, 5, 6]),
+          "FileChunk round-trips")
+} else {
+    check(false, "FileChunk unpack failed")
+}
+check(FileChunk.unpack(Data([1, 2, 3])) == nil, "short FileChunk returns nil")
+
 // The window list's `keyRepeat` (#162's letters): a host that repeats a device's held key says 1 (set after
 // the initializer, whose parameters stay as they were), and a device sends it a hardware keyboard's
 // characters as keys only then. Additive: an older host's list decodes with it nil, and an older device's

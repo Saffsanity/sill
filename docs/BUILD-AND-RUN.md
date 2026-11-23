@@ -36,6 +36,7 @@ python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
+swift run -c release SillHost --pairing --no-files   # take no files from devices (on by default with an identity; docs/files-plan.md)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_PRIVACY_GRACE=5 .build/release/SillHost --synthetic --lock-after-session   # TEST ONLY dry run of Lock this Mac when the last device leaves (=away, =nosleep, =away,nosleep for its two switches): "would lock", nothing locked; only Sill.app itself ever locks (SILL_TEST_PRIVACY_DISPLAYS, SILL_TEST_PRIVACY_NO_SYMBOL; Scripts/privacy-check/live.py)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
@@ -397,6 +398,11 @@ chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock M
 shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
 '<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
 `-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened),
+`-SillFilesHost off|old|none|gives` and `-SillFiles preparing|offering|sending|finishing|
+saved|saved3|cancelled|refused|lost|folder|ask` (files and photos, docs/files-plan.md: the mock
+Mac's `files`, 1 in every settings case but `legacy` and `cli`, and a transfer to the Mac on the
+chip over the stream and the line under the Settings panel's Files rows, or a file shared into
+Sill asking to be sent; `-SillSettingsScroll files` starts the panel at the Files rows),
 `-SillMacLocked 1|2|unlocking` (the mock Mac's screen locked, switched to another
 user, or just unlocked: no windows, apps or clipboard, the cover over the stream,
 the drawer's and the panel header's line, docs/locked-mac-plan.md), and in

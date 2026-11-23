@@ -889,6 +889,9 @@ extension StreamClient {
     /// A sill://pair link from outside the app: shown for confirmation, never acted on by itself (a
     /// poster or a message could otherwise add a look-alike "Mac" that collects keystrokes).
     func handleOpenURL(_ url: URL) {
+        // A file another app opened in Sill (its share sheet's Sill, Open In): to the Mac, once the person
+        // says so (StreamClient+Files).
+        if url.isFileURL { fileShared(url); return }
         guard url.scheme?.lowercased() == "sill" else { return }
         switch PairLink.parse(url.absoluteString) {
         case .success(let link):

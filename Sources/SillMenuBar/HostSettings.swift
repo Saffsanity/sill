@@ -55,6 +55,10 @@ final class HostSettings {
         static let lockAfterSession = "lockAfterSession"
         static let lockSleepsDisplay = "lockSleepsDisplay"
         static let lockOnlyAfterAway = "lockOnlyAfterAway"
+        /// Share files with devices (docs/files-plan.md §9) and where they are kept (a folder's path; none for
+        /// Downloads › Sill).
+        static let shareFiles = "shareFiles"
+        static let filesFolder = "filesFolder"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -152,6 +156,8 @@ final class HostSettings {
             // open decisions 6 and 5), as the CLI.
             Key.lockSleepsDisplay: base.lockSleepsDisplay,
             Key.lockOnlyAfterAway: base.lockOnlyAfterAway,
+            // On, like the CLI with an identity: a paired device's files, kept in Downloads › Sill.
+            Key.shareFiles: base.shareFiles,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -175,7 +181,9 @@ final class HostSettings {
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
                             lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
                             lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
-                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway)).validated()
+                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
+                            shareFiles: defaults.bool(forKey: Key.shareFiles),
+                            filesFolder: defaults.string(forKey: Key.filesFolder).flatMap { $0.isEmpty ? nil : $0 }).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -206,6 +214,10 @@ final class HostSettings {
         if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
         if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
         if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
+        if config.shareFiles != old.shareFiles { defaults.set(config.shareFiles, forKey: Key.shareFiles) }
+        if config.filesFolder != old.filesFolder {
+            if let folder = config.filesFolder { defaults.set(folder, forKey: Key.filesFolder) } else { defaults.removeObject(forKey: Key.filesFolder) }
+        }
     }
 
     // MARK: Remote devices seen (display only)

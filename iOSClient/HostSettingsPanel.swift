@@ -100,6 +100,9 @@ struct HostSettingsPanel: View {
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
+    /// The Files rows' pickers (docs/files-plan.md §8.1): the system's Files picker and its Photos picker.
+    @State private var filesPickerShown = false
+    @State private var photosPickerShown = false
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -125,6 +128,7 @@ struct HostSettingsPanel: View {
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
+    /// `files`, to the Files rows (Send Files, Send Photos; docs/files-plan.md §9) and their footnote.
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -137,6 +141,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "files"?: return filesRowsID
         default: return nil
         }
         #else
@@ -151,6 +156,7 @@ struct HostSettingsPanel: View {
     private static let clipboardRowsID = "clipboardPaste"
     private static let fullScreenRowID = "fullScreen"
     private static let hideThumbnailsRowID = "hideThumbnails"
+    private static let filesRowsID = "files"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -191,6 +197,17 @@ struct HostSettingsPanel: View {
         // tour's and the pairing overlay's do: SwiftUI's `.cancelAction` shortcut on Done (kept for
         // ⌘.) does not ask for priority (docs/hardware-keyboard-plan.md §1).
         .background(EscapeKey(action: close))
+        // The Files rows' pickers, here once: the rows sit in `middle`, which ViewThatFits lays out twice.
+        .fileImporter(isPresented: $filesPickerShown, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { client.sendFiles(FilePickers.sources(files: urls)) }
+        }
+        .sheet(isPresented: $photosPickerShown) {
+            PhotosPickerSheet { results in
+                photosPickerShown = false
+                FilePickers.send(results, client: client)
+            }
+            .ignoresSafeArea()
+        }
         .onAppear { headerFocused = true }
         // A refused change: the control has already gone back to the Mac's value, and the reason
         // is in the footer or the note. The haptic is a no-op on an iPad.
@@ -742,6 +759,9 @@ struct HostSettingsPanel: View {
             .id(Self.hideThumbnailsRowID)
             Footnote(text: PhoneKeyboardLift.Copy.footnote)
         }
+        // Files and photos (docs/files-plan.md §9), before the clipboard as the overview's §2.2 orders This
+        // ‹device›: they move into settings-pane's whole-screen pane with the rest of this group.
+        filesRows
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -800,6 +820,48 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+    }
+
+    /// The Files rows (docs/files-plan.md §9): Send Files to ‹Mac›… (the system's Files picker) and Send Photos
+    /// to ‹Mac›… (its Photos picker), shown while the Mac says `files` (or is older: what to update), enabled only
+    /// while this session may send (FilePolicy.deviceOffers: paired, the Mac's switch on, nothing of this device's
+    /// on its way), with Stop Sending while a transfer runs, its line under them, and the footnote: where the
+    /// files go, or why the rows are disabled. Hidden on a locked Mac (the header says why) and the CLI.
+    @ViewBuilder private var filesRows: some View {
+        let offering = client.filesOffering
+        let rows = DeviceFilesCopy.rows(offering)
+        if rows.shown {
+            Rows {
+                filesButton(DeviceFilesCopy.sendFiles(mac: mac), systemImage: "doc", enabled: rows.enabled) { filesPickerShown = true }
+                RowDivider()
+                filesButton(DeviceFilesCopy.sendPhotos(mac: mac), systemImage: "photo.on.rectangle", enabled: rows.enabled) { photosPickerShown = true }
+                if OutgoingFiles.holdsMoves(client.fileOut) {
+                    RowDivider()
+                    filesButton(DeviceFilesCopy.stopSending, systemImage: "xmark.circle", enabled: true) { client.cancelFiles() }
+                }
+            }
+            .id(Self.filesRowsID)
+            if let out = client.fileOut {
+                Footnote(text: DeviceFilesCopy.panelLine(out, mac: mac, device: device), warning: DeviceFilesCopy.warns(out), top: 6)
+                    .padding(.bottom, -6)
+                    .accessibilityHidden(true)      // announced as it starts and ends
+            }
+            if let note = DeviceFilesCopy.footnote(offering, mac: mac, device: device) {
+                Footnote(text: note)
+            }
+        }
+    }
+
+    private func filesButton(_ title: String, systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(enabled ? Palette.accent : Palette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .rowFrame()
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every

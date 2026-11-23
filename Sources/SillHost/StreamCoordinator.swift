@@ -376,6 +376,17 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    /// Files from devices (kinds 34 and 49, FileHub; docs/files-plan.md): every transfer on its own queue,
+    /// `sill.files`. The main actor pushes what it knows (`pushFilesContext`) and stops a device's transfer
+    /// when it leaves or is cut off, and every transfer when the Mac locks.
+    let files: FileHub
+    /// This host has an identity (Sill.app, SillHost --pairing or --remote): only then does it take files,
+    /// which come only from a paired device; the CLI's plain door says nothing of files.
+    private let filesIdentity: Bool
+    /// A synthetic host's own folder for files (never ~/Downloads), or SILL_TEST_FILES_DIR's on a test host.
+    private let filesTestFolder: URL?
+    /// What `files` was last told.
+    private var filesContext: FileHub.Context?
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -436,8 +447,13 @@ package final class StreamCoordinator {
         firewallHook = firewallTest.hook
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
+        // Files (FileHub): a synthetic host keeps them in a folder of its own; the TEST ONLY hooks on a test host.
+        let fileHooks = FileHub.testHooks(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                          synthetic: synthetic, environment: env)
+        filesTestFolder = fileHooks.folder
+        filesIdentity = remote?.identity != nil
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 } + fileHooks.lines
         status = HostStatus()
         privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
@@ -467,6 +483,9 @@ package final class StreamCoordinator {
         launchID = launch
         // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
         clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
+        let fileServer = server
+        files = FileHub(gate: SessionLock.shared.gate, folder: fileHooks.folder ?? Self.filesFolder(config),
+                        testLog: fileHooks.log, testFree: fileHooks.free) { t, c in fileServer.sendFileMessage(t, to: c) }
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -635,6 +654,8 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.files.stop(connection: id, .lost, tellPeer: false)     // its partial files deleted
+                self.pushFilesContext()
                 self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
@@ -693,6 +714,21 @@ package final class StreamCoordinator {
         // restrictive of that and the reading when it is handled (LockPolicy.restrictive).
         server.onMessage = { [weak self] message, connection, arrived in
             Task { @MainActor in await self?.handle(message, from: connection, arrived: arrived) }
+        }
+        // Files go from the network queue straight to their own (FileHub), with the reading as they arrived.
+        server.onFileMessage = { [files] message, connection, arrived, done in
+            files.received(message, from: connection, arrived: arrived, done: done)
+        }
+        // Transfers running: the snapshot says how many, so Sill.app keeps the Mac awake meanwhile.
+        files.onRunning = { [weak self] count in
+            Task { @MainActor in self?.status.update { $0.fileTransfers = count } }
+        }
+        // A device's offer is a person at it: the display wakes as for a tap (DisplayWake).
+        files.onOffer = { [weak self] id in
+            Task { @MainActor in
+                guard let self, let connection = self.connections[id] else { return }
+                self.deviceActive(.files, connection)
+            }
         }
         catalog.onWindowsChanged = { [weak self] infos in
             Task { @MainActor in await self?.windowsChanged(infos) }
@@ -979,8 +1015,12 @@ package final class StreamCoordinator {
         // Lock this Mac when the last device leaves and its two switches, at once too: off ends a wait under way now.
         privacy.switched(on: new.lockAfterSession, sleeps: new.lockSleepsDisplay, onlyAway: new.lockOnlyAfterAway)
         guard new != target else { return false }
+        let filesWere = target.shareFiles
         pendingConfig = new
         publishSettings()
+        // Share files with devices, at once: off stops every transfer (FileHub), and the lists say files 0 or 1.
+        if new.shareFiles != filesWere { broadcastList() }
+        pushFilesContext()
         Task { @MainActor in await self.applyPending() }   // a burst before it runs is one restart
         return true
     }
@@ -1566,6 +1606,7 @@ package final class StreamCoordinator {
         if now.locked {
             pendingLaunch = nil              // a launch asked for before the lock picks nothing now
             injector.stopRepeating()         // a held key repeats no more
+            files.stopAll(.locked, tellPeer: true)   // every transfer, its partial files deleted
         }
         menuTargetChanged()                  // no app's menus while locked, the source's again after
         audioFollow()                        // and no sound
@@ -2610,6 +2651,8 @@ package final class StreamCoordinator {
 
     private func markRevoked(_ id: ObjectIdentifier) {
         guard revoked.insert(id).inserted else { return }
+        // Its transfer stops, its partial files deleted (docs/files-plan.md §11).
+        files.stop(connection: id, .notPaired, tellPeer: true)
         // A menu choice or fetch of it still waiting for its turn is neither made nor read.
         menus.clientRevoked(id)
         // TEST ONLY (SILL_TEST_INPUT_LOG, a synthetic host): where its input stops landing, so a test
@@ -3155,6 +3198,7 @@ package final class StreamCoordinator {
     /// by liveness.
     package func shutdownForExit() {
         privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
+        files.quit()                 // every transfer stopped, its partial files deleted
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
@@ -3170,6 +3214,7 @@ package final class StreamCoordinator {
     /// --synthetic host with --lock-after-session has one).
     package func releaseKeysForExit() {
         privacy.quit()       // nothing locks this Mac from here on (a wait under way says so)
+        files.quit()
         injector.releaseAll()
         restoreFits(keeping: nil)
     }
@@ -3673,6 +3718,10 @@ package final class StreamCoordinator {
         // The Desktop's stops (DesktopDisplays), with two or more: a device's button reads "Desktop 2" and
         // steps with kind 47, and VoiceOver names the stop. None from a synthetic host, whose Desktop is the
         // test pattern, but under SILL_TEST_DISPLAYS; none while locked or off console (LockPolicy.list).
+        // Files (docs/files-plan.md §5.1): 1 while Share files with devices is on, 0 while it is off, and nothing
+        // from a host without an identity (no device can pair with the CLI's plain door); none while locked or
+        // off console either (LockPolicy.list).
+        if filesIdentity { list.files = target.shareFiles ? FilePolicy.takes : 0 }
         let stops = catalog.desktopCandidates
         if !synthetic || catalog.testDisplays != nil, stops.count > 1 {
             list.desktopDisplays = stops.count
@@ -3713,6 +3762,7 @@ package final class StreamCoordinator {
         server.send(settingsMessage(state), to: connection)
         lastPublished[id] = state
         connections[id] = connection
+        pushFilesContext()       // before it can offer files: its name and its pairing (FileHub)
         // Who this Mac is and how to reach it from afar (kind 18, signed), on both doors, only from
         // a host with an identity. An older device skips it too.
         if let info = remote?.macInfoMessage() { server.send(info, to: connection) }
@@ -3785,6 +3835,25 @@ package final class StreamCoordinator {
                                  sessionPaired: sessionPaired(id))
     }
 
+    /// What FileHub knows (docs/files-plan.md §7.2): the switch on a host with an identity, the folder, its
+    /// words, and each connected session's name and pairing. Sent only when it changed, so it is cheap to call
+    /// at every publish.
+    private func pushFilesContext() {
+        var c = FileHub.Context()
+        c.share = filesIdentity && target.shareFiles
+        c.folder = filesTestFolder ?? Self.filesFolder(target)
+        c.place = filesTestFolder == nil && target.filesFolder == nil ? FilesCopy.defaultPlace : c.folder.lastPathComponent
+        for (id, connection) in connections { c.peers[id] = FileHub.Peer(name: deviceName(connection), paired: sessionPaired(id)) }
+        guard c != filesContext else { return }
+        filesContext = c
+        files.update(c)
+    }
+
+    /// Where files from devices are kept: the folder chosen, else Downloads › Sill.
+    package static func filesFolder(_ config: HostConfig) -> URL {
+        config.filesFolder.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? FileStore.defaultDestination
+    }
+
     /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it
     /// (RemoteAccess publishes every change of the list, and each change publishes the settings): the
     /// one judgement both of what the connection may set (Direct Wireless, `DeviceSettings.accepted`)
@@ -3817,6 +3886,7 @@ package final class StreamCoordinator {
     /// To every device whose catalog went out, its own state, when that differs from the last one
     /// it was sent. Prints nothing, so the CLI's output only changes when a device sends a change.
     private func publishSettings() {
+        pushFilesContext()       // the trust list and the devices' names, which every publish follows
         var messages: [(NWConnection, StreamMessage)] = []
         for (id, connection) in connections {
             let state = settingsState(for: id)

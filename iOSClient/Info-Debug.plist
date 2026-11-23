@@ -46,5 +46,26 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Files and photos (docs/files-plan.md §8.3): Sill among the apps of another app's share sheet for a file
+	     of any type (Open In, the Files app's Share), which it sends to the Mac it is connected to once the person
+	     says Send. Rank Alternate: never the default app for any type. With LSSupportsOpeningDocumentsInPlace iOS
+	     hands over the original, read in place under its security scope, rather than a copy in Documents/Inbox. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

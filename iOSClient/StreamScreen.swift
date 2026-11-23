@@ -161,7 +161,8 @@ final class DeviceIdleTimer {
             let front = window.windowScene?.activationState == .foregroundActive
             if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
             let used = DeviceIdlePolicy.lastUse(.init(input: client.lastPersonInputAt, control: client.lastActionAt,
-                                                      session: client.personSessionAt, front: entries[i].frontSince))
+                                                      session: client.personSessionAt, front: entries[i].frontSince,
+                                                      transfer: client.lastFileProgressAt))
             windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
         }
         let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)
@@ -421,6 +422,20 @@ struct StreamScreen: View {
                         .position(x: geo.size.width / 2, y: room.midY)
                         .transition(.opacity)
                 }
+                // Files and photos (FileChip, docs/files-plan.md §10): the clipboard chip's place and rules,
+                // and while it shows the clipboard's chip waits (files first: the overview's §2.3).
+                if fileChipAllowed, FileChip.shows(client), let panel = tourTargets[.stream] {
+                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
+                    let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
+                                                           : max(0, panel.width - 16)
+                    FileChip(client: client)
+                        .frame(maxWidth: widest, alignment: .trailing)
+                        .padding(8)
+                        .frame(width: panel.width, height: panel.height,
+                               alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
+                        .position(x: panel.midX, y: panel.midY)
+                        .transition(.opacity)
+                }
                 // The clipboard's chip (docs/clipboard-plan.md): a sibling after the layouts, so its
                 // Paste button and Dismiss take their touches over the stream's UIKit input view, and
                 // nothing else does (the frame around it is empty). Near the bar, off the link's line,
@@ -624,8 +639,12 @@ struct StreamScreen: View {
     private var linkLineAllowed: Bool { !settingsOpen && !drawerOpen && !overlayShown && !tourOnScreen }
 
     /// The clipboard's chip shows where the link's line may, and not over a thumbnail's lights or the
-    /// Aa ruler either (the Settings panel has its own Paste).
-    private var clipboardChipAllowed: Bool { linkLineAllowed && windowMenu == nil && !scaleOpen }
+    /// Aa ruler either (the Settings panel has its own Paste), nor while the files' chip shows in its place.
+    private var clipboardChipAllowed: Bool { fileChipAllowed && !FileChip.shows(client) }
+
+    /// The files' chip (FileChip): where the clipboard's may show (the Settings panel has the Files rows and
+    /// their line).
+    private var fileChipAllowed: Bool { linkLineAllowed && windowMenu == nil && !scaleOpen }
 
     /// The chip itself on screen, not its note in its place: its time runs only then.
     private var clipboardChipOnScreen: Bool {

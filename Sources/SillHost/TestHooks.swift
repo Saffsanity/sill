@@ -26,6 +26,8 @@ enum TestHooks {
         // Lock this Mac when the last device leaves (PrivacyPolicy.testHooks): the wait, the displays a password could
         // be typed at, and a lock call that answers as on a macOS without it. A test host locks nothing anyway.
         "SILL_TEST_PRIVACY_GRACE", "SILL_TEST_PRIVACY_DISPLAYS", "SILL_TEST_PRIVACY_NO_SYMBOL",
+        // Files' (FileHub, docs/files-plan.md §7.6): the folder, each decision logged, the free space the rule reads.
+        "SILL_TEST_FILES_DIR", "SILL_TEST_FILES_LOG", "SILL_TEST_FILES_FREE",
     ]
 
     /// One line for each such variable set on a host that does not honour them; nothing on a test

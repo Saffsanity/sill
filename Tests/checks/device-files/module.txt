@@ -1,0 +1,14 @@
+# Compiled as one module by ../module.py, each file's `import StreamProtocol` dropped, with main.swift: the
+# device's sender (DeviceFiles, SessionLink's uplink ledger, the words) and the Mac's own receiver (FileHub and
+# what it needs), so the check runs a device's transfer into the real hub over loopback.
+flags: -package-name sill
+Sources/StreamProtocol/*.swift
+Sources/SillHost/FileHub.swift
+Sources/SillHost/FileStore.swift
+Sources/SillHost/LockPolicy.swift
+Sources/SillHost/RefusalSummary.swift
+Sources/SillHost/Stats.swift
+iOSClient/SessionLink.swift
+iOSClient/MessageReader.swift
+iOSClient/DeviceFiles.swift
+iOSClient/FilesCopy+Device.swift

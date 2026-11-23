@@ -159,11 +159,51 @@ enum MockCatalog {
                 break
             }
         }
+        seedFiles(client)
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
         // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
         if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }   // the view too: no app's menus
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
+    }
+
+    /// Files and photos (docs/files-plan.md §12.3): `-SillFilesHost off|old|none|gives` the Mac's `files` (its
+    /// switch off; an older Sill on the Mac, which says nothing of files but its version; nothing; it also gives
+    /// files); `-SillFiles preparing|offering|sending|finishing|saved|saved3|cancelled|refused|lost|folder|ask`
+    /// the chip over the stream (and the Settings panel's line under the Files rows) in that state, or a
+    /// file shared into Sill asking to be sent. Neither goes away by itself here.
+    private static func seedFiles(_ client: StreamClient) {
+        let defaults = UserDefaults.standard
+        switch defaults.string(forKey: "SillFilesHost") {
+        case "off"?: client.hostFiles = 0
+        case "old"?: client.hostFiles = nil; client.hostVersion = "0.6.3"
+        case "none"?: client.hostFiles = nil
+        case "gives"?: client.hostFiles = FilePolicy.gives
+        default: break
+        }
+        guard let state = defaults.string(forKey: "SillFiles") else { return }
+        let one = ["IMG_1204.heic"], three = ["IMG_1204.heic", "IMG_1205.mov", "Quarterly report.pdf"]
+        func shot(_ phase: OutgoingFiles.Phase, _ names: [String], acked: UInt64 = 0) -> OutgoingFiles {
+            OutgoingFiles(serial: 1, phase: phase, names: names, total: 48_000_000, acked: acked, since: 0)
+        }
+        let saved = FileTransfer.done(transfer: 1, kept: three, place: FilesCopy.defaultPlace)
+        switch state {
+        case "preparing": client.fileOut = shot(.preparing, three)
+        case "offering": client.fileOut = shot(.offering, one)
+        case "sending": client.fileOut = shot(.sending, one, acked: 20_160_000)
+        case "finishing": client.fileOut = shot(.finishing, three, acked: 47_900_000)
+        case "saved": client.fileOut = shot(.done(.done(transfer: 1, kept: one, place: FilesCopy.defaultPlace)), one, acked: 48_000_000)
+        case "saved3": client.fileOut = shot(.done(saved), three, acked: 48_000_000)
+        case "cancelled": client.fileOut = shot(.stopped(reason: FileReason.cancelled.rawValue, message: nil, byPeer: false, name: nil), one)
+        case "refused": client.fileOut = shot(.stopped(reason: FileReason.noRoom.rawValue, message: nil, byPeer: true, name: nil), three)
+        case "lost": client.fileOut = shot(.stopped(reason: FileReason.lost.rawValue, message: nil, byPeer: false, name: nil), one)
+        case "folder": client.fileOut = shot(.stopped(reason: DeviceFilesCopy.folderReason, message: nil, byPeer: false, name: "Holiday"), ["Holiday"])
+        case "ask":
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("Quarterly report.pdf")
+            client.filesShared = FilesShared(sources: [DeviceFiles.Source(url: url, name: "Quarterly report.pdf", scoped: true)], at: 0)
+        default:
+            print("-SillFiles \(state): not a state (preparing, offering, sending, finishing, saved, saved3, cancelled, refused, lost, folder, ask)")
+        }
     }
 
     /// `-SillPointer <state>`: the mock's pointer in one of the plan's states (see the harness's
@@ -442,6 +482,9 @@ enum MockCatalog {
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
+        // …and takes files (`WindowList.files` 1, docs/files-plan.md): the panel's Files rows. The CLI's plain
+        // door says nothing of files, and an older Mac neither.
+        client.hostFiles = c == .legacy || c == .cli ? nil : FilePolicy.takes
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's
