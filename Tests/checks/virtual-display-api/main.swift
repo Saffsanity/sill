@@ -643,18 +643,39 @@ check(backing([Mode(width: 800, height: 1200), Mode(width: 1600, height: 600)], 
       "the widest's width and the tallest's height, from different modes: \(backing([Mode(width: 800, height: 1200), Mode(width: 1600, height: 600)], 2))")
 check(backing([mini, pad13, Mode(width: 1000, height: 700)], 2) == [2752, 2064], "the largest of three, wherever it is listed")
 check(backing([], 2) == [0, 0], "no mode, no backing")
+// A backing asked for (the Virtual Desktop's, VirtualDesktopSize.backing): at least it each way, the modes' own where larger.
+func atLeast(_ modes: [Mode], _ b: (wide: Int, high: Int)?) -> [Int] { let r = VirtualDisplay.maxPixels(modes, scale: 2, atLeast: b); return [r.wide, r.high] }
+check(atLeast([mini], nil) == [2436, 1600], "none asked: the modes' own (\(atLeast([mini], nil)))")
+check(atLeast([mini], (3072, 3072)) == [3072, 3072], "a square asked: the square, the room both ways inside (\(atLeast([mini], (3072, 3072))))")
+check(atLeast([pad13], (2000, 2000)) == [2752, 2064], "smaller than the modes': the modes' own")
+check(atLeast([mini], (2000, 3072)) == [2436, 3072], "each way on its own: the wider of the two widths, the taller of the heights (\(atLeast([mini], (2000, 3072))))")
 // init's wiring, read as text: the descriptor's maximum is the list's backing, and every listed mode goes to setModes:.
 // build.sh puts the VirtualDisplay.swift it compiled (a mutant's too) beside the binary.
 let vdSource = (try? String(contentsOfFile: CommandLine.arguments[0] + ".VirtualDisplay.swift", encoding: .utf8)) ?? ""
 check(!vdSource.isEmpty, "the VirtualDisplay.swift compiled in is read (\(CommandLine.arguments[0]).VirtualDisplay.swift)")
-check(vdSource.contains("let maxPx = Self.maxPixels(modes, scale: scale)")
+check(vdSource.contains("let maxPx = Self.maxPixels(modes, scale: scale, atLeast: backing)\n        self.backing = maxPx\n")
       && vdSource.contains("\"setMaxPixelsWide:\", UInt32(maxPx.wide))") && vdSource.contains("\"setMaxPixelsHigh:\", UInt32(maxPx.high))"),
-      "init sizes the descriptor's maximum for every mode it lists")
+      "init sizes the descriptor's maximum for every mode it lists and the backing asked for, and keeps it")
 check(vdSource.contains("let modes = Self.modeList(asked: ModeSize(width: widthPt, height: heightPt), others: otherModes)")
       && vdSource.contains("let settings = try Self.newSettings(modes, scale: scale, refreshHz: refreshHz)"),
       "init lists the asked mode and the others, and applies them all")
 check(vdSource.contains("guard displayID != 0, modesListed.contains(size) else { return false }"),
       "switchMode moves only to a mode the display was made with (or given since)")
+// The follow in place's calls (probes P2b and P2c): applySettings: with the list at the rate asked, the size asked for now
+// its first; the switch only to the size at the display's scale, a mode usable for the desktop first; nothing asked when
+// none is listed; its code given back.
+check(vdSource.contains("let rate = newRate ?? refreshHz\n        let settings = try Self.newSettings(list, scale: scale, refreshHz: rate)")
+      && vdSource.contains("        modesListed = list\n        widthPt = list[0].width\n        heightPt = list[0].height\n        refreshHz = rate\n"),
+      "applyModes sends the rate asked (else the one it has) and keeps the list, the size and the rate it took")
+check(vdSource.contains("$0.width == size.width && $0.height == size.height && $0.pixelWidth == size.width * scale")
+      && vdSource.contains("&& $0.pixelHeight == size.height * scale }")
+      && vdSource.contains("return matching.first { $0.isUsableForDesktopGUI() } ?? matching.first"),
+      "the mode switched to: the size at the display's scale, a usable one first")
+check(vdSource.contains("guard let mode = listedMode(size) else { return nil }")
+      && vdSource.contains("let done = CGCompleteDisplayConfiguration(config, .forSession)") && vdSource.contains("return done.rawValue"),
+      "switchToListed asks nothing for a mode not listed, and gives back the complete code")
+check(vdSource.contains("func listsUsable(_ size: ModeSize) -> Bool { listedMode(size)?.isUsableForDesktopGUI() == true }"),
+      "listsUsable: listed and usable for the desktop")
 
 print("virtual-display-api: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

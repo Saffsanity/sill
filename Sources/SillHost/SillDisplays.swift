@@ -74,16 +74,18 @@ final class SillDisplays {
     }
 
     /// Makes `role`'s display at `widthPt`×`heightPt` points, `scale` and `refreshHz`, with the role's identity, in place
-    /// of the role's old one, which its owner removed first; `otherModes`: more sizes listed beside it (the Virtual
-    /// Desktop's turn, when probe P2's verdict allows a way in place: VirtualDesktopSize.otherModes; none by default). A
+    /// of the role's old one, which its owner removed first; `otherModes`: more sizes listed beside it (none: macOS lists
+    /// such a mode as not usable, probes P2 and P2b); `backing`: pixels each way its backing holds at least, so the live
+    /// display can take another size in place (the Virtual Desktop's: VirtualDesktopSize.backing; none: its own). A
     /// throw is VirtualDisplay's (a missing private method, a size out of bounds, a mode refused), with the guard's marker
     /// taken back as a make that failed. The display is online a moment later (`waitUntilOnline`).
     func make(_ role: SillDisplayRole, widthPt: Int, heightPt: Int, scale: Int = 2, refreshHz: Double,
-              otherModes: [VirtualDisplay.ModeSize] = []) throws -> VirtualDisplay {
+              otherModes: [VirtualDisplay.ModeSize] = [], backing: (wide: Int, high: Int)? = nil) throws -> VirtualDisplay {
         let d: VirtualDisplay
         do {
             d = try VirtualDisplay(name: role.name, widthPt: widthPt, heightPt: heightPt, scale: scale, refreshHz: refreshHz,
-                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes)
+                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes,
+                                   backing: backing)
         } catch {
             makeGuard?.made(cameUp: false)
             throw error
@@ -109,15 +111,18 @@ final class SillDisplays {
     }
 
     /// Waits until ScreenCaptureKit lists `d`, `role`'s display, as it lists new displays a little after CoreGraphics
-    /// does, and keeps the listing (`listed`). Bounded: without Screen Recording this call has been seen to never return
-    /// while a virtual display exists. Nil when it never did within `timeout`, or `d` is no longer the role's display.
-    func waitUntilListed(_ d: VirtualDisplay, as role: SillDisplayRole, timeout: TimeInterval = 3) async -> SCDisplay? {
+    /// does, and keeps the listing (`listed`); `points`, at that size (a display that changed size in place: the Virtual
+    /// Desktop's follow). Bounded: without Screen Recording this call has been seen to never return while a virtual
+    /// display exists. Nil when it never did within `timeout`, or `d` is no longer the role's display.
+    func waitUntilListed(_ d: VirtualDisplay, as role: SillDisplayRole, timeout: TimeInterval = 3,
+                         points: (width: Int, height: Int)? = nil) async -> SCDisplay? {
         let t1 = Date()
         var listed: SCDisplay?
         while Date().timeIntervalSince(t1) < timeout {
             let remaining = max(0.2, timeout - Date().timeIntervalSince(t1))
             if let c = await WindowCatalog.shareableContent(excludingDesktopWindows: true, onScreenWindowsOnly: true, timeout: remaining),
-               let found = c.displays.first(where: { $0.displayID == d.displayID }) { listed = found; break }
+               let found = c.displays.first(where: { shown in shown.displayID == d.displayID
+                   && (points.map { shown.width == $0.width && shown.height == $0.height } ?? true) }) { listed = found; break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         guard let listed, made[role] === d else { return nil }

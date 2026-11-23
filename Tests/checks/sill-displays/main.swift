@@ -67,8 +67,9 @@ for f in hostFiles where f != "VirtualDisplay.swift" {
 check(makers == ["SillDisplays.swift 1", "VirtualDisplaySelfTest.swift 1"],
       "a display made only in SillDisplays.make and the self test: \(makers)")
 check(manager.contains("d = try VirtualDisplay(name: role.name, widthPt: widthPt, heightPt: heightPt, scale: scale, refreshHz: refreshHz,\n"
-                       + "                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes)"),
-      "SillDisplays.make makes each display with its role's identity, and the modes it is asked for")
+                       + "                                   vendorID: role.vendor, productID: role.product, serialNum: role.serial, otherModes: otherModes,\n"
+                       + "                                   backing: backing)"),
+      "SillDisplays.make makes each display with its role's identity, and the modes and backing it is asked for")
 // The guard for #380 around every make: the marker taken back on a throw and once it is up (or not).
 check(manager.contains("        } catch {\n            makeGuard?.made(cameUp: false)\n            throw error\n        }"),
       "a make that throws takes the guard's marker back as a make that failed")
@@ -115,6 +116,15 @@ check(coordinator.contains("let said = testHeadlessMade && headlessDisplay == ni
 // The Virtual Desktop (phase 2b's commit 8): the same role's display, made, waited for, listed and removed there.
 check(coordinator.contains("newDisplay = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, refreshHz: Double(hz),"),
       "the Virtual Desktop is made by SillDisplays, as the Desktop's display")
+check(coordinator.contains("refreshHz: Double(hz),\n                                           backing: (backing.wide, backing.high))")
+      && coordinator.contains("let backing = VirtualDesktopSize.backing(made: asked, devices: connected, follows: follows)"),
+      "the Virtual Desktop is made with the backing its follow in place needs (VirtualDesktopSize.backing)")
+// Its size changes in place only in the coordinator's follow (driveInPlace), through VirtualDisplay's applyModes and
+// switchToListed: never elsewhere in the host.
+check(hostFiles.filter { $0 != "VirtualDisplay.swift" && $0 != "StreamCoordinator.swift"
+                         && (source("Sources/SillHost/\($0)").contains(".applyModes(") || source("Sources/SillHost/\($0)").contains(".switchToListed(")) }.isEmpty
+      && occurrences(".applyModes(", coordinator) == 1 && occurrences(".switchToListed(", coordinator) == 1,
+      "a display's size changes in place only in the coordinator's follow")
 check(coordinator.contains("        displays.willMake(.desktop)\n        let t0 = CFAbsoluteTimeGetCurrent()\n        if testVirtualDesktop {"),
       "its marker is written just before it is made, or said to be")
 check(coordinator.contains("_ = await displays.waitUntilOnline(newDisplay, timeout: 3)"), "it is waited for there, which takes the marker back")
