@@ -256,6 +256,9 @@ under Larger Picture's row 1 kept 62 pt in view on every phone, today's keeps 21
    about 44 pt taller, a third-party keyboard) or a future iPhone can cover the key row, never row
    1 (70 pt of margin), whose Keyboard button takes it down. The alternative learns the tallest
    keyboard the device showed and moves the layout once, while the keyboard is up.
+   Since 2026-11-19 a taller keyboard no longer covers the key row: while it is up, the rows lift over its
+   real top and the picture's frame keeps its shape in the room left (PhoneKeyboardLift); the room, the
+   viewport, stays the estimate's.
 4. **The Menus button.** Default: **in row 1 after Apps while the Mac sent menus** (six buttons;
    five before the menus come, a moment after connecting). The alternative keeps six places always.
 5. **The iPhone Duo's cover.** Default: **unchanged, the switch hidden on the Duo** (its keyboard

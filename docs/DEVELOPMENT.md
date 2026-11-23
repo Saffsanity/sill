@@ -608,6 +608,19 @@ trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
+The key row stays above the software keyboard too, whatever its height
+(`PhoneKeyboardLift`, from the keyboard's real top as UIKit reports it): a
+keyboard that would come within 10 pt of it (a third-party keyboard with a bar
+of its own, an input method's candidates, an iPhone SE's own, any keyboard on
+the iPhone Duo's cover) lifts row 1, the thumbnails and the key row together
+until it is 10 pt clear, and while it is up the picture's frame keeps its shape
+in the room left above them; the Mac's window is not resized. Apple's keyboard
+moves nothing on the other iPhones. With Larger Picture the room stays the
+estimate's below, and the same lift applies over a taller keyboard. Hide
+Thumbnails While Typing (Settings › This iPhone, off by default) tucks the
+thumbnails and the Menus button away whenever the keyboard is up, so the key
+row sits under the buttons and more of the trackpad shows above the keyboard.
+
 Larger Picture (Settings › This iPhone, off by default; issue #58,
 docs/larger-picture-plan.md) gives a phone held upright more picture while a
 window streams: the thumbnails go, and the picture gets every point that keeps
