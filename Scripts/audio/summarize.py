@@ -172,6 +172,18 @@ for spec in sys.argv[2:]:
         gate(pback is not None and fback is not None and pback <= fback + 1 and pback <= end + 10,
              f"{name}: after the dip the packets' age is back at {pback} s, the frames' at {fback} s (the dip ended at {end} s)")
         gate(h["total"]("aud.drop") == 0 and not d["closed"], f"{name}: aud.drop {h['total']('aud.drop')}, the session lasted")
+    elif kind == "retry":         # #365: the pipeline's own retry, 10 s after the first start, then 20 s after the second
+        tries = re.findall(r"^Audio: trying the test tone again\.$", h["text"], re.M)
+        refused = re.findall(r"^Audio: could not capture the test tone: the test tone was refused", h["text"], re.M)
+        gate("Audio capture ended: the test tone ended by itself after 3 s" in h["text"] and len(tries) == 2 and len(refused) == 1,
+             f"{name}: the tone ended by itself after 3 s, then {len(tries)} tries by itself (2), {len(refused)} of them refused (1)")
+        gate(d["epochs"] == "1, 2" and d["formats"] == 2 and d["orphans"] == 0 and d["gaps"] == 0,
+             f"{name}: epochs [{d['epochs']}], {d['formats']} formats, {d['orphans']} packets before their format, {d['gaps']} seq gaps")
+        heard = [p[0] for p in d["per"] if p[4] > 0]
+        early, between, back = [t for t in heard if t <= 5], [t for t in heard if 5 < t < 29], [t for t in heard if t >= 29]
+        gate(bool(early) and max(early) <= 5 and not between and bool(back) and min(back) <= 33,
+             f"{name}: sound in seconds {early[:1]}…{early[-1:]}, again from {back[:1]}, and between them {between} "
+             f"(none: the failed try 10 s in made none, the next waited 20 s, not 10)")
     elif kind == "none":
         pass
 print(f"{failed} gate{'s' if failed != 1 else ''} failed")
