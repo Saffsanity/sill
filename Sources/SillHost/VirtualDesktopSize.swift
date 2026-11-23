@@ -423,8 +423,10 @@ package enum VirtualDesktopSize {
         /// The goal's pixels at 1x, where macOS lands a turn first (P2c: 800×1218 lands at 1600×2436 @1×).
         var goalAtOneX: Size { Size(widthPt: goal.widthPt * goal.scale, heightPt: goal.heightPt * goal.scale, scale: 1) }
 
-        /// applySettings: answered (`answered`: YES; false for NO or a throw); the display reads `reading` now.
+        /// applySettings: answered (`answered`: YES; false for NO or a throw); the display reads `reading` now. Only after
+        /// an `apply`: anything else waits (nothing more after the end).
         mutating func applied(_ answered: Bool, reading: Size?, at now: Double) -> Action {
+            guard phase == .apply else { return .wait }
             trace.append("applySettings: with \(Self.words(goal)) alone answered \(answered ? "YES" : "NO") at +\(ms(now)) ms")
             guard answered else { return fail(.refused, reading: reading, at: now) }
             phase = .land
@@ -616,7 +618,8 @@ package enum VirtualDesktopSize {
 
         let made: Size
         let backing: Backing
-        let knobs: TestKnobs
+        /// The steps made to fail (a test may set them once the display is where its test starts).
+        var knobs: TestKnobs
         /// What it reads now (once `read` has let what was on its way land).
         private(set) var now: Size
         /// The 2x mode macOS lists usable after a 1x landing.

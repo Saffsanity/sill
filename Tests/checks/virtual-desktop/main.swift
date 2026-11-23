@@ -360,7 +360,7 @@ typealias IP = VDS.InPlace
 struct Drive { var actions: [IP.Action] = []; var end: IP.Action = .wait; var display: VDS.TestDisplay; var machine: IP; var t: Double }
 func drive(from: VDS.Size, to: VDS.Size, made: VDS.Size? = nil, at start: VDS.Size? = nil, backing: VDS.Backing = bk(3072, 3072),
            knobs: VDS.TestKnobs = VDS.TestKnobs(), poll: Double = 0.02, blank: Double = 0) -> Drive {
-    var d = VDS.TestDisplay(made: made ?? from, backing: backing, knobs: knobs)
+    var d = VDS.TestDisplay(made: made ?? from, backing: backing)
     if let start, start != d.now {        // the display somewhere else first (made lying down, turned since: P2c's way)
         _ = d.apply(start, at: -10)
         var t = -10.0, asked = false
@@ -369,6 +369,7 @@ func drive(from: VDS.Size, to: VDS.Size, made: VDS.Size? = nil, at start: VDS.Si
             if !asked, d.lists(start, at: t) { _ = d.switchTo(start, at: t); asked = true }
         }
     }
+    d.knobs = knobs                       // its steps fail from here on, as the test asks
     var m = IP(from: from, to: to, at: 0)
     var r = Drive(display: d, machine: m, t: 0)
     var action = m.first

@@ -167,6 +167,7 @@ MUTANTS = [
     ("no wait for the listing", "size", "        static let listWait = 1.0 ", "        static let listWait = 0.0 "),
     ("no wait for the switch", "size", "        static let switchWait = 1.5 ", "        static let switchWait = 0.0 "),
     ("NO taken as YES", "size", "            guard answered else { return fail(.refused, reading: reading, at: now) }\n", ""),
+    ("an answer taken after the end", "size", "            guard phase == .apply else { return .wait }\n            trace.append(", "            trace.append("),
     ("the 1x landing at the size's points", "size",
      "var goalAtOneX: Size { Size(widthPt: goal.widthPt * goal.scale, heightPt: goal.heightPt * goal.scale, scale: 1) }",
      "var goalAtOneX: Size { Size(widthPt: goal.widthPt, heightPt: goal.heightPt, scale: 1) }"),
