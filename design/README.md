@@ -23,7 +23,9 @@
   plain `.icns` shows up on macOS 27 shrunk inside a grey tile) and the iOS
   app's primary icon. `Packaging/AppIconCommunity.icon`, grub-basket's design
   from pull request #386, is the iOS app's alternate icon (Settings, App
-  Icon). Render any look of either with Icon Composer's command-line tool:
+  Icon), and `Packaging/AppIconWindowsill.icon`, joannou's (a Mac's window
+  lit green at night, a cat on its sill), a second one. Render any look of
+  any of them with Icon Composer's command-line tool:
 
   ```
   "/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" \

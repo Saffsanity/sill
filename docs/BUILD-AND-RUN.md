@@ -353,9 +353,9 @@ remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
 parts scrolled to their ends), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper; `appicon` to the
-App Icon group over the version, docs/app-icons-plan.md), `-SillAppIcon original|community|<name>` (that
+App Icon group over the version, docs/app-icons-plan.md), `-SillAppIcon original|community|windowsill|<name>` (that
 group's stand-in for iOS's alternate icon name, an unknown name too; a tap moves the stand-in alone),
-`-SillAppIconFailed 1` (its line for a change iOS refused), `-SillAppIconSet original|community` (a tap's
+`-SillAppIconFailed 1` (its line for a change iOS refused), `-SillAppIconSet original|community|windowsill` (a tap's
 real call a second after the group appears: iOS's alert in a photo, the icon iOS keeps at the next launch;
 the console's `app icon: …` lines say what happened),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

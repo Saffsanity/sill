@@ -10,10 +10,10 @@ import UIKit
 /// the version (HostSettingsPanel's `appIcon`, which gives it the group's title and footnote); its pictures wrap
 /// to more rows when more icons come.
 ///
-/// DEBUG `-SillAppIcon original|community|<name>`: the harness's stand-in for iOS's alternate icon name (an
+/// DEBUG `-SillAppIcon original|community|windowsill|<name>`: the harness's stand-in for iOS's alternate icon name (an
 /// unknown name too, as iOS could hand one back), so a photo shows each mark without a change; a tap then moves
 /// the stand-in alone. `-SillAppIconFailed 1`: the refusal's line, as though iOS had said no.
-/// `-SillAppIconSet original|community`: a second after the group appears, the real call a tap makes, so a photo
+/// `-SillAppIconSet original|community|windowsill`: a second after the group appears, the real call a tap makes, so a photo
 /// of the harness's own simulator shows iOS's alert, and a later launch the icon iOS kept; never with
 /// `-SillAppIcon`, whose stand-in it would move instead.
 struct AppIconPicker: View {
@@ -167,7 +167,7 @@ struct AppIconPicker: View {
     }
 
     #if DEBUG
-    /// `-SillAppIcon`'s stand-in: none without it; `original` the primary icon (nil), `community` its alternate,
+    /// `-SillAppIcon`'s stand-in: none without it; `original` the primary icon (nil), `community` or `windowsill` an alternate,
     /// any other word that name.
     private static var standIn: String?? = {
         guard let word = UserDefaults.standard.string(forKey: "SillAppIcon") else { return nil }

@@ -22,6 +22,9 @@ SOURCE = [
      "var alternateIconName: String? { self != Self.standard ? nil : iconName }"),
     ("C7 the previews under another name", 'var previewImageName: String { iconName + "Preview" }', 'var previewImageName: String { "Preview" + iconName }'),
     ("C8 one id for both", "var id: String { rawValue }", 'var id: String { "icon" }'),
+    ("C9 the windowsill's name misspelt (setAlternateIconName would fail)", 'case .windowsill: return "AppIconWindowsill"',
+     'case .windowsill: return "AppIconWindowSill"'),
+    ("C10 the windowsill before the community in Settings", "    case community\n    case windowsill\n", "    case windowsill\n    case community\n"),
     # The words.
     ("W1 the community's author left out", 'case .community: return "grub-basket"', "case .community: return nil"),
     ("W2 the author's login misspelt", 'case .community: return "grub-basket"', 'case .community: return "grubbasket"'),
@@ -43,6 +46,8 @@ SOURCE = [
      " You can switch back to \\(AppIconChoice.standard.title) here whenever you’re connected to a Mac.",
      " \\(AppIconChoice.standard.title) is always here to switch back to."),
     ("W15 the footnote's way back without its Mac", "here whenever you’re connected to a Mac.", "here."),
+    ("W16 the windowsill's author left out", 'case .windowsill: return "joannou"', "case .windowsill: return nil"),
+    ("W17 the windowsill called Cat", 'case .windowsill: return "Windowsill"', 'case .windowsill: return "Cat"'),
     # Which icon shows.
     ("S1 no name reads as the community's", "guard let name else { return standard }", "guard let name else { return .community }"),
     ("S2 an unknown name reads as the community's", "return allCases.first { $0.alternateIconName == name } ?? standard",
@@ -64,7 +69,7 @@ SOURCE = [
     ("R4 never asks", "choice.alternateIconName == name ? .none : .set(choice.alternateIconName)", ".none"),
     # Whether the group shows.
     ("O1 shown where iOS cannot change the icon", "supportsAlternateIcons && allCases.count > 1", "allCases.count > 1"),
-    ("O2 never shown", "supportsAlternateIcons && allCases.count > 1", "supportsAlternateIcons && allCases.count > 2"),
+    ("O2 never shown", "supportsAlternateIcons && allCases.count > 1", "supportsAlternateIcons && allCases.count > allCases.count"),
 ]
 
 PBX = "iOSClient/Sill.xcodeproj/project.pbxproj"
@@ -72,34 +77,39 @@ PBX = "iOSClient/Sill.xcodeproj/project.pbxproj"
 # the first replaced (every one when found is negative: -n for n found); (name, path, None, None, 0) removes the
 # file or folder; (name, path, "", text, None) writes a new file.
 WIRING = [
-    ("P1 the first configuration without the alternate", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;\n", "", 2),
-    ("P2 neither configuration with the alternate", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;\n", "", -2),
-    ("P3 an alternate the choices do not have", PBX, "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;",
-     'ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconPride";', 2),
-    ("P4 every icon set included instead", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;\n",
+    ("P1 the first configuration without the alternates", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"AppIconCommunity AppIconWindowsill\";\n", "", 2),
+    ("P2 neither configuration with the alternates", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"AppIconCommunity AppIconWindowsill\";\n", "", -2),
+    ("P3 an alternate the choices do not have", PBX, 'ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconWindowsill";',
+     'ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconWindowsill AppIconPride";', 2),
+    ("P4 every icon set included instead", PBX, "\t\t\t\tASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"AppIconCommunity AppIconWindowsill\";\n",
      "\t\t\t\tASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;\n", -2),
     ("P5 another primary icon", PBX, "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;", "ASSETCATALOG_COMPILER_APPICON_NAME = AppIconCommunity;", 2),
     ("P6 the community's document not a resource", PBX, "\t\t\t\tA1000001000000000000A1C1 /* AppIconCommunity.icon in Resources */,\n", "", 1),
     ("P7 the original's document a plain folder", PBX, "lastKnownFileType = folder.iconcomposer.icon; name = AppIcon.icon;",
      "lastKnownFileType = folder; name = AppIcon.icon;", 1),
     ("P8 the community's document at another path", PBX, "path = ../Packaging/AppIconCommunity.icon;", "path = ../design/AppIconCommunity.icon;", 1),
+    ("P9 the windowsill left out of the alternates", PBX, 'ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconCommunity AppIconWindowsill";',
+     "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconCommunity;", -2),
+    ("P10 the windowsill's document not a resource", PBX, "\t\t\t\tA1000001000000000000A1C4 /* AppIconWindowsill.icon in Resources */,\n", "", 1),
     ("D1 a layer of the original missing", "Packaging/AppIcon.icon/Assets/ipad.svg", None, None, 0),
     ("D2 a layer of the community's missing", "Packaging/AppIconCommunity.icon/Assets/island.svg", None, None, 0),
     ("D3 the community's document without its icon.json", "Packaging/AppIconCommunity.icon/icon.json", None, None, 0),
     ("D4 the original's icon.json not JSON", "Packaging/AppIcon.icon/icon.json", '"groups" : [', '"groups" : [[', 1),
     ("D5 a layer naming no picture", "Packaging/AppIcon.icon/icon.json", '"image-name" : "window.svg",\n', "", 1),
+    ("D6 a layer of the windowsill's missing", "Packaging/AppIconWindowsill.icon/Assets/sill.svg", None, None, 0),
     ("A1 the old icon set back beside the document", "iOSClient/Assets.xcassets/AppIcon.appiconset/Contents.json", "", '{"images":[]}', None),
     ("A2 the community's preview missing", "iOSClient/Assets.xcassets/AppIconCommunityPreview.imageset", None, None, 0),
     ("A3 the original's preview naming a picture that is not there", "iOSClient/Assets.xcassets/AppIconPreview.imageset/Contents.json",
      '"filename" : "AppIconPreview.png"', '"filename" : "AppIconPreview@3x.png"', 1),
+    ("A4 the windowsill's preview missing", "iOSClient/Assets.xcassets/AppIconWindowsillPreview.imageset", None, None, 0),
     ("M1 Sill for Mac's icon another", "Packaging/Info.plist", "<key>CFBundleIconName</key>\n\t<string>AppIcon</string>",
      "<key>CFBundleIconName</key>\n\t<string>AppIconCommunity</string>", 1),
     ("M2 make-app.sh compiling the community's for Sill for Mac", "Scripts/make-app.sh", 'doc="$PWD/Packaging/AppIcon.icon"',
      'doc="$PWD/Packaging/AppIconCommunity.icon"', 1),
 ]
 # What the check reads, copied for the wiring's mutants.
-READS = [PBX, "Packaging/AppIcon.icon", "Packaging/AppIconCommunity.icon", "iOSClient/Assets.xcassets", "Packaging/Info.plist",
-         "Scripts/make-app.sh"]
+READS = [PBX, "Packaging/AppIcon.icon", "Packaging/AppIconCommunity.icon", "Packaging/AppIconWindowsill.icon",
+         "iOSClient/Assets.xcassets", "Packaging/Info.plist", "Scripts/make-app.sh"]
 
 caught = 0
 total = len(SOURCE) + len(WIRING)

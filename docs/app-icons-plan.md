@@ -65,6 +65,20 @@ grub-basket's `Packaging/AppIcon.icon` from #386 (commit be5113f1; unchanged in 
 its seven files byte for byte, at `Packaging/AppIconCommunity.icon`, in a commit authored by them. Nothing else of
 #386 comes in: its menu bar glyph, site, disk image and design changes stay with that pull request.
 
+## B2. The windowsill (joannou)
+
+joannou's `Packaging/AppIconWindowsill.icon`, a second alternate, offered after this plan: a Mac's window lit green at
+night (#76FB4B on a near-black green gradient, #1F2E1D to #060906), its three lights and the title bar's edge cut out
+of it, and a cat sitting on the sill with its back to us, looking in, cut out of the window too; the sill a slim bar
+under it. Two groups, both glass, neutral shadows at 0.5, translucency off: the window, then the sill. The fill has a
+dark specialization (a shade darker), so Default and Dark are the same night; Clear and Tinted are the system's
+own, and the cat holds in each (rendered with ictool in all six looks). Wired as the community's is: a case in
+`AppIconChoice` (`windowsill`, "Windowsill", "by joannou"), the document a resource (A1C4/F1C4), its name second in
+`ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES` in both configurations, and its preview,
+`AppIconWindowsillPreview`, rendered as `Scripts/app-icon-previews.sh` does (288 px, iOS Default). It adds about
+2.4 MB per device download as the community's does: the simulator build's Assets.car is 15.0 MB (both idioms)
+against 10.1 MB with two icons. Its subject is the app's, a Mac's window, under the same name (2.3.8, below).
+
 ## C. The switcher (Sill for iPhone and iPad)
 
 - **The build**: both documents are resources of the iOS target (`folder.iconcomposer.icon`, as #386 wired its

@@ -1,0 +1,84 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.12157,0.18039,0.11373,1.00000",
+          "srgb:0.02353,0.03529,0.02353,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0.0
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1.0
+          }
+        }
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.10196,0.15294,0.09412,1.00000",
+          "srgb:0.01569,0.02353,0.01569,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0.0
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1.0
+          }
+        }
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "name" : "Window",
+      "layers" : [
+        {
+          "name" : "window",
+          "image-name" : "window.svg",
+          "glass" : true
+        }
+      ],
+      "specular" : true,
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    },
+    {
+      "name" : "Sill",
+      "layers" : [
+        {
+          "name" : "sill",
+          "image-name" : "sill.svg",
+          "glass" : true
+        }
+      ],
+      "specular" : true,
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}

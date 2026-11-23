@@ -1,9 +1,9 @@
 // AppIconChoice (iOSClient/AppIconChoice.swift) on its own, and the build's wiring of the icons it names: the
 // Home Screen icon of Sill for iPhone and iPad, the person's choice in Settings beside the version (Noah,
 // 2026-11-18; docs/app-icons-plan.md).
-//   - The choices: the original first, the primary icon and what a new install shows; the community's an
-//     alternate with its name; their names, previews and ids each its own.
-//   - The words: each title, the community's credit by its author's login, VoiceOver's, the group's title, the
+//   - The choices: the original first, the primary icon and what a new install shows; the community's and the
+//     windowsill an alternate each, with its name; their names, previews and ids each its own.
+//   - The words: each title, each alternate's credit by its author's login, VoiceOver's, the group's title, the
 //     footnote (the device's word, the way back while a Mac is connected, never "always"), each tile's hint, the
 //     refusal.
 //   - Which icon shows: no name, each alternate's name, and names this build does not ship (a later icon's, the
@@ -29,32 +29,41 @@ func exists(_ p: String) -> Bool { FileManager.default.fileExists(atPath: path(p
 
 // MARK: - The choices
 
-check("two choices, the original first, then the community's", C.allCases == [.original, .community])
+check("three choices, the original first, then the community's, then the windowsill", C.allCases == [.original, .community, .windowsill])
 check("a new install shows the original (the standard)", C.standard == .original)
 check("the original is the primary icon, AppIcon: no alternate name, so setAlternateIconName(nil) brings it back",
       C.original.iconName == "AppIcon" && C.original.alternateIconName == nil)
 check("the community's is the alternate AppIconCommunity", C.community.iconName == "AppIconCommunity"
       && C.community.alternateIconName == "AppIconCommunity")
-check("the alternates are exactly [AppIconCommunity]: what the project must list", C.alternateIconNames == ["AppIconCommunity"])
+check("the windowsill is the alternate AppIconWindowsill", C.windowsill.iconName == "AppIconWindowsill"
+      && C.windowsill.alternateIconName == "AppIconWindowsill")
+check("the alternates are exactly [AppIconCommunity, AppIconWindowsill], in Settings' order: what the project must list",
+      C.alternateIconNames == ["AppIconCommunity", "AppIconWindowsill"])
 check("every choice but the standard has an alternate name, and only the standard has none",
       C.allCases.allSatisfy { ($0 == C.standard) == ($0.alternateIconName == nil) })
 check("each choice's icon name, preview, id and title its own",
       Set(C.allCases.map(\.iconName)).count == C.allCases.count && Set(C.allCases.map(\.previewImageName)).count == C.allCases.count
       && Set(C.allCases.map(\.id)).count == C.allCases.count && Set(C.allCases.map(\.title)).count == C.allCases.count)
-check("the previews: AppIconPreview and AppIconCommunityPreview (the icon's name, then Preview)",
-      C.original.previewImageName == "AppIconPreview" && C.community.previewImageName == "AppIconCommunityPreview")
-check("a choice's id is its raw value, original and community", C.original.id == "original" && C.community.id == "community"
+check("the previews: AppIconPreview, AppIconCommunityPreview and AppIconWindowsillPreview (the icon's name, then Preview)",
+      C.original.previewImageName == "AppIconPreview" && C.community.previewImageName == "AppIconCommunityPreview"
+      && C.windowsill.previewImageName == "AppIconWindowsillPreview")
+check("a choice's id is its raw value, original, community and windowsill", C.original.id == "original" && C.community.id == "community"
+      && C.windowsill.id == "windowsill"
       && C.allCases.allSatisfy { C(rawValue: $0.id) == $0 })
 check("no alternate is named as the primary, so no name means two icons", !C.alternateIconNames.contains(C.standard.iconName))
 
 // MARK: - The words
 
-check("the titles: Original, Community", C.original.title == "Original" && C.community.title == "Community")
+check("the titles: Original, Community, Windowsill", C.original.title == "Original" && C.community.title == "Community"
+      && C.windowsill.title == "Windowsill")
 check("the community's author by login, grub-basket; the original none", C.community.author == "grub-basket" && C.original.author == nil)
+check("the windowsill's author by login, joannou", C.windowsill.author == "joannou")
 check("the credit under the community's title: \"by grub-basket\"; none under the original's",
       C.community.credit == "by grub-basket" && C.original.credit == nil)
+check("the credit under the windowsill's title: \"by joannou\"", C.windowsill.credit == "by joannou")
 check("VoiceOver: \"Original icon\", \"Community icon, by grub-basket\"",
       C.original.spoken == "Original icon" && C.community.spoken == "Community icon, by grub-basket")
+check("VoiceOver: \"Windowsill icon, by joannou\"", C.windowsill.spoken == "Windowsill icon, by joannou")
 check("the group's title: App Icon", C.Copy.title == "App Icon")
 check("the footnote, on an iPad: what it changes and the way back",
       C.Copy.footnote(device: "iPad")
@@ -76,14 +85,16 @@ check("the words use typographic apostrophes, never a straight one",
 
 check("no alternate name: the original", C.current(alternateIconName: nil) == .original)
 check("AppIconCommunity: the community's", C.current(alternateIconName: "AppIconCommunity") == .community)
-for unknown in ["AppIconPride", "AppIcon", "", "appiconcommunity", "AppIconCommunity ", "community", "original", "AppIconCommunityPreview"] {
+check("AppIconWindowsill: the windowsill", C.current(alternateIconName: "AppIconWindowsill") == .windowsill)
+for unknown in ["AppIconPride", "AppIcon", "", "appiconcommunity", "AppIconCommunity ", "community", "original", "AppIconCommunityPreview",
+                "appiconwindowsill", "AppIconWindowSill", "windowsill", "AppIconWindowsillPreview"] {
     check("a name this build does not ship (\"\(unknown)\"): the original, which iOS shows then",
           C.current(alternateIconName: unknown) == .original)
 }
 
 // MARK: - What a tap asks
 
-let names: [String?] = [nil, "AppIconCommunity", "AppIconPride"]
+let names: [String?] = [nil, "AppIconCommunity", "AppIconWindowsill", "AppIconPride"]
 func word(_ n: String?) -> String { n.map { "\"\($0)\"" } ?? "nil" }
 func say(_ r: C.Request) -> String {
     switch r {
@@ -92,8 +103,9 @@ func say(_ r: C.Request) -> String {
     }
 }
 let expected: [AppIconChoice: [C.Request]] = [
-    .original: [.none, .set(nil), .set(nil)],
-    .community: [.set("AppIconCommunity"), .none, .set("AppIconCommunity")],
+    .original: [.none, .set(nil), .set(nil), .set(nil)],
+    .community: [.set("AppIconCommunity"), .none, .set("AppIconCommunity"), .set("AppIconCommunity")],
+    .windowsill: [.set("AppIconWindowsill"), .set("AppIconWindowsill"), .none, .set("AppIconWindowsill")],
 ]
 for choice in C.allCases {
     for (i, name) in names.enumerated() {
