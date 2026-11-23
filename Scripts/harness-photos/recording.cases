@@ -1,0 +1,34 @@
+# Recording the stream (#284, docs/recording-plan.md, gate G5): the rows, the light, the count and the notes, from
+# the mock's states (-SillRecording, -SillRecordingNote; ContentView's contract). No recorder runs, nothing dials.
+#   Scripts/harness-photos.sh Scripts/harness-photos/recording.cases --baseline <the commit before the views>
+# The Settings group, first in This iPad: Start Recording, Record Sound, the footnote.
+settings-recording        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording --wait=5
+settings-soundoff         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording -SillSettingsCase soundoff --wait=5
+settings-legacy           -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording -SillSettingsCase legacy --wait=5
+settings-nothing          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording -SillActive none --wait=5
+settings-stop-row         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillRecording on --wait=5
+settings-stop-low         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillRecording low --wait=5
+settings-cancel-row       -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillRecording count --wait=5
+settings-nospace          -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording -SillRecordingNote nospace --wait=5
+settings-xxl              -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll recording -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL --wait=5
+# Over the picture: the count, Starting…, the light, low on space.
+count                     -SillLayout 951x669 -SillHinge flat -SillRecording count
+starting                  -SillLayout 951x669 -SillHinge flat -SillRecording starting
+light-duo-flat            -SillLayout 951x669 -SillHinge flat -SillRecording on
+light-duo-half            -SillLayout 669x951 -SillHinge half -SillRecording on
+light-duo-cover           -SillLayout 466x678 -SillHinge closed -SillRecording on --pose=closed-upright
+light-ipad-landscape      -SillLayout 1133x744 -SillIdiom pad -SillRecording on
+light-ipad-portrait       -SillLayout 744x1133 -SillIdiom pad -SillRecording on
+light-iphone              -SillLayout 393x852 -SillRecording on
+light-iphone-larger       -SillLayout 393x852 -Sill.largerPicture 1 -SillRecording on
+light-link-line           -SillLayout 951x669 -SillHinge flat -SillRecording on -SillLinkLine behind
+light-low                 -SillLayout 951x669 -SillHinge flat -SillRecording low
+light-xxl                 -SillLayout 951x669 -SillHinge flat -SillRecording on -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+# The notes, over the stream and on the connect screen.
+note-saved                -SillLayout 951x669 -SillHinge flat -SillRecordingNote saved
+note-parts                -SillLayout 951x669 -SillHinge flat -SillRecordingNote parts
+note-space                -SillLayout 951x669 -SillHinge flat -SillRecordingNote space
+note-failed               -SillLayout 951x669 -SillHinge flat -SillRecordingNote failed
+note-gaveup               -SillLayout 951x669 -SillHinge flat -SillRecordingNote gaveup
+note-connect-ended        -SillLayout 951x669 -SillHinge flat -SillConnectCase looking -SillRecordingNote ended
+note-connect-left         -SillLayout 951x669 -SillHinge flat -SillConnectCase looking -SillRecordingNote left

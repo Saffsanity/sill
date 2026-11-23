@@ -943,6 +943,10 @@ final class StreamClient: ObservableObject {
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
     /// through iPadOS's text system, as they always did. Cleared with the session.
     var hostKeyRepeat: Int?
+    /// Whether this session's Mac shows that a device records the stream (`WindowList.recordings`, #284): 1 from a
+    /// Mac whose menu and log say it, nil from one before it. Settings' recording footnote says which. Cleared
+    /// with the session.
+    @Published var hostRecordings: Int?
     /// How many stops this session's Mac's Desktop has and which it shows, or comes back to, from 1 (the
     /// main display), with their names (`WindowList.desktopDisplays`, `desktopDisplay`,
     /// `desktopDisplayNames`; DesktopDisplays): the Desktop button's "Desktop 2", its dots, VoiceOver's
@@ -985,6 +989,23 @@ final class StreamClient: ObservableObject {
     @Published var clipboardChip = false
     /// "Sent to ‹Mac›’s clipboard…" or "Too long to send…", for a moment after a Paste.
     @Published var clipboardNote: ClipboardNote?
+    /// The stream's recording on this device (#284, docs/recording-plan.md; StreamClient+Recording): its phase and
+    /// the light's numbers, and the note after it (its own, never the clipboard's). Main thread.
+    @Published var recording = RecordingStatus()
+    @Published var recordingNote: RecordingNote?
+    /// The recording's recorder, from "1" until its stop; its endings' observers; what its count and its
+    /// "Starting…" scheduled (cancelled by a newer generation). Main thread.
+    var recorder: StreamRecorder?
+    var recordingObservers: [NSObjectProtocol] = []
+    var recordingGeneration = 0
+    var recordingStart = RecordingStart()
+    var recordingNoteExpiry: DispatchWorkItem?
+    /// When the last recording ended (systemUptime): the device's auto-lock counts from it (DeviceIdlePolicy).
+    var recordingEndedAt: TimeInterval?
+    /// When anybody on this connection last asked the Mac for a keyframe (kind 44: the picture's recovery,
+    /// Disconnect's fresh picture, the recording), systemUptime: the recording keeps the Mac's second from it
+    /// (RecordingPolicy.keyframeAsk). Main thread.
+    var lastKeyframeAskAt: TimeInterval?
     /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription).
     var clipboardSubscribed = false
     /// When Sill last became active: a session that starts soon after gets the chip's look too.
@@ -1032,11 +1053,21 @@ final class StreamClient: ObservableObject {
     private let link = SessionLink()
     let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
+    /// The last parameter sets as they came (kind 0's payload): the recording compares them. On `queue`.
+    private var lastParameterSetsData: Data?
+    /// Frames since the session's last keyframe, new parameter sets counting as one: a recording starts from
+    /// that keyframe only when it is still the picture (RecordingPolicy.start). On `queue`.
+    private var framesSinceKeyframe = 0
+    /// The session's latest sound format (kind 43 type 1): a recorder's first. On `queue`.
+    var lastAudioFormat: AudioFormat?
+    /// The recorder that taps the stream from "1" until its stop (StreamClient+Recording), every frame before
+    /// the display sees it. Set and cleared on `queue`.
+    var recordingTap: StreamRecorder?
     /// The session's last keyframe with the parameter sets it came with (the Mac sends them before
     /// every keyframe): a saved Mac's tile picture, decoded when the session ends (KeyframePicture),
     /// since no snapshot of the screen can take the display layer's video on a device. One frame,
     /// replaced at each keyframe, dropped with the session (`tearDown`). On `queue`.
-    private var lastKeyframe: (frame: Data, parameterSets: ParameterSets)?
+    private var lastKeyframe: (frame: Data, parameterSets: ParameterSets, stamp: Double, arrival: Double)?
     /// Disconnect waits for a keyframe (`freshPictureWait`'s token): the next to come is told to the
     /// main thread. On `queue`.
     private var keyframeWanted: Int?
@@ -1304,7 +1335,7 @@ final class StreamClient: ObservableObject {
         case .nothing:
             break
         case .askNow:
-            send(.keyframeRequest, payload: Data())
+            sendKeyframeRequest()
             lookAtKeyframeRecovery(at: now + wait, from: now)
             #if DEBUG
             print("keyframe: \(why); asked the Mac for a keyframe (spacing \(Int(keyframeRecovery.spacingNow)) s)")
@@ -1324,6 +1355,44 @@ final class StreamClient: ObservableObject {
         let work = DispatchWorkItem { [weak self] in self?.considerKeyframeAsk() }
         keyframeAskWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at - now), execute: work)
+    }
+
+    /// Kind 44, noted as this connection's last ask (`lastKeyframeAskAt`) for the recording's spacing: the Mac
+    /// takes one a second and drops the rest. Main thread.
+    func sendKeyframeRequest() {
+        send(.keyframeRequest, payload: Data())
+        lastKeyframeAskAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// While the picture recovery's ask is out and its interruption open: when its keyframe stops being due (its
+    /// ask plus `answerWait`), so a recording's ask waits for it (RecordingPolicy.keyframeAsk); nil otherwise.
+    /// Main thread.
+    var recoveryAskDueUntil: TimeInterval? {
+        guard keyframeRecovery.open, keyframeRecovery.asked, let last = keyframeRecovery.lastAsk else { return nil }
+        return last + KeyframeRecovery.answerWait(worstRttMs: lastRttMaxMs)
+    }
+
+    /// The recovery's last ask (systemUptime), which an awaited recording ask counts from. Main thread.
+    var recoveryLastAsk: TimeInterval? { keyframeRecovery.lastAsk }
+
+    /// How long an ask waits for its keyframe on this link (KeyframeRecovery.answerWait). Main thread.
+    var keyframeAnswerWait: TimeInterval { KeyframeRecovery.answerWait(worstRttMs: lastRttMaxMs) }
+
+    /// "1": `rec` taps the stream from here on, the session's newest parameter sets, last keyframe and sound
+    /// format first. On `queue`.
+    func installRecordingTap(_ rec: StreamRecorder) {
+        rec.begin(sets: lastParameterSetsData, lastKeyframe: keptKeyframe(), audioFormat: lastAudioFormat)
+        recordingTap = rec
+    }
+
+    /// The light, now: where the movie starts (StreamRecorder.light). On `queue`.
+    func recordingLight(_ rec: StreamRecorder) -> RecordingPolicy.StartPoint {
+        rec.light(arrival: CACurrentMediaTime(), lastKeyframe: keptKeyframe(), framesSinceKeyframe: framesSinceKeyframe)
+    }
+
+    /// The session's last keyframe as the recorder takes it. On `queue`.
+    private func keptKeyframe() -> StreamRecorder.Frame? {
+        lastKeyframe.map { StreamRecorder.Frame(id: -1, data: $0.frame, stamp: $0.stamp, arrival: $0.arrival, isKeyframe: true) }
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
@@ -3553,7 +3622,7 @@ final class StreamClient: ObservableObject {
         freshPictureAskedAt = ProcessInfo.processInfo.systemUptime
         queue.async { self.keyframeWanted = token }
         if asked {
-            send(.keyframeRequest, payload: Data())
+            sendKeyframeRequest()
             // The picture's recovery asks nothing more: the session ends within the wait, and its own
             // ask, due meanwhile while an interruption's keyframe is overdue, would come within the
             // Mac's second of this one and be refused (KeyframeRecovery keeps asks 2 s apart for that).
@@ -3690,6 +3759,8 @@ final class StreamClient: ObservableObject {
         // Picture in Picture shows nothing of a session that has ended: it stops (PictureInPicturePolicy.stops;
         // the reconnect runs when Sill comes back, as after any stay in the background).
         pictureInPicture.end(.sessionEnded, why: "the session ended (\(status))")
+        // A recording ends with its session (RecordingPolicy.Ending.sessionEnded), its movie finished.
+        stopRecording(.sessionEnded)
         abandonMove()
         resetPath()
         lastMoveAttempt = nil
@@ -3718,6 +3789,7 @@ final class StreamClient: ObservableObject {
         // session's stream outlives it.
         queue.async {
             self.lastParameterSets = nil; self.lastKeyframe = nil; self.keyframeWanted = nil
+            self.lastParameterSetsData = nil; self.framesSinceKeyframe = 0; self.lastAudioFormat = nil; self.recordingTap = nil
             self.pendingMove = nil; self.stopMeasuring()
         }
         firstListDeadline?.cancel()
@@ -3729,6 +3801,7 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
+        hostRecordings = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
         hostDesktopDisplayNames = nil
@@ -3786,6 +3859,7 @@ final class StreamClient: ObservableObject {
         keyframeRecovery = KeyframeRecovery()
         keyframeAskWork?.cancel()
         keyframeAskWork = nil
+        lastKeyframeAskAt = nil
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
         settings.reset()
         soundAcrossMove = nil
@@ -4374,6 +4448,9 @@ final class StreamClient: ObservableObject {
         case .parameterSets:
             if let ps = ParameterSets(encoded: data) {
                 lastParameterSets = ps
+                if data != lastParameterSetsData { framesSinceKeyframe += 1 }   // a new picture: the kept keyframe is not it
+                lastParameterSetsData = data
+                recordingTap?.parameterSets(data, arrival: CACurrentMediaTime())
                 onParameterSets?(ps)
             }
         case .frame:
@@ -4384,8 +4461,10 @@ final class StreamClient: ObservableObject {
             let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
+            let arrival = CACurrentMediaTime()
+            framesSinceKeyframe = header.isKeyframe ? 0 : framesSinceKeyframe + 1
             if header.isKeyframe, let ps = lastParameterSets {
-                lastKeyframe = (data, ps)       // the tile's picture (ConnectionList); its payload, not a copy
+                lastKeyframe = (data, ps, header.timestamp, arrival)   // the tile's picture (ConnectionList); its payload, not a copy
                 if let token = keyframeWanted {
                     keyframeWanted = nil
                     DispatchQueue.main.async { self.freshKeyframeCame(token, timedOut: false) }
@@ -4397,6 +4476,9 @@ final class StreamClient: ObservableObject {
                 DispatchQueue.main.async { self.lockShadeChanged(LockedMac.shade(self.lockShade, frameIsKeyframe: true)) }
             }
             frameForSound(header)
+            // The recording takes every frame as it came, before the display's own waits (Picture in Picture's
+            // pause, a flushed layer, a locked Mac's blank): docs/recording-plan.md, rule 5.
+            recordingTap?.frame(data, stamp: header.timestamp, isKeyframe: header.isKeyframe, arrival: arrival)
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
@@ -4438,6 +4520,7 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                if self.hostRecordings != list.recordings { self.hostRecordings = list.recordings }
                 self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).

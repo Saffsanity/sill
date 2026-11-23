@@ -263,6 +263,17 @@ struct ContentView: View {
 ///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
+/// * `-SillRecording count|starting|on|low` — the mock's recording of the stream (#284, docs/recording-plan.md;
+///   no recorder runs): the count's "3", "Starting…", the light ("0:42 · 126 MB"), the light low on space ("1:42 ·
+///   230 MB · 4 min left"), each over the picture and, with `-SillSettings 1`, as the row pinned at the top of
+///   Settings; `-SillRecordingNote saved|parts|left|ended|space|failed|gaveup|nospace` the note after one, kept (over
+///   the stream in the clipboard chip's corner, in Settings' top row, on the connect screen); `-SillSettingsScroll
+///   recording` the panel at the This iPad group's recording rows (Start Recording, Record Sound, the footnote; the
+///   mock Mac says `recordings` 1 in every settings case but `legacy`, whose footnote says it runs an older Sill;
+///   `soundoff` dims Record Sound). Live (`-SillLive 1` or the normal app with `-SillConnect`): `-SillRecordFor S`
+///   taps Start Recording 3 s after the stream screen shows and Stop S s after the light (the movie in the simulated
+///   device's Documents/Sill Recordings; the console's "recording: …" lines say what happened), and
+///   `-SillRecordingSpace <bytes>` is the free space the recording's space rule reads (in the normal app too).
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
 ///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and
 ///   `offConsole` for 2), its placeholder streams as the Desktop, the cover over the stream says why
@@ -1340,6 +1351,15 @@ struct ConnectScreen: View {
             .duoLog(posture, size: geo.size, screen: "connect screen")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        // After a session ended while this window recorded (#284): where the movie went, for a moment.
+        .overlay(alignment: .top) {
+            if let note = client.recordingNote {
+                RecordingNoteView(note: note)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .transition(.opacity)
+            }
+        }
         .alert("New Group", isPresented: Binding(get: { newGroupFor != nil }, set: { if !$0 { newGroupFor = nil } })) {
             TextField("Name", text: $newGroupName)
             // A blank name, or Other (where the Macs with no group already are), names no group: Add

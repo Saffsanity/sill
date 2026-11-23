@@ -2,7 +2,8 @@
 # Sources/StreamProtocol compiled as one module with the check: SillVersion (how tags, bundles and the
 # wire write a version, and their order), SillProtocol, and the update notice's payloads: kind 23's
 # Hello, kind 22's new fields with the five goodbyes of before byte for byte, and the window list's
-# hostVersion and protocol (docs/update-notice-plan.md, section 3).
+# hostVersion and protocol (docs/update-notice-plan.md, section 3); and every additive field since, the
+# recording's ClientStats.recording and WindowList.recordings last (#284).
 #   Tests/checks/compatibility/run.sh             compile and run the check
 #   Tests/checks/compatibility/run.sh --mutants   one-line mutants of StreamProtocol; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -159,6 +159,10 @@ enum MockCatalog {
                 break
             }
         }
+        // Recording the stream (#284): `-SillRecording count|starting|on|low` the mock's recording (its count, Starting…,
+        // the light, the light low on space; no recorder runs), `-SillRecordingNote saved|parts|left|ended|space|failed|
+        // gaveup|nospace` the note after one, kept.
+        client.mockRecording(UserDefaults.standard.string(forKey: "SillRecording"), note: UserDefaults.standard.string(forKey: "SillRecordingNote"))
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
         // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
         if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }   // the view too: no app's menus
@@ -442,6 +446,8 @@ enum MockCatalog {
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
+        // …and shows in its menu that a device records the stream (`WindowList.recordings` 1, #284).
+        client.hostRecordings = c == .legacy ? nil : 1
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's
@@ -774,6 +780,8 @@ enum MockCatalog {
             client.macPreviews = ["HOMEPAIRING8": thumbnail(seed: 0, size: size), "HOMEPAIRING6": thumbnail(seed: 1, size: size),
                                   "A3C5HR4RBV67YR21": thumbnail(seed: 2, size: size)]
         }
+        // `-SillRecordingNote ended|left|…`: the note after a session ended while it recorded (#284), kept.
+        client.mockRecording(nil, note: UserDefaults.standard.string(forKey: "SillRecordingNote"))
         return client
     }
 

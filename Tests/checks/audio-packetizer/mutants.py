@@ -1,9 +1,14 @@
-"""H3 (docs/audio-plan.md): each mutant changes Sources/SillHost/AudioPacketizer.swift in one place, is
-compiled with the check (main.swift) and must fail it. usage: mutants.py WORKTREE"""
+"""H3 (docs/audio-plan.md): each mutant changes Sources/SillAudio/AudioPacketizer.swift or
+Sources/SillHost/AudioSourceRule.swift in one place (whichever of the two holds its pattern, which must be
+found exactly once in both together), is compiled with the check (main.swift) and must fail it.
+usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(WT, "Sources/SillHost/AudioPacketizer.swift")
+FILES = {
+    "AudioPacketizer.swift": "Sources/SillAudio/AudioPacketizer.swift",
+    "AudioSourceRule.swift": "Sources/SillHost/AudioSourceRule.swift",
+}
 MUTANTS = [
     # The packet size and the stamps
     ("512 for any multiple of 256", "frames > 0 && frames % 512 == 0 ? 512 : 480", "frames > 0 && frames % 256 == 0 ? 512 : 480"),
@@ -54,16 +59,21 @@ MUTANTS = [
     ("silence not counted", "        if isSilent { silent += 1 }\n", ""),
     ("the tally's tolerance a whole buffer", "if off <= 0.25 * Double(frames) / sampleRate { worstJitter", "if off <= 1.5 * Double(frames) / sampleRate { worstJitter"),
 ]
-orig = open(SRC).read()
+texts = {f: open(os.path.join(WT, rel)).read() for f, rel in FILES.items()}
 caught = 0
 for name, old, new in MUTANTS:
-    if orig.count(old) != 1:
-        print(f"{name}: NOT APPLIED (pattern found {orig.count(old)} times)"); continue
+    found = sum(text.count(old) for text in texts.values())
+    if found != 1:
+        print(f"{name}: NOT APPLIED (pattern found {found} times)"); continue
+    file = next(f for f, text in texts.items() if old in text)
     with tempfile.TemporaryDirectory() as t:
-        path = os.path.join(t, "AudioPacketizer.swift")
-        open(path, "w").write(orig.replace(old, new, 1))
+        paths = []
+        for f, text in texts.items():
+            path = os.path.join(t, f)
+            open(path, "w").write(text.replace(old, new, 1) if f == file else text)
+            paths.append(path)
         exe = os.path.join(t, "check")
-        c = subprocess.run(["swiftc", "-O", path, os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
+        c = subprocess.run(["swiftc", "-O", *paths, os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
         if c.returncode != 0:
             print(f"{name}: did not compile\n{c.stderr[:400]}"); continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)

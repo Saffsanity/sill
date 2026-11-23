@@ -295,5 +295,6 @@ M = [
     ("list: a locked list keeps the displays", F, "        l.desktopDisplays = nil\n", ""),
     ("list: a locked list keeps which display", F, "        l.desktopDisplay = nil\n", ""),
     ("list: a locked list keeps the displays' names", F, "        l.desktopDisplayNames = nil\n", ""),
+    ("list: a locked list drops `recordings`", F, "        l.locked = true\n", "        l.recordings = nil\n        l.locked = true\n"),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)

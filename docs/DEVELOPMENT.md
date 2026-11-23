@@ -1026,6 +1026,30 @@ docs/picture-in-picture-plan.md has the plan, what Apple documents and does not,
 the open questions and the device tests. Its console lines (DEBUG) start with
 `pip:`.
 
+## Recording the stream
+
+Settings › This iPad (This iPhone) › Start Recording (issue #284, built on #303; docs/recording-plan.md): Settings
+closes, 3, 2, 1 counts over the picture, and a red light shows the movie's time and size ("0:42 · 126 MB", "· 4
+min left" when space is low). The movie is the stream as it came, never re-encoded (the Mac's HEVC frames, its
+sound decoded on the device and written as AAC when Send Audio and Record Sound are on), in Files › On My iPad ›
+Sill › Sill Recordings: a new movie for each picture size, "Sill 2026-11-18 at 14.03.12.mov", " (2)" and so on.
+It stops at Stop (pinned at the top of Settings while it records), when the session ends, when Sill or its window
+leaves the screen (Picture in Picture too), at the device's lock, when space falls under 1 GB, or when the writer
+fails; the note after it says where the movie went. The Mac's menu and Sill.log say that a device records
+(`ClientStats.recording`, `RecordingNotice`). `iOSClient/RecordingPolicy.swift`, `RecordingClock.swift` (with
+`RecordingTimeline`) and `RecordedSound.swift` are the rules, checked in `Tests/checks/recording`;
+`StreamRecorder.swift` carries them out and `StreamClient+Recording.swift` runs a recording; `SillDocuments.swift`
+is the one owner of Documents. Its console lines (DEBUG) start with `recording:`.
+
+`Scripts/recording-check/run.sh` is the recording rig: after `swift build -c release`, the app's own
+StreamRecorder records a synthetic test host's stream on 127.0.0.1 (no encoder of the Mac's: the host's software
+encoder, and the recorder writes the frames as they came) in ten cases of under a minute each (the test tone's
+clicks within 5 ms, a still window lasting to the stop, a new size making a second movie, a Mac that skips the
+keyframe asks, a killed device's movie still opening, the space rule stopping it, a locked Mac's placeholder in a
+movie of its own), and `moviecheck` reads every movie with AVFoundation. The harness's recording arguments
+(`-SillRecording`, `-SillRecordingNote`, `-SillRecordingSpace`, `-SillRecordFor`) are in docs/BUILD-AND-RUN.md,
+and `Scripts/harness-photos/recording.cases` photographs them.
+
 ## A hardware keyboard and trackpad on the device
 
 With a keyboard attached to the iPhone or iPad (a Magic Keyboard, a Smart

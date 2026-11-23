@@ -22,12 +22,14 @@ MUTANTS = [
     ("M10 the automatic reconnect's start counts as use", "reconnected ? previous : now", "now"),
     ("M11 the automatic reconnect forgets the person's session start", "reconnected ? previous : now", "reconnected ? nil : now"),
     ("M12 a session the person started keeps the last one's start", "reconnected ? previous : now", "reconnected ? previous : (previous ?? now)"),
-    ("M13 input the person sent never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.control, uses.session, uses.front]"),
-    ("M14 a stream screen's control never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.session, uses.front]"),
-    ("M15 a session's start never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.front]"),
-    ("M16 coming to the front never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.session]"),
-    ("M17 the earliest use, not the latest", "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.max()",
-        "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.min()"),
+    ("M13 input the person sent never counts", "[uses.input, uses.control, uses.session, uses.front, uses.recording]", "[uses.control, uses.session, uses.front, uses.recording]"),
+    ("M14 a stream screen's control never counts", "[uses.input, uses.control, uses.session, uses.front, uses.recording]", "[uses.input, uses.session, uses.front, uses.recording]"),
+    ("M15 a session's start never counts", "[uses.input, uses.control, uses.session, uses.front, uses.recording]", "[uses.input, uses.control, uses.front, uses.recording]"),
+    ("M16 coming to the front never counts", "[uses.input, uses.control, uses.session, uses.front, uses.recording]", "[uses.input, uses.control, uses.session, uses.recording]"),
+    ("M17 the earliest use, not the latest", "[uses.input, uses.control, uses.session, uses.front, uses.recording].compactMap { $0 }.max()",
+        "[uses.input, uses.control, uses.session, uses.front, uses.recording].compactMap { $0 }.min()"),
+    # The recording (#284, decision 9).
+    ("M18 a recording never counts", "[uses.input, uses.control, uses.session, uses.front, uses.recording]", "[uses.input, uses.control, uses.session, uses.front]"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
