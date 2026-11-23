@@ -23,10 +23,11 @@ MUTANTS = {
     # And the rest of the contract
     "R6 whole pieces (the minimum at the piece)": [
         (PIECE_READ, "connection.receive(minimumIncompleteLength: min(remaining, Self.piece), maximumLength: min(remaining, Self.piece))")],
+    # The cap is StreamMessage.maxHostPayload(for:) since #300 (a kind 32's 12 MiB); these two still take it away.
     "R7 the frame cap for every kind": [
-        ("let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload", "let cap = StreamMessage.maxFramePayload")],
+        ("let cap = StreamMessage.maxHostPayload(for: header.kind)", "let cap = StreamMessage.maxFramePayload")],
     "R8 the other cap for every kind": [
-        ("let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload", "let cap = StreamMessage.maxOtherHostPayload")],
+        ("let cap = StreamMessage.maxHostPayload(for: header.kind)", "let cap = StreamMessage.maxOtherHostPayload")],
     "R9 a message cut short delivered at the end": [
         ("            if ended {\n                self.header = nil", "            if ended {\n                if !buffer.isEmpty { onMessage(header, buffer) }\n                self.header = nil")],
     "R10 no stillReads before a read": [("    private func readHeader() {\n        guard stillReads() else { return }\n", "    private func readHeader() {\n")],
