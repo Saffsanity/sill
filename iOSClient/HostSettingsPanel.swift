@@ -12,11 +12,12 @@ import StreamProtocol
 /// presentation anywhere; sheets adapt by size class, which is unknown for the Duo; the layout harness
 /// draws a fake Duo screen inside the simulator's, which a presentation would escape; and a presentation
 /// knows nothing of the half-folded crease. Its two parts are the places for rows: the Mac's (`macPart`,
-/// under the pinned header with Done, then Disconnect, `withDisconnect`) and this device's (`devicePart`), in one
-/// column, two columns side by side, or the laptop pose's two pages, each part scrolling on its own and
-/// nothing on the fold (`SettingsPane.Layout`). A feature's rows go into the part whose they are: a group
-/// is a `Rows` with its `Footnote`, and a group that begins a topic carries a header as Away from home and
-/// This iPad do.
+/// under the pinned header with Done, then Disconnect, `withDisconnect`) and this device's (`devicePart`): one
+/// column on every screen without a fold to keep to (Noah, 2026-11-23), both parts in one scroll view with
+/// Disconnect under them; around the iPhone Duo's fold a column on each page in the book pose, or the laptop
+/// pose's two pages, each part scrolling on its own and nothing on the fold (`SettingsPane.Layout`). A
+/// feature's rows go into the part whose they are: a group is a `Rows` with its `Footnote`, and a group that
+/// begins a topic carries a header as Away from home and This iPad do.
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
@@ -117,7 +118,8 @@ struct HostSettingsPanel: View {
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
     /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour, the version);
-    /// in two columns or pages, each part at its end (the Mac's at Away from home, this device's at the version).
+    /// in the book pose's columns and the laptop pose's pages, each part at its end (the Mac's at Away from
+    /// home, this device's at the version).
     /// `-SillSettingsScroll` below goes to its row in whichever part holds it.
     private static var startsAtEnd: Bool {
         #if DEBUG
@@ -231,11 +233,12 @@ struct HostSettingsPanel: View {
     // MARK: The pane's arrangement (SettingsPane.Layout)
 
     /// The header, the two parts and Disconnect where the layout puts them, in the leading-edge space (so right
-    /// to left mirrors them): one column, the header pinned over both parts and Disconnect under them, as the
-    /// panel had them; two columns, the header over both (its words over the Mac's column, Done at the far
-    /// column's end), the Mac's part with Disconnect under it in the leading column and this device's in the
-    /// trailing one, a column on each page in the book pose; or the laptop pose's two pages, the header, the
-    /// Mac's part and Disconnect above the fold and this device's part below it. Nothing on the fold's band.
+    /// to left mirrors them): one column on every screen without a fold to keep to, the header pinned over both
+    /// parts and Disconnect under them, as the panel had them; the book pose's column on each page, the header
+    /// across both (its words over the leading page's column, Done at the trailing page's column's end), the
+    /// Mac's part with Disconnect under it on the leading page and this device's on the trailing one; or the
+    /// laptop pose's two pages, the header, the Mac's part and Disconnect above the fold and this device's part
+    /// below it. Nothing on the fold's band.
     @ViewBuilder private func arranged(_ l: SettingsPane.Layout) -> some View {
         switch l.arrangement {
         case .oneColumn:
@@ -319,8 +322,8 @@ struct HostSettingsPanel: View {
 
     // MARK: Header and foot (pinned)
 
-    /// `words`: how wide the Mac's name and lines may be (two columns: the Mac's column, so they keep off the
-    /// fold and the other column); nil: the row's room beside Done.
+    /// `words`: how wide the Mac's name and lines may be (the book pose: the leading page's column, so they keep
+    /// off the fold); nil: the row's room beside Done.
     private func header(words: CGFloat?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
@@ -580,9 +583,10 @@ struct HostSettingsPanel: View {
 
     // MARK: This device's part (scrolls)
 
-    /// This device's own, after everything of the Mac's (in one column under it, in two its own column or
-    /// page), whatever state the Mac's settings are in: while they load, and for a Mac without them too. A
-    /// feature of this device's adds its group here, in This iPad's or after it.
+    /// This device's own, after everything of the Mac's (in one column under it; in the book pose its own
+    /// page's column, in the laptop pose the page below the fold), whatever state the Mac's settings are in:
+    /// while they load, and for a Mac without them too. A feature of this device's adds its group here, in This
+    /// iPad's or after it.
     @ViewBuilder private var devicePart: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Both are this device's own: its gestures, then the tour.

@@ -221,7 +221,7 @@ struct ContentView: View {
 ///   between (951×669, 34 pt kept at the bottom)", the last the home indicator's room it was given).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
-///   iPad, Take the Tour, the version); in two columns or pages, each part at its own end. `-SillSettingsScroll gestures` starts them at the This iPad group
+///   iPad, Take the Tour, the version); in the book pose's columns or the laptop pose's pages, each part at its own end. `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and

@@ -931,16 +931,19 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the pinned header with the Mac's name, the readout and route line, the away
   line and Done, then the Mac's part (`macPart`: the callouts, the link's callout
   and its button, the slow-link callout for older Macs, its groups, Away from
-  home, the footnote) with Disconnect pinned under it, and this device's part
-  (`devicePart`: This iPad's group, Take the Tour, its last line this app's
-  version, `VersionLine`), each in a scroll view of its own, placed by
-  `SettingsPane.Layout`; a feature's group goes into the part whose it is),
-  `SettingsPane` (where the pane's two parts go: one column, two side by side
-  (sideways from 652 pt, upright from 732), a column on each page of the book
-  pose, the laptop pose's two pages, nothing on the fold, right to left
-  mirrored, the room under Disconnect, the home indicator's (`footBottom`); and
-  `Close`, what each way of closing it brings; pure,
-  `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every
+  home, the footnote) and this device's part (`devicePart`: This iPad's group,
+  Take the Tour, its last line this app's version, `VersionLine`), placed by
+  `SettingsPane.Layout`: in one column both in one scroll view with Disconnect
+  under them (right under the rows where they all fit, else pinned at the
+  foot), and around the iPhone Duo's fold each in a scroll view of its own
+  with Disconnect under the Mac's; a feature's group goes into the part whose
+  it is), `SettingsPane` (where the pane's two parts go: one column on every
+  screen without a fold to keep to, an iPad's and an iPhone's either way round
+  (Noah, 2026-11-23), a column on each page of the book pose, the laptop
+  pose's two pages, nothing on the fold, right to left mirrored, the room
+  under Disconnect, the home indicator's (`footBottom`); and `Close`, what
+  each way of closing it brings; pure, `Tests/checks/settings-pane`; pbxproj
+  A5E1/F5E1), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`

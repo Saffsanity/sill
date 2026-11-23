@@ -11,11 +11,7 @@ orig = open(SRC).read()
 MUTANTS = {
     # The numbers.
     "M1 margins of 8": ("static let margin: CGFloat = 16", "static let margin: CGFloat = 8"),
-    "M2 no gap between the columns": ("static let gap: CGFloat = 20", "static let gap: CGFloat = 0"),
-    "M3 columns of 280 sideways": ("static let minColumn: CGFloat = 300", "static let minColumn: CGFloat = 280"),
-    "M4 upright as sideways": ("let least = H > W ? SettingsPane.minUprightColumn : SettingsPane.minColumn",
-                               "let least = SettingsPane.minColumn"),
-    "M5 no widest column": ("let w = min(SettingsPane.maxColumn, pair)", "let w = pair"),
+    "M3 a book page's column from 280": ("static let minColumn: CGFloat = 300", "static let minColumn: CGFloat = 280"),
     "M6 one column at the full width": ("let column = min(SettingsPane.maxColumn, max(0, W - 2 * m))", "let column = max(0, W - 2 * m)"),
     "M7 pages of 150": ("static let minPage: CGFloat = 200", "static let minPage: CGFloat = 150"),
     # The laptop pose.
@@ -39,14 +35,13 @@ MUTANTS = {
                                                      "let first = min(SettingsPane.maxColumn, leadingPage)"),
     "M17 narrow pages kept to": ("if first >= SettingsPane.minColumn, second >= SettingsPane.minColumn {", "if first > 0, second > 0 {"),
     "M18 the trailing page as wide as the leading": ("let leadingPage = b.minX, trailingPage = W - b.maxX", "let leadingPage = b.minX, trailingPage = b.minX"),
-    # Two columns and one.
-    "M19 the pair at the leading edge": ("let x = (W - 2 * w - SettingsPane.gap) / 2", "let x = m"),
-    "M20 the device's column on the Mac's": ("device = CGRect(x: x + w + SettingsPane.gap, y: 0, width: w, height: H)",
-                                             "device = CGRect(x: x, y: 0, width: w, height: H)"),
-    "M21 one column at the leading edge": ("mac = CGRect(x: centred, y: 0, width: column, height: H)\n                device = mac",
-                                           "mac = CGRect(x: m, y: 0, width: column, height: H)\n                device = mac"),
-    "M22 the square as upright": ("let least = H > W ? SettingsPane.minUprightColumn : SettingsPane.minColumn",
-                                  "let least = H >= W ? SettingsPane.minUprightColumn : SettingsPane.minColumn"),
+    # One column wherever no fold is kept to (Noah, 2026-11-23: "Settings should not be 2 columns, please make
+    # it 1 column"): two columns brought back without a fold must fail the check.
+    "M21 one column at the leading edge": ("mac = CGRect(x: centred, y: 0, width: column, height: H)\n            device = mac",
+                                           "mac = CGRect(x: m, y: 0, width: column, height: H)\n            device = mac"),
+    "M35 two columns again on a screen held sideways": ("arrangement = .oneColumn", "arrangement = W > H ? .twoColumns : .oneColumn"),
+    "M36 a fold made up down the middle of every screen": ("if let down = fold.verticalBand {",
+                                                          "if let down = fold.verticalBand ?? Optional(CGRect(x: W / 2 - 10, y: 0, width: 20, height: H)) {"),
     # The header.
     "M23 the header over the Mac's column only": ("arrangement == .twoColumns ? (mac.minX, device.maxX - mac.minX) : (mac.minX, mac.width)",
                                                    "(mac.minX, mac.width)"),

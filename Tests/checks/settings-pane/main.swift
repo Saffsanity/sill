@@ -4,7 +4,8 @@
 // 1,400 pt at heights from 240 to 1,400, each without a fold, with the book pose's band down it (centred and
 // off centre) and with the laptop pose's across it, left to right and right to left: inside the screen and its
 // margins, never wider than 600, never on the fold, the Mac's part leading and above, the arrangement exactly
-// where its rule says, the header over the Mac's column; and what each way of closing it brings.
+// where its rule says (one column wherever no fold is kept to: Noah, 2026-11-23), the header over the Mac's
+// column; and what each way of closing it brings.
 //   swiftc -O iOSClient/SettingsPane.swift iOSClient/DuoPosture.swift Tests/checks/settings-pane/main.swift -o .build/checks/settings-pane/check
 import CoreGraphics
 import Foundation
@@ -19,12 +20,10 @@ func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CG
 
 // MARK: - The numbers
 
-check("16 pt margins, 20 between columns, columns of 300 sideways and 340 upright at least, 600 at most, pages of 200",
-      SettingsPane.margin == 16 && SettingsPane.gap == 20 && SettingsPane.minColumn == 300 && SettingsPane.minUprightColumn == 340
-        && SettingsPane.maxColumn == 600 && SettingsPane.minPage == 200)
+check("16 pt margins, a book page's column of 300 at least, 600 at most, pages of 200",
+      SettingsPane.margin == 16 && SettingsPane.minColumn == 300 && SettingsPane.maxColumn == 600 && SettingsPane.minPage == 200)
 check("under Disconnect: 16 pt at a screen's foot with no home indicator, 12 over the laptop pose's fold",
       SettingsPane.footGap == 16 && SettingsPane.foldGap == 12)
-check("two columns from 652 pt sideways and 732 upright", SettingsPane.twoColumnsFrom == 652 && SettingsPane.twoColumnsUprightFrom == 732)
 
 // MARK: - The real sizes
 //
@@ -44,23 +43,14 @@ struct Case {
     let mac: CGRect
     let device: CGRect
 }
-func columns(_ W: CGFloat, _ H: CGFloat, _ w: CGFloat) -> (CGRect, CGRect) {
-    let x = (W - 2 * w - 20) / 2
-    return (rect(x, 0, w, H), rect(x + w + 20, 0, w, H))
-}
 func one(_ W: CGFloat, _ H: CGFloat) -> CGRect { let w = min(600, W - 32); return rect((W - w) / 2, 0, w, H) }
 
 var cases: [Case] = []
 func add(_ name: String, _ W: CGFloat, _ H: CGFloat, bottom: CGFloat, fold: FoldInfo = .inferred, _ a: Layout.Arrangement,
          mac: CGRect? = nil, device: CGRect? = nil) {
-    switch a {
-    case .oneColumn:
+    if a == .oneColumn {
         cases.append(Case(name: name, size: size(W, H), bottom: bottom, fold: fold, arrangement: a, mac: one(W, H), device: one(W, H)))
-    case .twoColumns where mac == nil:
-        let w = min(600, (W - 52) / 2)
-        let (m, d) = columns(W, H, w)
-        cases.append(Case(name: name, size: size(W, H), bottom: bottom, fold: fold, arrangement: a, mac: m, device: d))
-    default:
+    } else {
         cases.append(Case(name: name, size: size(W, H), bottom: bottom, fold: fold, arrangement: a, mac: mac!, device: device!))
     }
 }
@@ -70,29 +60,31 @@ add("iPhone 15 Pro upright", 393, 852 - 59, bottom: 34, .oneColumn)
 add("iPhone 13 mini upright", 375, 812 - 50, bottom: 34, .oneColumn)
 add("iPhone SE upright", 375, 667 - 20, bottom: 0, .oneColumn)
 add("iPhone SE with Display Zoom upright", 320, 568 - 20, bottom: 0, .oneColumn)
-// Phones on their side (the notch's or the island's inset at each side): two columns, the SE's 667 pt too.
-add("iPhone 18 Pro Max on its side", 956 - 124, 440, bottom: 21, .twoColumns)
-add("iPhone 15 Pro on its side", 852 - 118, 393, bottom: 21, .twoColumns)
-add("iPhone 13 mini on its side", 812 - 88, 375, bottom: 21, .twoColumns)
-add("iPhone SE on its side", 667, 375, bottom: 0, .twoColumns)
+// Phones on their side (the notch's or the island's inset at each side): one column too, 600 pt and centred
+// (Noah, 2026-11-23: "Settings should not be 2 columns, please make it 1 column"; until then two columns here).
+add("iPhone 18 Pro Max on its side", 956 - 124, 440, bottom: 21, .oneColumn)
+add("iPhone 15 Pro on its side", 852 - 118, 393, bottom: 21, .oneColumn)
+add("iPhone 13 mini on its side", 812 - 88, 375, bottom: 21, .oneColumn)
+add("iPhone SE on its side", 667, 375, bottom: 0, .oneColumn)
 add("iPhone SE with Display Zoom on its side", 568, 320, bottom: 0, .oneColumn)
-// iPads (the status bar's 24 pt off the top): two columns either way round, but in narrow windows.
-add("iPad Pro 13-inch sideways", 1376, 1032 - 24, bottom: 20, .twoColumns)
-add("iPad Pro 13-inch upright", 1032, 1376 - 24, bottom: 20, .twoColumns)
-add("iPad Pro 11-inch upright", 834, 1210 - 24, bottom: 20, .twoColumns)
-add("iPad mini sideways", 1133, 744 - 24, bottom: 20, .twoColumns)
-add("iPad mini upright", 744, 1133 - 24, bottom: 20, .twoColumns)
-// Half of a sideways iPad is taller than wide: upright, 683 pt, one column.
+// iPads (the status bar's 24 pt off the top): one column either way round, 600 pt and centred, and in narrow
+// windows the window's width less 16 each side.
+add("iPad Pro 13-inch sideways", 1376, 1032 - 24, bottom: 20, .oneColumn)
+add("iPad Pro 13-inch upright", 1032, 1376 - 24, bottom: 20, .oneColumn)
+add("iPad Pro 11-inch upright", 834, 1210 - 24, bottom: 20, .oneColumn)
+add("iPad mini sideways", 1133, 744 - 24, bottom: 20, .oneColumn)
+add("iPad mini upright", 744, 1133 - 24, bottom: 20, .oneColumn)
 add("iPad Pro 13-inch, half of Split View sideways", 683, 1032 - 24, bottom: 20, .oneColumn)
 add("iPad Pro 13-inch, half of Split View upright", 507, 1376 - 24, bottom: 20, .oneColumn)
 add("iPad in Slide Over", 320, 1000, bottom: 20, .oneColumn)
 add("an iPad window 720 pt wide, upright", 720, 900, bottom: 20, .oneColumn)
-// The iPhone Duo (iOS 27.1).
+// The iPhone Duo (iOS 27.1): its folded poses keep to the fold, a column on each page or a page each side of
+// it; open flat and closed, one column as any screen.
 add("Duo, the book pose", 951, 669, bottom: 34, fold: .known(bookFold), .twoColumns,
     mac: rect(16, 0, 423.5, 669), device: rect(511.5, 0, 423.5, 669))
 add("Duo, the laptop pose", 669, 951, bottom: 34, fold: .known(laptopFold), .twoPages,
     mac: rect(34.5, 0, 600, 455.5), device: rect(34.5, 495.5, 600, 455.5))
-add("Duo, open flat sideways", 951, 669, bottom: 34, fold: .known(nil), .twoColumns)
+add("Duo, open flat sideways", 951, 669, bottom: 34, fold: .known(nil), .oneColumn)
 add("Duo, open flat upright", 669, 951, bottom: 34, fold: .known(nil), .oneColumn)
 add("Duo, the cover upright", 382, 678, bottom: 34, fold: .known(nil), .oneColumn)
 add("Duo, the cover on its side", 594, 466, bottom: 34, fold: .known(nil), .oneColumn)
@@ -142,9 +134,14 @@ check("the laptop pose: the header over the upper page's column, beside Done",
 check("the laptop pose: the upper page ends at the fold's top, the lower begins at its foot",
       laptopL.mac.maxY == 455.5 && laptopL.device.minY == 495.5 && laptopL.device.maxY == 951 && laptopL.band == laptopFold)
 // A fold whose pages could not hold the columns is not kept to (no device has one).
-check("a book band leaving pages of 280 pt: as without a fold (two columns of 300)",
-      Layout(size: size(652, 500), bottomInset: 0, fold: .known(rect(306, 0, 40, 500))).arrangement == .twoColumns
-        && Layout(size: size(652, 500), bottomInset: 0, fold: .known(rect(306, 0, 40, 500))).band == nil)
+check("a book band whose pages hold columns of 274 pt: not kept to, one column as without a fold",
+      Layout(size: size(652, 500), bottomInset: 0, fold: .known(rect(306, 0, 40, 500))).arrangement == .oneColumn
+        && Layout(size: size(652, 500), bottomInset: 0, fold: .known(rect(306, 0, 40, 500))).band == nil
+        && Layout(size: size(652, 500), bottomInset: 0, fold: .known(rect(306, 0, 40, 500))).mac == rect(26, 0, 600, 500))
+check("a book band whose pages hold columns of 300 pt: kept to; of 299.5: one column",
+      Layout(size: size(704, 500), bottomInset: 0, fold: .known(rect(332, 0, 40, 500))).arrangement == .twoColumns
+        && Layout(size: size(704, 500), bottomInset: 0, fold: .known(rect(332, 0, 40, 500))).mac == rect(16, 0, 300, 500)
+        && Layout(size: size(703, 500), bottomInset: 0, fold: .known(rect(331.5, 0, 40, 500))).arrangement == .oneColumn)
 check("a laptop band 150 pt from the top: one column, no fold kept",
       Layout(size: size(669, 951), bottomInset: 34, fold: .known(rect(0, 150, 669, 40))).arrangement == .oneColumn)
 check("a laptop band whose lower page is 200 pt over the home indicator: two pages; 199: one column",
@@ -154,26 +151,30 @@ check("a laptop band whose upper page is 200 pt: two pages; 199.5: one column",
       Layout(size: size(669, 951), bottomInset: 0, fold: .known(rect(0, 200, 669, 40))).arrangement == .twoPages
         && Layout(size: size(669, 951), bottomInset: 0, fold: .known(rect(0, 199.5, 669, 40))).arrangement == .oneColumn)
 
-// The thresholds, at the point.
-check("sideways: 651 pt one column, 652 two of 300", Layout(size: size(651, 400), bottomInset: 0, fold: .inferred).arrangement == .oneColumn
-      && Layout(size: size(652, 400), bottomInset: 0, fold: .inferred).arrangement == .twoColumns
-      && Layout(size: size(652, 400), bottomInset: 0, fold: .inferred).mac.width == 300)
-check("upright: 731 pt one column, 732 two of 340", Layout(size: size(731, 1000), bottomInset: 0, fold: .inferred).arrangement == .oneColumn
-      && Layout(size: size(732, 1000), bottomInset: 0, fold: .inferred).arrangement == .twoColumns
-      && Layout(size: size(732, 1000), bottomInset: 0, fold: .inferred).mac.width == 340)
-check("square counts as sideways", Layout(size: size(700, 700), bottomInset: 0, fold: .inferred).arrangement == .twoColumns)
-check("600 pt at most: 1376 sideways gives two of 600 with 78 at each side",
-      Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).mac == rect(78, 0, 600, 1008)
-        && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).device == rect(698, 0, 600, 1008))
+// Without a fold to keep to, one column however wide the screen and whichever way round (Noah, 2026-11-23:
+// "Settings should not be 2 columns, please make it 1 column"): two columns came from 652 pt sideways and 732
+// upright until then.
+check("without a fold, one column where two came until 2026-11-23: 652 pt sideways, 732 upright, a square, an iPad",
+      [size(652, 400), size(732, 1000), size(700, 700), size(1376, 1008), size(1032, 1352)].allSatisfy { s in
+          [FoldInfo.inferred, .known(nil)].allSatisfy { Layout(size: s, bottomInset: 0, fold: $0).arrangement == .oneColumn }
+      })
+check("without a fold, one column on screens wider than any device's: 2,732 by 2,048, either way round",
+      [size(2732, 2048), size(2048, 2732)].allSatisfy { s in
+          [FoldInfo.inferred, .known(nil)].allSatisfy { Layout(size: s, bottomInset: 20, fold: $0).arrangement == .oneColumn }
+      })
+check("600 pt at most, centred: an iPad Pro 13-inch sideways gives one column of 600 at 388",
+      Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).mac == rect(388, 0, 600, 1008)
+        && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred).device == rect(388, 0, 600, 1008))
 check("one column 600 at most, centred", Layout(size: size(669, 951), bottomInset: 0, fold: .known(nil)).mac == rect(34.5, 0, 600, 951))
 check("the lines for the console, with the bottom the pane was given",
       bookL.description == "two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, the fold 455.5–495.5 between (951×669, 34 pt kept at the bottom)"
         && laptopL.description == "two pages 600 pt wide at 34.5, the Mac's to 455.5, this device's from 495.5 (669×951, 34 pt kept at the bottom)"
         && Layout(size: size(393, 793), bottomInset: 34, fold: .inferred).description == "one column 361 pt wide at 16 (393×793, 34 pt kept at the bottom)"
+        && Layout(size: size(734, 393), bottomInset: 21, fold: .inferred).description == "one column 600 pt wide at 67 (734×393, 21 pt kept at the bottom)"
         && Layout(size: size(1376, 1008), bottomInset: 20, fold: .inferred, rightToLeft: true).description
-            == "two columns 600 pt wide, the Mac's at 78, this device's at 698 (1376×1008, 20 pt kept at the bottom, right to left)")
+            == "one column 600 pt wide at 388 (1376×1008, 20 pt kept at the bottom, right to left)")
 check("the line without a bottom: nothing said (an iPhone SE on its side)",
-      Layout(size: size(667, 375), bottomInset: 0, fold: .inferred).description == "two columns 307.5 pt wide, the Mac's at 16, this device's at 343.5 (667×375)")
+      Layout(size: size(667, 375), bottomInset: 0, fold: .inferred).description == "one column 600 pt wide at 33.5 (667×375)")
 
 // MARK: - The grid
 
@@ -188,15 +189,15 @@ final class Rule {
 }
 let inside = Rule("every part inside the screen, 16 pt from its sides (a screen wider than 32 pt)")
 let widest = Rule("no part wider than 600 pt")
-let decided = Rule("the arrangement is the rule's: two pages for a laptop band with pages of 200, two columns on a book band's pages of 300 or more each, else two columns where each gets 300 sideways or 340 upright, else one")
+let decided = Rule("the arrangement is the rule's: two pages for a laptop band with pages of 200, two columns on a book band's pages of 300 or more each, else one column")
 let offFold = Rule("nothing on a fold's band: the columns on its pages, 16 pt from them; the pages above and below it")
 let leadingMac = Rule("the Mac's part leading (its column first in the leading-edge space) or above, this device's trailing or below")
-let pairs = Rule("two columns without a fold: equal, 20 apart, centred, each at least the rule's least")
+let foldsOnly = Rule("two columns or two pages only around a fold kept to (a book band, a laptop band): every other screen one column, however wide and whichever way round (Noah, 2026-11-23)")
 let single = Rule("one column: both parts in it, min(600, W − 32) wide, centred, the screen's height")
-let headerRule = Rule("the header over the Mac's part (in two columns out to the far column's edge, its words the Mac's column less 8)")
+let headerRule = Rule("the header over the Mac's part (in the book pose out to the trailing page's column's edge, its words the leading page's column less 8)")
 let mirrored = Rule("right to left mirrors left to right: the same rects on the screen, mirrored, the Mac's part on the leading side")
 let footRule = Rule("Disconnect clear of the home indicator: at the screen's foot its room, 16 pt at least; 12 over the laptop pose's fold")
-let rules = [inside, widest, decided, offFold, leadingMac, pairs, single, headerRule, mirrored, footRule]
+let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule]
 
 func mirror(_ r: CGRect, _ W: CGFloat) -> CGRect { rect(W - r.maxX, r.minY, r.width, r.height) }
 func same(_ a: CGRect, _ b: CGRect) -> Bool { near(a.minX, b.minX) && near(a.minY, b.minY) && near(a.width, b.width) && near(a.height, b.height) }
@@ -230,9 +231,14 @@ for w in stride(from: 200, through: 1400, by: 1) {
                 } else if let b = fold.verticalBand, b.minX - 2 * m >= 300, W - b.maxX - 2 * m >= 300 {
                     want = .twoColumns
                 } else {
-                    want = (W - 52) / 2 >= (H > W ? 340 : 300) ? .twoColumns : .oneColumn
+                    want = .oneColumn
                 }
                 decided.expect(l.arrangement == want, at + ", expected \(want.rawValue)")
+                // Whatever the thresholds: two parts side by side or one above the other only with a fold's band
+                // between them, of the fold's own kind; no band, one column.
+                foldsOnly.expect((l.arrangement == .oneColumn) == (l.band == nil)
+                                 && (l.arrangement != .twoColumns || fold.verticalBand != nil)
+                                 && (l.arrangement != .twoPages || fold.horizontalBand != nil), at)
                 footRule.expect(l.arrangement == .twoPages ? l.footBottom == 12 : l.footBottom == max(16, bottom) && l.footBottom >= bottom,
                                 at + ", \(l.footBottom) under Disconnect")
                 if let band = l.band.map(l.onScreen) {
@@ -253,12 +259,6 @@ for w in stride(from: 200, through: 1400, by: 1) {
                 switch l.arrangement {
                 case .twoColumns:
                     leadingMac.expect(l.mac.maxX <= l.device.minX && (rtl ? mac.minX > device.minX : mac.minX < device.minX), at)
-                    if l.band == nil {
-                        let least: CGFloat = H > W ? 340 : 300
-                        pairs.expect(near(l.mac.width, l.device.width) && near(l.device.minX - l.mac.maxX, 20)
-                                     && near(mac.minX, W - device.maxX) && l.mac.width >= least - 0.001
-                                     && near(l.mac.width, min(600, (W - 52) / 2)), at)
-                    }
                     headerRule.expect(near(l.header.x, l.mac.minX) && near(l.header.width, l.device.maxX - l.mac.minX)
                                       && l.headerWords != nil && near(l.headerWords!, l.mac.width - 8), at)
                 case .twoPages:
