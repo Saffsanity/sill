@@ -18,6 +18,13 @@
 #   Tests/touchrig/compare.py --edge BASE.log NEW.log   their verdict: shown, every stroke as main's; hidden, a swipe in
 #                                              from the band brings the controls and sends nothing, anything else goes
 #                                              on whole, in order (where the sources have RevealEdgePan.swift)
+#   RIG_ONLY=pad Tests/touchrig/run.sh NAME    Trackpad mode (TouchMode, #178): the trackpad laid over the overlay as the
+#                                              app lays it over the picture, at the left edge, the swipe in listening and not
+#   Tests/touchrig/compare.py --pad NEW.log    its verdict, within the one log: a swipe in sends nothing; every other stroke
+#                                              held by it sends what the same stroke sends unheld, the pointer's travel
+#                                              too; the pad still answers after a stroke the swipe in held; nothing reaches
+#                                              the picture under the pad. A log of sources from before the fix (#222's
+#                                              head, daa7b5e4, or main) shows what it fixes
 #
 # It runs on a simulator of its own, named by SILL_TOUCHRIG_SIM (default "Sill touchrig"), made (an
 # iPad Pro 11-inch (M5) on the newest iOS) when there is none and deleted afterwards only when this
@@ -75,6 +82,9 @@ if grep -q "var sendGesture" TrackpadView.swift; then flags+=(-D GESTURES); fi
 if grep -q "StreamZoom" InputOverlay.swift; then flags+=(-D ZOOM); fi
 # Full screen's swipe in from the left edge (docs/full-screen-plan.md), where the sources have it: on the rig's window.
 if [ -f RevealEdgePan.swift ]; then flags+=(-D REVEAL); fi
+# Trackpad mode's pad over the picture (TouchMode, #178), where the sources have it: the rig lays it over the overlay
+# with `overPicture`; before, the plain surface, as #222's first version laid it.
+if grep -q "overPicture: Bool" TrackpadView.swift; then flags+=(-D PADOVER); fi
 cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth.m" "$here/Bridging.h" .
 
 target=arm64-apple-ios17.0-simulator

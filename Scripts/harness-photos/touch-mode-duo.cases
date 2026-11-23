@@ -1,0 +1,17 @@
+# Touch Mode (#178, #222; docs/steps/2026-11-18-ready-222.md) on the agents' Duo (iOS 27.1): the Settings panel at its
+# row (Direct Touch, then Trackpad), sideways and upright, large type; the tour's picture card in Trackpad mode (the
+# Duo's an iPhone's: no Pencil row); the stream screen in Trackpad mode, sideways and in the laptop pose, which must be
+# main's pixel for pixel (the pad over the picture draws nothing); and a stray stored value. Main ignores -Sill.touchMode
+# and -SillSettingsScroll touch.
+#   Scripts/harness-photos.sh Scripts/harness-photos/touch-mode-duo.cases --baseline origin/main
+duo-touch-direct        -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll touch
+duo-touch-trackpad      -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll touch -Sill.touchMode trackpad
+duo-touch-ax3           -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll touch -Sill.touchMode trackpad -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+duo-upright-trackpad    -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsScroll touch -Sill.touchMode trackpad
+duo-tour-trackpad       -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.touchMode trackpad --wait=6
+duo-stream-trackpad     -SillLayout 951x669 -SillHinge flat -Sill.touchMode trackpad
+duo-laptop-trackpad     -SillLayout 669x951 -SillHinge half -Sill.touchMode trackpad
+# A stored value that is neither mode (TouchMode.stored: anything but "trackpad", "Trackpad" too, is Direct Touch): the
+# control shows Direct Touch, as duo-touch-direct's photo does, and the tour's picture card is Direct Touch's, main's.
+duo-touch-stray         -SillLayout 951x669 -SillHinge flat -SillSettings 1 -SillSettingsScroll touch -Sill.touchMode Trackpad
+duo-tour-stray          -SillLayout 951x669 -SillHinge flat -SillTourState fresh -SillTour touch -Sill.touchMode Trackpad --wait=6

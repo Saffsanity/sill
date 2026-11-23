@@ -727,6 +727,48 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
+        pointerBegan(touch, with: event)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = Self.pointerTouch(in: touches) else {
+            super.touchesMoved(touches, with: event); return
+        }
+        pointerMoved(touch)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = Self.pointerTouch(in: touches) else {
+            super.touchesEnded(touches, with: event); return
+        }
+        pointerEnded(touch)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = Self.pointerTouch(in: touches) else {
+            super.touchesCancelled(touches, with: event); return
+        }
+        pointerCancelled(touch)
+    }
+
+    /// Trackpad mode (TouchMode, #178): the trackpad over the picture hands on the Apple Pencil's touches and a
+    /// connected trackpad's or mouse's clicks, which land on it and not here (`TrackpadSurface.pointerTouch`). They
+    /// are the pointer's here as in Direct Touch: the Pencil clicks and drags where it touches, a trackpad's click
+    /// where iPadOS's pointer is (TouchMode.taker), each through the path of this view's own touches below.
+    func takePointerTouch(_ phase: UITouch.Phase, _ touch: UITouch, with event: UIEvent?) {
+        guard touch.type == .pencil || touch.type == .indirectPointer else { return }
+        switch phase {
+        case .began:
+            momentum.stop()
+            pointerBegan(touch, with: event)
+        case .moved: pointerMoved(touch)
+        case .ended: pointerEnded(touch)
+        case .cancelled: pointerCancelled(touch)
+        default: break
+        }
+    }
+
+    private func pointerBegan(_ touch: UITouch, with event: UIEvent?) {
         if touch.type == .pencil { pencilTouching = true }
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
@@ -737,27 +779,18 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         sendPointer(pointerButtonIsSecondary ? .rightDown : .leftDown, at: point, clamped: false)
     }
 
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = Self.pointerTouch(in: touches) else {
-            super.touchesMoved(touches, with: event); return
-        }
+    private func pointerMoved(_ touch: UITouch) {
         // A move while the button is down is a drag on the host's side.
         if let at = sendPointer(.move, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
     }
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = Self.pointerTouch(in: touches) else {
-            super.touchesEnded(touches, with: event); return
-        }
+    private func pointerEnded(_ touch: UITouch) {
         if touch.type == .pencil { pencilTouching = false }
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
     }
 
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = Self.pointerTouch(in: touches) else {
-            super.touchesCancelled(touches, with: event); return
-        }
+    private func pointerCancelled(_ touch: UITouch) {
         if touch.type == .pencil { pencilTouching = false }
         // Never leave the button stuck down.
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
