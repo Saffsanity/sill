@@ -771,6 +771,10 @@ app as CI builds it; docs/steps/2026-11-18-camera.md has the numbers.
   `Packaging/SillCameraExtension.entitlements`; make-app.sh's `SILL_CAMERA_EXTENSION` (off by default) and
   `SILL_APP_OUT`; release.sh's check of Sill Camera's slices; P1, `Scripts/camera-check/package.sh`.
 
+- The fourth run (2026-11-23; its notes in docs/steps/2026-11-18-camera.md): main c33d1057 (#399, #396, #402) merged
+  in, its five conflicts settled keeping both sides (#402's lock switches, then `deviceCamera`, in HostConfig and its
+  check), and verified in a heavy hold of its own; no step of this plan changed.
+
 Not yet: step 8 (Sill.app: `CameraExtensionState`, `CameraExtensionManager`, `CameraSink` with the fit into the app's
 size, the "Camera and Microphone (beta)" section with "Use iPhone and iPad cameras", the card's line, the previews;
 then H6 and H11); Sill Camera running anywhere (it needs the portal steps of §15 step 10 and Noah's Mac: N1); Share
