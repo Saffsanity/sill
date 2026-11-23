@@ -1,4 +1,4 @@
-**Privacy, part 2: this Mac's screens dark while a device uses it, built for real in Sill.app from Noah's probe G0 of 2026-11-23 (2026-11-18, branch `privacy-darken` from `privacy-lock` at 4d6a470, which is main at 8dbbb50 with #184 and part 1; main with #402 merged in since).**
+**Privacy, part 2: this Mac's screens dark while a device uses it, built for real in Sill.app from Noah's probe G0 of 2026-11-23 (2026-11-18, branch `privacy-darken` from `privacy-lock` at 4d6a470, which is main at 8dbbb50 with #184 and part 1; main merged in since, last at 5d062a3c with #402, #389 and #418).**
 
 docs/privacy-mode-plan.md (part 2: rules 2–5, 7–9, 11–14; G0) and docs/privacy-mode-assessment.md. Part 1, the lock when
 the last device leaves, is the branch `privacy-lock` underneath this one; this branch's pull request is based on it, so
@@ -209,7 +209,9 @@ used)"; #323: "as a toggle".
   1. *The last device leaves*: 30 s later it lifts (`grace`, the lock's). If Lock this Mac when the last device leaves
      is on and the same departure started its wait, the black holds until the lock's outcome, at most 30 + 3 + 1 s after
      the departure, so the room sees the lock screen and never the desktop. A device back within the 30 s keeps it dark.
-  2. *The switch is turned off*: lit at once (rule 9), from Settings on the Mac or from a device's view of it.
+  2. *The switch is turned off*: lit at once (rule 9), from Settings › Devices on the Mac (under the black: with keys
+     passing, a click where the switch is reaches it; a device never sees Sill's own windows, which every capture
+     leaves out).
   3. *Sill quits* (its Quit, a logout, a restart, an update's install, SIGTERM): lit at once (rule 11), before the quit
      goes on, and the windows go with the process anyway.
   4. *Sill crashes or is force-quit*: the window server removes a dead process's windows (G0: 14 and 16 ms).
@@ -244,11 +246,12 @@ used)"; #323: "as a toggle".
   a key on the dark Mac while a password field or Secure Keyboard Entry has the keyboard is not noticed (it goes to that
   field; a click still locks); the key or click that locks still reaches the app under it (an observer cannot stop it,
   open decision 3); the black lifts 2 s after an unlock at the Mac, not at once (open decision 8's settled unlock); a
-  display plugged in while dark shows its picture until its window is in; the pairing window is under the black, so a new
-  device pairs only after the Mac is taken back; a window another app puts above 1501 (an overlay at the shielding
-  level) would show over the black (none in G0); a main-thread stall of 10 s while dark (a slow answer to a keychain
-  prompt, say) ends Sill and reopens it; a Touch Bar keeps the front app's controls, and VoiceOver started at the Mac
-  with keys passing reads the covered windows aloud (the plan's small leaks).
+  display plugged in while dark shows its picture until its window is in; the pairing window, Settings and Sill's menu
+  are under the black, so a new device pairs only after the Mac is taken back; a window another app puts above 1501 (an
+  overlay at the shielding level) would show over the black (none in G0); a main-thread stall of 10 s while dark (a
+  slow answer to a keychain prompt, or Accessibility waiting on an app that hangs while Sill sizes its window:
+  WindowSizer is the main actor's) ends Sill and reopens it; a Touch Bar keeps the front app's controls, and VoiceOver
+  started at the Mac with keys passing reads the covered windows aloud (the plan's small leaks).
 - **Defaults taken in run 4** (the pull request lists them for Noah): level 1501, opaque; the black under the lock
   screen, lit 2 s after an unlock at the Mac; Sill's own input by its tag or its own process; the hint's "Press any key
   or click to lock it."; moving, dragging and scrolling only show the hint, a modifier key alone does nothing; Only
@@ -301,3 +304,60 @@ used)"; #323: "as a toggle".
   mouse is used on the Mac itself, only to lock it. It reads no key and keeps or sends nothing of it." Review notes
   (Sill for Mac ships outside the App Store; for the App Store's Sill for iPhone and iPad, once that Mac release is out):
   "Your Mac’s own screen can stay dark while you use it from afar."
+- **Run 5 (2026-11-23): run 4's code compiled and verified for the first time.** Run 4 had pushed the darkening and
+  ended while its one hold was still queued, so none of it had compiled. Main 5d062a3c (#389, #418) merged in
+  (aee63f9c, no conflict). Read as a reviewer before the hold: nothing seen wrong in the Swift, and nothing in the hold
+  that could darken, cover or lock this Mac (the real seams are made only in PrivacyScreen.init with `real`, which the
+  CLI's `testHooks: true`, `--synthetic` and the bare binary's ad hoc signature all rule out; the bare binary's
+  previews exit before any coordinator is made, and CurtainView's is drawn with cacheDisplay, never in a window; every
+  host synthetic, on 127.0.0.1, under 30 s). New: darken.py's `switch` case, Sill.app's own code for the switches and
+  its Quit in the bare SillMenuBar binary as a synthetic test host on loopback (`-requirePairing NO`,
+  `-virtualDisplay 0`, a TLS test client at home, `-SillSetAfter`, `-SillQuitAfter`; the three keys HostSettings saves
+  are read from the bare binary's defaults domain and removed), so ways 2 and 3 below have a dry run through
+  HostSettings, `setTarget` and AppDelegate's Quit, not only the CLI's.
+- **Verified in run 5** (at 2695c1f9, in one hold of heavy.sh's slot B, 16:51 to 18:25; logs in sill-handoff's
+  next/privacy-darken/run5/logs): `swift build -c release` 55 s (53.48 s), no warning; the probe compiles
+  (`--build-only`); the darken check, 332 checks, 0 failed, and its mutants, 141 of 141 caught (2,837 s; each new one by
+  its own case); the privacy check, 217 checks, and its mutants, 87 of 87 caught (1,429 s);
+  `Scripts/privacy-check/darken.py OUT all`, 39 of 39 verdicts (144 s): the black up at 0.620 s, before the connect's
+  wake counted in the same turn; lit
+  3.1 s after the last departure; a key's lock unconfirmed 3.04 s later, then the ⌃⌘Q hint; the Mac's own unlock at
+  8.06 s; the hold lit at the lock's outcome (9.375 s); SIGTERM lit, then its line; the watchdog's dry run once, 9.01 s
+  into a 12 s stall, the host going on; and the switch case: dark at the connect and at each switch back on (4.06,
+  10.57, 16.57 s), off lit at once (8.57 s), only away with the device at home lit at once (13.57 s), the ⌃⌘Q hint with
+  keys passing, Sill's own Quit while dark lit before its line (19.57 s), the keys saved as Settings would (1, 0, 0) and
+  removed; `Scripts/privacy-check/live.py OUT all` 48 of 48 (183 s); the previews from the bare binary, 336 PNGs (9 s),
+  the ten new ones (the Devices pane's darken, darkenany, darkenpass and darkennoaccessibility in both appearances, the
+  hint's lock and pass) looked at; H2, this build's CLI against main 5d062a3c's, built from `git archive` in the same
+  hold (45 s), no new flag: idle 45 s 9 lines each, the 7 others identical masked, and a test client 30 s 35 lines each,
+  the 12 others identical masked, the same 7 statistic names (run5/h2.py); `Tests/checks/run-all.sh`, all 77 pure checks passed (723 s); a
+  parse-only text check that away-quality's 67, stage-release's 25 and key-repeat's 42 patterns and update-install's
+  AppModel one are each still found once (their files changed only in comments, or not at all: their mutants not run);
+  CI green at 2695c1f9 (run 45162791943, Build and check 23 m 41 s), the commits after it docs only.
+- **Every way the black ends, and what covers it** (run 5's review of the code, once everything was green):
+  1. *The last device leaves*: the check (rule 6: the wait, a return, 29.9 and 30 s, the hold for the lock and its
+     bound; both rules scripted; the model's R0 and I8), the dry runs `wait` and `hold`, part 1's live.py; trial steps 1
+     and 9.
+  2. *The switch is turned off*: the check (rule 9), the dry run `switch` (Sill.app's own HostSettings and `setTarget`,
+     in the bare binary); trial step 2.
+  3. *Sill quits*: the check (rule 11), the dry runs `quit` (the CLI's SIGTERM) and `switch` (AppDelegate's Quit and
+     `quitBegins`, in the bare binary); trial step 3.
+  4. *Sill crashes*: nothing of Sill's to check (the window server removes a dead process's windows); G0 measured 14 and
+     16 ms; trial step 4.
+  5. *Sill freezes*: the check (rule 12's decisions), the dry run `watchdog`; the real end only with a debugger, which
+     this Mac must not run: under "not verified". A process stopped whole stops its watchdog too (G0's step 3).
+  6. *The Mac locks*: the check (rules 4, 7 and 8), the dry runs `takeback`, `keys` and `pass`, G0's spell 1 (the lock
+     screen in front at 1000; 1501 inferred); trial steps 5 and 6.
+  7. *The Mac sleeps*: the check covers the wake's part (the lock screen, then the Mac's own unlock); that the
+     watchdog's clock stops in sleep (CLOCK_UPTIME_RAW), so a sleep is no hang, and that the wait's clock counts it, is
+     read in the code, not run (no test may sleep this Mac): under "not verified"; trial step 8.
+  8. *Another user takes the screen*: the check (rule 8: back from off console is the Mac's own), the dry run
+     `takeback` for the same glue with a lock; trial step 8.
+  9. *A display is added or removed while dark*: the check (rule 13's count: every screen gone lifts, one back darkens);
+     no dry run (a test host's displays are fixed, and DisplayChanges and WindowCurtain.resync are Sill.app's alone): a
+     hook to change them would touch DarkenPolicy and its 141 mutants, not small; under "not verified"; trial step 7.
+  Findings: the step file said a device's view of Settings could turn the switch off (captures leave Sill's windows
+  out: corrected, way 2 above); the pull request lacked the plan's small leaks (a Touch Bar, VoiceOver) and Sill's own
+  menu under the black (added to its defects); and a main-thread stall need not be a keychain prompt: WindowSizer is the
+  main actor's, so Accessibility waiting on an app that hangs while Sill sizes its window can reach the watchdog's 10 s
+  and end the session (named in the defects; WindowSizer itself is outside this pull request).
