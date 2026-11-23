@@ -551,21 +551,33 @@ is made); kept while a device shows it and 30 s after, while locked until the
 unlock; removed at once off console or when turned off; at most one make or
 removal every 3 s and ten a minute; never the main display beside a real
 screen. The windows on it move to the main display as it goes and come back as
-it returns (Accessibility; memory only), and Quit moves them first. A turn of
-the device it was made for is taken by its next make until probe P2 says a way
-in place (`VirtualDesktopSize.followWay`, one line). It is the same display as a
+it returns (Accessibility; memory only), and Quit moves them first. It follows
+the device it is for in place (Noah's probes P2b and P2c of 2026-11-23,
+`Scripts/display-modes-probe/p2b|p2c`; `VirtualDesktopSize.InPlace`): a turn
+held 1 s takes about 0.7 s (applySettings: with the turned size alone lands at
+1x, then a CoreGraphics switch to its 2x mode), another device's room of the
+same shape about 0.3 s (one applySettings:), and the Desktop restarts once, at
+the new size; a step refused or late falls back to the size it had and waits
+for its next make, as does a size past the backing it was made with (a square
+of 3072 to 4096 pixels a side for This device) or a device before 0.7. A device
+that steps onto it takes it over, and so does the next device to ask for the
+Desktop on it once the one it was for has left. It is the same display as a
 Mac with no screen's (one display in two roles): with no real screen it is that
 display. Sill.log: "Desktop: display 3 of 3 (Virtual Desktop), asked by iPad
 mini.", "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad
-mini (its screen).", "Virtual Desktop: iPad mini turned; the next one is made at
-800×1218 pt.", "Virtual Desktop: no device has shown it for 30 s; moved 3
+mini (its screen).", "Virtual Desktop: iPad mini turned; followed in place in
+650 ms: 800×1218 pt @2× at 60 Hz." (with a detail line of its steps before it),
+"Virtual Desktop: iPhone shows it now; …", "…; not followed in place: macOS
+refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in
+980 ms; the next one is made at 800×1218 pt.", "Virtual Desktop: no device has shown it for 30 s; moved 3
 windows to Built-in Retina Display and removed it.", "Virtual Desktop: 2 of 3
 windows back in their places (1 was moved on the Mac).", "Virtual Desktop: kept
 while this Mac is locked; …", "Virtual Desktop: waited 2.1 s before making it (3
 s since the last change).", "Settings from iPad mini: virtual desktop off → on".
 On test hosts only: `SILL_TEST_VIRTUAL_DESKTOP=1` with `SILL_TEST_DISPLAYS` (its
 screens) says it makes it, as one more stop, and makes none;
-`SILL_TEST_VD_GRACE=<s>` shortens its 30 s; `Scripts/desktop-check/live.py OUT`
+`SILL_TEST_VD_GRACE=<s>` shortens its 30 s; `SILL_TEST_VD_STEPS` makes its said
+display refuse a switch or never land; `Scripts/desktop-check/live.py OUT`
 runs its scenarios; `Tests/checks/virtual-desktop` checks its rules. The real
 trials (it makes a display) are Noah's, in the step file of 2026-11-18
 (`docs/steps/2026-11-18-virtual-desktop-2b.md`).

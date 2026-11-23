@@ -278,8 +278,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
-  size and rate, the device's, and (phase 2b) following the device, `Follow`, `followStep` and probe
-  P2's one-line seam `followWay`; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  size and rate, the device's, and (phase 2b) following the device, `Follow`, `followStep`, `followWay`
+  (in place, by Noah's probes P2b and P2c of 2026-11-23), the `backing` it is made with, `InPlace` (a
+  follow's steps: applySettings: with the size alone, the switch for a turn, each read back with a
+  bounded wait, a fall back to the size it had at 2x, else its removal) and, TEST ONLY, `TestDisplay`
+  (the display as the probes measured one) and SILL_TEST_VD_STEPS' knobs; `DisplayMakeGuard`, #380's
+  guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
   `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
   the roles changing hands with the headless display, never the main display beside a real screen;
@@ -287,8 +291,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
   and back as it returns, over WindowRestore's `Access`; on the Mac `WindowSizer.DesktopWindows`; pure; both
   `Tests/checks/virtual-desktop`); the coordinator drives them (StreamCoordinator.swift's "The Virtual
-  Desktop": its stop, its make and removal through SillDisplays, its windows, following its device, the
-  roles changing hands, kind 16's `virtualDesktopState`, Quit),
+  Desktop": its stop, its make and removal through SillDisplays, its windows, following its device in
+  place (`followVirtualDesktopInPlace`, `driveInPlace`; the device it is for kept as devices come and go,
+  `adoptVirtualDesktopDevice`), the roles changing hands, kind 16's `virtualDesktopState`, Quit),
   `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
@@ -669,9 +674,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Scripts/display-modes-probe/run.sh` (TEST ONLY; P2 of docs/virtual-desktop-plan.md as revised
   2026-11-18, phase 2b): `probe.swift` with VirtualDisplay.swift alone; without `--make` the dry run (the
   private API looked up, the modes, their backing and the steps printed; nothing made), with `--make`
-  Noah's run on a Mac at rest (refused while a Sill runs): a display with the room both ways as its modes,
-  switched in place, given new modes by `applySettings:` again, a window of its own on it, each change's
-  ID, mode, callback flags and the window's place, and one verdict line for each way.
+  Noah's run on a Mac at rest (refused without a terminal and while a Sill runs): a display with the room
+  both ways as its modes, switched in place, given new modes by `applySettings:` again, a window of its
+  own on it, each change's ID, mode, callback flags and the window's place, and one verdict line for each
+  way, saying what the display did (corrected 2026-11-23). The probes that followed it on 2026-11-23 and
+  decided the follow in place, as Noah ran them: `p2b/` (P2b: `probe2.swift`, `run.sh`) and `p2c/` (P2c:
+  `probe3.swift`, `VirtualDisplay-probe.patch`, its two PROBE ONLY changes, `run.sh`), both compiled with
+  `VirtualDisplay-b7339612.swift` (Sources/SillHost/VirtualDisplay.swift as it was then); each run.sh
+  checks the sources' sha256, never builds for `--dry-run` (`--build` builds: an agent's, through the heavy
+  lock), refuses the real run without a terminal or while a Sill runs, links no VideoToolbox or
+  ScreenCaptureKit, stops each case at its limit, and writes to `.build/display-modes-probe/p2b|p2c/`;
+  P2c's refuses `--quarter-turn` (the rotation setting) for good.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own
@@ -689,9 +702,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   software decoder and prints each one's size and luma, so the placeholder's
   black is measured. `Scripts/desktop-check/live.py OUT` (TEST ONLY; docs/virtual-desktop-plan.md): the Desktop's
   stops on a test host (SILL_TEST_DISPLAYS: steps, taps, rates, the lock, the span), and from phase 2b the Virtual
-  Desktop on two more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's room, its
-  turn, its grace, locked and off console, the span; a paired device's switch shown at once, an unpaired one's refused,
-  the switch flipped four times a second against the spacing), a verdict per rule.
+  Desktop on four more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's room, its
+  turn followed in place as the probes measured a display, its grace, locked and off console, the span; a paired
+  device's switch shown at once, an unpaired one's refused, the switch flipped four times a second against the spacing;
+  SILL_TEST_VD_STEPS: a refused switch falling back, another device taken over in place, a room beyond the backing,
+  a way back that never lands removing it), a verdict per rule.
   `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
   docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,

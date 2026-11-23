@@ -492,3 +492,153 @@ live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtu
 
 The pull request's list of Noah's steps gains an 11 (Lock this Mac when the last device leaves with the Virtual Desktop
 showing, default 30); its 11 to 14 are now 12 to 15. The list above keeps its old numbers.
+
+**Fourth part (2026-11-23): main 5d062a3c brought in, and the Virtual Desktop follows its device in place, by Noah's
+probes.** Main moved to 5d062a3c (#389, the words for the promised features; #418, the iPhone's key row above any
+software keyboard): `virtual-desktop-2a` took it with no conflict (87367adc), and this branch took that head (4f14b58f)
+with one conflict, iOSClient/HostSettingsPanel.swift, where #418's scroll anchor `hideThumbnailsRowID` and this branch's
+`virtualDesktopID` were added on the same line: both stay. No source of this branch met main's change otherwise.
+
+Then the probes. Noah ran four on his Mac on 2026-11-23 (Mac14,9, macOS 27.2.1, 26B131; Sill quit, no device connected).
+Their outputs stay outside the repository, in `~/Downloads/sill-handoff/next/vd-2b/`: `noah-probes-20261123.md` (P2's two
+runs, transcribed), `p1-20261123.txt` (P1 at the four sizes), `probe2/out-20261123-162350.txt` (P2b) and
+`probe3/out-20261123-165306.txt` (P2c). The probes are in `Scripts/display-modes-probe/` as he ran them (P2's verdict lines
+corrected, below). What they found:
+- **P1** (`--virtual-display-selftest` at the four sizes): each came up at the mode asked, at 2x: 1218×800 and 1133×744 at
+  60 Hz, 1376×1032 and 1496×800 at 120 Hz, online in 213 to 273 ms, ScreenCaptureKit listing it after 18 to 21 ms, gone
+  after 58 to 327 ms. So #395's open decision 4 is answered: macOS keeps an iPad mini's own 1133 × 744 at 2x (the 800-point
+  floor stays until Noah decides otherwise; it is #395's).
+- **P2** (the room both ways listed at creation): the turn listed at creation is refused (the switch answered false and
+  nothing changed); after `applySettings:` with three modes the display WAS at the new one 333 and 339 ms later, the same
+  ID, though `switchMode` answered false (it looked in macOS's list from before; P2b showed why); a mode beyond the
+  backing is listed and never taken.
+- **P2b** (`probe2/`): a mode listed beside another (at creation, or `[room, turn]` later) reads "NOT usable for the
+  desktop" (flags 0x1), and a CoreGraphics switch to it answers configure 0, complete 1001 (illegal argument), nothing
+  changing: there is no way by the modes listed at creation. `applySettings:` with the turn ALONE moves the live display
+  in place, the same ID, but to the turned pixels at 1x (1600×2436 @1× for 800×1218, in 351 ms; 1600×2992 @1× for
+  800×1496, in 308 ms), and 300 ms later macOS lists the turn at 2x as usable (flags 0x2000003). Another shape of the same
+  orientation inside the backing, alone, lands at 2x: 1496×800 to 1218×800 in 300 ms, back in 317 ms, the same ID; one
+  beyond the backing (1496×800 on a display made 2436 px square) is never taken. Back to the room by `applySettings:` with
+  it alone: 2x, 319 to 325 ms, from 1x too. Which mode macOS takes from a longer list is no rule of first, last, current,
+  smallest or largest. `applySettings:` holds its caller 278 to 287 ms every time. The two windows of the probe's own on
+  the display stayed on it, inside it, their size kept, through every step (the display never turned).
+- **P2c** (`probe3/`): the turn in two steps works: `applySettings:` with the turn alone, then, as soon as the display reads
+  the turned pixels at 1x and macOS lists the turn at 2x usable (both at +316 to +368 ms), a CoreGraphics switch to that
+  mode answers configure 0, complete 0, and the display reads the turn at 2x at +650 ms (iPad mini, 800×1218 at 60 Hz),
+  +683 ms (iPhone, 800×1496 at 120 Hz), +661 and +706 ms on displays made with the room alone (no turn listed at
+  creation, the same square backing: listing the turn at creation is not needed); the switch call holds its caller 321 to
+  334 ms; `switchMode`'s own lookup would pick the same mode. Back to the room by `applySettings:` with it alone: 2x in 317
+  to 326 ms. The same display ID throughout, never removed or added; two reconfiguration callbacks for a turn (1x, then
+  2x). hiDPI read back 2 before and after, the physical size unchanged (281×185 mm for the iPad mini's room). The probe's
+  small window kept its size and stayed on the display; its window wider than the turn (974 or 1196 points of 800) was
+  narrowed by macOS to 800 and stayed on it, and when the display turned back it was at its own width and place again
+  without the probe moving it. Rotation (the private `rotation` setting, an unsigned int of unknown units) was not tried
+  and is never used.
+- **Never measured, by rule**: a ScreenCaptureKit stream of the display while it changes size in place, and how other
+  apps' windows behave. Both are Noah's to try in this branch's build (the steps below).
+
+What they decided, each in the code (`VirtualDesktopSize`: `followWay`, `backing`, `followStep`, `InPlace`; the
+coordinator's `followVirtualDesktop`, `followVirtualDesktopInPlace`, `driveInPlace`, `adoptVirtualDesktopDevice`):
+- **In place, by `applySettings:` with the new size alone** (`followWay = .newModes`; `.listedModes` is gone): a size of
+  the display's orientation in one step (P2b step e), a turn in two (P2c step 1). The Virtual Desktop is made with its room
+  alone, so macOS lists no unusable turn (P2c step 4).
+- **The switch only once the display reads the size's pixels at 1x and macOS lists its 2x mode usable**, a usable mode
+  chosen first (`VirtualDisplay.switchToListed`, `listsUsable`); a size macOS lands at 2x by itself needs none.
+- **Each step read back, with a bounded wait**: the display's change within 2 s of `applySettings:` (measured 0.31 to 0.37
+  s), the 2x listing within 1 s of the 1x landing (measured at once), 2x within 1.5 s of the switch (measured 0.33 s); a
+  look every 20 ms.
+- **A step refused, late or landing elsewhere falls back**: `applySettings:` with the size it had, alone (2x in about 320
+  ms, from 1x too: P2b, P2c), and the new size waits for the next make, the letterbox as before; when even that does not
+  land, the display goes (its windows to the main display first) and the Desktop that still shows its stop makes it again
+  at the new size 3 s later: never a display left at 1x.
+- **The backing** (`VirtualDesktopSize.backing`, VirtualDisplay's `backing`): a size past the backing it was made with is
+  never taken (P2 step 3, P2b step e), and P2c made a turn on a display whose backing was larger than its modes. So This
+  device's Virtual Desktop is made with a square backing of the longest side, at 2x, among its own size and every
+  connected device's (either way round, as each may turn), at least 3072 pixels a side (every iPhone's and iPad's room
+  both ways as far as is known: an iPhone Pro Max held sideways is about 1510 × 800 points, an iPad Pro 13-inch 1376 ×
+  1032), at most 4096 (the widest picture every Mac's encoder takes, #295; 64 MiB at 4 bytes a pixel if macOS keeps it
+  all, not measured), never less than its own pixels. A chosen size or Same as main display never follows a device and is
+  made as before, with its own pixels. A size that does not fit waits for the next make, with one line.
+- **The Desktop's stream restarts once, at the final size at 2x**: a turn is two reconfigurations (P2c), so the
+  Desktop's display follower waits while a follow runs (`virtualDesktopResizing`); at its end the coordinator waits until
+  ScreenCaptureKit lists the display at the new size (at most 1.5 s) and the follower restarts the Desktop once
+  ("Desktop: the display is 800×1218 pt now (was 1218×800); restarting at its size.").
+- **The main actor**: `applySettings:` holds it about 0.3 s and the switch about 0.33 s (P2b, P2c), as a make's own calls
+  already do. The private object has only ever been called on the main thread, the probes' too, so it stays there; a
+  device's input waits that long during a follow.
+- **Windows**: at a turn macOS narrows a window wider than the display and keeps it on it, and gave the probe's own window
+  its width and place back when the display turned back (P2c), so Sill moves none at a follow; the ledger
+  (DesktopWindowLedger) is for the display's removal and return, as before. Other apps' windows are not measured (a step
+  below; a known visible behaviour if an app's window stays narrow).
+- **The device it is for**: the plan's rule (§5), kept as devices come and go: a device that steps onto the Virtual
+  Desktop takes it (its room followed in place); when the device it was for leaves, the next device the make's own rule
+  names (the one that asked for the Desktop last, as each does as it connects, else the newest viewport's) takes it while a
+  device shows it. Two devices at once share it, sized for the one that stepped onto it last, as before.
+- **The rate**: a turn keeps the rate it has; another device's rate (the person's choice, else the device's, held to the
+  Frame Rate limit, as at a make) is asked with its size in the same `applySettings:`, and the stream is held to the rate
+  CoreGraphics reads back (a rate changed in place is not measured).
+- **A device before 0.7** (0.6.2): it sends no room, only its panel, which may change as its own controls come and go:
+  its turn waits for the next make, as before (`followStep`'s `sendsRoom`). Every other path is as it was: the headless
+  display (#395's) never follows; a test host and the CLI without the Virtual Desktop print nothing new.
+- **Its lines**: "Virtual Desktop: in place: applySettings: with 800×1218 alone answered YES at +285 ms; at 1600×2436 @1×
+  at +318 ms; …" (the steps, before each outcome), "Virtual Desktop: iPad mini turned; followed in place in 650 ms:
+  800×1218 pt @2× at 60 Hz.", "Virtual Desktop: iPhone shows it now; followed in place in 300 ms: 1496×800 pt @2× at 120
+  Hz.", "…; not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in 980
+  ms; the next one is made at 800×1218 pt.", "…, and it did not come back to 1218×800 pt @2×; removed it: the next one
+  is made at 800×1218 pt.", "…; 1900×800 pt @2× is beyond the backing it was made with (3072×3072 px); the next one is
+  made at 1900×800 pt.".
+- **TEST ONLY**: a test host's said Virtual Desktop runs the same machine against `VirtualDesktopSize.TestDisplay`, the
+  display as the probes measured one (a size of its orientation at 2x 0.32 s after `applySettings:`, a turn at its pixels
+  at 1x first with its 2x mode then listed, the switch 0.32 s, nothing past the backing); `SILL_TEST_VD_STEPS`
+  (`switch-refused`, `stuck`, `late`) makes a step fail. The desktop gate's scenarios use both.
+
+The probes in the repository (`Scripts/display-modes-probe/`): `p2b/` (P2b: `probe2.swift` as run, `run.sh`) and `p2c/`
+(P2c: `probe3.swift` as run, `VirtualDisplay-probe.patch` with its two PROBE ONLY changes, `run.sh`), both compiled with
+`VirtualDisplay-b7339612.swift`, this branch's VirtualDisplay.swift as it was when they ran; each run.sh checks the
+sources' sha256 against the ones Noah ran, never builds for `--dry-run`, refuses the real run without a terminal and while
+a Sill runs, links no VideoToolbox or ScreenCaptureKit, stops each case at its limit and writes to
+`.build/display-modes-probe/`; P2c's refuses `--quarter-turn`. P2's own `probe.swift` now says what the display did, read
+back, beside the call's answer: its 2026-11-23 output said "new modes on the live display …: no" only because the verdict
+wanted `switchMode` to answer true; the display was at the new size with the same ID. Its run.sh now refuses `--make`
+without a terminal too, before it builds.
+
+Checks: `virtual-desktop` (the backing and 2,000 random makes, the step, InPlace driven against TestDisplay and by hand,
+P2c's own times in the detail line, 2,000 random follows against the invariants, the lines, the knobs; 235 mutants, 57
+new), `virtual-display-api` (the backing asked for, the follow's calls' wiring as text; 108 mutants, 11 new),
+`sill-displays` (the make with its backing; a display's size changed in place only by the coordinator's follow; 46
+mutants, 3 new). The desktop gate's first Virtual Desktop host now follows the turn in place and back; two more hosts
+show a refused switch falling back, the iPhone taking it over after the iPad, a room beyond the backing, and a way back
+that never lands removing it and making it again.
+
+**Defaults taken for Noah to confirm** (this part's; 1 to 30 stand, 8 replaced):
+31. **In place** (replaces 8): a turn of the device it is for, or another device of the same orientation, is followed in
+    place after 1 s steady (the plan's settle) and at most once every 3 s, inside the backing; refused or late, it falls back
+    to the size it had and waits for the next make.
+32. **The backing**: a square of 3072 to 4096 pixels a side for This device (every phone and iPad both ways, and the
+    devices connected when it is made), its own pixels for a chosen size; a size past it waits for the next make.
+33. **No new switch**: the follow in place lives inside the Virtual Desktop's switch (off by default) and its Resolution's
+    Match the device; a fixed Resolution stops it, as before.
+34. **The device it is for** passes to a device that steps onto it, and, once the one it was for leaves, to the next device
+    that asks for the Desktop on it (the make's own rule); two at once share the one that stepped onto it last.
+35. **A display that will not come back to 2x is removed** (its windows to the main display first) and made again 3 s later
+    by the Desktop that shows its stop, rather than left at 1x.
+36. **The main actor holds about 0.3 s per step** (0.6 s for a turn): the private object stays on the thread it was
+    measured on.
+37. **Sill moves no window at a follow**: macOS keeps them on the display and narrows a wider one; whether every app's
+    comes back to its width when it turns back is Noah's step.
+38. **A device of another rate taking it over** asks its rate in the same `applySettings:`; the stream is held to the rate
+    CoreGraphics reads back.
+
+**For Noah** (this part's; they come first in the pull request's list, after the install). Watch Sill.log meanwhile:
+`grep -E "Virtual Desktop|Desktop:" ~/Library/Logs/Sill/Sill.log | tail -30`.
+- **Turn the iPad while it shows the Virtual Desktop.** About two seconds later the Mac's desktop turns with it and fills
+  the iPad again. Sill.log: "Virtual Desktop: in place: …" then "Virtual Desktop: iPad mini turned; followed in place in
+  … ms: 800×1218 pt @2× at 60 Hz." and "Desktop: the display is 800×1218 pt now (was 1218×800); restarting at its size.";
+  turn back: "… followed in place in … ms: 1218×800 pt @2× at 60 Hz.". A window wider than the iPad held upright is
+  narrowed; turned back, it should be as wide as before. A failure: "not followed in place: …" (the iPad stays letterboxed
+  until it is made again), "removed it" (it comes back upright 3 s later), a picture that freezes or stays the old shape
+  after "restarting", or a window thrown onto another screen.
+- **Let the iPhone take it over after the iPad.** With the iPad on the Virtual Desktop, disconnect the iPad and connect
+  the iPhone within 30 s: its Desktop comes back onto the Virtual Desktop, which takes the iPhone's shape. Sill.log:
+  "Virtual Desktop: iPhone shows it now; followed in place in … ms: 1496×800 pt @2× at 120 Hz." (at 60 Hz if macOS keeps
+  the rate it had). A failure: "not followed in place: …" or "beyond the backing", or the iPhone letterboxed.
