@@ -439,7 +439,7 @@ enum DebugHooks {
         }
         // What a person at a dark Mac sees on each display (DarkenPolicy's hint, PrivacyCurtain.swift's view at a
         // 1512×982 pt screen's size), drawn offscreen like every preview here: never a window.
-        for (hintName, hint) in [("lock", DarkenPolicy.Hint.lock), ("pass", .pass)] {
+        for (hintName, hint) in [("lock", DarkenPolicy.Hint.lock), ("pass", DarkenPolicy.Hint.pass)] {
             let view = CurtainView.preview(size: NSSize(width: 1512, height: 982), hint: hint)
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 view.cacheDisplay(in: view.bounds, to: rep)

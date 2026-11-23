@@ -65,8 +65,8 @@ final class WindowCurtain: Curtain {
         }
         for id in screens {
             guard let window = windows[id] else { continue }
-            let frame = Self.frame(of: id)
-            if window.frame != frame { window.setFrame(frame, display: true) }
+            let rect = Self.frame(of: id)
+            if window.frame != rect { window.setFrame(rect, display: true) }
         }
         for (id, window) in windows where !screens.contains(id) {
             window.orderOut(nil)
@@ -75,8 +75,8 @@ final class WindowCurtain: Curtain {
     }
 
     private static func makeWindow(on display: UInt32) -> NSWindow {
-        let frame = frame(of: display)
-        let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let rect = Self.frame(of: display)
+        let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.backgroundColor = .black
         window.isOpaque = DarkenPolicy.windowOpaque
@@ -88,8 +88,8 @@ final class WindowCurtain: Curtain {
         window.animationBehavior = .none
         window.isExcludedFromWindowsMenu = true
         window.tabbingMode = .disallowed
-        window.contentView = CurtainView(frame: NSRect(origin: .zero, size: frame.size))
-        window.setFrame(frame, display: false)
+        window.contentView = CurtainView(frame: NSRect(origin: .zero, size: rect.size))
+        window.setFrame(rect, display: false)
         return window
     }
 
