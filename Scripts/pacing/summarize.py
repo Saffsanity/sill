@@ -231,6 +231,8 @@ GATES = {
     "homecable": ("nothing dropped, no worse than its base run, the same statistics named",
                   lambda r, b: r["drops"] == 0 and (b is None or (no_worse(r, b) and r["statKeys"] == b["statKeys"]))),
     "homeext": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
+    "homestall": ("the frame age back at 45 ms within 5 s of the stall's end, ≤ 30 keyframes a minute",
+                  lambda r, b: r["rec"] is not None and r["rec"] <= 5 and r["keys"] <= 30),
     "slowkf": ("recorded: the old device's liveness (whole messages)", None),
 }
 print(f"\n{'case':10} {'runs':>4}  {'base fps':>9} {'new fps':>9}  {'base drop/m':>11} {'new drop/m':>10}  {'base rec':>8} {'new rec':>8}  gate (new)")

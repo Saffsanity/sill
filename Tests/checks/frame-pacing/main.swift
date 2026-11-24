@@ -636,6 +636,15 @@ do {
           "model, a 10 s dip to 3 Mbit/s: back to a current picture at 60 fps within 15 s (the old rule still trailed)")
 }
 do {
+    // One 1.5 s stall on a 50 Mbit/s Wi-Fi at Balanced: on the old rule the storm it starts outlives it (a keyframe every
+    // other frame is more than the link carries); the new one is current again at once.
+    let (old, new) = both({ [Device("d", mbps: 50, changes: [(30, 0), (31.5, 50)])] }, kf: 200_000, delta: 31_000)
+    print("   model, one 1.5 s stall on 50 Mbit/s: keyframes a minute from 40 s, old \(Int(old.keyframesPerMinute(40, 60))), "
+          + "new \(Int(new.keyframesPerMinute(40, 60))); frame age from 40 s, old \(s(old.devices[0].worstAge(40, 60))), new \(s(new.devices[0].worstAge(40, 60)))")
+    check(old.keyframesPerMinute(40, 60) > 600 && new.keyframesPerMinute(40, 60) <= 16 && new.devices[0].worstAge(40, 60) < 0.1
+          && new.devices[0].fps(40, 60) > 59, "model, one 1.5 s stall on 50 Mbit/s: the old rule's storm for good, the new one back at 60 fps")
+}
+do {
     // Away: every decision as paceRemote made it, on the pacing harness's links.
     for (label, mbps, fps, kf, delta, gop) in [("Low on 8 Mbit/s", 8.0, 60.0, 150_000, 8_000, 4.0),
                                                ("1.6 MB keyframes on 2 Mbit/s", 2.0, 60.0, 1_600_000, 1_000, 30.0),

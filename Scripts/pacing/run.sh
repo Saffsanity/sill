@@ -82,6 +82,9 @@
 #            five windows), the path dead from 22 s: each settles, the stream stays deltas
 #   homecable Pro · Retina-sized frames (1.5 MB keyframes, 83 KB deltas) on a 400 Mbit/s cable: nothing
 #            dropped, the same as base
+#   homestall Balanced-sized frames (250 KB keyframes, 31 KB deltas) on a 50 Mbit/s Wi-Fi that stalls for
+#            1.5 s at 12 s: the frame age back at 45 ms within 5 s (base: the storm the stall starts,
+#            a keyframe every other frame, outlives it)
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
 #   (the old device's liveness: whole messages), home (a home client, plain TCP: unchanged) and
@@ -125,6 +128,7 @@ cases=(
   "homeslow|45|1|Home|bottleneck|--kf 100000 --delta 25000 --home -- --rate-mbps 6 --delay-ms 10 --queue-bytes 262144 --blackhole-at 35 -- --plain --reconnect"
   "homefive|30|1|Home|bottleneck|--kf 100000 --delta 25000 --home -- --rate-mbps 6 --delay-ms 10 --queue-bytes 262144 --blackhole-at 22 -- --plain --reconnect"
   "homecable|30|1|Home|bottleneck|--kf 1500000 --delta 83000 --home -- --rate-mbps 400 --delay-ms 2 --queue-bytes 262144 -- --plain"
+  "homestall|30|1|Home|bottleneck|--kf 250000 --delta 31000 --home -- --rate-mbps 50 --delay-ms 5 --queue-bytes 262144 --rate-at 12:0,13.5:50 -- --plain --reconnect"
 )
 full_cases=(
   "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
