@@ -480,7 +480,8 @@ come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
 (below; off unless turned on), Reverse Scrolling (below; off unless turned on),
 Hold to Show Window Controls (below, Holding a window's thumbnail; 0.5 s unless
 changed) and Three-Finger Gestures (below, Trackpad gestures; on unless turned
-off), none of them ever sent to the Mac, and last Take the Tour.
+off), then on an iPhone a Keys group with Arrow Keys (below; off unless turned
+on), none of them ever sent to the Mac, and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
@@ -506,9 +507,17 @@ a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
 it, and nothing under it moves. Under it come Apps, Aa, Keyboard, Desktop and
 Settings, as wide as the row; the window thumbnails; esc, tab, ctrl, opt, cmd
 and shift; and the trackpad in the rest. The Keyboard button stays above the
-software keyboard, so it always takes it down. There are no arrow keys or
-Spotlight key there: Spotlight is cmd, then space on the keyboard. The
-trackpad counts a stroke down it as far as the same stroke across a 16:10
+software keyboard, so it always takes it down. There is no Spotlight key there:
+Spotlight is cmd, then space on the keyboard. Nor, unless Arrow Keys is on
+(Settings › This iPhone › Keys, off unless turned on; issue #287, PR #315,
+`PhoneKeyRow`), are there arrow keys: with it on, ← ↓ ↑ → follow shift and the
+row scrolls sideways, as the thumbnails do, every cap at least 44 pt wide (six
+whole and over half of ← at rest, five and over half of shift at Display Zoom's
+320 pt, where the six alone are 42 pt), the cut cap fading at the edge; a swipe
+brings the arrows in beside shift, and held they repeat on the Mac as an iPad's
+do. VoiceOver's action on every cap, Show the arrow keys (Show the modifier keys
+at the end), scrolls the row there and back. The row's height is the same, so
+nothing else moves. The trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
@@ -964,11 +973,35 @@ own long press is (it was a fixed 1.5 s). It is the device's own
 with every Sill for Mac. Every bar's thumbnails (sideways, an iPad's window bar
 upright, a phone's row 2) take a change at once, the drag's start with it; the
 drag's own rules (12 pt before the hold is a scroll of the strip, 8 pt after
-it lifts the thumbnail) and the picture's long press (a right click, 0.45 s)
-do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
+it lifts the thumbnail) and the picture's long press (a right click, or with
+Hold, Then Drag on a right click or a drag, 0.45 s) do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
 seconds", adjustable: a swipe up or down is a tenth.
 `iOSClient/ThumbnailHold.swift` is the rule, checked in
 `Tests/checks/thumbnail-hold`.
+
+## Holding on the picture
+
+A finger held on the picture for 0.45 s is the Mac's right button or its left
+while Hold, Then Drag is on, as it is unless turned off, in the Settings panel's
+This iPad group (This iPhone on a phone; issue #178, PR #292 by addhumal).
+Lifted where it was pressed (within 8 pt), it right-clicks there, at the lift;
+moved on past 8 pt, it presses the left button where it was pressed and drags to
+where it lifts, so a window, a slider or a selection moves under the finger. A
+tap still clicks and a finger that moves before the hold still scrolls; a
+three-finger stroke or a cancel mid-drag lets the button up and clicks nothing.
+With the switch off, the hold right-clicks there at once, as before #292, and
+the finger's moves and lift send nothing. The switch is on unless turned off
+(`Sill.holdThenDrag`, `TouchHold.defaultOn`): Noah's decision of 2026-11-20,
+once he had tried it ("hold and drag works as expect it, make it on by
+default"), over the rule that new behaviour is off unless turned on, so an
+update from 0.6 moves the right click from the hold to the lift until the switch
+is turned off. It is the device's own, never sent to the Mac, read as each hold
+begins, and the tour's picture card says the drag while it is on. No wire
+change: the drag is the left button's down, moves and up, as the Pencil's, which
+every Sill for Mac takes. `iOSClient/TouchHold.swift` is the rule, the switch
+with it, checked in `Tests/checks/touch-hold`; `RIG_ONLY=hold
+Tests/touchrig/run.sh NAME` drives the real overlay with synthesized touches
+(`RIG_HOLD=off`, the switch off: the right click at the hold, as before).
 
 ## Pinch zoom
 
@@ -976,7 +1009,7 @@ Two fingers on the picture zoom it as a photo zooms in Photos (issue #65): sprea
 them and the picture grows about the point between them, up to 5×, and moves
 with them, the point under the fingers staying under them. On a zoomed picture
 any two fingers move it and pinch it, and one finger is still the Mac's (a tap
-clicks, a hold right-clicks, a drag scrolls), landing on what shows under it, as
+clicks, a hold right-clicks or, with Hold, Then Drag on, drags, a drag scrolls), landing on what shows under it, as
 the Pencil, a hover and the iPad's own pointer do. On the whole picture two
 fingers scroll the Mac as before, unless they pinch first (their spacing changes
 12 pt, and more than the point between them moves). A slight pinch out leaves
@@ -2318,6 +2351,11 @@ simulator:
   Chinese (Pinyin) keyboard beside English. A switch behaves differently
   before and after the keyboard is first put away (iOS reports it only
   before): test both.
+- Arrow Keys: `-Sill.arrowKeys 1` turns an iPhone's switch on for one run (in
+  the normal app too), so the key row upright scrolls with the arrows after
+  shift; `-SillKeyScroll end` starts it scrolled to them, and `-SillSettings 1
+  -SillSettingsScroll keys` shows the switch in its Keys group. The pure rule,
+  `PhoneKeyRow`, is checked by `Tests/checks/phone-key-row`.
 - Larger Picture: `-Sill.largerPicture 1` turns the device's switch on for
   one run (in the normal app too); it acts while a window streams, which the
   mock does unless `-SillActive desktop` (or `none`) says otherwise, and the
@@ -2405,6 +2443,14 @@ simulator:
   this one keeps 0.3), and `-SillSettingsScroll hold` opens the Settings panel
   at its stepper. The console says `thumbnails: hold 0.3 s` when a bar's
   thumbnails first read the length and at each change.
+- `-Sill.holdThenDrag 0` turns the device's Hold, Then Drag off for one run
+  (in the normal app too; PR #292; on unless turned off since 2026-11-20, and
+  `-Sill.holdThenDrag 1` turns it on), `-SillSettingsScroll holddrag` opens the
+  Settings panel at its switch, and with `-SillTourState fresh -SillTour touch`
+  the tour's picture card shows the drag in the hold's row, or with the switch
+  off the right click alone. The hold itself is a finger's, which no launch
+  argument makes: the touch rig's `RIG_ONLY=hold` (with `RIG_HOLD=off`, the
+  switch off) drives the real overlay instead.
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and

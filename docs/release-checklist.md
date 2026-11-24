@@ -129,7 +129,7 @@ serves the root or `/docs`, never `/site`. So:
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
   and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
-  without it). None is open since 0.6.2: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
+  without it). One is open now, `Hold drag` (below); before it none was open since 0.6.2: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
   Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing window,
   Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
   and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
@@ -148,6 +148,10 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- Open: `Hold drag` (Hold, Then Drag on the picture, on by default from the release that ships it: PR #414,
+  on #292), support.html's "Dragging with your finger on the picture". README's sentence about it sits inside
+  a paragraph and carries no marker lines (README is not republished). After the perl,
+  `grep -n "Dragging with your finger" ../sill-site/*.html` finds nothing.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would

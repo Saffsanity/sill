@@ -33,8 +33,9 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
-/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; on an iPhone, Keys (Arrow Keys,
+/// `PhoneKeyRow.arrowKeysKey`, #287); then Take the Tour, and last this app's version, "Sill 0.6.2 (1400)"
+/// (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -75,11 +76,17 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This iPhone's Arrow Keys (#287; PhoneKeyRow.arrowKeysKey): off unless turned on, read by the key row
+    /// (the four arrows after shift, in a row that scrolls), never sent; offered on an iPhone alone.
+    @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off
+    /// (`TouchHold.defaultOn`, Noah 2026-11-20), read by the picture's input view as each hold begins, never sent.
+    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -129,6 +136,7 @@ struct HostSettingsPanel: View {
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
+    /// `keys`, to the Keys group's title, over Arrow Keys and its footnote (#287; an iPhone's alone).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     /// `camera`, to Share Camera's rows and their footnote (docs/camera-plan.md §13.3).
     private static var startsAt: String? {
@@ -142,7 +150,9 @@ struct HostSettingsPanel: View {
         case "typing"?: return hideThumbnailsRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
+        case "holddrag"?: return holdThenDragRowID
         case "fullscreen"?: return fullScreenRowID
+        case "keys"?: return keysGroupID
         case "camera"?: return cameraRowsID
         default: return nil
         }
@@ -151,7 +161,10 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let keysGroupID = "keys"
     private static let sendAudioID = "sendAudio"
+    /// DEBUG `-SillSettingsScroll holddrag`: Hold, Then Drag's switch and its footnote (#292).
+    private static let holdThenDragRowID = "holdThenDrag"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
@@ -694,6 +707,9 @@ struct HostSettingsPanel: View {
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
     /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
+    /// Hold, Then Drag (`TouchHold`, #292) comes right before Reverse Scrolling, the first of the rows about
+    /// touch, for every Mac: it changes only what a finger held on the picture sends, a drag being the
+    /// left button's down, moves and up, which every Sill for Mac takes.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
@@ -781,6 +797,19 @@ struct HostSettingsPanel: View {
         // Share Camera (docs/camera-plan.md §10), after the clipboard's rows as the 2026-11-18 overview's §2.2 orders
         // This ‹device›: they move into settings-pane's whole-screen pane, its device part, with the rest of this group.
         cameraRows
+        // Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off (Noah, 2026-11-20), this device's
+        // own, never sent.
+        // The first of the rows about touch; under Touch Mode's Direct Touch once #222's row is here (in Trackpad
+        // mode the pad over the picture takes the fingers, and has its own hold, then drag), and in the
+        // whole-screen Settings pane's Touch and Zoom group once #393 is.
+        Rows {
+            Toggle(isOn: $holdThenDrag) {
+                Text(TouchHold.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.holdThenDragRowID)
+        Footnote(text: TouchHold.footnote)
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)
@@ -811,6 +840,31 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        keys
+    }
+
+    /// Keys, this device's key row: on an iPhone, Arrow Keys (#287, PhoneKeyRow), off unless turned on, with
+    /// what it does under it (PhoneKeyRow.Copy); nothing on an iPad, whose key row has the arrows. Its own
+    /// group under This iPhone, after the gestures and before Take the Tour, where the key row's other
+    /// switches are to join it. For every Mac: the row is this device's own, and the Mac sees only its keys.
+    @ViewBuilder private var keys: some View {
+        if PhoneKeyRow.offered(phoneArrangement: DuoLayout.phoneArrangement) {
+            Text(PhoneKeyRow.Copy.group)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+                .id(Self.keysGroupID)
+            Rows {
+                Toggle(isOn: $arrowKeys) {
+                    Text(PhoneKeyRow.Copy.title).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: PhoneKeyRow.Copy.footnote)
+        }
     }
 
     /// Share Camera (docs/camera-plan.md §10, §11; a beta): shown while the Mac's list says `camera` (disabled at its

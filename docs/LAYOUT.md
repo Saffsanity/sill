@@ -142,7 +142,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   lines, and written at its path again once another Sill moved it aside or it was deleted;
   `Tests/checks/host-log`),
   `WindowCatalog` (polls windows and thumbnails only while a client is
-  connected; icons; installed apps in the background; when its last look
+  connected; icons; installed apps in the background, in two looks on a queue
+  of their own, this Mac's own disk at once and its other volumes too once a
+  device connects (`lookAtVolumesIfDue`; never on a test host), again when they
+  changed (at a device's arrival, and in Sill.app 2 s after a mount while one
+  is connected), each app's path kept for a launch Launch Services cannot
+  place, #370; when its last look
   landed, `lookAge`; the Desktop's stops from that look, `desktopCandidates`,
   the one shown, `display` and `desktopDisplayID`, the choice a device stepped
   to and its span, `mainOnly` while locked, `mainDisplay` for the sound;
@@ -163,8 +168,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   pure, `Tests/checks/catalog-windows`), `InstalledApps`
   (where those are found: each applications folder and the folders inside it,
   at any depth (#135's), never inside a bundle, another package or a
-  framework, and never through a link inside a scanned folder (one given that
-  is itself a link is followed), #76; pure, `Tests/checks/installed-apps`),
+  framework, and never walking into a link or a Finder alias inside a scanned
+  folder (one given that is itself a link is followed), #76; a link or an alias
+  that points at an app lists that app, where it points read from it before
+  anything is resolved and an alias resolved without UI or mounting; the Mac's
+  other volumes, #370: the Applications folder at the top of each volume of
+  one's own, mounted directly in /Volumes, no dot name, local, writable, shown
+  in Finder, no APFS role, no macOS of its own and the folder no link, from the
+  kernel's mount table and the I/O Registry; `Reach`, which volumes a look
+  reads, and the first look none of the home folder but its Applications
+  folder (Downloads, iCloud Drive: macOS may ask); `secondLookDue`, when the look with the volumes runs: while a device
+  is connected, so macOS's question about a removable volume never comes at
+  launch, and only when they changed; pure, `Tests/checks/installed-apps`),
   `WindowCapture` (ScreenCaptureKit; its line names the scale it captures at),
   `CaptureScale` (the pixel scale a capture runs at: the Resolution knob held to
   the display's own, ScreenCaptureKit's `pointPixelScale` for the filter, so a
@@ -914,7 +929,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   use; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
   `DeviceIdleTimer` carries it out, PR #230), `PictureInPicturePolicy` (Picture in Picture,
   #291: when a window's picture is offered and which window, what counts as watched, heard and
-  running while it shows, the pause, what ends it, the Lifecycle; pure,
+  running while it shows, the pause, what ends it, the session's end when it ends with Sill in the
+  background (#379), the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
   `CameraPolicy` (Share Camera, docs/camera-plan.md §6.1: the row and its words, when the device offers and
@@ -978,7 +994,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
-  in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
+  in StreamScreen.swift take it, issue #113), `PhoneKeyRow` (a phone's key row upright and its switch, Arrow
+  Keys, `Sill.arrowKeys`, off unless turned on, offered on an iPhone alone: Settings › This iPhone › Keys,
+  issue #287, PR #315; off the six caps that name a key, as before; on the four arrows after shift in a row
+  that scrolls, `Strip`: every cap 44 pt or wider, as many whole as fit so, six at most (five at 320 pt), 0.6
+  of the next showing, the fades at an edge with caps past it, the end; VoiceOver's action on every cap and
+  the cap it moves to, `voiceOverFocus`; the words, `Copy`; pure, `Tests/checks/phone-key-row` with
+  PhonePortraitLayout's row; pbxproj A315/F315; KeyRow and `PhoneKeyStrip` in PortraitStreamScreen.swift
+  draw it, the Settings panel's `keys` group has the switch), `VersionLabel` (this app's version and build as its bundle says
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
@@ -1063,7 +1086,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301),
   `TrackpadGestures` (which stroke on the glass goes silent and which arms,
   the gesture decided as one of its three fingers lifts, and whether it goes
-  to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701) and, in
+  to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701), `TouchHold` (the
+  picture's touch and hold in Direct Touch, issue #178, PR #292: with this
+  device's Hold, Then Drag on, `Sill.holdThenDrag`, on unless turned off (Noah,
+  2026-11-20), never sent, a right click at the lift, or a drag with the left
+  button from where it was pressed once it moves past 8 pt, a cancel letting the
+  button up; off, a right click at once, as before; the switch's words; pure,
+  `Tests/checks/touch-hold`;
+  InputOverlay's long press feeds it, `StreamClient.holdThenDragOn` as each hold
+  begins; the Settings panel's row before Reverse Scrolling; pbxproj A178/F178) and, in
   InputOverlay.swift, `StrokeObserver` (the recognizer on both surfaces that
   feeds it every direct touch and takes none). The clipboard:
   `StreamClient+Clipboard` (the subscription at the first window list that
@@ -1254,7 +1285,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   app, driven with synthesized touches (`TouchSynth`, private UIKit calls, test
   only, never in the app), every event logged; `run.sh [--rev REV] [--switch
   off] NAME` builds and runs it on a simulator of its own
-  (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
+  (`SILL_TOUCHRIG_SIM`; `RIG_ONLY=hold` the picture's touch and hold alone, #178,
+  with Hold, Then Drag on as on a fresh install, #292, and `RIG_HOLD=off` off in
+  any run; the log's `RIG hold:` line says which, and compare.py judges the
+  picture's holds that move only between logs that agree on it), `compare.py` judges a run against the surfaces
   before, and a stroke made right after a gesture against the same stroke
   made fresh; `compare.py --all` every stroke against main's, and, where the
   sources have full screen's RevealEdgePan (on the rig's window),

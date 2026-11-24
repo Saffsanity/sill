@@ -74,6 +74,7 @@ Scripts/menu-check/run.sh               # the menus' reader and mirror against S
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
+RIG_ONLY=hold Tests/touchrig/run.sh hold   # the picture's touch and hold alone with Hold, Then Drag on, as on a fresh install (#292; Noah, 2026-11-20): a right click at the lift, or a drag once it moves; RIG_HOLD=off (any run) turns it off: a right click at the hold, as before, and compare.py judges the picture's holds that move only between logs that agree on it
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
@@ -174,6 +175,9 @@ window list, no thumbnails, no display lookup), so a test host with a client con
 macOS for no screen recording: every ScreenCaptureKit call counts against the responsible app's
 grant (Claude's, for a host an agent runs), and macOS reminds the person once a month and after
 every rebuilt binary; set it on every headless host whose test needs no real window.
+A `--synthetic` host's Apps list reads this Mac's own disk alone (of the home folder, ~/Applications
+alone), never its other volumes (#370), so it never makes macOS ask the app that runs it whether it
+may read a removable volume or the Downloads folder.
 `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
@@ -373,7 +377,11 @@ switch at those seconds), `-Sill.pictureInPicture 1` (its Picture in Picture on 
 the panel at it; live, `-SillPiPStartAt <s>` starts it as iOS does as Sill leaves, `-SillPiPPauseAt
 <s>[,<s>…]` the window's pause and play, `-SillPiPLockAt <s>` the device's lock, `-SillPiPSession
 active|inactive` the audio session held or not; `xcrun simctl launch UDID com.apple.Preferences` sends
-Sill away, the console's `pip:` lines say what happened), `-SillVoiceOver 1` (that group as with VoiceOver on:
+Sill away, the console's `pip:` lines say what happened), `-Sill.holdThenDrag 0` (its Hold, Then Drag off for one
+run, PR #292, in the normal app too: the hold on the picture right-clicks at once, as before, and the tour's
+picture card says only that; on, the default since Noah's 2026-11-20, a finger held on the picture and then
+moved drags with the left button, one lifted where it was pressed right-clicks at the lift, and the card says
+so; `-Sill.holdThenDrag 1` on for one run; `-SillSettingsScroll holddrag` the panel at its switch), `-SillVoiceOver 1` (that group as with VoiceOver on:
 its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
 iPad…'s overlay; `-SillOverlayLine asking|shown|openonmac|locked|noanswer` the
 line its ask's answer sets; under `-SillLive 1` it opens over the live session
@@ -551,6 +559,11 @@ ja-JP, ru-RU…), not from its `AppleKeyboards` preference. A test host's Deskto
 `-SillIdiom pad` draws a screen taller than wide and narrower than 600 pt as
 an iPad does (the compact halves) rather than as a phone, so an iPhone
 simulator photographs it (`phone` the other way round; the normal app too).
+`-Sill.arrowKeys 1` turns an iPhone's Arrow Keys on for one run (in the normal app
+too; #287, PhoneKeyRow): the phone's key row upright adds ← ↓ ↑ → after shift and
+scrolls sideways, `-SillKeyScroll end` starting it scrolled to the arrows, and
+`-SillSettings 1 -SillSettingsScroll keys` shows the Settings panel at its Keys
+group (an iPhone's; `-SillIdiom pad` has none).
 `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: once, the
 portrait key row taps cmd, esc, shift and ctrl through its caps' action, then
 the trackpad checks that a touch at its centre lands on it, strokes, taps with
