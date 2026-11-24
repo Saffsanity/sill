@@ -89,7 +89,7 @@ MUTANTS = [
     # The screen (2026-11-25): taken within bounds, else none; never a refusal.
     ("SC1 a screen's pixels to 16384", SCREEN_PX, SCREEN_PX.replace("1...32768", "1...16384")),
     ("SC2 a screen's scale from 0.5", SCREEN_SC, SCREEN_SC.replace("1...4", "0.5...4")),
-    ("SC3 a screen's height never looked at", SCREEN_GUARD, SCREEN_GUARD.replace("screenPixels.contains(s.pixelHeight), ", "")),
+    ("SC3 a screen's height never looked at", SCREEN_GUARD, SCREEN_GUARD.replace(", screenPixels.contains(s.pixelHeight),", ",")),
     ("SC4 a screen's scale never looked at", SCREEN_GUARD, SCREEN_GUARD.replace(",\n              screenScales.contains(s.scale) else", " else")),
     ("SC5 a screen sent as it is", SCREEN_HELD, "        held.screen = v.screen\n"),
     ("SC6 no screen ever sent", SCREEN_HELD, "        held.screen = nil\n"),
