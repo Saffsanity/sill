@@ -642,7 +642,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the tool and the background. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
-  `--raw17=JSON@T`, `--raw9=JSON@T` (a literal viewport, kind 9),
+  `--raw17=JSON@T`, `--raw9=JSON@T` (a literal viewport, kind 9), a viewport's `--panel=WxH`, `--room=WxH`,
+  `--room-after=WxH@T` and `--view-after=PANEL[,ROOM]@T` (Full Screen on or off, a turn),
   `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
   and each second's frames with their kB (the encoder's output);

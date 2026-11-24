@@ -693,3 +693,153 @@ the probes only as dry runs):
   mutate, and two replacement strings of this run's own mutants); `stage-release` and `away-quality`, which read or
   compile files of this run's, mutate none of them, and both passed in run-all.
 - GitHub's CI on ae797ee9 (run 45179138167): every step of Build and check passed; #408 read mergeable with its base.
+
+**Fifth part (2026-11-24): the room, after Noah's first try on real hardware.** Main moved to d9b3e995 (#410, Arrow Keys
+on an iPhone's key row; #406, Picture in Picture's end with Sill in the background; #405, the Apps list's apps on other
+disks): `virtual-desktop-2a` took it with no conflict (61adbfcf), and this branch took that head (bc905244) with one,
+iOSClient/HostSettingsPanel.swift, where #410's `-SillSettingsScroll keys` and this branch's `vdesk` were added on the same
+line; both stay. Noah then installed a build of this branch on his MacBook Pro, iPad mini and iPhone 15 Pro and tried it.
+His words, whole: "There are issues with Virtual Desktop. When it loads in, you see black bars because the aspect ratio is
+set to the devices aspect ratio. What it should do is size the window to be as large as the available space, the same way
+Virtual Display works. In addition, the same behavior should happen when the device is rotated, but it doesn't really as
+there are still vertical bars. Same thing should happen when full screen is enabled or disabled." His Mac's log of that
+trial (the first time any of this ran on a real display): made 800×1218 pt @2× at 60 Hz in 490 ms for the iPad (its
+screen); the iPad's turn followed in place in 402 ms (applySettings: answered YES at +284 ms, 2x at +402 ms), back in 456
+ms, the Desktop restarted at its size; the iPhone taking it over sideways in 380 ms (1494×800 at 120 Hz); and the iPhone
+upright, 800×1614 pt, "beyond the backing it was made with (3072×3072 px)", until the display was made again (444 ms). So
+following in place works on a real display, and two things were wrong.
+
+- **A. The size.** It was the device's room: Full Screen's, the shape of the whole screen (less the Dynamic Island's
+  strip on an iPhone), whether the controls show or not. The picture is drawn in what the controls leave: on the iPad
+  mini sideways the pane under the bar, 1117 × 618; upright the halves' upper pane, 728 × 535. So bars from the first
+  moment, and again after each turn. Noah's decision: the space the picture has, as a window on the stage display is
+  fitted to it, at the make, at a turn, when Full Screen goes on or off, and whenever else that space changes for good;
+  never bars while Match the device is chosen.
+- **B. The backing.** Run 4 made This device's display with a square backing of the longest size among the devices
+  connected, at least 3072 px, "every iPhone and iPad room both ways". The iPhone upright needs 800 × 1614 pt at 2x, 3228
+  px: it was never followed, and kept bars at its sides until the display was made again.
+
+What the space is, read from the device (StreamScreen and PortraitStreamScreen, and the "viewport:" lines its DEBUG console
+prints): the viewport's panel (`width`, `height`), in every layout, the very rectangle the stage fits a window to
+(VirtualStage.windowSize: the panel ÷ Aa; Aa never resizes the Desktop):
+- an iPad sideways, an iPhone on its side, the Duo's displays sideways: the pane under the bar, inside its 8-point margin
+  (iPad mini 1117 × 618, iPhone 15 Pro 718 × 299, an iPhone 12 to 14 734 × 296);
+- an iPad upright and the Duo's inner display upright (the halves): the upper half's pane (iPad mini 728 × 535; the Duo
+  half folded above the fold; open flat at the picture's own shape, below);
+- an iPhone upright: its 16:10 pane over the controls (377 × 235 on an iPhone 15 Pro); Larger Picture's taller room acts
+  only while a window streams;
+- with Full Screen, in every layout: Full Screen's room, which the panel then is (iPad mini 1133 × 744 and 744 × 1133,
+  iPhone 15 Pro 393 × 793 upright and 734 × 393 on its side).
+The device already keeps the panel still while the software keyboard comes up, the key row lifts above a tall one (#418:
+"Never the lifted room: the Mac resizes nothing for a keyboard"), Settings, the drawer, Aa's ruler or a thumbnail's lights
+open (each over the picture, not beside it), and a pinch zooms it (inside the pane): it never resized a Mac window for any
+of them. It changes the panel, and sends a new viewport 0.25 s after the last change, when the device turns, its window is
+resized or folded, Full Screen goes on or off (the bar or the rows go; in the halves the pane takes the whole screen), the
+controls come back by themselves, or what streams changes a phone's arrangement. So nothing changes on the device, and
+nothing on the wire: every device build sends its panel, 0.6.2 among them. The room stays, and now tells a turn from a tap.
+
+What changed (VirtualDesktopSize, its check `virtual-desktop`, the coordinator; 180cf0c5):
+- **Rule A**: `device(space:)` takes the panel (`device(room:panel:)` took the room first). An iPad mini sideways with its
+  controls: 1446 × 800 pt; upright: 1089 × 800 (wide: the upper half is wider than tall); Full Screen: 1218 × 800 and 800
+  × 1218. An iPhone 15 Pro upright: 1283 × 800 with the controls, 800 × 1614 with Full Screen; on its side 1921 × 800 and
+  1494 × 800. Each keeps the picture's shape within the rounding of a point: no bars. The headless display (#395's) took the
+  panel already; it still never follows.
+- **Its timing** (`Follow`, `Cause`): a change whose room is the same and whose panel is not is a tap (Full Screen on or
+  off, the controls back by themselves): followed at once. Another device taking it over (a step onto it, or its Desktop
+  back on the stop once the one it was for left): at once. A change of the room (a turn, a fold, a resized window), a
+  device that sends no room (0.6.2: a tap or a turn cannot be told), and the Desktop shown again after a window or another
+  stop (what streams may still change a phone's arrangement): after 1 s steady, as the plan's settle. Never sooner than 1 s
+  after the make or the last follow's end (was 3 s from its start: each follow is one or two calls of about 0.3 s and a
+  restart of the Desktop's stream, so a run of taps follows about once a second, the newest last). Never during a follow
+  (`started`, `going`): a change that comes meanwhile waits for its end, so Full Screen on and then a turn, or on and off,
+  end at the device's last space, each in place, in order, with no make. Only while it shows: the phone's arrangement and
+  the Duo's pane follow a window's shape while one streams, and a follow then would turn the display, and narrow its
+  windows, for nothing.
+- **Every device follows in place**: `followStep`'s `sendsRoom` is gone (a 0.6.2 device's panel is its space too).
+- **Rule B** (`backing`): This device's display is made with a square backing of 4096 px (the cap run 4 already had: the
+  widest picture every Mac's encoder takes, #295), never less than its own pixels, whatever devices are connected. Every
+  iPhone's and iPad's space in a layout of its own, made for one and followed to by any other, either way round, fits:
+  the widest is an iPhone 12 to 14's (and 16e's) on its side with its controls, 734 × 296 pt, 1984 × 800, 3968 px; an
+  iPhone 15 Pro's 718 × 299 is 1921 × 800; held upright with Full Screen, 800 × 1614, 3228 px; an iPad Pro 13-inch's 1376 ×
+  1032 is 2752 px. Only a window shaped past 2.56 : 1 (2048 × 800 pt), as Stage Manager or Split View can make on an iPad,
+  does not: "… is beyond the backing it was made with (4096×4096 px); the next one is made at …", and that device sees
+  bars until the Virtual Desktop is next made (30 s after none shows it, or the switch off and on). Memory: a 4096 px
+  square is 64 MiB at 4 bytes a pixel if macOS keeps it whole (not measured); the stage's own display is made larger than
+  that for every window an iPad mini streams (its envelope, 2234 pt square at 2x for a 1117-point panel, is its mode).
+- **Its lines**: "Virtual Desktop 1446×800 pt @2× at 60 Hz id N: made in 490 ms for iPad mini (its picture: 1117×618
+  pt).", "Virtual Desktop: iPad mini hid its controls; followed in place in 330 ms: 1218×800 pt @2× at 60 Hz.", "… showed
+  its controls; …", "… turned; …" (wide became tall or tall wide, its shorter side the same), "…'s picture changed size;
+  …" (a fold, a resized window, a device that cannot tell),
+  "… shows it now; …" (another device), "… shows it again; …".
+- **The device's side**: comments only (FullScreenPolicy.hiddenRoom, StreamScreen; Viewport.room's in StreamProtocol): the
+  room tells the Mac a turn from a tap. No picture changes, so no harness photo was taken.
+
+The desktop gate (ad38e4dd; sillclient.py's `--panel=WxH` and `--view-after=PANEL[,ROOM]@T`): the existing Virtual Desktop
+hosts now send Full Screen's panel (the panel is the room), so their sizes, turns and fall backs are as they were; the
+turn back now comes 1 s after the first follow's end. A host of its own for rule A: an iPad mini made at the space with
+its controls showing (1446 × 800), Full Screen on and off followed in place at once (1218 × 800, back), a turn with the
+controls showing after 1 s (its upper half's 1089 × 800, one step), Full Screen on upright (800 × 1218: 1x, then the
+switch), Full Screen off and a turn 0.3 s later (each in place, in order, no make), then the iPhone 15 Pro upright with
+Full Screen after the iPad (800 × 1614, inside the backing) and its controls back (1283 × 800). A space beyond the backing
+is 2200 × 800 now. Each Virtual Desktop verdict that finds nothing prints what the host said in its window.
+
+**The gate where this branch meets #400 (the darkening).** In a local build of both (`test-070-all`), two of the gate's
+verdicts failed every time, on a quiet Mac too: "the iPad gone, the iPhone that comes takes it over in place" and "a room
+beyond the backing: the next make" found empty lists. The host had printed "Virtual Desktop: iPhone changed its room;
+followed in place in 342 ms: …" and "… Wide iPad changed its room; …" where this branch alone prints "… shows it now; …".
+The line said "shows it now" only when `vd.device != vd.sizedFor`, and `sizedFor` kept the iPad's ObjectIdentifier after
+it left; an ObjectIdentifier is the object's address, and in that build the iPhone's connection object took the iPad's
+(then the Wide iPad's took the iPhone's). Fixed where it began: `sizedFor` is gone, and the cause travels with the change
+(`Follow.saw(_:cause:at:)`, `.device` from `adoptVirtualDesktopDevice`); the device it is for is still forgotten the
+moment its connection leaves. The gate itself now prints, beside a verdict that finds nothing, the host's Virtual Desktop
+lines of that window.
+
+**For whichever of this branch and #400 lands second** (sill-displays fails where both are merged: "the reconfiguration
+callback is registered in SillDisplays alone"): #400's Sill.app display watch (PrivacyCurtain.swift's DisplayChanges)
+registers a CGDisplayRegisterReconfigurationCallback of its own; the second to land makes it take its display changes from
+SillDisplays (a second listener on `watchReconfiguration`'s one callback, the change's beginning left out as both do) and
+keeps the check as it is.
+
+**The 800-point floor, for Noah** (reported, not built). Noah's first words for this feature (2026-11-18) were that it
+"should default to resolution and refresh of client device"; probe P1 showed macOS keeps a device's own points at 2x
+(1133 × 744 on the iPad mini). What an upright iPhone 15 Pro gets:
+- with the floor (now): 800 × 1614 pt with Full Screen, drawn on a screen 393 points wide, so everything is at 0.49 of its
+  size; 1283 × 800 with the controls showing (its 16:10 pane), at 0.29;
+- with its own points: 393 × 793 (Full Screen) or 377 × 235 (the controls showing), at 2x, everything full size.
+What macOS does at such a width (from what is known of it; nothing here was made, so not measured): the menu bar stays 24
+points tall, and the menus that do not fit are not shown (the status items go first), so at 377 to 393 points the Apple
+menu, the app's name and two or three of its menus show; Mac windows have minimum sizes, commonly 400 to 800 points wide,
+and macOS lets a window stand larger than its display, past its edges, so most would not fit; the smallest resolution
+macOS offers its own displays is about 1024 × 640 points. The question is in the pull request.
+
+**Defaults taken for Noah to confirm** (this part's; 1 to 38 stand):
+39. **Rule A in every layout**: the space is the viewport's panel, as for a window on the stage. On an iPad held upright
+    with the controls showing that is the upper half, so the Virtual Desktop is wide there (1089 × 800 on an iPad mini)
+    and tall only with Full Screen (800 × 1218); on an iPhone upright with the controls, its 16:10 pane (1283 × 800).
+40. **The timing**: Full Screen on or off, the controls back by themselves, and another device taking it over: at once
+    (the device has waited 0.25 s already); a turn, a fold, a resized window, a 0.6.2 device's change and the Desktop shown
+    again: after 1 s steady; at least 1 s between follows (was 3 s).
+41. **Only while it shows**: no follow while a window streams or another stop shows; back on it, its device's space then.
+42. **Every device in place**, a 0.6.2 device too.
+43. **The backing**: a 4096 px square for Match the device, whatever is connected (replaces 32).
+44. **The make's line** names the picture's space.
+45. **The iPhone Duo open flat and upright** (unchanged): its pane takes the picture's shape, so there the Virtual Desktop
+    keeps the shape it was made with, with no bars either way; making the pane 16:10, as for a window the Mac sizes,
+    needs the device to know the Mac sizes the Virtual Desktop to it (a later change if wanted).
+
+**For Noah** (this part's; first in the pull request's list, after the install). Watch Sill.log meanwhile:
+`grep -E "Virtual Desktop|Desktop:" ~/Library/Logs/Sill/Sill.log | tail -30`.
+- **Step onto it with the controls showing** (the iPad mini sideways): no black bars. Sill.log: "Virtual Desktop 1446×800
+  pt @2× at 60 Hz id N: made in … ms for iPad … (its picture: 1117×618 pt)." A failure: bars at its sides or top and
+  bottom, or a made line without "(its picture: …)".
+- **Full Screen on and off** (Settings › This iPad › Full Screen; the swipe in from the left edge brings the controls
+  back): no bars either way, about half a second after each. Sill.log: "… hid its controls; followed in place in N ms:
+  1218×800 pt @2× at 60 Hz." and "… showed its controls; …: 1446×800 …"; N is how long the display took (about 300 ms
+  here; 650 for an upright iPad, whose desktop turns). A failure: bars that stay, "not followed in place", or a picture
+  that freezes.
+- **Turn the iPad with the controls showing**: after about a second and a half, no bars: upright "… turned; followed in
+  place in … ms: 1089×800 pt …" (the upper half is wider than tall), and back sideways 1446×800. A failure: vertical bars
+  after the turn, as in the first try.
+- **The iPhone upright after the iPad**: with the iPad on the Virtual Desktop, disconnect it, then connect the iPhone held
+  upright with Full Screen on, within 30 s: "iPhone shows it now; followed in place in … ms: 800×1614 pt @2× at 120 Hz."
+  (at 60 if macOS keeps the rate it had). A failure: "beyond the backing", or bars at its sides.
