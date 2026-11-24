@@ -12,8 +12,9 @@ usage: sillrelay.py --listen PORT --to HOST:PORT [--delay-ms N] [--rate-mbps R] 
                         uplink. Client → host is not shaped. (The relay's receive buffer from the
                         host is always small, 64 KB, for the same reason.)
   --up-rate-mbps R      client → host at most R Mbit/s, the same way: the relay reads from the client
-                        only as fast as R allows, 4 KB at a time, with a 16 KB receive buffer, so the
-                        client's own send queue fills as a device's does behind a slow uplink (the
+                        only as fast as R allows, 4 KB at a time, with a 16 KB receive buffer from the
+                        first segment on and asyncio's read-ahead at 4 KB, so the client's own send
+                        queue fills, unacknowledged, as a device's does behind a slow uplink (the
                         camera's pacing gate, docs/camera-plan.md §13.2 H11)
   --blackhole-after S   S seconds into each connection, stop forwarding both ways without closing
                         either side (nothing is read, written or closed from then on): a dead path
@@ -152,7 +153,18 @@ async def handle(client_reader, client_writer):
         except (ConnectionError, OSError): pass
 
 async def main():
-    server = await asyncio.start_server(handle, "127.0.0.1", OPTS["listen"])
+    if OPTS["up-rate-mbps"]:
+        # Client → host shaped: the connection's receive buffer small from its first segment (set on the listening
+        # socket, so the SYN-ACK already offers the small window; set after accept, the window offered stays) and
+        # asyncio's own buffer of what it read ahead small too, so what the uplink cannot carry yet waits in the
+        # client's send queue, unacknowledged, as behind a slow uplink, never here (H11).
+        lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        lsock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
+        lsock.bind(("127.0.0.1", OPTS["listen"]))
+        server = await asyncio.start_server(handle, sock=lsock, limit=4096)
+    else:
+        server = await asyncio.start_server(handle, "127.0.0.1", OPTS["listen"])
     port = server.sockets[0].getsockname()[1]
     shaping = []
     if OPTS["delay-ms"]: shaping.append(f"+{OPTS['delay-ms']:g} ms round trip")

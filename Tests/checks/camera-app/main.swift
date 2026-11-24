@@ -330,7 +330,11 @@ do {
     let long = S.appNames([app("x", 51)], name: { _ in String(repeating: "W", count: 60) })
     check(long?.count == CameraFeedPolicy.nameCap, "at most \(CameraFeedPolicy.nameCap) characters (\(long?.count ?? 0))")
     let two = S.appNames([app("x", 52), app("y", 53)], name: { $0 == 52 ? String(repeating: "A", count: 30) : "Zoom" })
-    check(two.map { $0.count <= CameraFeedPolicy.nameCap } == true, "two long names capped too (\(two ?? ""))")
+    check(two == String(repeating: "A", count: 30) + " and Zoom", "two names that fit: whole (\(two ?? ""))")
+    let twoLong = S.appNames([app("x", 52), app("y", 53)], name: { $0 == 52 ? String(repeating: "A", count: 30) : String(repeating: "B", count: 30) })
+    check(twoLong == String(repeating: "A", count: 30) + " and " + String(repeating: "B", count: 5), "two long names capped at 40 (\(twoLong ?? ""))")
+    let threeLong = S.appNames([app("x", 52), app("y", 53), app("z", 54)], name: { _ in nil }) // all three gone: their identifiers
+    check(threeLong == "x and 2 more", "gone apps by identifier, then counted (\(threeLong ?? ""))")
 
     func demand(_ running: Bool, _ w: Int, _ h: Int, _ fps: Int, _ apps: [CameraFeedPolicy.App]) -> String {
         CameraFeedPolicy.encode(CameraFeedPolicy.Demand(running: running, width: w, height: h, fps: fps, apps: apps))

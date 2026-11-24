@@ -167,16 +167,7 @@ final class AppModel {
                                               cameraOutput: cameraSink)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
-                // One path from the controls to the host, synchronous: the host's target equals
-                // settings.config at every main-actor turn, so a device's change and a menu click
-                // never undo each other. Sill Camera's installation and feed follow the switch after it.
-                settings.onChange = { [settings, weak c, weak self] in
-                    c?.setTarget(settings.config)
-                    self?.applyCameraSwitch()
-                }
-                cameraSink.onStatus = { [weak self] status in
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.cameraSinkStatus = status } }
-                }
+                wireSettings(to: c)
                 // A device's change goes through HostSettings like a menu click: saved (only the keys
                 // it changed) and shown live in Settings and the menu. Laid over settings.config, never
                 // over the host's value: over the away quality for a device away from home, which
@@ -210,6 +201,19 @@ final class AppModel {
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
+        }
+    }
+
+    /// One path from the controls to the host, synchronous: the host's target equals settings.config at every
+    /// main-actor turn, so a device's change and a menu click never undo each other. Sill Camera's installation and
+    /// feed follow the switch after it, and the feed's status comes to the main actor for Settings › Streaming.
+    private func wireSettings(to c: StreamCoordinator) {
+        settings.onChange = { [settings, weak c, weak self] in
+            c?.setTarget(settings.config)
+            self?.applyCameraSwitch()
+        }
+        cameraSink.onStatus = { [weak self] status in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.cameraSinkStatus = status } }
         }
     }
 
