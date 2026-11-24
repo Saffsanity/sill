@@ -427,7 +427,7 @@ final class Device {
         maxPending = max(maxPending, pending)
         maxWait = max(maxWait, times.oldestWait(now: t))
     }
-    func ages(_ a: Double, _ b: Double) -> [Double] { shown.filter { $0.t >= a && $0.t < b }.map(\.age) }
+    func ages(_ a: Double, _ b: Double) -> [Double] { shown.filter { $0.t >= a && $0.t < b }.map { $0.age } }
     func worstAge(_ a: Double, _ b: Double) -> Double { ages(a, b).max() ?? .nan }
     func fps(_ a: Double, _ b: Double) -> Double { Double(ages(a, b).count) / (b - a) }
 }
