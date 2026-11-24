@@ -534,6 +534,12 @@ final class StreamClient: ObservableObject {
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
+    /// This session's own window's scene while its picture is on an external display (ExternalDisplay),
+    /// where the display view's window is the monitor's: what "in front" is judged by then.
+    weak var homeScene: UIWindowScene?
+    /// The scene this session's window is in: `homeScene`, else the display view's.
+    var ownScene: UIWindowScene? { homeScene ?? displayView.window?.windowScene }
+
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
         view.renderQueue = queue
@@ -1158,7 +1164,7 @@ final class StreamClient: ObservableObject {
         let center = NotificationCenter.default
         // A scene's notification counts only for this session's window (any, before it has one).
         let ours: (Notification) -> Bool = { [weak self] note in
-            guard let scene = note.object as? UIScene, let own = self?.displayView.window?.windowScene else { return true }
+            guard let scene = note.object as? UIScene, let own = self?.ownScene else { return true }
             return scene === own
         }
         for name in [UIApplication.didBecomeActiveNotification, UIScene.didActivateNotification] {
@@ -1193,7 +1199,7 @@ final class StreamClient: ObservableObject {
     /// This window's scene is in the foreground and active, or, while the picture is in no window, Sill is
     /// active. Main thread.
     private var sceneInFront: Bool {
-        if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
+        if let scene = ownScene { return scene.activationState == .foregroundActive }
         return UIApplication.shared.applicationState == .active
     }
 
@@ -3575,7 +3581,7 @@ final class StreamClient: ObservableObject {
     /// What Disconnect does first for the tile's picture (ConnectionList.freshPicture). Main thread.
     private func freshPictureOnLeaving() -> ConnectionList.FreshPicture {
         guard connected, videoSize != .zero, let macID = session?.macID else { return .stored }
-        let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+        let inFront = ownScene?.activationState == .foregroundActive
         let takes = ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil)
         let now = ProcessInfo.processInfo.systemUptime
         let decision = ConnectionList.freshPicture(takesPreview: takes, streaming: active != .none,
@@ -3753,7 +3759,7 @@ final class StreamClient: ObservableObject {
         // session lost or ended by the Mac gives the one kept.
         freshPictureWait = nil
         if connected, videoSize != .zero, let macID = session?.macID {
-            let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+            let inFront = ownScene?.activationState == .foregroundActive
             if ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil) {
                 takePreview(of: macID)
             } else {
