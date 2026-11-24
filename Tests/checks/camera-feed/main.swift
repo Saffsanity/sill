@@ -162,8 +162,10 @@ do {
 
 do {
     var r = Run()
-    check(r.p.placeholder == P.Placeholder(title: "Sill Camera", line: "Open Sill on this Mac.", format: P.Format(width: 1280, height: 720)),
-          "nothing feeds it: Open Sill on this Mac. (\(r.p.placeholder))")
+    // Nothing feeds it: Sill is not running, or its switch is off (Sill for Mac then never feeds it), one line for both.
+    check(P.Copy.noSill == "Open Sill on this Mac and turn on Use iPhone and iPad cameras in its Settings.", "the no-feeder words: \(P.Copy.noSill)")
+    check(r.p.placeholder == P.Placeholder(title: "Sill Camera", line: P.Copy.noSill, format: P.Format(width: 1280, height: 720)),
+          "nothing feeds it: Open Sill on this Mac and turn on… (\(r.p.placeholder))")
     r.feed()
     check(r.p.placeholder.line == "Sill Camera isn’t available right now.", "fed, nothing said yet: not available, nobody named")
     let words: [(P.Show, String)] = [
@@ -180,7 +182,7 @@ do {
     r.p.formatChosen(1)
     check(r.p.placeholder.format == P.Format(width: 1920, height: 1080), "the placeholder at the size apps take")
     r.p.sinkStop(client: sill)
-    check(r.p.placeholder.line == "Open Sill on this Mac." && r.p.show == nil, "Sill gone: what it said goes too")
+    check(r.p.placeholder.line == P.Copy.noSill && r.p.show == nil, "Sill gone: what it said goes too")
     r.feed(sill2)
     check(r.p.placeholder.line == "Sill Camera isn’t available right now.", "the next Sill starts from nothing, naming nobody (\(r.p.placeholder.line))")
 }
@@ -250,9 +252,9 @@ do {
     check(r.tick() == nil, "no app runs it: nothing")
     r.p.sourceStarted()
     let first = r.tick()
-    check(line(first) == "Open Sill on this Mac.", "an app runs it, nothing feeds: the placeholder at once (\(String(describing: first)))")
+    check(line(first) == P.Copy.noSill, "an app runs it, nothing feeds: the placeholder at once (\(String(describing: first)))")
     check(r.tick(after: 0.01) == nil, "the same placeholder within a frame duration: nothing")
-    check(line(r.tick(after: 0.03)) == "Open Sill on this Mac.", "a frame duration on: again")
+    check(line(r.tick(after: 0.03)) == P.Copy.noSill, "a frame duration on: again")
     r.feed()
     check(line(r.tick(after: 0.001)) == "Sill Camera isn’t available right now.", "new words: at once")
     r.write(liveIPad)
@@ -321,7 +323,7 @@ do {
     _ = s.frame()
     check(s.p.formatChosen(0) && s.p.frameAt != nil, "the same format again keeps the frame")
     s.p.clientLeft(sill, pid: 99)
-    check(s.p.feeder == nil && s.p.frameAt == nil && line(s.tick(after: 0.05)) == "Open Sill on this Mac.", "the feeder left: its frame never again")
+    check(s.p.feeder == nil && s.p.frameAt == nil && line(s.tick(after: 0.05)) == P.Copy.noSill, "the feeder left: its frame never again")
 }
 
 // MARK: - Apps that start and stop the stream

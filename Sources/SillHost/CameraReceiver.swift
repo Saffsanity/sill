@@ -10,23 +10,48 @@ import VideoToolbox
 import StreamProtocol
 
 /// Where a device's decoded camera frames go (docs/camera-plan.md §7): the seam where Sill Camera, the
-/// Core Media I/O camera extension, takes them (Sill.app's CameraSink, with the extension, in a later
-/// step), or the TEST ONLY CameraTestOutput on a test host. Everything here is called on `sill.camera`.
-protocol CameraOutput: AnyObject {
+/// Core Media I/O camera extension, takes them (Sill.app's CameraSink, Sources/SillMenuBar), or the TEST
+/// ONLY CameraTestOutput on a test host. Everything here is called on `sill.camera`.
+package protocol CameraOutput: AnyObject {
+    /// The queue the output does its own work on, when it has one (Sill.app's CameraSink: every CoreMediaIO
+    /// call): the receiver then runs on it too, so one queue, `sill.camera`, owns the policy, the decoder, the
+    /// fit and every CoreMediaIO call (docs/camera-plan.md §9). Nil: the receiver makes its own.
+    var queue: DispatchQueue? { get }
     /// The pixel format the receiver's decoder makes for it (NV12 for Sill Camera, BGRA for the test's PNGs).
     var pixelFormat: OSType { get }
     /// What Sill Camera shows while no frame is live: nobody, "Turn on Share Camera…", or the holder's name
     /// and its pause.
-    func feedChanged(_ feed: CameraHostPolicy.Feed)
+    func feedChanged(_ show: CameraShow)
     /// One decoded frame, upright as the device sent it, with its capture time (the device's wall clock).
     func frame(_ image: CVPixelBuffer, captured: Double)
     /// Set by the receiver before `start`: an app opening or closing Sill Camera, and Sill Camera's
     /// readiness (installed, allowed, running), as they change. Call on any queue.
-    var onApp: ((CameraHostPolicy.AppUse?) -> Void)? { get set }
+    var onApp: ((CameraAppUse?) -> Void)? { get set }
     var onReady: ((Bool) -> Void)? { get set }
     /// Whether Sill Camera is ready now; then `onReady` for every change.
     var ready: Bool { get }
     func start()
+}
+
+/// What Sill Camera shows while no frame is live, as the receiver tells its output (CameraHostPolicy.Feed): nothing
+/// of anyone (the switch off, Sill Camera not ready, the Mac locked or another user on its screen), "Turn on Share
+/// Camera…" (nobody holds it), or the holder's name and its pause (one of CameraFormat's pauses).
+package enum CameraShow: Equatable {
+    case unavailable
+    case waiting
+    case device(name: String, pause: String?)
+}
+
+/// An app's use of Sill Camera, as its output tells the receiver (CameraHostPolicy.AppUse): its name (cleaned; nil
+/// when Sill Camera cannot tell) and the format it chose.
+package struct CameraAppUse: Equatable {
+    package var name: String?
+    package var width: Int
+    package var height: Int
+    package var fps: Int
+    package init(name: String?, width: Int, height: Int, fps: Int) {
+        self.name = name; self.width = width; self.height = height; self.fps = fps
+    }
 }
 
 /// The Mac's receiving side of the devices' cameras (kind 46, docs/camera-plan.md §6.3, §7, §9): every
@@ -37,8 +62,9 @@ protocol CameraOutput: AnyObject {
 /// what the window list says reach the main actor only when they change, never per frame. Nothing here
 /// touches AppKit, so the CLI's `dispatchMain` is no concern (the CLI makes no receiver anyway).
 final class CameraReceiver: @unchecked Sendable {
-    /// `sill.camera`: the policy, the decoder, the output; every member below is touched only on it.
-    let queue = DispatchQueue(label: "sill.camera", qos: .userInitiated)
+    /// `sill.camera`: the policy, the decoder, the output; every member below is touched only on it. The output's
+    /// own queue when it has one (Sill.app's CameraSink makes `sill.camera` for its CoreMediaIO calls).
+    let queue: DispatchQueue
     private var policy = CameraHostPolicy()
     private let output: CameraOutput
     private let server: StreamServer
@@ -72,6 +98,7 @@ final class CameraReceiver: @unchecked Sendable {
 
     init(output: CameraOutput, server: StreamServer, gate: LockGate, software: Bool, testLog: Bool) {
         self.output = output
+        self.queue = output.queue ?? DispatchQueue(label: "sill.camera", qos: .userInitiated)
         self.server = server
         self.gate = gate
         self.software = software
@@ -81,7 +108,10 @@ final class CameraReceiver: @unchecked Sendable {
     /// Starts: the switch, the lock's reading and Sill Camera's readiness pushed in, the output's
     /// callbacks set, the grace's tick every second.
     func start(switchOn: Bool) {
-        output.onApp = { [weak self] app in self?.queue.async { self?.handle(.appChanged(app)) } }
+        output.onApp = { [weak self] use in
+            let app = use.map { CameraHostPolicy.AppUse(name: $0.name, width: $0.width, height: $0.height, fps: $0.fps) }
+            self?.queue.async { self?.handle(.appChanged(app)) }
+        }
         output.onReady = { [weak self] ready in self?.queue.async { self?.handle(.readyChanged(ready)) } }
         let unlocked = gate.reading == .unlocked
         queue.async { [self] in
@@ -269,7 +299,11 @@ final class CameraReceiver: @unchecked Sendable {
             case .noDecoder:
                 decoder = nil
             case .feed(let f):
-                output.feedChanged(f)
+                switch f {
+                case .unavailable: output.feedChanged(.unavailable)
+                case .waiting: output.feedChanged(.waiting)
+                case .device(let name, let pause): output.feedChanged(.device(name: name, pause: pause))
+                }
             case .line(let l):
                 print(l)
             case .count(let k):
@@ -371,8 +405,10 @@ final class CameraTestOutput: CameraOutput, @unchecked Sendable {
     private let hook: CameraTestHook.Hook
     private var frames = 0
     private(set) var ready = true
-    var onApp: ((CameraHostPolicy.AppUse?) -> Void)?
+    var onApp: ((CameraAppUse?) -> Void)?
     var onReady: ((Bool) -> Void)?
+    /// No CoreMediaIO here: the receiver keeps its own queue.
+    var queue: DispatchQueue? { nil }
     var pixelFormat: OSType { kCVPixelFormatType_32BGRA }
 
     init(hook: CameraTestHook.Hook) { self.hook = hook }
@@ -385,7 +421,7 @@ final class CameraTestOutput: CameraOutput, @unchecked Sendable {
                 switch step {
                 case .on(let w, let h, let fps, let name):
                     print("Test camera: \(name) opens Sill Camera at \(w)×\(h), \(fps) fps.")
-                    self.onApp?(CameraHostPolicy.AppUse(name: name, width: w, height: h, fps: fps))
+                    self.onApp?(CameraAppUse(name: name, width: w, height: h, fps: fps))
                 case .off:
                     print("Test camera: no app uses Sill Camera.")
                     self.onApp?(nil)
@@ -400,9 +436,9 @@ final class CameraTestOutput: CameraOutput, @unchecked Sendable {
         }
     }
 
-    func feedChanged(_ feed: CameraHostPolicy.Feed) {
+    func feedChanged(_ show: CameraShow) {
         let words: String
-        switch feed {
+        switch show {
         case .unavailable: words = "nobody (unavailable)"
         case .waiting: words = "Turn on Share Camera…"
         case .device(let name, let pause): words = name + (pause.map { " (paused: \($0))" } ?? "")

@@ -49,6 +49,10 @@ package struct HostStatusSnapshot: Equatable {
         /// Its link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6); nil while it
         /// does. The card names it.
         package var link: LinkStatus?
+        /// Its camera while it is Sill Camera's and an app on this Mac uses it (kind 16's `inUse`,
+        /// docs/camera-plan.md §11): the app's name, "" when Sill Camera cannot tell; nil otherwise. The
+        /// card's camera line and Settings › Streaming's camera line say it.
+        package var camera: String?
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
                      frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil,

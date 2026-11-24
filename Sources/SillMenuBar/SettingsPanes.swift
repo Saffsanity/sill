@@ -495,6 +495,13 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
             }
+            // Sill Camera (docs/camera-plan.md §10, step 8), after Send audio as the 2026-11-18 overview's Q15 places it:
+            // off by default, and off asks nothing of macOS; on, Sill asks macOS to activate Sill Camera and says here
+            // what it needs. At once, no restart.
+            CameraSection(on: $settings.config.deviceCamera, state: model.cameraState, macOS: CameraExtensionManager.macOS,
+                          actions: CameraSection.Actions(open: { CameraExtensionManager.open($0) },
+                                                         tryAgain: { model.camera.tryAgain() },
+                                                         remove: { model.removeSillCamera() }))
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
                     Label(snapshot.hardwareEncoderStuck
@@ -504,6 +511,59 @@ private struct StreamingPane: View {
                         .foregroundStyle(.orange)
                 }
             }
+        }
+    }
+}
+
+// MARK: Camera
+
+/// Settings › Streaming's "Camera and Microphone (beta)" section (docs/camera-plan.md §10, §11): Use iPhone and iPad
+/// cameras, Sill Camera's line in the state it is in (CameraExtensionPolicy.words), its button and Remove Sill
+/// Camera…. Plain values in, so the previews draw every state (DebugHooks); the buttons only call back.
+struct CameraSection: View {
+    @Binding var on: Bool
+    let state: CameraExtensionState
+    let macOS: Int
+    var actions = Actions()
+
+    struct Actions {
+        var open: (CameraExtensionPolicy.Pane) -> Void = { _ in }
+        var tryAgain: () -> Void = {}
+        var remove: () -> Void = {}
+    }
+
+    var body: some View {
+        let words = CameraExtensionPolicy.words(state, macOS: macOS)
+        Section {
+            Toggle(CameraExtensionPolicy.Copy.toggle, isOn: $on)
+            if let line = words.line {
+                VStack(alignment: .leading, spacing: 6) {
+                    if words.attention {
+                        Warning(line)
+                    } else {
+                        Text(line).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if words.button != nil || words.remove {
+                        HStack {
+                            switch words.button {
+                            case .openSettings(let pane)?:
+                                Button(CameraExtensionPolicy.Copy.openSettings) { actions.open(pane) }
+                            case .tryAgain?:
+                                Button(CameraExtensionPolicy.Copy.tryAgain) { actions.tryAgain() }
+                            case nil:
+                                EmptyView()
+                            }
+                            if words.remove {
+                                Button(CameraExtensionPolicy.Copy.remove) { actions.remove() }
+                            }
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text(CameraExtensionPolicy.Copy.header)
+        } footer: {
+            Footnote(CameraExtensionPolicy.Copy.footnote)
         }
     }
 }

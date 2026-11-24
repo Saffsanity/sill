@@ -377,8 +377,8 @@ package final class StreamCoordinator {
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
     /// The devices' cameras (kind 46, CameraReceiver on its own queue `sill.camera`; docs/camera-plan.md):
-    /// nil on the CLI, which cannot host Sill Camera and never says `camera`, and in Sill.app until Sill
-    /// Camera's extension (the plan's step 8); a TEST ONLY output's on a test host (SILL_TEST_CAMERA).
+    /// nil on the CLI, which cannot host Sill Camera and never says `camera`; Sill.app's CameraSink in Sill.app
+    /// (`cameraOutput`, the plan's step 8); a TEST ONLY output's on a test host (SILL_TEST_CAMERA), which wins.
     private let camera: CameraReceiver?
     /// What the window list says of the camera: the receiver's word (1, or 0 while the switch is off or
     /// Sill Camera is not ready), nil without a receiver. LockPolicy.list leaves it out while locked.
@@ -413,9 +413,12 @@ package final class StreamCoordinator {
     /// CLI's default). `testHooks`: false for Sill.app's own executable, which honours no TEST ONLY
     /// hook that bears on who gets in or what pairing needs (§4.3): with it false, or on a host
     /// that advertises, those hooks are ignored with one line each. `hostVersion`: Sill.app's
-    /// version for the window lists, when it has one that parses.
+    /// version for the window lists, when it has one that parses. `cameraOutput`: Sill.app's feed into Sill
+    /// Camera (CameraSink), with which this host takes the devices' cameras while `deviceCamera` is on and says
+    /// `camera` 0 while it is off; nil (the CLI) takes none and says nothing of a camera, as before.
     package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil,
-                 homePairing: Bool = false, testHooks: Bool = true, hostVersion: String? = nil) throws {
+                 homePairing: Bool = false, testHooks: Bool = true, hostVersion: String? = nil,
+                 cameraOutput: CameraOutput? = nil) throws {
         var config = config.validated()
         if !appKitLoop { config.virtualDisplay = false }
         self.config = config
@@ -482,6 +485,10 @@ package final class StreamCoordinator {
         clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
         if let hook = cameraHook.hook {
             camera = CameraReceiver(output: CameraTestOutput(hook: hook), server: server, gate: lockGate, software: true, testLog: hook.log)
+        } else if let cameraOutput {
+            // Sill.app's Sill Camera (the bare binary's is a dry run that never finds it): VideoToolbox's decoder,
+            // hardware preferred, and its software decoder on a test host, as the hook's.
+            camera = CameraReceiver(output: cameraOutput, server: server, gate: lockGate, software: synthetic, testLog: false)
         } else {
             camera = nil
         }
@@ -3835,9 +3842,17 @@ package final class StreamCoordinator {
         return state
     }
 
-    /// The receiver's kind 16 camera for the connections whose camera changed.
+    /// The receiver's kind 16 camera for the connections whose camera changed; the status card's camera line
+    /// follows the one in use (HostStatusSnapshot.Device.camera: the app, "" when Sill Camera cannot name it).
     private func cameraStatesChanged(_ states: [ObjectIdentifier: CameraState?]) {
         for (id, s) in states { cameraStates[id] = s }
+        status.update { snapshot in
+            for i in snapshot.devices.indices {
+                guard let changed = states[snapshot.devices[i].id] else { continue }
+                let inUse = changed.flatMap { $0.state == CameraState.inUse ? ($0.app ?? "") : nil }
+                if snapshot.devices[i].camera != inUse { snapshot.devices[i].camera = inUse }
+            }
+        }
         publishSettings()
     }
 

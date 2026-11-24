@@ -169,6 +169,17 @@ list's camera= when it says it:
                      its access unit (its header and keyframe flag kept), once; a line says when it went
   --expect=cameraState=S,camera=N  (with --expect's other keys, or alone) at exit, the last kind 16's
                      camera state (none when it said none) and the last window list's camera (none)
+  --camera-pad=N     with --camera: each frame padded to N bytes with a filler-data NAL unit (HEVC type 38, which a
+                     decoder skips), so the fixture loads a slow link as a 720p camera does (H11)
+  --camera-pace      with --camera: a stand-in for the device's pacing (CameraPacing, docs/camera-plan.md §6.2): a frame
+                     goes only while the bytes this Mac's kernel holds for the connection unacknowledged (SO_NWRITE)
+                     are within the budget, the larger of 16 KB and 40 ms of what the connection carried in the last
+                     second; otherwise it is skipped, and the next to go is the fixture's keyframe. The CAMERA line
+                     counts the skips
+  --wall             each key and tap's line also says when it was due and when it went, in this Mac's wall clock
+                     ("due 1732456789.123456 sent 1732456789.124001"), so a gate can time its arrival at the host
+The camera's flags (and the input flags) may also go to a Scripts/sillrelay.py on this Mac whose --to is a --synthetic
+host's port on this Mac.
 A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
 and against the Mac ID), 20 and 22 (its reason, then message, minimumVersion and reconnect when sent)
 are printed one line each; a session prints the order of the
@@ -212,7 +223,7 @@ INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "camera", "camera-corrupt")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "camera", "camera-corrupt", "camera-pad")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -285,16 +296,24 @@ def held_key(text):
     if not (h == h and 0 < h < 3600): raise ValueError(f"--key: HOLD is seconds, more than 0, got {hold!r}")
     return usage(u), h
 
-def synthetic_listener(port):
+def synthetic_listener(port, through_relay=True):
     """Whether every process listening on this Mac's TCP `port` is a --synthetic host (lsof, ps): the only
-    hosts that never post input, whatever their launcher may do. Nothing listening is not one."""
+    hosts that never post input, whatever their launcher may do. Nothing listening is not one. A
+    Scripts/sillrelay.py counts when its --to is 127.0.0.1 (or ::1, localhost) and a --synthetic host listens
+    there (one relay deep): the camera's pacing gate (H11) shapes the link in front of a test host."""
     try:
         pids = subprocess.run(["/usr/sbin/lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
                               capture_output=True, text=True, timeout=10).stdout.split()
         if not pids: return False
         for pid in set(pids):
             args = subprocess.run(["/bin/ps", "-o", "args=", "-p", pid], capture_output=True, text=True, timeout=10).stdout.split()
-            if "--synthetic" not in args: return False
+            if "--synthetic" in args: continue
+            if not through_relay or not any(a.endswith("/sillrelay.py") or a == "sillrelay.py" for a in args): return False
+            to = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--to"), None) \
+                or next((a[len("--to="):] for a in args if a.startswith("--to=")), None)
+            h, _, p = (to or "").rpartition(":")
+            if h.strip("[]") not in ("127.0.0.1", "::1", "localhost") or not p.isdigit(): return False
+            if not synthetic_listener(int(p), through_relay=False): return False
         return True
     except (OSError, subprocess.SubprocessError):
         return False
@@ -573,7 +592,7 @@ try:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
-                       "--off-console-view",
+                       "--off-console-view", "--camera-pace", "--wall",
                        "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -659,6 +678,12 @@ try:
     camera_corrupt = number(valued("camera-corrupt"), "--camera-corrupt") if valued("camera-corrupt") is not None else None
     if camera_corrupt is not None and (camera_file is None or camera_corrupt < 1):
         raise ValueError("--camera-corrupt=N takes a frame's number from 1, with --camera")
+    camera_pad = number(valued("camera-pad"), "--camera-pad") if valued("camera-pad") is not None else 0
+    if valued("camera-pad") is not None and (camera_file is None or not 16 <= camera_pad <= 200_000):
+        raise ValueError("--camera-pad=N takes 16 to 200000 bytes, with --camera")
+    camera_pace = "--camera-pace" in flags
+    if camera_pace and camera_file is None: raise ValueError("--camera-pace needs --camera")
+    wall = "--wall" in flags
     if camera_file is not None or any(e[2] in ("camera-claim", "camera-stop", "camera-pause", "raw46") for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--camera and its flags only go to a --synthetic host on this Mac; nothing on port {port} is one.")
@@ -848,6 +873,24 @@ cam_offered = False; cam_state = None; cam_sending = False; cam_paused = False; 
 cam_epoch = 0; cam_index = 0; cam_seq = 0; cam_next = 0.0
 cam_sent = 0; cam_keys = 0; cam_epochs = 0; cam_demands = 0; cam_demand_keys = 0; cam_states = []; last_camera_list = None
 cam_sec_frames = 0; cam_sec_bytes = 0; cam_pause_reason = ""
+cam_skipped = 0; cam_carried = []   # --camera-pace: frames skipped for the budget; (time, bytes carried in all) samples
+SO_NWRITE = 0x1024                  # macOS: the bytes in a socket's send buffer, not yet acknowledged
+def camera_unsent():
+    try: return s.getsockopt(socket.SOL_SOCKET, SO_NWRITE)
+    except OSError: return 0
+def camera_budget(now):
+    """§6.2's budget: the larger of 16 KB and 40 ms of what the connection carried over the last second (the camera's
+    bytes handed over less what still waits, as this stand-in reads them)."""
+    carried = cam_handed - camera_unsent()
+    cam_carried.append((now, carried))
+    while cam_carried and now - cam_carried[0][0] > 1: cam_carried.pop(0)
+    rate = (carried - cam_carried[0][1]) / max(0.25, now - cam_carried[0][0]) if len(cam_carried) > 1 else 0
+    return max(16384, 0.04 * rate)
+cam_handed = 0
+def camera_filler(n):
+    """An HEVC filler-data NAL unit (type 38) of n bytes with its 4-byte length: decoders skip it."""
+    body = b"\x4c\x01" + b"\xff" * max(0, n - 4 - 3) + b"\x80"
+    return struct.pack(">I", len(body)) + body
 def camera_send(payload, key=False, stamp=None):
     s.sendall(struct.pack(">BdBI", 46, stamp if stamp is not None else time.time(), 1 if key else 0, len(payload)) + payload)
 def camera_format(body):
@@ -907,11 +950,12 @@ def fire(e, now):
         s.sendall(pointer_input("move", *parsed)); print(f"  sent move {text} at {at}")
     elif name == "tap":
         s.sendall(pointer_input("move", *parsed) + pointer_input("leftDown", *parsed) + pointer_input("leftUp", *parsed))
-        print(f"  sent tap {text} (move, down, up) at {at}")
+        print(f"  sent tap {text} (move, down, up) at {at}" + (f" due {t0 + e[0]:.6f} sent {time.time():.6f}" if wall else ""))
     elif name == "key":
         u, part = parsed
         if part is None:
-            s.sendall(key_input(u, True) + key_input(u, False)); print(f"  sent key {u} (down, up) at {at}")
+            s.sendall(key_input(u, True) + key_input(u, False))
+            print(f"  sent key {u} (down, up) at {at}" + (f" due {t0 + e[0]:.6f} sent {time.time():.6f}" if wall else ""))
         else:
             s.sendall(key_input(u, part == "down")); print(f"  sent key {u} {part} at {at}")
             if part == "down":
@@ -965,11 +1009,18 @@ while time.time() - t0 < dur:
             s.sendall(msg(12, json.dumps(report).encode())); nextstats = now + 1
         while cam_sending and now >= cam_next:
             k, data = camera_frames[cam_index]
+            if camera_pace and camera_unsent() > camera_budget(now):
+                # Over the budget: this picture is skipped, and the next to go is a keyframe (the fixture's first), as
+                # the device's encoder would make one after a gap; nothing waits in front of input meanwhile.
+                cam_skipped += 1; cam_index = 0; cam_next += 1 / camera_size[2]
+                continue
+            if camera_pad and len(data) < camera_pad: data = data + camera_filler(camera_pad - len(data))
             if camera_corrupt is not None and cam_sent + 1 == camera_corrupt:
                 # A length of 0xFFFFFFFF before the first NAL unit: no decoder reads it.
                 data = b"\xff" * len(data)
                 print(f"  camera frame {cam_sent + 1} (epoch {cam_epoch}, seq {cam_seq}) sent corrupted at {time.time()-t0:.3f}s")
             camera_send(bytes([2]) + struct.pack(">HI", cam_epoch, cam_seq) + data, key=k, stamp=time.time())
+            cam_handed += 14 + 7 + len(data)
             cam_sent += 1; cam_keys += 1 if k else 0; cam_seq += 1; cam_sec_frames += 1; cam_sec_bytes += 7 + len(data)
             cam_index = (cam_index + 1) % len(camera_frames); cam_next += 1 / camera_size[2]
     except OSError as e:
@@ -1175,7 +1226,7 @@ if plays_audio:
           f"age p50 {pct(aud_ages, .5):.2f} p95 {pct(aud_ages, .95):.2f} max {max(aud_ages) if aud_ages else float('nan'):.2f} ms")
 if camera_file is not None or cam_states:
     print(f"CAMERA sent {cam_sent} frames ({cam_keys} keyframes) in {cam_epochs} epochs; {cam_demands} demands ({cam_demand_keys} with a keyframe); "
-          f"states {' > '.join(cam_states) or 'none'}")
+          f"states {' > '.join(cam_states) or 'none'}" + (f"; skipped {cam_skipped} for the budget" if camera_pace else ""))
 s.close()
 menus_failed = False
 if expect_menus is not None:

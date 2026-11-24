@@ -723,6 +723,71 @@ Steps 1 to 9 need no profile and no device; step 10's first try needs the portal
 19. **Turning the Mac's switch off.** Leaves Sill Camera installed (its placeholder says to turn it on), removal
     separate, or removes it at once (an administrator's prompt each time)? *Recommend: leave it installed.*
 
+## 19. Sill.app's side as built (step 8): every state a person can end in, and the way out
+
+Settings › Streaming, "Camera and Microphone (beta)": **Use iPhone and iPad cameras**, off by default; under it one line
+for the state it is in (CameraExtensionPolicy, its words below), its button, and Remove Sill Camera… when Sill Camera is
+installed. The device reads only what the Mac's list and kind 16 say (CameraPolicy's footnote, §11's words).
+
+1. **Never turned on** (the default): nothing is asked of macOS (no request, no prompt, no extension, no CoreMediaIO
+   call). The list says `camera` 0, kind 16 `off`: the device's Share Camera is disabled, "Turn on Use iPhone and iPad
+   cameras in Sill’s Settings on ‹Mac› to share this ‹device›’s camera with it." Way out: turn it on. (A Sill.app from
+   before step 8 says no `camera`: "Update Sill on ‹Mac› to share this ‹device›’s camera with it.", which is right for
+   it; the CLI says nothing, and the row hides.)
+2. **Turned on, the first time**: "Installing Sill Camera…", and macOS's own alert, “Sill” would like to use a new camera
+   extension (Open System Settings, OK); then "Waiting for approval: in System Settings › General › Login Items &
+   Extensions, click ⓘ beside Camera Extensions and turn on Sill Camera." with Open System Settings… (macOS 14:
+   "… Privacy & Security, click Allow for Sill."). Kind 16 says `notReady`: "Sill Camera isn’t ready on ‹Mac›. In
+   Sill’s Settings there, Streaming shows what it needs."
+3. **The alert dismissed, or Allow never clicked**: the same waiting line while Sill runs (macOS keeps the request
+   pending until Sill quits); every launch with the switch on asks again. Way out: Open System Settings… and turn it on
+   there; or turn the switch off (nothing more is asked; an approval given later still installs Sill Camera, unused).
+4. **Allowed**: "Starting Sill Camera…" until Sill's feed reaches it, then "Ready. Apps on this Mac can choose “Sill
+   Camera”."; the list says `camera` 1 and a device can share. While an app uses it: "In use by ‹FaceTime›, with
+   ‹iPad›’s camera.", and the menu's card has "Camera: FaceTime" over "iPad’s camera" under that device.
+5. **Sill updated** (another build of Sill Camera inside): at its first launch with the switch on, macOS asks Sill
+   whether to replace the older one, and Sill replaces it ("Updating Sill Camera to this version of Sill…", the log's
+   "replacing build ‹n› with ‹m›"); then Ready, or the waiting line if macOS wants the approval again (V4, N18).
+6. **Sill moved out of /Applications**: "Move Sill to the Applications folder, open it from there, and turn this on
+   again."; nothing is asked (macOS activates only from there). A Sill Camera installed earlier from there may still
+   take Sill's feed, and then the section says Ready: it works.
+7. **A build that cannot install it** (no Sill Camera inside, or no install entitlement: a development build, or a
+   profile without the System Extension capability): "This build of Sill can’t install Sill Camera."; nothing asked.
+8. **A managed Mac**: "This Mac’s administrator doesn’t allow camera extensions from other developers." (IT can allow
+   team 9B2KKVM937's.)
+9. **Turned off in System Settings** (macOS 15.1 and later say so): "Sill Camera is turned off in System Settings ›
+   General › Login Items & Extensions." with Open System Settings….
+10. **A restart needed**: "Restart this Mac to finish installing Sill Camera."
+11. **Any other refusal**: "Couldn’t install Sill Camera: ‹reason›." (each of macOS's codes in a few words) with Try
+    Again.
+12. **Camera access** (V2, if macOS counts Sill's feed as using a camera and Sill is not allowed): "Sill isn’t allowed
+    to use cameras, which it needs to pass a device’s camera to apps here. In System Settings › Privacy & Security ›
+    Camera, turn on Sill." with Open System Settings…. Every camera build carries NSCameraUsageDescription and, with
+    the install entitlement, the camera entitlement, so macOS asks rather than refusing without a word.
+13. **Installed, but the feed did not start**: "Sill Camera is installed but didn’t take Sill’s pictures. Turn this off
+    and on to try again." (the log has the status).
+14. **The switch turned off**: Sill stops feeding at once and asks nothing; Sill Camera is left installed and unused
+    (Q19: removing it would ask an administrator each time, and an app set to Sill Camera would lose its camera; on
+    again asks nothing new). Apps still list it, its still saying "Open Sill on this Mac and turn on Use iPhone and
+    iPad cameras in its Settings." (the extension's one line for no feeder, which covers both Sill not running and
+    this). The section: "Sill Camera stays installed while this is off, and apps still list it." with Remove Sill
+    Camera…; the device: as 1.
+15. **Remove Sill Camera…**: the switch goes off and Sill asks macOS to remove it (an administrator may be asked):
+    "Removing Sill Camera…", then "Sill Camera was removed." (nothing to remove counts as removed), or "Couldn’t remove
+    Sill Camera: ‹reason›." with Remove again. Sill in the Trash takes it too (macOS).
+16. **Two devices sharing**: the last one whose person turned Share Camera on is the camera; the other's footnote
+    "‹iPhone› is ‹Mac›’s camera now. Turn Share Camera off and on to use this iPad instead."; the card names the one
+    in use.
+17. **The device going away mid-call**: a second after its last frame Sill Camera shows "Waiting for ‹iPad›’s
+    camera…"; its offer stands 10 s, so a move or a quick reconnect resumes with a keyframe (H10); then "Turn on Share
+    Camera in Sill on your iPhone or iPad." (or the most recent other offer takes it). The app keeps its camera.
+18. **The device removed** (Settings › Devices › Remove) mid-call: its frames go at once and the camera is free within
+    0.25 s (H6): "Turn on Share Camera…".
+19. **The Mac locked, or another user on its screen**: refused at any lock (§0): Sill Camera shows "Sill Camera isn’t
+    available right now.", naming nobody; frames are dropped and the list says no `camera`. After the unlock (its 2 s
+    settle) the demand comes back with a keyframe (H4) while the device's offer stands, else the device offers again.
+20. **Sill quits mid-call**: Sill Camera shows its no-feeder line; the device's session ends with it.
+
 ## Progress
 
 **2026-11-18, the first building run** (branch `camera`, pull request #401; notes in

@@ -6,8 +6,11 @@
 # entitlements (the App Sandbox and that group, nothing else) and the app's (no system-extension.install in a build that
 # is not Developer ID, so it can't activate it); both signatures, strictly, the app's deep; the app's seal covering the
 # extension (a changed byte in a copy of it fails the app's check); the hardened runtime on both; the same slices in
-# both (arm64 and x86_64 with --universal). It never copies anything to /Applications, never activates or runs what it
-# built, and installs nothing: the bundle is removed after its checks (--keep keeps it in OUT).
+# both (arm64 and x86_64 with --universal); the app's camera words (NSCameraUsageDescription, docs/camera-plan.md §17
+# V2) and no camera entitlement in an ad hoc build. Then (step 8) the same make-app.sh without SILL_CAMERA_EXTENSION:
+# the bundle every release and nightly has been until now, nothing of Sill Camera in it (no Contents/Library, no camera
+# words, no camera or install entitlement), signed strictly. It never copies anything to /Applications, never activates
+# or runs what it built, and installs nothing: each bundle is removed after its checks (--keep keeps them in OUT).
 #   Scripts/camera-check/package.sh [--universal] [--keep] [OUT]   (OUT: .build/camera-check by default)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -72,6 +75,8 @@ judge "$( [ -n "$group" ] && [ "${mach#"$group"}" != "$mach" ]; echo $?)" "the M
 keys="$(plutil -convert json -o - "$ents" 2>/dev/null | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin))))' 2>/dev/null || true)"
 judge "$(is "$keys" "com.apple.security.app-sandbox com.apple.security.application-groups")" "nothing else in its entitlements ($keys)"
 judge "$( ! grep -q 'system-extension.install' "$out/app-entitlements.plist"; echo $?)" "an ad hoc Sill.app does not ask for system-extension.install, so it can't activate Sill Camera"
+judge "$( ! grep -q 'security.device.camera' "$out/app-entitlements.plist"; echo $?)" "nor for the camera entitlement (only a build that can install Sill Camera does)"
+judge "$( [ -n "$(plist "$app/Contents/Info.plist" NSCameraUsageDescription)" ]; echo $?)" "the app's camera words, should feeding Sill Camera count as using a camera (NSCameraUsageDescription)"
 
 # The signatures.
 judge "$(codesign --verify --strict "$ext" >/dev/null 2>&1; echo $?)" "Sill Camera's signature, strictly"
@@ -95,8 +100,24 @@ if [ "$universal" = 1 ]; then
     judge "$(is "$ext_archs" "arm64 x86_64")" "both architectures (SILL_UNIVERSAL=1)"
 fi
 
+if [ "$keep" = 1 ]; then echo "kept: $app"; else rm -rf "$app"; echo "removed $app"; fi
+
+# Without SILL_CAMERA_EXTENSION: the Sill.app every release and nightly has been, nothing of Sill Camera in it.
+plain="$out/plain/Sill.app"
+rm -rf "$out/plain"; mkdir -p "$out/plain"
+env -u SILL_CAMERA_EXTENSION SILL_SIGN_IDENTITY=- SILL_APP_OUT="$plain" SILL_UNIVERSAL="$both" \
+    Scripts/make-app.sh > "$out/make-app-plain.log" 2>&1 || { tail -30 "$out/make-app-plain.log"; echo "FAIL make-app.sh without the extension"; exit 1; }
+grep -E '^Built ' "$out/make-app-plain.log" || true
+judge "$( [ ! -e "$plain/Contents/Library" ]; echo $?)" "without it: no Contents/Library"
+judge "$( [ -z "$(plist "$plain/Contents/Info.plist" NSCameraUsageDescription)" ]; echo $?)" "without it: no camera words"
+codesign -d --entitlements - --xml "$plain" > "$out/plain-entitlements.plist" 2>/dev/null || true
+judge "$( ! grep -qE 'security.device.camera|system-extension.install' "$out/plain-entitlements.plist"; echo $?)" "without it: neither entitlement"
+files="$(cd "$plain" && find . -type f -not -path './Contents/_CodeSignature/*' | sort | xargs)"
+judge "$(is "$files" "./Contents/Info.plist ./Contents/MacOS/Sill ./Contents/PkgInfo ./Contents/Resources/AppIcon.icns ./Contents/Resources/Assets.car")" "without it: the bundle's files as ever ($files)"
+judge "$(codesign --verify --strict --deep "$plain" >/dev/null 2>&1; echo $?)" "without it: the signature, strictly and deep"
+if [ "$keep" = 1 ]; then echo "kept: $plain"; else rm -rf "$out/plain"; echo "removed $plain"; fi
+
 # Nothing installed.
 judge "$(is "$(stat -f %m /Applications/Sill.app 2>/dev/null || echo none)" "$installed_before")" "/Applications/Sill.app untouched"
-if [ "$keep" = 1 ]; then echo "kept: $app"; else rm -rf "$app"; echo "removed $app"; fi
 echo "P1: $passed of $((passed + failed)) ok"
 [ "$failed" = 0 ]

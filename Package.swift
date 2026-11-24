@@ -25,10 +25,12 @@ let package = Package(
         .target(name: "SillHostCore", dependencies: ["StreamProtocol"], path: "Sources/SillHost"),
         // The command-line host: flags, the run loop, the Terminal permission hint.
         .executableTarget(name: "SillHostCLI", dependencies: ["SillHostCore", "StreamProtocol"]),
-        // The menu bar app: status item, Settings and Log windows (AppKit lifecycle, SwiftUI panes).
-        .executableTarget(name: "SillMenuBar", dependencies: ["SillHostCore", "StreamProtocol"]),
-        // Sill Camera's rules (CameraFeedPolicy, docs/camera-plan.md §6.4), shared by the extension and Sill.app's sink:
-        // Foundation only, and no product, so the iOS project never sees it.
+        // The menu bar app: status item, Settings and Log windows (AppKit lifecycle, SwiftUI panes), and Sill Camera's
+        // feed (CameraSink) and installation (CameraExtensionManager).
+        .executableTarget(name: "SillMenuBar", dependencies: ["SillHostCore", "StreamProtocol", "CameraFeed"]),
+        // Sill Camera's rules (CameraFeedPolicy, docs/camera-plan.md §6.4) and Sill.app's side of its feed
+        // (CameraSinkPolicy), shared by the extension and Sill.app's sink: Foundation only, and no product, so the iOS
+        // project never sees it.
         .target(name: "CameraFeed"),
         // Sill Camera itself: run by macOS as its own sandboxed process once Sill for Mac activated it.
         .executableTarget(name: "SillCameraExtension", dependencies: ["CameraFeed"]),

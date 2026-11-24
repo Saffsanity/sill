@@ -133,7 +133,7 @@ enum StatusText {
         if case .advertising(let n) = s.network { name = n }
 
         return StatusPresentation(glyph: glyph, header: header, subtitle: subtitle,
-                                  source: sourceRow(s), devices: s.devices.map(deviceRow), attention: attention,
+                                  source: sourceRow(s), devices: s.devices.flatMap { [deviceRow($0)] + cameraRow($0) }, attention: attention,
                                   virtualDisplayNote: virtualDisplayNote(s),
                                   tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
                                   advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
@@ -295,6 +295,15 @@ enum StatusText {
         if let route = routeWord(d) { parts.append(route) }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
                                       detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
+    }
+
+    /// The camera line under the device whose camera an app on this Mac uses through Sill Camera (docs/camera-plan.md
+    /// §11): "Camera: FaceTime" over "iPad’s camera" ("Camera: In Use" when Sill Camera cannot name the app).
+    private static func cameraRow(_ d: HostStatusSnapshot.Device) -> [StatusPresentation.Row] {
+        guard let app = d.camera else { return [] }
+        return [StatusPresentation.Row(id: "camera \(String(describing: d.id))", symbol: "video.fill",
+                                       title: CameraExtensionPolicy.Copy.cardTitle(app: app),
+                                       detail: CameraExtensionPolicy.Copy.cardDetail(device: shortName(d.name ?? d.endpoint)))]
     }
 
     /// A device's link that does not keep up, as its row says it: behind, "3 fps, the link can’t carry

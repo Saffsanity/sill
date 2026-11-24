@@ -2,7 +2,7 @@
 """A passthrough TCP relay that shapes the link between a Sill device (or sillclient.py) and a
 host, for testing the remote door's slow-link rules headless. Standard library only (asyncio).
 
-usage: sillrelay.py --listen PORT --to HOST:PORT [--delay-ms N] [--rate-mbps R]
+usage: sillrelay.py --listen PORT --to HOST:PORT [--delay-ms N] [--rate-mbps R] [--up-rate-mbps R]
                     [--blackhole-after S] [--record PREFIX]
   --listen PORT         where to listen on 127.0.0.1; 0 takes any free port
   --to HOST:PORT        the host's door ([v6]:port for IPv6); every accepted connection gets its own
@@ -11,6 +11,10 @@ usage: sillrelay.py --listen PORT --to HOST:PORT [--delay-ms N] [--rate-mbps R]
                         as R allows, so the host's own send queue fills as it would behind a slow
                         uplink. Client → host is not shaped. (The relay's receive buffer from the
                         host is always small, 64 KB, for the same reason.)
+  --up-rate-mbps R      client → host at most R Mbit/s, the same way: the relay reads from the client
+                        only as fast as R allows, 4 KB at a time, with a 16 KB receive buffer, so the
+                        client's own send queue fills as a device's does behind a slow uplink (the
+                        camera's pacing gate, docs/camera-plan.md §13.2 H11)
   --blackhole-after S   S seconds into each connection, stop forwarding both ways without closing
                         either side (nothing is read, written or closed from then on): a dead path
   --record PREFIX       write each connection's bytes to PREFIX-N.up (client → host) and
@@ -24,7 +28,7 @@ def fail(text):
     print(f"sillrelay.py: {text}", file=sys.stderr); sys.exit(2)
 
 def parse(argv):
-    opts = {"listen": None, "to": None, "delay-ms": 0.0, "rate-mbps": None, "blackhole-after": None, "record": None}
+    opts = {"listen": None, "to": None, "delay-ms": 0.0, "rate-mbps": None, "up-rate-mbps": None, "blackhole-after": None, "record": None}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -46,10 +50,12 @@ def parse(argv):
         opts["to"] = (host, int(port))
         opts["delay-ms"] = float(opts["delay-ms"])
         if opts["rate-mbps"] is not None: opts["rate-mbps"] = float(opts["rate-mbps"])
+        if opts["up-rate-mbps"] is not None: opts["up-rate-mbps"] = float(opts["up-rate-mbps"])
         if opts["blackhole-after"] is not None: opts["blackhole-after"] = float(opts["blackhole-after"])
     except ValueError as e:
         fail(str(e))
-    if opts["delay-ms"] < 0 or (opts["rate-mbps"] is not None and opts["rate-mbps"] <= 0): fail("delay and rate must be positive")
+    if opts["delay-ms"] < 0 or (opts["rate-mbps"] is not None and opts["rate-mbps"] <= 0) \
+            or (opts["up-rate-mbps"] is not None and opts["up-rate-mbps"] <= 0): fail("delay and rate must be positive")
     return opts
 
 OPTS = parse(sys.argv[1:])
@@ -59,16 +65,17 @@ class Pipe:
     """One direction of one connection: reads, optionally paces the reads, delays each chunk by a
     fixed amount (a writer task keeps the order) and writes. Stops at EOF, an error or the
     blackhole."""
-    def __init__(self, name, reader, writer, delay, rate, record, dead):
+    def __init__(self, name, reader, writer, delay, rate, record, dead, chunk=None):
         self.name, self.reader, self.writer = name, reader, writer
         self.delay, self.rate, self.record, self.dead = delay, rate, record, dead
+        self.chunk = chunk
         self.queue = asyncio.Queue()
         self.bytes = 0
 
     async def pump(self):
         # Pacing: a chunk of n bytes is followed by a pause of n*8/rate seconds before the next
         # read, so the host is drained at the link's rate and its own queue does the waiting.
-        chunk = 16384 if self.rate else 1 << 20
+        chunk = self.chunk or (16384 if self.rate else 1 << 20)
         while not self.dead.is_set():
             try:
                 data = await self.reader.read(chunk)
@@ -119,7 +126,11 @@ async def handle(client_reader, client_writer):
     half = OPTS["delay-ms"] / 2000.0
     rec_up = open(f"{OPTS['record']}-{n}.up", "wb") if OPTS["record"] else None
     rec_down = open(f"{OPTS['record']}-{n}.down", "wb") if OPTS["record"] else None
-    up = Pipe("up", client_reader, host_writer, half, None, rec_up, dead)
+    if OPTS["up-rate-mbps"]:
+        # The same for the uplink: a small receive buffer from the client, so its own queue does the waiting.
+        csock = client_writer.get_extra_info("socket")
+        if csock is not None: csock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
+    up = Pipe("up", client_reader, host_writer, half, OPTS["up-rate-mbps"], rec_up, dead, chunk=4096 if OPTS["up-rate-mbps"] else None)
     down = Pipe("down", host_reader, client_writer, half, OPTS["rate-mbps"], rec_down, dead)
     tasks = [asyncio.ensure_future(t) for t in (up.pump(), up.deliver(), down.pump(), down.deliver())]
     if OPTS["blackhole-after"] is not None:
@@ -146,6 +157,7 @@ async def main():
     shaping = []
     if OPTS["delay-ms"]: shaping.append(f"+{OPTS['delay-ms']:g} ms round trip")
     if OPTS["rate-mbps"]: shaping.append(f"host → client {OPTS['rate-mbps']:g} Mbit/s")
+    if OPTS["up-rate-mbps"]: shaping.append(f"client → host {OPTS['up-rate-mbps']:g} Mbit/s")
     if OPTS["blackhole-after"] is not None: shaping.append(f"blackhole after {OPTS['blackhole-after']:g} s")
     print(f"sillrelay listening on 127.0.0.1:{port}" + (f" ({', '.join(shaping)})" if shaping else ""), flush=True)
     async with server:

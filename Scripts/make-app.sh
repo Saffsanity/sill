@@ -191,6 +191,10 @@ if [ "$camera" = 1 ]; then
     cp Packaging/CameraExtension-Info.plist "$ext/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)" "$ext/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$ext/Contents/Info.plist"
+    # Sill for Mac feeds Sill Camera through a camera device's stream, which macOS may count as using a camera
+    # (docs/camera-plan.md §17, V2, open until Noah's first try): the words macOS shows if it asks, so the ask can never
+    # end Sill for want of them. Sill asks for no camera itself, and never uses this Mac's own.
+    /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Sill passes the camera of your iPhone or iPad to apps on this Mac through Sill Camera. It never uses this Mac’s own camera." "$stage/Contents/Info.plist"
 fi
 # Signs Sill Camera before the app that seals it: "$@" are codesign's options for this build's path.
 sign_camera() {
@@ -267,9 +271,15 @@ if [ "$release" = 1 ]; then
         # build whose profile predates the capability still signs, and says it can't install Sill Camera.
         if [ "$camera" = 1 ] && [ "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.system-extension.install' "$prof_dir/prof.plist" 2>/dev/null)" = true ]; then
             cp "$ents" "$prof_dir/camera.entitlements"
-            plutil -insert com.apple.developer.system-extension.install -bool YES "$prof_dir/camera.entitlements"
+            # PlistBuddy, not plutil: plutil's key paths split at every dot, so `plutil -insert com.apple…` finds no
+            # "com" and fails (measured 2026-11-24); PlistBuddy's ":" paths keep the dots in a name.
+            /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.system-extension.install bool true' "$prof_dir/camera.entitlements"
+            # The hardened runtime's camera entitlement beside it: feeding Sill Camera's stream may count as using a
+            # camera (V2), and a hardened app without it is refused without a word. No profile grants it (none needs
+            # to), so the check below passes it by name.
+            /usr/libexec/PlistBuddy -c 'Add :com.apple.security.device.camera bool true' "$prof_dir/camera.entitlements"
             ents="$prof_dir/camera.entitlements"
-            camera_note="this build can install it (com.apple.developer.system-extension.install)"
+            camera_note="this build can install it (com.apple.developer.system-extension.install, com.apple.security.device.camera)"
         fi
         # Every entitlement the file asks for, by the file's own list of them, so one added later is
         # checked too: an app signed with one the profile does not grant is killed at launch like
@@ -288,6 +298,12 @@ if [ "$release" = 1 ]; then
             rm -rf "$stage"; echo "error: $ents is not a property list of entitlements." >&2; exit 1
         fi
         for key in $wanted_keys; do
+            # The hardened runtime's resource entitlements, which no profile grants and taskgated asks no profile for:
+            # passed by name, only those, and only true.
+            case "$key" in
+                com.apple.security.device.camera)
+                    if [ "$(/usr/libexec/PlistBuddy -c "Print :$key" "$ents" 2>/dev/null)" = true ]; then continue; fi ;;
+            esac
             if /usr/libexec/PlistBuddy -c "Print :$key:0" "$ents" >/dev/null 2>&1; then
                 i=0
                 while wanted="$(/usr/libexec/PlistBuddy -c "Print :$key:$i" "$ents" 2>/dev/null)"; do

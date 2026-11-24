@@ -16,7 +16,7 @@ import Foundation
 ///   until it stops or leaves. What it says to show and its frames count only while it feeds; when it goes, both go.
 /// - Each tick of the source stream, while an app runs it: a frame from the feeder goes out as it arrives, and is sent
 ///   again at the app's rate while it is under a second old, so apps see a steady stream; then the placeholder, whose
-///   words come from what Sill.app said ("Open Sill on this Mac." while nothing feeds). Only a device state names a
+///   words come from what Sill.app said ("Open Sill on this Mac and turn on…" while nothing feeds). Only a device state names a
 ///   device; every other placeholder names nobody (another user on the Mac's screen sees "isn’t available").
 /// - The demand Sill.app reads: whether an app runs Sill Camera, the size and rate it chose, and the apps that run
 ///   it (by signing identifier and pid; Sill.app names them).
@@ -208,7 +208,9 @@ package struct CameraFeedPolicy {
 
     package enum Copy {
         package static let title = "Sill Camera"
-        package static let noSill = "Open Sill on this Mac."
+        /// Nothing feeds Sill Camera: Sill is not running, or its Use iPhone and iPad cameras is off (Sill for Mac then
+        /// does not feed it at all, docs/camera-plan.md §18 Q19, so this one line says both).
+        package static let noSill = "Open Sill on this Mac and turn on Use iPhone and iPad cameras in its Settings."
         package static let off = "Turn on Use iPhone and iPad cameras in Sill’s Settings on this Mac."
         package static let unavailable = "Sill Camera isn’t available right now."
         package static let waiting = "Turn on Share Camera in Sill on your iPhone or iPad."

@@ -337,8 +337,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   keyframes, the epochs and rates, what Sill Camera shows; pure,
   `Tests/checks/camera-host`), `CameraReceiver` (kind 46 from the network
   queue on its own queue `sill.camera`: the policy, VideoToolbox's decoder per
-  epoch, never an encoder; `CameraOutput`, the seam Sill Camera's sink takes;
-  the TEST ONLY `CameraTestOutput`), `CameraTestHook` (SILL_TEST_CAMERA,
+  epoch, never an encoder; `CameraOutput`, the seam Sill Camera's sink takes,
+  `package` since step 8, with `CameraShow` and `CameraAppUse`, what crosses it, and
+  the output's own queue adopted as `sill.camera`; the TEST ONLY `CameraTestOutput`),
+  `CameraTestHook` (SILL_TEST_CAMERA,
   SILL_TEST_CAMERA_DEMAND, SILL_TEST_CAMERA_LOG, a test host's only; pure,
   `Tests/checks/camera-host`), Lock this Mac when the last device leaves
   (docs/privacy-mode-plan.md, part 1): `PrivacyPolicy` (which departures count, the
@@ -454,7 +456,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   time), what goes out at each tick (a frame as it comes, again at the app's rate while under a
   second old, else the placeholder) and the placeholder's words (only a device state names a
   device). Its own library target, no product (the iOS project never sees it), because Sill.app's
-  sink shares its encodings; pure, `Tests/checks/camera-feed`.
+  sink shares its encodings; pure, `Tests/checks/camera-feed`. Beside it `CameraSinkPolicy`
+  (step 8): what Sill.app's CameraSink writes into Sill Camera's state for what the receiver says,
+  the app Sill Camera's demand names (by pid, else its identifier's last part; one, two or "and N
+  more", 40 characters at most) and the sink's two frames, the newest winning; pure,
+  `Tests/checks/camera-app`.
 - `Sources/SillCameraExtension/` — Sill Camera, the Core Media I/O camera extension
   (docs/camera-plan.md §6.4, §7, §9): `main.swift` (`CMIOExtensionProvider.startService`, the run
   loop), `SillCameraProvider.swift` (the provider; the device "Sill Camera" with fixed IDs, its
@@ -495,7 +501,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the checks; compiles on its own with swiftc), and `ProcessLife` (whether a process is still
   there, by its pid and the time it started, the kernel's word: Update Now's new copy waits at launch
   for the Sill that started it to quit, and NSRunningApplication's `isTerminated` never changed there;
-  Foundation only, `Tests/checks/update-install`). Update Now, the one-click update
+  Foundation only, `Tests/checks/update-install`). Sill Camera in Sill.app (docs/camera-plan.md
+  step 8): `CameraExtensionState` (`CameraExtensionPolicy`: what Sill asks macOS for, macOS's
+  answers, Settings › Streaming's "Camera and Microphone (beta)" section, its words, buttons and log
+  lines, the TEST ONLY dry run's script; pure, `Tests/checks/camera-app`), `CameraExtensionManager`
+  (main actor: carries the policy out with `SystemCameraExtension`, OSSystemExtensionRequest, only for
+  Sill.app's own code in /Applications with Sill Camera inside and the install entitlement, or with the
+  bare binary's `DryRunCameraExtension`; nothing asked while Use iPhone and iPad cameras is off) and
+  `CameraSink` (the host receiver's CameraOutput: Sill Camera's device by its UID through CoreMediaIO's C
+  API, its sink stream, the state written before any frame, the demand read back, each frame fitted into
+  the app's size with VTPixelTransferSession and queued, two at most; nothing of CoreMediaIO while the
+  switch is off, and a dry run in the bare binary). Update Now, the one-click update
   (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
   Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
   their words; the release; the order of versions and builds, `isNewer`: a release by its version, and over a
@@ -562,7 +578,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `9B2KKVM937.me.saffer.sill.mac.camera`, the app's version and build) and
   `Packaging/SillCameraExtension.entitlements` (the App Sandbox and that app group), signed
   before the app; the app asks for `com.apple.developer.system-extension.install` only when its
-  profile grants it; off by default until the portal's System Extension capability exists;
+  profile grants it, and then `com.apple.security.device.camera` too (passed by name by the
+  profile check, which no profile grants), with `NSCameraUsageDescription` in every camera build
+  (docs/camera-plan.md §17, V2: feeding Sill Camera may count as using a camera); off by default
+  until the portal's System Extension capability exists;
   `SILL_APP_OUT` builds the bundle into another folder, never with `--install`; `release.sh`'s
   `check_signature` checks Sill Camera's slices too when a build carries it);
   `Scripts/release.sh`
@@ -687,10 +706,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   number in blocks along its top, on VideoToolbox's software HEVC encoder,
   refusing a hardware session) and `check-fixture.swift` decodes it on the
   software decoder, each frame reading its own number; `Scripts/camera-check/live.py
-  OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|all]` runs the camera's loopback
-  gates against synthetic `--pairing` test hosts with SILL_TEST_CAMERA and
+  OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|removed|app|dryrun|pacing|all]`
+  runs the camera's loopback gates against synthetic `--pairing` test hosts with SILL_TEST_CAMERA and
   paired sillclient.py clients sending the fixture (`--camera`), each host
-  under a minute; `Scripts/camera-check/encoder.sh [OUT.bin]` compiles the app's
+  under a minute: `removed` (H6), `app` (H12) and `dryrun` against the bare SillMenuBar binary
+  (Sill.app's receiver, its Sill Camera dry runs), `pacing` (H11) through `sillrelay.py
+  --up-rate-mbps 2` with sillclient.py's stand-in for the device's pacing (`--camera-pace`,
+  `--camera-pad`, `--wall`); `Scripts/camera-check/encoder.sh [OUT.bin]` compiles the app's
   own CameraEncoder, CameraPattern, CameraStream and CameraPolicy for macOS with
   `encoder-main.swift` and runs the device's stream end to end on VideoToolbox's
   software encoder and decoder (never the hardware encoder; not in CI, whose

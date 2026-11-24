@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """TEST ONLY: the devices' cameras on the Mac against synthetic test hosts on loopback (docs/camera-plan.md §13.2,
-gates H1 to H5 and H7 to H10, H2 as a frame that does not decode). Each case starts .build/release/SillHost
+gates H1 to H12, H2 as a frame that does not decode). Each case starts .build/release/SillHost
 --synthetic --pairing (a throwaway identity in a folder of
 the test's own) with SILL_TEST_LOOPBACK, SILL_TEST_SOFTWARE_ENCODER, SILL_TEST_NO_ROUTER and SILL_TEST_NO_SCREEN, so
 nothing touches the hardware encoder, the router or ScreenCaptureKit, and SILL_TEST_CAMERA (a counter, or PNGs in a
@@ -11,7 +11,16 @@ Scripts/camera/fixture-640x360.bin, made with VideoToolbox's software encoder), 
 host runs under a
 minute. Prints a verdict per rule; exits 1 on any FAIL.
 
-    python3 Scripts/camera-check/live.py OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|all]
+Sill.app's own receiver (step 8) runs in the bare .build/release/SillMenuBar binary, --synthetic, with the same
+variables (never Sill.app itself): its identity in a test folder a CLI host paired the client into first, so no
+pairing window opens. `removed` (H6) removes the device while its camera is live (-SillUnpairAfter); `app` (H12) is
+Sill.app's receiver without the test hook: Use iPhone and iPad cameras off, then on, then off (-SillSetAfter), its
+Sill Camera installation and feed TEST ONLY dry runs that ask macOS nothing and never touch CoreMediaIO; `dryrun` plays
+the dry run's approval and activation (-SillCameraDryRun). `pacing` (H11) puts Scripts/sillrelay.py --up-rate-mbps 2 in
+front of a test host and times keys sent while the camera runs, with sillclient.py's stand-in for the device's
+pacing and without it.
+
+    python3 Scripts/camera-check/live.py OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|removed|app|dryrun|pacing|all]
 
 stdout (H9) compares this build's CLI with main's, whose SillHost SILL_MAIN_HOST names (a release build of origin/main
 made beside this one); without it, `stdout` fails and `all` skips it, saying so."""
@@ -20,6 +29,8 @@ import difflib, os, re, signal, subprocess, sys, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOST = os.path.join(ROOT, ".build/release/SillHost")
+APP = os.path.join(ROOT, ".build/release/SillMenuBar")
+RELAY = os.path.join(ROOT, "Scripts/sillrelay.py")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 # SILL_CAMERA_FIXTURE: another fixture of the same format, such as the device's own encoder's (encoder.sh OUT.bin).
 FIXTURE = os.environ.get("SILL_CAMERA_FIXTURE") or os.path.join(ROOT, "Scripts/camera/fixture-640x360.bin")
@@ -34,14 +45,15 @@ def verdict(ok, what):
 
 class Host:
     """One synthetic --pairing host with a test Sill Camera: its stdout's lines and its port."""
-    def __init__(self, out, label, env=None, camera="count", binary=HOST):
+    def __init__(self, out, label, env=None, camera="count", binary=HOST, args=("--synthetic", "--pairing"), remote=None):
         self.out, self.label, self.lines = out, label, []
-        remote = os.path.join(out, label + ".remote"); os.makedirs(remote, exist_ok=True); os.chmod(remote, 0o700)
+        remote = remote or os.path.join(out, label + ".remote"); os.makedirs(remote, exist_ok=True); os.chmod(remote, 0o700)
+        self.remote = remote
         e = dict(os.environ); e.update(BASE_ENV); e.update({"SILL_TEST_REMOTE_DIR": remote, "SILL_TEST_ASK_FROM_THIS_MAC": "1"})
         if camera: e["SILL_TEST_CAMERA"] = camera
         e.update(env or {})
         self.start = time.time()
-        self.p = subprocess.Popen(["nice", "-n", "10", binary, "--synthetic", "--pairing"], stdout=subprocess.PIPE,
+        self.p = subprocess.Popen(["nice", "-n", "10", binary, *args], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, env=e, start_new_session=True, text=True, bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
         self.port = None
@@ -68,6 +80,11 @@ class Host:
         rx = re.compile(pattern)
         return [l for _, l in self.lines if rx.search(l)]
 
+    def times(self, pattern):
+        """When each line matching `pattern` arrived (this Mac's wall clock, as the reader read it)."""
+        rx = re.compile(pattern)
+        return [t for t, l in self.lines if rx.search(l)]
+
     def count(self, key):
         """A Stats key summed over every [1s] line."""
         return sum(int(m) for _, l in self.lines for m in re.findall(rf"(?:^|\s){re.escape(key)} (\d+)", l) if l.startswith("[1s]"))
@@ -89,8 +106,8 @@ class Host:
         return None
 
 
-def client(host, label, seconds, *args, identity=None, background=False):
-    cmd = [sys.executable, "-I", CLIENT, host.port, str(seconds), "none", *args, *([f"--identity={identity}"] if identity else [])]
+def client(host, label, seconds, *args, identity=None, background=False, port=None, source="none"):
+    cmd = [sys.executable, "-I", CLIENT, port or host.port, str(seconds), source, *args, *([f"--identity={identity}"] if identity else [])]
     log = os.path.join(host.out, f"{host.label}-{label}.client.log")
     if background:
         f = open(log, "w")
@@ -358,14 +375,154 @@ def case_stdout(out):
     verdict(not diff and len(texts[0]) >= 8, f"the same {len(texts[0])} lines, numbers, codes, keys and ports aside: {diff[:6]}")
 
 
+def paired_for_app(out, label):
+    """A client paired with a test Mac identity kept in a folder (SILL_TEST_REMOTE_DIR), by a CLI host that is then
+    stopped: the bare app started on the same folder is that Mac, the client already on its trust list, and no pairing
+    window opens. Returns (the folder, the client's identity), or (None, None)."""
+    h = Host(out, label + "-pairing", camera=None)
+    try:
+        ident = paired(h, out, "ipad")
+    finally:
+        h.stop()
+    return (h.remote, ident) if ident else (None, None)
+
+
+def bare_app(out, label, remote, args, env=None, camera="count"):
+    """The bare SillMenuBar binary, --synthetic, on `remote`'s identity: Sill.app's own code paths (its receiver, Sill
+    Camera's dry runs), never Sill.app. Its defaults domain is SillMenuBar; every switch here is a launch argument."""
+    return Host(out, label, camera=camera, binary=APP, remote=remote, env=env,
+                args=("--synthetic", "-SillLogFile", os.path.join(out, label + ".app.log"), *args))
+
+
+def case_removed(out):
+    print("== removed (H6): Sill.app's receiver (the bare app); the device is removed while its camera is live: its frames go, the camera is free within 0.25 s", flush=True)
+    remote, ident = paired_for_app(out, "removed")
+    if not ident: return
+    h = bare_app(out, "removed", remote, ["-deviceCamera", "1", "-SillUnpairAfter", "8", "-SillQuitAfter", "16"],
+                 env={"SILL_TEST_CAMERA_DEMAND": "1 on 640x360@30 FaceTime", "SILL_TEST_CAMERA_LOG": "1"})
+    try:
+        text, code = client(h, "session", 11, "--tls", "--stats", "--device=ipad", f"--camera={FIXTURE}", identity=ident)
+        st = [x[0] for x in states(text)]
+        verdict("inUse" in st, f"the device's camera in use before the removal: {st}")
+        removal = h.times(r"^SillUnpairAfter .* s: removing 1 paired device$")
+        verdict(len(removal) == 1, f"the bare app removed the paired device once: {h.all(r'^SillUnpairAfter')}")
+        if len(removal) != 1: return
+        t = removal[0]
+        freed = h.times(rf"^Camera: {named('ipad')} was removed; Sill Camera is free\.$")
+        verdict(bool(freed) and freed[0] - t <= 0.25, f"the camera freed {(freed[0] - t) if freed else None} s after the removal (0.25 s at most)")
+        shows = [x for x in h.times(r"^Test camera: Sill Camera shows Turn on Share Camera…\.$") if x >= t]
+        verdict(bool(shows) and shows[0] - t <= 0.25, f"Sill Camera shows nobody's camera {(shows[0] - t) if shows else None} s after it")
+        before = [x for x in h.times(r"^Test camera: frame \d+ ") if x < t]
+        after = [x for x in h.times(r"^Test camera: frame \d+ ") if x > t + 0.25]
+        verdict(len(before) >= 60 and not after, f"its frames decoded before ({len(before)}), none after ({len(after)})")
+        verdict(re.search(r"goodbye.*removed|removed.*goodbye|kind 22.*removed|reason=removed|\bremoved\b", text) is not None or "EOF from host" in text,
+                "the device's session ended with the removal")
+        verdict(bool(h.all(r"^TEST: this host takes devices' cameras \(SILL_TEST_CAMERA\)")), "the bare app took the test hook (a test host)")
+    finally:
+        h.stop()
+
+
+def case_app(out):
+    print("== app (H12): Sill.app's receiver without the test hook: off says camera 0 and asks nothing; on asks (a dry run) and says not ready; off again", flush=True)
+    remote, ident = paired_for_app(out, "app")
+    if not ident: return
+    h = bare_app(out, "app", remote, ["-SillSetAfter", "5 deviceCamera=1; 10 deviceCamera=0", "-SillQuitAfter", "16"], camera=None)
+    try:
+        text, code = client(h, "session", 13, "--tls", "--stats", "--device=ipad", f"--camera={FIXTURE}", identity=ident)
+        lists = re.findall(r"windowList: [^\n]*", text)
+        cams = sorted({c for l in lists for c in re.findall(r" camera=(\d+)", l)})
+        verdict(cams == ["0"] and all(" camera=" in l for l in lists if " locked=1" not in l),
+                f"every window list says camera=0 (Sill.app with a receiver, its Sill Camera never ready here): {cams}")
+        st = [x[0] for x in states(text)]
+        verdict(st[:3] == ["off", "notReady", "off"], f"kind 16's camera: off, notReady while on, off again: {st}")
+        t_on = h.times(r"^SillSetAfter 5 s: deviceCamera=1$")
+        first_ext = h.times(r"^Camera extension")
+        verdict(bool(t_on) and bool(first_ext) and first_ext[0] >= t_on[0], f"nothing asked of Sill Camera's installation before the switch went on")
+        verdict(bool(h.all(r"^Camera extension \(dry run\): would ask macOS to activate Sill Camera \(me\.saffer\.sill\.mac\.camera\)\.$"))
+                and bool(h.all(r"^Camera extension: activation requested \(dry run: nothing asked of macOS\)\.$"))
+                and bool(h.all(r"^Camera extension: failed: this build of Sill has no Sill Camera inside\.$")),
+                "on: the dry run says what it would ask, and answers as for a build with no Sill Camera inside")
+        looks = h.all(r"^Camera \(dry run\): Sill would look for Sill Camera's device E839B629-E61D-49BE-A432-1A5D122456D0")
+        verdict(len(looks) == 1, f"on: the feed's dry run says once what it would look for ({len(looks)})")
+        verdict(bool(h.all(r"^Camera extension: Use iPhone and iPad cameras off; Sill Camera is not installed\.$"))
+                and len(h.all(r"^Camera: Use iPhone and iPad cameras (on|off)\.$")) == 2, "off again: said, the receiver's switch followed")
+        verdict(not h.all(r"Sill no longer feeds|feeding Sill Camera|Sill Camera went away"), "the feed never started (no CoreMediaIO here)")
+        c = camera_line(text)
+        verdict(c is not None and c[0] == 0, f"no frame sent: nothing asked for one ({c})")
+    finally:
+        h.stop()
+
+
+def case_dryrun(out):
+    print("== dryrun: the bare app's TEST ONLY dry run plays macOS's approval and activation (-SillCameraDryRun); its feed still never starts", flush=True)
+    remote, ident = paired_for_app(out, "dryrun")
+    if not ident: return
+    h = bare_app(out, "dryrun", remote, ["-deviceCamera", "1", "-SillCameraDryRun", "0.5 approval; 2 complete", "-SillQuitAfter", "8"], camera=None)
+    try:
+        text, code = client(h, "session", 6, "--tls", "--device=ipad", f"--camera={FIXTURE}", "--expect=cameraState=notReady,camera=0", identity=ident)
+        verdict(code == 0 and "EXPECT ok" in text, "the device: not ready, the list camera=0 (the bare app's feed never reaches Sill Camera)")
+        verdict(bool(h.all(r"^Camera extension: waits for approval in System Settings\.$")) and bool(h.all(r"^Camera extension: activated \(build \S+\)\.$")),
+                "the dry run's approval, then its activation, said as the real ones are")
+    finally:
+        h.stop()
+        # The activation is remembered in the bare binary's own defaults domain: forgotten again.
+        subprocess.run(["defaults", "delete", "SillMenuBar", "cameraExtensionBuild"], capture_output=True)
+
+
+def case_pacing(out):
+    print("== pacing (H11): keys behind the camera on a 2 Mbit/s uplink, with the device's pacing (a stand-in) and without it", flush=True)
+    path = os.path.join(out, "pacing.path"); open(path, "w").write("0 756 474\n")
+    h = Host(out, "pacing", env={"SILL_TEST_CAMERA_DEMAND": "1 on 1280x720@30 FaceTime", "SILL_TEST_POINTER_PATH": path, "SILL_TEST_INPUT_LOG": "1"})
+    relay = None
+    try:
+        ident = paired(h, out, "ipad")
+        if not ident: return
+        relay = subprocess.Popen([sys.executable, "-I", RELAY, "--listen", "0", "--to", f"127.0.0.1:{h.port}", "--up-rate-mbps", "2"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True)
+        first = relay.stdout.readline()
+        m = re.search(r"listening on 127\.0\.0\.1:(\d+)", first)
+        if not m: verdict(False, f"the relay did not listen: {first!r}"); return
+        rport = m.group(1)
+        keys = [f"--key=4@{3 + i * 0.5:g}" for i in range(18)]
+        results = {}
+        for label, extra in (("paced", ["--camera-pace"]), ("unpaced", [])):
+            n0 = len(h.lines)
+            text, code = client(h, label, 13, "--tls", "--device=ipad", f"--camera={FIXTURE}", "--camera-pad=12000", "--fps=15", "--wall",
+                                *extra, *keys, identity=ident, port=rport, source="desktop")
+            time.sleep(1)
+            due = [float(x) for x in re.findall(r"sent key 4 \(down, up\) at [\d.]+s due ([\d.]+) sent [\d.]+", text)]
+            arrived = [t for t, l in h.lines[n0:] if re.match(r"^Test input: key 0 down ", l)]
+            waits = [a - d for d, a in zip(due, arrived)]
+            c = re.search(r"skipped (\d+) for the budget", text)
+            results[label] = (waits, len(due), len(arrived), int(c.group(1)) if c else None, camera_line(text))
+        pw, pdue, parr, pskip, pcam = results["paced"]
+        uw, udue, uarr, _, ucam = results["unpaced"]
+        verdict(pdue == 18 and parr >= 18, f"paced: every key sent and arrived ({pdue} sent, {parr} arrived)")
+        verdict(pw and max(pw) <= 0.3, f"paced: each key within the budget's wait, 0.3 s at most: max {max(pw) if pw else None:.3f} s, median {sorted(pw)[len(pw) // 2] if pw else None:.3f} s")
+        verdict(pskip is not None and pskip > 0 and pcam is not None and pcam[0] > 100,
+                f"paced: the stand-in skipped pictures over the budget ({pskip}) and still sent {pcam and pcam[0]} frames")
+        umed = sorted(uw)[len(uw) // 2] if uw else 0
+        verdict(udue == 18 and umed >= 0.4 and (not pw or umed >= 2 * max(pw)),
+                f"unpaced: the same camera queues keys behind it (median {umed:.3f} s), so the pacing is what keeps them prompt")
+        h.next_tick()
+        verdict(h.count("cam.decoded") > 100, f"the padded frames decoded (filler NAL units skipped): {h.count('cam.decoded')}")
+    finally:
+        if relay is not None and relay.poll() is None:
+            os.killpg(relay.pid, signal.SIGTERM)
+            try: relay.wait(3)
+            except subprocess.TimeoutExpired: os.killpg(relay.pid, signal.SIGKILL)
+        h.stop()
+
+
 CASES = {"live": case_live, "two": case_two, "lock": case_lock, "unpaired": case_unpaired, "hostile": case_hostile, "nohook": case_nohook,
-         "corrupt": case_corrupt, "move": case_move, "stdout": case_stdout}
+         "corrupt": case_corrupt, "move": case_move, "stdout": case_stdout, "removed": case_removed, "app": case_app,
+         "dryrun": case_dryrun, "pacing": case_pacing}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: print(__doc__); sys.exit(2)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
-    if not os.path.exists(HOST): print(f"no {HOST}: swift build -c release first (through heavy.sh)"); sys.exit(2)
+    if not os.path.exists(HOST) or not os.path.exists(APP): print(f"no {HOST} or {APP}: swift build -c release first (through heavy.sh)"); sys.exit(2)
     for name in (CASES if which == "all" else [which]):
         CASES[name](out)
     bad = [w for ok, w in verdicts if not ok]
