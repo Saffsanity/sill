@@ -67,24 +67,24 @@ enum PairingProblem: Equatable {
 
     var text: String {
         switch self {
-        case .address: return "That doesn’t look like an address. Try 100.101.102.103 or mac.example.net."
-        case .zone: return "Remove the part after %: it only works on this network."
-        case .codeLength: return "A code has 12 digits."
-        case .codeTypo: return "That code has a typo. Check it against your Mac."
+        case .address: return String(localized: "That doesn’t look like an address. Try 100.101.102.103 or mac.example.net.")
+        case .zone: return String(localized: "Remove the part after %: it only works on this network.")
+        case .codeLength: return String(localized: "A code has 12 digits.")
+        case .codeTypo: return String(localized: "That code has a typo. Check it against your Mac.")
         case .wrongCode(let left):
-            // A no-break space keeps the count with its word when the line wraps ("4 / tries left").
-            return "That code didn’t work. Check the code on your Mac. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
-        case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first."
+            return String(localized: "That code didn’t work. Check the code on your Mac. \(left) tries left.",
+                          comment: "Wrong pairing code; pluralize the number of attempts remaining.")
+        case .notPairing(let mac): return String(localized: "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first.")
         case .stopped(let mac):
-            return "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code."
-        case .expired: return "This code expired. Choose Pair iPhone or iPad… on your Mac for a new one."
+            return String(localized: "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code.")
+        case .expired: return String(localized: "This code expired. Choose Pair iPhone or iPad… on your Mac for a new one.")
         case .proofFailed(let host):
-            return "Pairing didn’t finish: the Mac at \(host) couldn’t show it knows the code. Pair from the same network as your Mac, or scan the code instead."
-        case .nothingAnswered(let host): return "Nothing answered at \(host). Check the address, and that Sill is open on your Mac."
-        case .notSill(let host): return "Something answered at \(host), but it isn’t Sill, or its Sill is too old to pair."
-        case .localNetwork(let host): return "To reach \(host), allow Local Network for Sill in Settings."
-        case .notALink: return "That’s not a Sill code."
-        case .noKey(let reason): return "This \(StreamClient.deviceWord) couldn’t make its key (\(reason))."
+            return String(localized: "Pairing didn’t finish: the Mac at \(host) couldn’t show it knows the code. Pair from the same network as your Mac, or scan the code instead.")
+        case .nothingAnswered(let host): return String(localized: "Nothing answered at \(host). Check the address, and that Sill is open on your Mac.")
+        case .notSill(let host): return String(localized: "Something answered at \(host), but it isn’t Sill, or its Sill is too old to pair.")
+        case .localNetwork(let host): return String(localized: "To reach \(host), allow Local Network for Sill in Settings.")
+        case .notALink: return String(localized: "That’s not a Sill code.")
+        case .noKey(let reason): return String(localized: "This \(StreamClient.deviceWord) couldn’t make its key (\(reason)).")
         case .homeStopped(let mac): return DiscoveryPolicy.HomeCopy.stopped(mac: mac)
         case .homeExpired(let mac): return DiscoveryPolicy.HomeCopy.expired(mac: mac)
         case .homeClosed(let mac): return DiscoveryPolicy.HomeCopy.closed(mac: mac)
@@ -147,7 +147,7 @@ extension StreamClient {
         setGroup(nil, for: macID)
         removePreview(for: macID)
         persistSavedMacs()
-        status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
+        status = String(localized: "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac.")
     }
 
     // MARK: Connection groups and preview pictures (ConnectionList)
@@ -358,7 +358,7 @@ extension StreamClient {
         guard let mac = savedMac(macID), let pin = mac.fingerprintData else { return }
         let name = displayName(macID)
         guard let identity = DeviceIdentity.existing() else {
-            status = "This \(Self.deviceWord) has no key for \(name). Pair it again."
+            status = String(localized: "This \(Self.deviceWord) has no key for \(name). Pair it again.")
             return
         }
         cancelRemoteDial()
@@ -367,7 +367,7 @@ extension StreamClient {
             old.cancel()
         }
         hostName = name
-        status = why == .automatic ? "Reconnecting to \(name) remotely…" : "Connecting to \(name) remotely…"
+        status = why == .automatic ? String(localized: "Reconnecting to \(name) remotely…") : String(localized: "Connecting to \(name) remotely…")
         // The Mac's own list and the typed addresses first, then the VPN addresses an earlier list of
         // its had (its VPN was off while this device connected at home: SavedMac.rememberedAddresses).
         let candidates = RemoteDialPolicy.order(mac.allAddresses, remembered: SavedMacs.remembered(mac, now: Date().timeIntervalSince1970),
@@ -406,7 +406,7 @@ extension StreamClient {
                     if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
                     macID = newer.macID
                     self.hostName = self.displayName(macID)
-                    self.status = why == .automatic ? "Reconnecting to \(self.hostName) remotely…" : "Connecting to \(self.hostName) remotely…"
+                    self.status = why == .automatic ? String(localized: "Reconnecting to \(self.hostName) remotely…") : String(localized: "Connecting to \(self.hostName) remotely…")
                 } else if winner.fingerprint != pin {
                     winner.connection.cancel()           // cannot happen: the verify block took no other key
                     self.remoteDialFailed(macID: macID, why: why, failure: .wrongMac, candidate: winner.candidate)
@@ -482,7 +482,7 @@ extension StreamClient {
         remoteRoute = r
         askedNearby = false
         connectedAt = Date()
-        status = "Connected to \(hostName)"
+        status = String(localized: "Connected to \(hostName)")
         if case .paired = pairing { pairing = .idle }
         resetLiveness()
         if let id = s.macID, let i = savedMacs.firstIndex(where: { $0.macID == id }) {
@@ -518,7 +518,7 @@ extension StreamClient {
             default:
                 r.remoteFailures += 1
                 r.nextRemoteAt = ProcessInfo.processInfo.systemUptime + DiscoveryPolicy.remoteRetryDelay(afterFailures: r.remoteFailures)
-                status = "Reconnecting to \(name) remotely…"
+                status = String(localized: "Reconnecting to \(name) remotely…")
             }
             reconnect = r
             reconnectIfListed()
@@ -526,7 +526,7 @@ extension StreamClient {
             afterPairingWatch?.cancel()
             afterPairingWatch = nil
             pairing = .idle
-            status = failure == .remoteOff ? words : "\(name) is saved. Tap it to connect."
+            status = failure == .remoteOff ? words : String(localized: "\(name) is saved. Tap it to connect.")
         case .tap, .connectRemotely, .launchArgument:
             status = words
         }
@@ -634,7 +634,7 @@ extension StreamClient {
     private func endWithNotice(_ goodbye: Goodbye, session s: Session?, saved: SavedMac?, name: String) {
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
         tearDown(status: outcome.text, restartSearch: connected)
-        notice = Notice(text: outcome.text, storeLink: outcome.storeLink)
+        notice = Notice(storeLink: outcome.storeLink)
         if s?.why == .afterPairing {
             afterPairingWatch?.cancel()
             afterPairingWatch = nil
@@ -804,7 +804,7 @@ extension StreamClient {
             if now >= r.lostAt + DiscoveryPolicy.redialWindow {
                 r.remoteAllowed = false
                 reconnect = r
-                status = "Stopped trying to reach \(r.name). Tap it to try again."
+                status = String(localized: "Stopped trying to reach \(r.name). Tap it to try again.")
             } else {
                 let due = DiscoveryPolicy.remoteDialDue(listed: network != nil || direct != nil, lostAt: r.lostAt,
                                                         networkLeftAt: savedSightings.leftAt[id], rememberedDirect: r.rememberedDirect,
@@ -1018,7 +1018,7 @@ extension StreamClient {
         }
         pairingDial?.cancel()
         let shown = macName ?? candidates.first?.display ?? "your Mac"
-        pairing = .working("Pairing with \(shown)…")
+        pairing = .working(String(localized: "Pairing with \(shown)…"))
         #if DEBUG
         print("remote: pairing with \(shown) (\(method)) at \(candidates.map(\.key))")
         #endif
@@ -1196,7 +1196,7 @@ extension StreamClient {
             self.cancelRemoteDial()
             if let c = self.connection { self.connection = nil; c.cancel(); self.tearDown(status: self.status, restartSearch: false) }
             self.pairing = .idle
-            self.status = "\(self.displayName(macID)) is saved. Tap it to connect."
+            self.status = String(localized: "\(self.displayName(macID)) is saved. Tap it to connect.")
             self.discoveryChanged()
         }
         afterPairingWatch?.cancel()

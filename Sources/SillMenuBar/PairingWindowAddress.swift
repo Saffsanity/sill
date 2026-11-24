@@ -35,7 +35,7 @@ enum PairingWindowAddress {
         var secondary: String?
     }
 
-    static let placeholder = "this Mac’s address"
+    static let placeholder = String(localized: "this Mac’s address")
 
     /// `addresses` and `lan` are the remote status's (dial order: VPN names, VPN IPv4, VPN IPv6,
     /// this network's IPv4, then the internet's); `port` is the remote door's and `defaultPort` the

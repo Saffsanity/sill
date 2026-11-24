@@ -30,7 +30,7 @@ struct PairingOverlay: View {
         _typed = State(initialValue: typed || (scannerMode == .live && !CodeScanner.isSupported))
     }
 
-    private var mac: String { client.macName.isEmpty ? "your Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? String(localized: "your Mac") : client.macName }
     private var working: Bool { if case .working = client.pairing { return true }; return false }
 
     var body: some View {
@@ -83,7 +83,7 @@ struct PairingOverlay: View {
         // The Mac's answer to that ask, spoken: VoiceOver's focus is on the title, and a line that
         // says no code is showing, or why, must be heard.
         .onChange(of: client.overlayAskLine) { _, line in
-            if let line, line != DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac) { AccessibilityNotification.Announcement(line).post() }
+            if let line, !client.overlayAskIsPending { AccessibilityNotification.Announcement(line).post() }
         }
         .task(id: client.pairing) {
             // Paired: says so, then fades after a second; the stream never stopped.
@@ -157,7 +157,7 @@ struct PairingOverlay: View {
     private var title: some View {
         VStack(alignment: .leading, spacing: 4) {
             // The typed path is all a device without the scanner gets: it says what to do there.
-            Text(typed ? "Enter the Code from \(mac)" : "Scan the Code on \(mac)")
+            Text(typed ? String(localized: "Enter the Code from \(mac)") : String(localized: "Scan the Code on \(mac)"))
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
@@ -173,7 +173,7 @@ struct PairingOverlay: View {
 
     private var codeField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
+            PairingField(prompt: "0000 0000 0000", label: String(localized: "Code"), text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($codeFocused)
                 .onSubmit(pairTyped)
                 .onChange(of: code) { _, typed in
@@ -216,7 +216,7 @@ struct PairingOverlay: View {
             Label("Paired with \(name).", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.text)
-                .onAppear { AccessibilityNotification.Announcement("Paired with \(name).").post() }
+                .onAppear { AccessibilityNotification.Announcement(String(localized: "Paired with \(name).")).post() }
         case .failed(let p):
             ProblemLine(text: p.text)
         case .idle:
@@ -227,7 +227,7 @@ struct PairingOverlay: View {
     private var links: some View {
         HStack(spacing: 18) {
             if CodeScanner.isSupported || scannerMode != .live {
-                Button(typed ? "Scan Code Instead" : "Enter Code Instead") {
+                Button(typed ? String(localized: "Scan Code Instead") : String(localized: "Enter Code Instead")) {
                     client.pairing = .idle
                     codeFocused = false
                     typed.toggle()
