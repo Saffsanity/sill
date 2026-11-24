@@ -40,6 +40,8 @@
 	<string>Sill makes this Mac visible to your iPhone and iPad on the same network so they can stream its windows.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Sill lists the apps on your external drives in the Apps list on your iPhone and iPad.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

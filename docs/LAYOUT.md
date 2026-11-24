@@ -134,7 +134,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   lines, and written at its path again once another Sill moved it aside or it was deleted;
   `Tests/checks/host-log`),
   `WindowCatalog` (polls windows and thumbnails only while a client is
-  connected; icons; installed apps in the background; when its last look
+  connected; icons; installed apps in the background, in two looks on a queue
+  of their own, this Mac's own disk at once and its other volumes too once a
+  device connects (`lookAtVolumesIfDue`; never on a test host), again when they
+  changed (at a device's arrival, and in Sill.app 2 s after a mount while one
+  is connected), each app's path kept for a launch Launch Services cannot
+  place, #370; when its last look
   landed, `lookAge`; the Desktop's stops from that look, `desktopCandidates`,
   the one shown, `display` and `desktopDisplayID`, the choice a device stepped
   to and its span, `mainOnly` while locked, `mainDisplay` for the sound;
@@ -155,8 +160,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   pure, `Tests/checks/catalog-windows`), `InstalledApps`
   (where those are found: each applications folder and the folders inside it,
   at any depth (#135's), never inside a bundle, another package or a
-  framework, and never through a link inside a scanned folder (one given that
-  is itself a link is followed), #76; pure, `Tests/checks/installed-apps`),
+  framework, and never walking into a link or a Finder alias inside a scanned
+  folder (one given that is itself a link is followed), #76; a link or an alias
+  that points at an app lists that app, where it points read from it before
+  anything is resolved and an alias resolved without UI or mounting; the Mac's
+  other volumes, #370: the Applications folder at the top of each volume of
+  one's own, mounted directly in /Volumes, no dot name, local, writable, shown
+  in Finder, no APFS role, no macOS of its own and the folder no link, from the
+  kernel's mount table and the I/O Registry; `Reach`, which volumes a look
+  reads, and the first look none of the home folder but its Applications
+  folder (Downloads, iCloud Drive: macOS may ask); `secondLookDue`, when the look with the volumes runs: while a device
+  is connected, so macOS's question about a removable volume never comes at
+  launch, and only when they changed; pure, `Tests/checks/installed-apps`),
   `WindowCapture` (ScreenCaptureKit; its line names the scale it captures at),
   `CaptureScale` (the pixel scale a capture runs at: the Resolution knob held to
   the display's own, ScreenCaptureKit's `pointPixelScale` for the filter, so a
