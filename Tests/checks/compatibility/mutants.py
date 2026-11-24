@@ -27,7 +27,7 @@ MUTANTS = [
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
     ("kind 28 as 250", "StreamMessage.swift", "case gesture = 28", "case gesture = 250"),
     ("kind 47 as 48 (the Desktop's next stop)", "StreamMessage.swift", "case nextDisplay = 47", "case nextDisplay = 48"),
-    ("kind 47 as 46 (an open pull request's)", "StreamMessage.swift", "case nextDisplay = 47", "case nextDisplay = 46"),
+    ("kind 47 as 251 (never a kind)", "StreamMessage.swift", "case nextDisplay = 47", "case nextDisplay = 251"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
     # The Mac's sound (docs/audio-plan.md §3.4): the hello's codecs, the host's pick, Send Audio, the note, the stats.
     ("the hello's codecs never kept", "Compatibility.swift", "        self.audio = audio\n", "        self.audio = nil\n"),
@@ -45,6 +45,12 @@ MUTANTS = [
     ("sessionPaired false by default", "HostSettings.swift", "                sessionPaired: Bool? = nil) {", "                sessionPaired: Bool? = false) {"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    # The camera (kind 46, docs/camera-plan.md §5): its number, its generation, and how this build reads kind
+    # 16's camera; the rest of its wire is camera-wire's.
+    ("kind 46 as 252", "StreamMessage.swift", "case camera = 46", "case camera = 252"),
+    ("the camera's generation 2", "Camera.swift", "    public static let generation = 1\n", "    public static let generation = 2\n"),
+    ("a later camera state read as idle", "HostSettings.swift", "Self.states.contains(state) ? state : Self.off }", "Self.states.contains(state) ? state : Self.idle }"),
+    ("a frame's capture time lost", "Camera.swift", "StreamMessage(kind: .camera, timestamp: captured,", "StreamMessage(kind: .camera, timestamp: 0,"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

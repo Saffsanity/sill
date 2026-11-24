@@ -11,7 +11,8 @@
 //   D3 a window in the background, not streaming or never used changes nothing, wherever it is listed;
 //   D4 the list's order changes nothing.
 // Then what counts as the person's use (`lastUse`, `sessionStart`: the verification's N1, 2026-10-29):
-// the latest of the four, a session's start only as the person started it and carried across the
+// the latest of the four (five since Share Camera, 2026-11-18: the camera's last second, a call on the Mac
+// held awake), a session's start only as the person started it and carried across the
 // automatic reconnect's; the N1 cases through a model of DeviceIdleTimer's stamps (a link that keeps
 // dropping and coming back by itself, a Mac that keeps stopping its capture and the device asking
 // again, the device's own pointer re-centre, each held for good by the rule before); then 20,000
@@ -108,6 +109,26 @@ eq(P.lastUse(Uses(input: 5, control: 9, session: 3, front: 1)), 9, "the latest o
 eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 1)), 9, "the latest of the four: input")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 9, front: 3)), 9, "the latest of the four: a session's start")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 9)), 9, "the latest of the four: the front")
+// Share Camera (docs/camera-plan.md §6.1 point 10, Q13): the last second the camera ran for an app on the Mac.
+eq(P.lastUse(Uses(input: nil, control: nil, session: nil, front: nil, camera: 4)), 4, "the camera's last second alone")
+eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 2, camera: 9)), 9, "the latest of the five: the camera's last second")
+eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 2, camera: 4)), 9, "a camera that stopped earlier leaves the latest")
+do {
+    // A 15-minute call on the Mac with the device's camera, nobody touching the device (N17): its last second
+    // stamped each second it runs, so the hold never ends while it runs, and ends 10 minutes after it stops.
+    var uses = Uses(input: nil, control: nil, session: 0, front: 0)
+    var heldEvery = true
+    for t in stride(from: 0.0, through: 900, by: 1) {
+        uses.camera = t
+        if P.holdEnds([Win(foregroundActive: true, streaming: true, lastUsedAt: P.lastUse(uses))], now: t) == nil { heldEvery = false }
+    }
+    check("a 15-minute call with the camera, nobody touching the device: held every second", heldEvery)
+    let used = P.lastUse(uses)
+    eq(P.holdEnds([Win(foregroundActive: true, streaming: true, lastUsedAt: used)], now: 1_499), 1_500, "the call over at 15 min: held 10 minutes more")
+    eq(P.holdEnds([Win(foregroundActive: true, streaming: true, lastUsedAt: used)], now: 1_500), nil, "and then the device's own")
+    eq(P.holdEnds([Win(foregroundActive: false, streaming: true, lastUsedAt: used)], now: 950), nil,
+       "the camera's use holds nothing with Sill in the background (where the camera never runs)")
+}
 eq(P.sessionStart(previous: nil, reconnected: false, now: 50), 50,
    "a session the person started (a tap, Connect Remotely, a pairing): its start counts")
 eq(P.sessionStart(previous: 10, reconnected: false, now: 50), 50, "a new one the person started counts from its own start")

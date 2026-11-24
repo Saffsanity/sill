@@ -18,6 +18,15 @@ final class AppModel {
     /// Update Now: the one-click update of the release the check offers (docs/one-click-update-plan.md).
     /// Not available without an update key compiled in (UpdateManifest.releaseKeys).
     let updater: AppUpdater
+    /// Sill Camera (docs/camera-plan.md, step 8): its installation, and Sill's feed into it, which the host's camera
+    /// receiver hands the frames of the device that shares its camera. Neither touches macOS until the host is up and
+    /// Use iPhone and iPad cameras is on; in the bare binary both are TEST ONLY dry runs.
+    let camera: CameraExtensionManager
+    let cameraSink: CameraSink
+    /// The feed's status, for Settings › Streaming (CameraSink.onStatus, brought to the main actor).
+    private(set) var cameraSinkStatus: CameraExtensionPolicy.Sink = .stopped
+    /// The switch as last handed to Sill Camera's installation and feed (nil before the host is up).
+    @ObservationIgnored private var cameraSwitchApplied: Bool?
     /// `--synthetic`: the Desktop streams a test pattern and the host stays off Bonjour, exactly
     /// as with the CLI's flag. No onboarding in this mode.
     let synthetic = CommandLine.arguments.contains("--synthetic")
@@ -79,6 +88,12 @@ final class AppModel {
         let settings = HostSettings()
         self.settings = settings
         permissions = PermissionsModel(settings: settings)
+        // Made here, asking nothing: the previews render from this model and exit before `start`.
+        cameraSink = CameraSink(dryRun: !Self.bundled)
+        let cameraSystem: CameraExtensionSystem = Self.bundled
+            ? SystemCameraExtension() : DryRunCameraExtension(script: DebugHooks.cameraDryRunScript())
+        camera = CameraExtensionManager(facts: CameraExtensionManager.facts(real: Self.bundled, defaults: .standard),
+                                        system: cameraSystem, defaults: .standard)
         let updates = UpdateChecker(configuration: DebugHooks.updateConfiguration(testPattern: CommandLine.arguments.contains("--synthetic")),
                                     automatic: settings.updateCheck)
         self.updates = updates
@@ -148,13 +163,11 @@ final class AppModel {
                 // "dev" does not parse): later devices can tell which Mac to update.
                 let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote,
                                               homePairing: true, testHooks: !Self.bundled,
-                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil)
+                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil,
+                                              cameraOutput: cameraSink)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
-                // One path from the controls to the host, synchronous: the host's target equals
-                // settings.config at every main-actor turn, so a device's change and a menu click
-                // never undo each other.
-                settings.onChange = { [settings, weak c] in c?.setTarget(settings.config) }
+                wireSettings(to: c)
                 // A device's change goes through HostSettings like a menu click: saved (only the keys
                 // it changed) and shown live in Settings and the menu. Laid over settings.config, never
                 // over the host's value: over the away quality for a device away from home, which
@@ -169,6 +182,9 @@ final class AppModel {
                 remote.setAddressName(settings.remoteAddressName)
                 settings.onAddressNameChange = { [settings, weak remote] in remote?.setAddressName(settings.remoteAddressName) }
                 await c.start(preselect: nil, promptForPermissions: false)
+                // Sill Camera, once the host is up: with the switch on, the launch's activation request (an
+                // active Sill Camera answers at once) and Sill's feed; with it off, nothing.
+                applyCameraSwitch()
                 Stats.shared.startPrinting()
                 print("Sill \(Self.version) (\(Self.build)) running from \(Bundle.main.bundlePath); log file \(HostLog.shared.fileURL?.path ?? "none")")
                 // Off by default, and worth seeing in a log someone sends (issue #108).
@@ -186,6 +202,49 @@ final class AppModel {
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
         }
+    }
+
+    /// One path from the controls to the host, synchronous: the host's target equals settings.config at every
+    /// main-actor turn, so a device's change and a menu click never undo each other. Sill Camera's installation and
+    /// feed follow the switch after it, and the feed's status comes to the main actor for Settings › Streaming.
+    private func wireSettings(to c: StreamCoordinator) {
+        settings.onChange = { [settings, weak c, weak self] in
+            c?.setTarget(settings.config)
+            self?.applyCameraSwitch()
+        }
+        cameraSink.onStatus = { [weak self] status in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.cameraSinkStatus = status } }
+        }
+    }
+
+    // MARK: Sill Camera
+
+    /// Use iPhone and iPad cameras to Sill Camera's installation and Sill's feed into it, once the host is up and at
+    /// each change (the host's receiver follows the switch itself, through setTarget). Off asks macOS nothing.
+    private func applyCameraSwitch() {
+        guard coordinator != nil else { return }
+        let on = settings.config.deviceCamera
+        guard on != cameraSwitchApplied else { return }
+        cameraSwitchApplied = on
+        cameraSink.setEnabled(on)
+        camera.switchChanged(on)
+    }
+
+    /// Remove Sill Camera… (Settings › Streaming): the switch goes off first, so nothing feeds Sill Camera while macOS
+    /// removes it (and may ask for an administrator).
+    func removeSillCamera() {
+        settings.config.deviceCamera = false
+        camera.remove()
+    }
+
+    /// What Settings › Streaming's camera section says: the switch, Sill Camera's installation and feed, and the app
+    /// using it with a device's camera (the status card's camera field).
+    var cameraState: CameraExtensionState {
+        let device = coordinator?.status.snapshot.devices.first { $0.camera != nil }
+        let use = device.map { CameraExtensionPolicy.Use(app: $0.camera, device: StatusText.shortName($0.name ?? $0.endpoint)) }
+        // Turned on before the host is up (or between two of its turns): starting, as it will be.
+        if settings.config.deviceCamera, !camera.model.switchOn { return .starting }
+        return CameraExtensionPolicy.shown(camera.model, sink: cameraSinkStatus, use: use)
     }
 
     // MARK: Updates

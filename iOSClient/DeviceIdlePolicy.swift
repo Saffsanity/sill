@@ -4,7 +4,8 @@ import Foundation
 /// towards issue #134): while one of Sill's windows the person can see (its scene foreground active)
 /// streams (its session connected, a source streaming), until `idleLimit` after the person last used
 /// that window's session (`lastUse`): input the person sent to the Mac, one of the stream screen's
-/// controls, the start of a session the person started, or the moment the window came to the front.
+/// controls, the start of a session the person started, the moment the window came to the front, or
+/// the last second its camera ran for an app on the Mac (Share Camera: a call keeps it awake).
 /// So a picture being read or watched does not lock under the person, and a device left alone still
 /// locks by its own Auto-Lock setting, `idleLimit` later than it would have, and its session then
 /// ends as before: no device left on a desk keeps the Mac streaming all night. What the device does
@@ -43,11 +44,16 @@ enum DeviceIdlePolicy {
         var session: Double?
         /// The moment the window's scene came to the front (foreground active).
         var front: Double?
+        /// The last second the device's camera ran for an app on the Mac (StreamClient+Camera; Share Camera,
+        /// docs/camera-plan.md §6.1 point 10, Q13): a call on the Mac keeps the device awake as a call keeps a
+        /// phone awake, while Sill is in front (the camera never runs otherwise); once it stops, `idleLimit`
+        /// counts from its last second.
+        var camera: Double?
     }
 
     /// A window's last use: the latest of its uses; nil when it has none.
     static func lastUse(_ uses: Uses) -> Double? {
-        [uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.max()
+        [uses.input, uses.control, uses.session, uses.front, uses.camera].compactMap { $0 }.max()
     }
 
     /// What a session's start leaves as `Uses.session`, at `now` as it connects (StreamClient's

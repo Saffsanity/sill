@@ -161,7 +161,8 @@ final class DeviceIdleTimer {
             let front = window.windowScene?.activationState == .foregroundActive
             if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
             let used = DeviceIdlePolicy.lastUse(.init(input: client.lastPersonInputAt, control: client.lastActionAt,
-                                                      session: client.personSessionAt, front: entries[i].frontSince))
+                                                      session: client.personSessionAt, front: entries[i].frontSince,
+                                                      camera: client.lastCameraUseAt))
             windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
         }
         let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)
@@ -427,18 +428,25 @@ struct StreamScreen: View {
                 // Paste button and Dismiss take their touches over the stream's UIKit input view, and
                 // nothing else does (the frame around it is empty). Near the bar, off the link's line,
                 // inside the stream panel's corner; never while something is open over the stream.
-                if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
+                // Share Camera's indicator (CameraChip, docs/camera-plan.md §6.1 point 9; App Review 2.5.14) shares
+                // the corner, nearest its edge, whenever it says anything: over the drawer too, never under Settings
+                // (whose rows say it), the pairing overlay or the tour; in Full Screen the camera symbol alone.
+                if clipboardChipShows || cameraChipShows, let panel = tourTargets[.stream] {
                     let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
                     // Never over the Keyboard toggle in the pane's other bottom corner (#215).
                     let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
                                                            : max(0, panel.width - 16)
-                    ClipboardChip(client: client)
-                        .frame(maxWidth: widest, alignment: .trailing)
-                        .padding(8)
-                        .frame(width: panel.width, height: panel.height,
-                               alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
-                        .position(x: panel.midX, y: panel.midY)
-                        .transition(.opacity)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if corner == .topTrailing, cameraChipShows { CameraChip(client: client, compact: hidden) }
+                        if clipboardChipShows { ClipboardChip(client: client) }
+                        if corner == .bottomTrailing, cameraChipShows { CameraChip(client: client, compact: hidden) }
+                    }
+                    .frame(maxWidth: widest, alignment: .trailing)
+                    .padding(8)
+                    .frame(width: panel.width, height: panel.height,
+                           alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
+                    .position(x: panel.midX, y: panel.midY)
+                    .transition(.opacity)
                 }
                 // Settings (docs/settings-pane-plan.md): a whole-screen pane over everything above, a sibling after
                 // the layouts so it takes every touch over the stream's UIKit input view, as the pairing overlay
@@ -641,6 +649,15 @@ struct StreamScreen: View {
     /// The clipboard's chip shows where the link's line may, and not over a thumbnail's lights or the
     /// Aa ruler either (the Settings panel has its own Paste).
     private var clipboardChipAllowed: Bool { linkLineAllowed && windowMenu == nil && !scaleOpen }
+
+    /// The clipboard's chip or its note shows now.
+    private var clipboardChipShows: Bool { clipboardChipAllowed && (client.clipboardChip || client.clipboardNote != nil) }
+
+    /// Share Camera's indicator shows now (CameraChip): whatever is open over the stream but Settings, whose rows say
+    /// it, the pairing overlay (its scanner pauses the camera) and the tour.
+    private var cameraChipShows: Bool {
+        !settingsOpen && !overlayShown && !tourOnScreen && CameraChip.chip(client) != .none
+    }
 
     /// The chip itself on screen, not its note in its place: its time runs only then.
     private var clipboardChipOnScreen: Bool {

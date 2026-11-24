@@ -17,7 +17,7 @@ import StreamProtocol
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, offConsoleView, lockAfterSession,
-///                                              lockSleepsDisplay, lockOnlyAfterAway,
+///                                              lockSleepsDisplay, lockOnlyAfterAway, deviceCamera,
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -44,6 +44,12 @@ import StreamProtocol
 ///                                              menu does when it opens, its answer shown by the
 ///                                              next print
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
+///     -SillCameraDryRun '<s> <answer>[; …]'    TEST ONLY: what macOS would answer the dry run's request for Sill
+///                                              Camera, s seconds after it (approval, complete, reboot,
+///                                              replace:A>B, fail:N, disabled, enabled, removed, removefail:N;
+///                                              CameraExtensionPolicy.dryRunScript). The bare binary never asks
+///                                              macOS anything: its requests and its feed are dry runs, and without
+///                                              this it answers as macOS answers a build with no Sill Camera inside
 ///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
 ///                                              a feed on this Mac only (http or https to
 ///                                              127.0.0.1, ::1 or localhost; anything else is
@@ -78,7 +84,8 @@ import StreamProtocol
 ///                                              (title bar, toolbar, pane) to <dir>/settings-<s>s-<tab>.png
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
 ///                                              Access panes in each of their states, General's
-///                                              update section in each of its, General with the
+///                                              update section in each of its, Streaming's camera
+///                                              section in each of its, General with the
 ///                                              macOS firewall's line and that line alone in each
 ///                                              of its verdicts), the pairing
 ///                                              window's states and the cable notice,
@@ -120,6 +127,19 @@ enum DebugHooks {
                              "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillSettingsAfter", "SillQuitAfter"]
     /// The Settings window's test arguments (issue #59), which Sill.app itself ignores too.
     static let windowHooks = ["SillTestScreenHeight", "SillSettingsShot"]
+    /// Sill Camera's TEST ONLY dry run (the bare binary's alone: Sill.app asks macOS for real, or not at all).
+    static let cameraHooks = ["SillCameraDryRun"]
+
+    /// TEST ONLY (-SillCameraDryRun, the bare binary's): the dry run's answers (CameraExtensionPolicy.dryRunScript);
+    /// nil without it (the default answers), when it does not read (one line), and in Sill.app, which has no dry run.
+    static func cameraDryRunScript() -> [(at: Double, event: CameraExtensionPolicy.Event)]? {
+        guard !AppModel.bundled, let raw = UserDefaults.standard.string(forKey: "SillCameraDryRun"), !raw.isEmpty else { return nil }
+        guard let script = CameraExtensionPolicy.dryRunScript(raw) else {
+            print("SillCameraDryRun ignored: it takes '<s> approval|complete|reboot|replace:A>B|fail:N|disabled|enabled|removed|removefail:N[; …]'.")
+            return nil
+        }
+        return script
+    }
 
     /// TEST ONLY (-SillTestScreenHeight <points>, and -SillSettingsAfter's height=): the Settings
     /// window fits the top <points> of its screen's visible frame (SettingsWindowFit.visible). Nil in
@@ -162,7 +182,7 @@ enum DebugHooks {
     static func schedule(model: AppModel) {
         let defaults = UserDefaults.standard
         if AppModel.bundled {
-            for name in timedHooks + windowHooks where defaults.object(forKey: name) != nil {
+            for name in timedHooks + windowHooks + cameraHooks where defaults.object(forKey: name) != nil {
                 print("-\(name) ignored: Sill.app itself takes no test hook (use the bare SillMenuBar binary).")
             }
             return
@@ -375,6 +395,7 @@ enum DebugHooks {
         case "lockAfterSession": config.lockAfterSession = flag
         case "lockSleepsDisplay": config.lockSleepsDisplay = flag
         case "lockOnlyAfterAway": config.lockOnlyAfterAway = flag
+        case "deviceCamera": config.deviceCamera = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -450,6 +471,17 @@ enum DebugHooks {
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-clipboard-\(sampleName)-\(name).png"))
+            }
+        }
+        // Settings › Streaming's camera section in each of its states (docs/camera-plan.md §13.3, G3), with macOS 14's
+        // and 15's approval words: plain values, so nothing is asked of macOS and no Sill Camera is looked for.
+        for sample in cameraSectionSamples() {
+            let section = Form { CameraSection(on: .constant(sample.on), state: sample.state, macOS: sample.macOS) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-camera-\(sample.name)-\(name).png"))
             }
         }
         for sample in updatePaneSamples() {
@@ -656,6 +688,16 @@ enum DebugHooks {
         var remoteSound = remote
         remoteSound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
         list.append(Sample(name: "remote-sound", snapshot: remoteSound))
+        // Sill Camera in use (docs/camera-plan.md §11): FaceTime with the iPad's camera, under its row; and with two
+        // devices, the iPhone's camera for an app Sill Camera cannot name.
+        if var camera = list.first(where: { $0.name == "streaming" })?.snapshot {
+            camera.devices[0].camera = "FaceTime"
+            list.append(Sample(name: "camera", snapshot: camera))
+        }
+        if var cameraTwo = list.first(where: { $0.name == "two" })?.snapshot, cameraTwo.devices.count == 2 {
+            cameraTwo.devices[1].camera = ""
+            list.append(Sample(name: "camera-two", snapshot: cameraTwo))
+        }
         // Pairing at home (docs/home-pairing-plan.md §6.4): a device's ask while its window shows
         // the code, while the limits kept one from opening, and while this Mac was locked; an older
         // device refused at the home door; the keychain unusable, so no home door at all.
@@ -693,6 +735,39 @@ enum DebugHooks {
         var blocksAll = blocked
         blocksAll.firewall = firewallSamples.first { $0.name == "all" }?.verdict
         list.append(Sample(name: "firewall-blocks-all", snapshot: blocksAll))
+        return list
+    }
+
+    /// Streaming's camera section (pane-camera-<name>): each CameraExtensionState with the switch as it would be, at
+    /// macOS 27's words, and macOS 14's approval.
+    private static func cameraSectionSamples() -> [(name: String, on: Bool, state: CameraExtensionState, macOS: Int)] {
+        typealias Sample = (name: String, on: Bool, state: CameraExtensionState, macOS: Int)
+        func on(_ name: String, _ state: CameraExtensionState, macOS: Int = 27) -> Sample { (name, true, state, macOS) }
+        func off(_ name: String, _ state: CameraExtensionState) -> Sample { (name, false, state, 27) }
+        let failure = CameraExtensionPolicy.reason(.systemExtension(8))
+        let removeFailure = CameraExtensionPolicy.reason(.systemExtension(13))
+        var list: [Sample] = []
+        list.append(off("off", .off(installed: false)))
+        list.append(off("off-installed", .off(installed: true)))
+        list.append(on("installing", .installing))
+        list.append(on("starting", .starting))
+        list.append(on("updating", .updating))
+        list.append(on("approval", .awaitingApproval))
+        list.append(on("approval-macos14", .awaitingApproval, macOS: 14))
+        list.append(on("applications", .needsApplications))
+        list.append(on("disabled", .disabledInSettings))
+        list.append(on("forbidden", .forbidden))
+        list.append(on("unsupported", .unsupportedBuild))
+        list.append(on("restart", .needsRestart))
+        list.append(on("camera-denied", .cameraDenied))
+        list.append(on("not-fed", .notFed))
+        list.append(on("ready", .ready))
+        list.append(on("in-use", .inUse(app: "FaceTime", device: "iPad")))
+        list.append(on("in-use-unnamed", .inUse(app: nil, device: "iPhone")))
+        list.append(on("failed", .failed(failure)))
+        list.append(off("removing", .removing))
+        list.append(off("removed", .removed))
+        list.append(off("remove-failed", .removeFailed(removeFailure)))
         return list
     }
 

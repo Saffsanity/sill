@@ -80,7 +80,15 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   events (iPadOS's own Natural Scrolling set those); pure,
   `Tests/checks/protocol`. Kind 44, `keyframeRequest` (device → host, no
   payload: this device's picture was interrupted and waits for a keyframe;
-  issue #101), has no type of its own.
+  issue #101), has no type of its own. `Camera.swift` — the device's camera
+  on the Mac (kind 46, both ways; docs/camera-plan.md §5, #193's kind):
+  `CameraMessage`, type 1 a JSON `CameraFormat` (the device's offer, `claim`,
+  `pause`, `stop`, or an epoch's HEVC format with its parameter sets), type 2
+  a binary `CameraFrame` (type · epoch · seq · one access unit; its capture
+  time and keyframe flag in the header), type 3 a JSON `CameraDemand` (Mac →
+  device: size, rate, keyframe, bitrate ceiling, token); `CameraCodec`
+  (generation 1's bounds); caps refused, never cut; kind 16's `CameraState`
+  sits in HostSettings.swift; pure, `Tests/checks/camera-wire`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -323,7 +331,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   size; `reconciles`; `Restore`, the window that comes back; the lines; and
   `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
   the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
-  `lockedMidSwitch` and `lockDecision`), Lock this Mac when the last device leaves
+  `lockedMidSwitch` and `lockDecision`), `CameraHostPolicy` (the devices'
+  cameras, docs/camera-plan.md §6.3, one reducer: who may, the one holder and
+  its claims, the grace of a move, kind 16's camera, the demand and its
+  keyframes, the epochs and rates, what Sill Camera shows; pure,
+  `Tests/checks/camera-host`), `CameraReceiver` (kind 46 from the network
+  queue on its own queue `sill.camera`: the policy, VideoToolbox's decoder per
+  epoch, never an encoder; `CameraOutput`, the seam Sill Camera's sink takes,
+  `package` since step 8, with `CameraShow` and `CameraAppUse`, what crosses it, and
+  the output's own queue adopted as `sill.camera`; the TEST ONLY `CameraTestOutput`),
+  `CameraTestHook` (SILL_TEST_CAMERA,
+  SILL_TEST_CAMERA_DEMAND, SILL_TEST_CAMERA_LOG, a test host's only; pure,
+  `Tests/checks/camera-host`), Lock this Mac when the last device leaves
   (docs/privacy-mode-plan.md, part 1): `PrivacyPolicy` (which departures count, the
   30 s wait, its end, the lock's confirmation, its two switches, rule 10's displays, the
   words; pure, `Tests/checks/privacy`; who acts: Sill.app itself alone), `PrivacyLock`
@@ -428,6 +447,30 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   door's TLS with pairing required, a throwaway identity, the code and link
   on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session[=away][,nosleep]`
   (with `--synthetic` only: a dry run).
+- `Sources/CameraFeed/` — `CameraFeedPolicy` (docs/camera-plan.md §6.4), Sill Camera's
+  rules as one reducer: its formats (NV12 `420v`, 1280×720 then 1920×1080, 15 to 30 fps), the
+  state Sill for Mac writes (`off`, `unavailable`, `waiting`, a device's name and pause; JSON, a
+  name cleaned and at most 40 characters) and the demand it reads (running, size, rate, the apps
+  by signing identifier and pid), who may feed Sill Camera (Sill for Mac alone, by its signing
+  identifier and, where the sandbox lets the extension check, its team's signature; one at a
+  time), what goes out at each tick (a frame as it comes, again at the app's rate while under a
+  second old, else the placeholder) and the placeholder's words (only a device state names a
+  device). Its own library target, no product (the iOS project never sees it), because Sill.app's
+  sink shares its encodings; pure, `Tests/checks/camera-feed`. Beside it `CameraSinkPolicy`
+  (step 8): what Sill.app's CameraSink writes into Sill Camera's state for what the receiver says,
+  the app Sill Camera's demand names (by pid, else its identifier's last part; one, two or "and N
+  more", 40 characters at most) and the sink's two frames, the newest winning; pure,
+  `Tests/checks/camera-app`.
+- `Sources/SillCameraExtension/` — Sill Camera, the Core Media I/O camera extension
+  (docs/camera-plan.md §6.4, §7, §9): `main.swift` (`CMIOExtensionProvider.startService`, the run
+  loop), `SillCameraProvider.swift` (the provider; the device "Sill Camera" with fixed IDs, its
+  source stream for apps and its sink stream for Sill for Mac; the custom properties
+  `4cc_SilS_glob_0000`, the state Sill for Mac writes and never read back, and `4cc_SilD_glob_0000`,
+  the demand, read-only; the feeder's signature checked by pid where the sandbox allows; one serial
+  queue, `sill.camera.feed`, the provider's client queue, the timer's and the sink's) and
+  `Placeholder.swift` (the still, grey, drawn with CoreGraphics into the luma plane of an
+  IOSurface-backed NV12 buffer, once per words and size). macOS only; CameraFeedPolicy decides.
+  Embedded by make-app.sh with `SILL_CAMERA_EXTENSION=1`; never run by a test.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -458,7 +501,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the checks; compiles on its own with swiftc), and `ProcessLife` (whether a process is still
   there, by its pid and the time it started, the kernel's word: Update Now's new copy waits at launch
   for the Sill that started it to quit, and NSRunningApplication's `isTerminated` never changed there;
-  Foundation only, `Tests/checks/update-install`). Update Now, the one-click update
+  Foundation only, `Tests/checks/update-install`). Sill Camera in Sill.app (docs/camera-plan.md
+  step 8): `CameraExtensionState` (`CameraExtensionPolicy`: what Sill asks macOS for, macOS's
+  answers, Settings › Streaming's "Camera and Microphone (beta)" section, its words, buttons and log
+  lines, the TEST ONLY dry run's script; pure, `Tests/checks/camera-app`), `CameraExtensionManager`
+  (main actor: carries the policy out with `SystemCameraExtension`, OSSystemExtensionRequest, only for
+  Sill.app's own code in /Applications with Sill Camera inside and the install entitlement, or with the
+  bare binary's `DryRunCameraExtension`; nothing asked while Use iPhone and iPad cameras is off) and
+  `CameraSink` (the host receiver's CameraOutput: Sill Camera's device by its UID through CoreMediaIO's C
+  API, its sink stream, the state written before any frame, the demand read back, each frame fitted into
+  the app's size with VTPixelTransferSession and queued, two at most; nothing of CoreMediaIO while the
+  switch is off, and a dry run in the bare binary). Update Now, the one-click update
   (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
   Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
   their words; the release; the order of versions and builds, `isNewer`: a release by its version, and over a
@@ -519,7 +572,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   arm64 and x86_64, each in its own scratch path under `.build/universal`,
   joined with lipo, #62; off by default here, on in the nightlies and, since
   0.6.0, in release.yml's publish job, so releases are universal; `release.sh`'s
-  `check_signature` reads every slice);
+  `check_signature` reads every slice; with `SILL_CAMERA_EXTENSION=1` it also builds
+  Sill Camera and embeds it at `Contents/Library/SystemExtensions/me.saffer.sill.mac.camera.systemextension`
+  with `Packaging/CameraExtension-Info.plist` (SYSX, Core Media I/O's Mach service name
+  `9B2KKVM937.me.saffer.sill.mac.camera`, the app's version and build) and
+  `Packaging/SillCameraExtension.entitlements` (the App Sandbox and that app group), signed
+  before the app; the app asks for `com.apple.developer.system-extension.install` only when its
+  profile grants it, and then `com.apple.security.device.camera` too (passed by name by the
+  profile check, which no profile grants), with `NSCameraUsageDescription` in every camera build
+  (docs/camera-plan.md §17, V2: feeding Sill Camera may count as using a camera); off by default
+  until the portal's System Extension capability exists;
+  `SILL_APP_OUT` builds the bundle into another folder, never with `--install`; `release.sh`'s
+  `check_signature` checks Sill Camera's slices too when a build carries it);
   `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
@@ -637,7 +701,27 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   streams; it needs Accessibility for whatever runs it, and an unlocked screen),
   and its `close` step WindowSizer's Close (with WindowRestore.swift, which
   WindowSizer needs since #75) against Slow Close: back within 1 s, as no answer.
-  `Scripts/audio/` is the
+  `Scripts/camera/` (TEST ONLY; docs/camera-plan.md §13.2): `make-fixture.swift`
+  made `fixture-640x360.bin` (three seconds of a moving pattern, each frame's
+  number in blocks along its top, on VideoToolbox's software HEVC encoder,
+  refusing a hardware session) and `check-fixture.swift` decodes it on the
+  software decoder, each frame reading its own number; `Scripts/camera-check/live.py
+  OUT [live|two|lock|unpaired|hostile|nohook|corrupt|move|stdout|removed|app|dryrun|pacing|all]`
+  runs the camera's loopback gates against synthetic `--pairing` test hosts with SILL_TEST_CAMERA and
+  paired sillclient.py clients sending the fixture (`--camera`), each host
+  under a minute: `removed` (H6), `app` (H12) and `dryrun` against the bare SillMenuBar binary
+  (Sill.app's receiver, its Sill Camera dry runs), `pacing` (H11) through `sillrelay.py
+  --up-rate-mbps 2` with sillclient.py's stand-in for the device's pacing (`--camera-pace`,
+  `--camera-pad`, `--wall`); `Scripts/camera-check/encoder.sh [OUT.bin]` compiles the app's
+  own CameraEncoder, CameraPattern, CameraStream and CameraPolicy for macOS with
+  `encoder-main.swift` and runs the device's stream end to end on VideoToolbox's
+  software encoder and decoder (never the hardware encoder; not in CI, whose
+  runners may lack the software HEVC encoder), writing epoch 0 as a fixture.
+  `Scripts/camera-check/package.sh [--universal] [--keep] [OUT]` is P1
+  (docs/camera-plan.md §13.4): Sill.app with Sill Camera inside, built by make-app.sh into OUT
+  (`.build/camera-check` by default) and signed ad hoc, checked (the extension's place, its
+  Info.plist, the Mach service name inside its app group, both entitlements, both signatures, the
+  app's seal over it, the slices), then removed; never in /Applications, never activated or run. `Scripts/audio/` is the
   encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
   `.build/audio/host` (the working tree's StreamServer and the sound's host
   files with `main.swift`: fake frames, the test tone, both doors on
@@ -755,7 +839,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
   off a lost path: `handOver`, `hold`, `adopt`, `unhold`; the input messages
   counted for the session's connection, `inputsOnSession`, which a kind 26's
-  `seen` is judged against; Foundation and Network only, checked with swiftc),
+  `seen` is judged against; the uplink ledger, `UplinkLedger`: what the session's
+  connection was handed and has not taken yet, by lane, and what it took in the last
+  second, which the camera's pacing reads (`uplink`), and `sendCamera`, a camera frame
+  refused, never kept, at a fence or a hold; Foundation and Network only, checked with
+  swiftc: `Tests/checks/fence`, its `camera` mode),
   `MessageReader` (the session's reader: each header, then the payload in
   pieces of at most 256 KB, every piece a sign of life for the liveness check;
   Network and StreamProtocol only, checked with swiftc),
@@ -867,6 +955,32 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   background (#379), the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
   controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
+  `CameraPolicy` (Share Camera, docs/camera-plan.md §6.1: the row and its words, when the device offers and
+  when it captures, the capture session's run, the offer on the wire (its claim, its stop, said again after a
+  refusal), the pause and its order, the format inside the Mac's demand, the heat's steps (`Heat`: a rise at once, a fall a step every 30 s), the
+  bitrate and its steps,
+  the keyframes, the chip) and `CameraPacing` (§6.2: the camera's share of the uplink, a picture skipped
+  before the encoder while the bytes the connection has not taken pass the budget or a move's fence
+  stands); pure, `Tests/checks/camera`; pbxproj A462/F462), `CameraStream` (§6.1 points 4 to 8: what becomes of
+  each picture and each encoded frame, one reducer: encoders and epochs, an epoch's format right before its first
+  frame, keyframes, the budget's skips and drops, nothing but a keyframe after a drop, the frame's cap, the
+  bitrate's steps; pure, `Tests/checks/camera-stream`; A468/F468), `CameraEncoder` (VideoToolbox's HEVC session
+  for one encoder: real time, no B-frames, no frame held back, keyframes only when asked, the bitrate and its data-rate limit, a
+  keyframe's parameter sets; `software` refuses a hardware session: the simulator, and the Mac's
+  `Scripts/camera-check/encoder.sh`; builds for macOS too; A464/F464), `CameraPattern` (a moving pattern with the
+  frame's number in blocks along its top, and the reader of that number; DEBUG `-SillCameraSource pattern` and
+  the Mac's encoder check; A465/F465), `CameraCapture` (the seam, `CameraSource`, and the camera behind it: one
+  AVCaptureSession on `sill.camera.session`, the front or back wide camera, the active format for the size and
+  rate, NV12, upright by AVCaptureDevice.RotationCoordinator, never mirrored, never the app's audio session,
+  iOS's interruptions and the system pressure as `Event`s; and `PatternSource`, DEBUG's pattern instead;
+  A463/F463), `StreamClient+Camera` (Share Camera's glue, docs/camera-plan.md §8, §9: the switch, off at every
+  launch, `Sill.shareCamera`, and `Sill.cameraPosition`; the offer, its `claim`, pause and `stop`; kind 16's
+  camera and type 3's demand; `updateCamera`, the one decision, with CameraPolicy; the capture's short stop
+  delay; `DeviceCamera`, the stream on `sill.camera.media` from the source through CameraStream and the
+  encoder to SessionLink; ClientStats' camera fields and DeviceIdlePolicy's camera; A466/F466) and
+  `CameraChip` (the indicator in the chip corner: "Camera" over "‹app› on ‹Mac›" with Stop, "Camera Paused",
+  the symbol alone in Full Screen; A467/F467); StreamScreen places the chip, the Settings panel's This iPad
+  group has Share Camera (a beta) and Camera: Front | Back,
   `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
   Screen, the picture in the screen's room; the swipe in from the left edge, `EdgeSwipe` (a finger landing
   within max(24 pt, the left safe-area inset), judged after 8 pt: right and no steeper than 45°, let go by

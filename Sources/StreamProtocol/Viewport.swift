@@ -119,6 +119,14 @@ public struct ClientStats: Codable, Hashable {
     public var audioBehindMs: Int?
     /// The sound's packets of that second that came too late to play. Nil as `audioBehindMs`.
     public var audioLate: Int?
+    /// The device's camera (kind 46), for the Mac's client line: frames sent that second, the kilobits a
+    /// second they took, the frames dropped before sending (its pacing, a hand-over), and its pause
+    /// (`CameraFormat.pauses`) while it pauses. Nil from a device whose camera has not run this session,
+    /// and from an older client. Display only: the Mac never acts on them. Set after the initializer.
+    public var cameraFps: Int?
+    public var cameraKbps: Int?
+    public var cameraDropped: Int?
+    public var cameraPause: String?
 
     public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String,
                 frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil, audioBehindMs: Int? = nil, audioLate: Int? = nil) {

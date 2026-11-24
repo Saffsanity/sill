@@ -1,0 +1,3 @@
+# Compiled as one module by ../module.py with main.swift: Sill Camera's rules alone (Foundation only).
+Sources/CameraFeed/CameraFeedPolicy.swift
+flags: -package-name sill

@@ -95,7 +95,7 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false,
-                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false, deviceCamera: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -116,7 +116,7 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true,
-                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false, deviceCamera: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -138,7 +138,7 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                          lockSleepsDisplay: true, lockOnlyAfterAway: false, deviceCamera: false)
     check(made.lockAfterSession && !made.offConsoleView, "a HostConfig made with it on has it on, and the off-console view as given")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
@@ -177,7 +177,7 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: false, lockOnlyAfterAway: true)
+                          lockSleepsDisplay: false, lockOnlyAfterAway: true, deviceCamera: false)
     check(!made.lockSleepsDisplay && made.lockOnlyAfterAway && made.lockAfterSession, "a HostConfig made with them has them as given")
     let change = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                     directWireless: true, sendAudio: true)
@@ -192,6 +192,27 @@ do {
     back.lockSleepsDisplay = true
     back.lockOnlyAfterAway = false
     check(back == standard, "the three move no other knob")
+}
+
+// Use iPhone and iPad cameras (docs/camera-plan.md §10), the Mac's alone: off in `standard` and `app` (a switch that
+// installs something into macOS starts off), named in the log's line, kept by `validated`, never moved by a device.
+do {
+    check(!standard.deviceCamera && !HostConfig.app.deviceCamera, "standard and app: device cameras off")
+    var on = standard
+    on.deviceCamera = true
+    eq(standard.changes(to: on), "device cameras off → on", "changes: the cameras' switch")
+    eq(on.changes(to: standard), "device cameras on → off", "changes: and back")
+    check(on.validated().deviceCamera && !standard.validated().deviceCamera, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: false,
+                          lockSleepsDisplay: true, lockOnlyAfterAway: false, deviceCamera: true)
+    check(made.deviceCamera, "a HostConfig made with it on has it on")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(on.applying(all).deviceCamera && on.applyingAway(all).deviceCamera
+          && !standard.applying(all).deviceCamera && !standard.applyingAway(all).deviceCamera,
+          "a device's change never moves it, at home or away")
 }
 
 // Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual

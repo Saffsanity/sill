@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Sill Camera</string>
+	<key>CFBundleExecutable</key>
+	<string>me.saffer.sill.mac.camera</string>
+	<key>CFBundleIdentifier</key>
+	<string>me.saffer.sill.mac.camera</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Sill Camera</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CMIOExtension</key>
+	<dict>
+		<key>CMIOExtensionMachServiceName</key>
+		<string>9B2KKVM937.me.saffer.sill.mac.camera</string>
+	</dict>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Sill is free and open source.</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Sill Camera lets apps on this Mac, such as FaceTime and Zoom, use the camera of an iPhone or iPad that shares it with Sill.</string>
+</dict>
+</plist>

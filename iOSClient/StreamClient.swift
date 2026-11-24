@@ -963,6 +963,16 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    /// Share Camera (kind 46, StreamClient+Camera, docs/camera-plan.md): what this session's Mac takes of the
+    /// device's camera (`WindowList.camera`: 1 generation 1, 0 its switch off or Sill Camera not ready; nil from
+    /// a Mac before it, the CLI, a locked Mac), this connection's word on it (kind 16's `camera`), and what the
+    /// views read of it. Cleared with the session.
+    @Published var hostCamera: Int?
+    @Published var cameraState: CameraState?
+    @Published var cameraLook = CameraLook()
+    /// The camera's session state and the stream's runner (StreamClient+Camera). Main thread.
+    var cameraSession = CameraSessionState()
+    var cameraPipeline: DeviceCamera?
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
     /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
     /// windows then, it streams a black placeholder, and the Apps drawer and the Settings panel's header
@@ -1144,6 +1154,8 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        // Share Camera follows Sill's scene and the pairing scanner (StreamClient+Camera).
+        observeCameraActivation()
         sound.setMuted(soundMuted)
         sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
         // The picture's window going away and coming back (KeyframeRecovery).
@@ -1191,8 +1203,8 @@ final class StreamClient: ObservableObject {
     }
 
     /// This window's scene is in the foreground and active, or, while the picture is in no window, Sill is
-    /// active. Main thread.
-    private var sceneInFront: Bool {
+    /// active. Main thread. Share Camera reads it too (StreamClient+Camera: the camera runs only in front).
+    var sceneInFront: Bool {
         if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
         return UIApplication.shared.applicationState == .active
     }
@@ -2238,8 +2250,12 @@ final class StreamClient: ObservableObject {
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
-        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
-                                 audio: AudioCodec.devicePlays, offConsoleView: LockedMac.viewGeneration))
+        var hello = Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
+                          audio: AudioCodec.devicePlays, offConsoleView: LockedMac.viewGeneration)
+        // Share Camera (docs/camera-plan.md §5): this device sends its camera as generation 1 and reads type 3, so
+        // a Mac that takes cameras sends it kind 46's demands; whether the camera ever runs is the switch's.
+        hello.camera = CameraCodec.generation
+        return Wire.encode(hello)
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -2874,6 +2890,8 @@ final class StreamClient: ObservableObject {
         menusMoved()
         // The Mac keeps the clipboard's subscription per connection: the new one subscribes too.
         clipboardMoved()
+        // And knows a camera's offer per connection: the new one hears it again (StreamClient+Camera).
+        cameraMoved()
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
@@ -3849,6 +3867,8 @@ final class StreamClient: ObservableObject {
         sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
+        // Nor the camera: it stops at once (StreamClient+Camera).
+        resetCamera()
     }
 
     /// The cover over the stream (a locked Mac, `LockedMac.Shade`): set, and "Unlocking…" given
@@ -4036,6 +4056,14 @@ final class StreamClient: ObservableObject {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
         link.send(message.serialized())
     }
+
+    /// Share Camera's way out (StreamClient+Camera, DeviceCamera on its own queue): an offer or an epoch's format
+    /// (kind 46 type 1) through `link.send`, kept in order across a move's fence; a frame (type 2) through
+    /// `link.sendCamera`, refused rather than kept at a fence or a hold; the uplink the camera's pacing reads.
+    /// Any thread (SessionLink's lock).
+    func sendCameraControl(_ data: Data) { link.send(data) }
+    func sendCameraFrame(_ data: Data) -> Bool { link.sendCamera(data) }
+    var cameraUplink: SessionLink.Uplink { link.uplink }
 
     func sendInput(_ event: InputEvent) { sendInput(event, byPerson: true) }
 
@@ -4509,6 +4537,8 @@ final class StreamClient: ObservableObject {
                 #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
+                // Share Camera: offer (or not) as the Mac's word and this device's switch say.
+                self.hostCameraChanged(list.camera)
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -4656,6 +4686,15 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
                 self.goodbye = goodbye
+            }
+        case .camera:
+            // Share Camera (StreamClient+Camera): the Mac's demand (type 3), the only type it sends. Only from the
+            // current connection.
+            guard case .demand(let demand)? = CameraMessage.parse(data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.receiveCameraDemand(demand)
             }
         case .clipboard:
             // Text copied on the Mac (StreamClient+Clipboard): written to this device's clipboard while
@@ -4836,6 +4875,8 @@ extension StreamClient {
         #endif
         let refused = settings.receive(state)
         if let fps = state.stream?.fps { sound.setStreamFPS(fps) }
+        // Share Camera: this connection's word on the camera (StreamClient+Camera).
+        cameraStateChanged(state.camera)
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()

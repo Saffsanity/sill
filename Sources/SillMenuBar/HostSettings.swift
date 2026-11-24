@@ -55,6 +55,7 @@ final class HostSettings {
         static let lockAfterSession = "lockAfterSession"
         static let lockSleepsDisplay = "lockSleepsDisplay"
         static let lockOnlyAfterAway = "lockOnlyAfterAway"
+        static let deviceCamera = "deviceCamera"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -152,6 +153,9 @@ final class HostSettings {
             // open decisions 6 and 5), as the CLI.
             Key.lockSleepsDisplay: base.lockSleepsDisplay,
             Key.lockOnlyAfterAway: base.lockOnlyAfterAway,
+            // Off, like the CLI's (which has no camera at all): Use iPhone and iPad cameras installs Sill Camera into
+            // macOS, so it starts off, and off asks macOS nothing (docs/camera-plan.md §10).
+            Key.deviceCamera: base.deviceCamera,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -175,7 +179,10 @@ final class HostSettings {
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
                             lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
                             lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
-                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway)).validated()
+                            lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
+                            // Use iPhone and iPad cameras (Settings › Streaming; docs/camera-plan.md §10): the Mac's
+                            // alone, never set by a device.
+                            deviceCamera: defaults.bool(forKey: Key.deviceCamera)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -206,6 +213,7 @@ final class HostSettings {
         if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
         if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
         if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
+        if config.deviceCamera != old.deviceCamera { defaults.set(config.deviceCamera, forKey: Key.deviceCamera) }
     }
 
     // MARK: Remote devices seen (display only)

@@ -344,11 +344,72 @@ check(Wire.decode(ReaderOf173.self, from: Wire.encode(named)).map { $0.desktopDi
 check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
       "a reader from before them skips all three")
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
-check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
-      "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
+check(StreamMessageKind(rawValue: 45) == nil, "45 not this build's (open pull requests' pen)")
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")
+// Kind 46, the device's camera (Camera.swift, docs/camera-plan.md §5; #193's kind, field and names), and
+// its flags: the window list's `camera`, the hello's `camera`, kind 16's `camera` and ClientStats' four,
+// each additive both ways (left out when nil, nil from an older peer, skipped by an older reader). The
+// layouts, caps and bounds are `camera-wire`'s.
+check(StreamMessageKind.camera.rawValue == 46 && StreamMessageKind(rawValue: 46) == .camera, "kind 46 is the camera")
+check(CameraCodec.hevc == "hevc" && CameraCodec.generation == 1, "generation 1 is HEVC")
+check(CameraCodec.positionFront == "front" && CameraCodec.positionBack == "back", "#193's positions")
+var withCam = named
+withCam.camera = 1
+check(json(withCam).contains(#""camera":1"#), "a list from a host that takes the camera says camera 1: \(json(withCam))")
+var camOff = named
+camOff.camera = 0
+check(json(camOff).contains(#""camera":0"#), "a Mac whose switch is off says camera 0")
+check(!json(named).contains("camera") && named.camera == nil && shares.camera == nil, "a list without it (the initializer's) leaves the key out")
+check(decodedOld != nil && decodedOld?.camera == nil, "an older host's list decodes, camera nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(withCam)).map { $0.camera == 1 && $0.desktopDisplays == 2 && $0.keyRepeat == 1 } == true,
+      "camera round-trips beside the Desktop's stops and keyRepeat")
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(withCam)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before it skips camera")
+var camHello = hello
+camHello.camera = CameraCodec.generation
+check(json(camHello).contains(#""camera":1"#) && Wire.decode(Hello.self, from: Wire.encode(camHello)) == camHello, "the hello's camera round-trips")
+check(!json(hello).contains("camera") && hello.camera == nil, "a hello without it (the initializer's) leaves the key out")
+check(Wire.decode(OldHello.self, from: Wire.encode(camHello)) == OldHello(appVersion: "1.0", build: "42", protocol: 1, device: "iPad (iPad14,1)"),
+      "an older host reads the hello and skips camera")
+check(Wire.decode(Hello.self, from: Data(#"{"appVersion":"0.6"}"#.utf8))?.camera == nil, "an older device's hello: camera nil")
+for state in CameraState.states {
+    var s = HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false, sessionPaired: true)
+    s.camera = CameraState(state: state, holder: state == CameraState.another ? "iPhone" : nil, app: state == CameraState.inUse ? "FaceTime" : nil)
+    check(json(s).contains(#""camera":{"#) && Wire.decode(HostSettingsState.self, from: Wire.encode(s)) == s, "kind 16's camera \(state) round-trips")
+    check(Wire.decode(OldState.self, from: Wire.encode(s))
+          == OldState(settings: OldStreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                                                  directWireless: false),
+                      persistent: true, virtualDisplayAvailable: true, softwareEncoder: false),
+          "an older device reads kind 16 and skips camera \(state)")
+}
+check(!json(HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)).contains("camera"),
+      "a state without it has no camera key")
+check(Wire.decode(HostSettingsState.self, from: Data(#"{"settings":{"maxFPS":60,"bitrate":8000000,"captureScale":1,"prioritizeSpeed":true,"virtualDisplay":false},"persistent":true,"virtualDisplayAvailable":true,"softwareEncoder":false,"sessionPaired":true}"#.utf8)).map { $0.camera == nil && $0.sessionPaired == true } == true,
+      "an older host's state: camera nil")
+check(Wire.decode(CameraState.self, from: Data(#"{"state":"recording","later":1}"#.utf8)).map { $0.knownState == CameraState.off && !$0.wanted } == true,
+      "a later state reads as off, its keys skipped")
+var camStats = heard
+camStats.cameraFps = 30; camStats.cameraKbps = 2400; camStats.cameraDropped = 2; camStats.cameraPause = CameraFormat.background
+check(Wire.decode(ClientStats.self, from: Wire.encode(camStats)) == camStats && json(camStats).contains(#""cameraKbps":2400"#),
+      "ClientStats carries the camera's four")
+check(Wire.decode(OldClientStats.self, from: Wire.encode(camStats))
+      == OldClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11),
+      "an older host reads the stats and skips the camera's")
+check(!json(heard).contains("camera"), "a device whose camera never ran sends none of them")
+// The three types as whole messages: the header's kind, and a frame's capture time and keyframe flag.
+let camFrameMessage = CameraMessage.frameMessage(CameraFrame(epoch: 5, seq: 19, data: Data([0, 0, 0, 2, 0x26, 0x01])),
+                                                 captured: 1_800_000_000.25, keyframe: true)!.serialized()
+check(StreamMessage.parseHeader(camFrameMessage).map { $0.kind == .camera && $0.isKeyframe && $0.timestamp == 1_800_000_000.25
+                                                       && $0.payloadLength == CameraFrame.headerBytes + 6 } == true
+      && camFrameMessage[camFrameMessage.startIndex + StreamMessage.headerLength] == CameraMessage.typeFrame,
+      "a frame's header: kind 46, its capture time and keyframe flag, then type 2")
+let camOffer = CameraMessage.message(.format(CameraFormat(position: CameraCodec.positionFront, claim: true)), now: 1)!.serialized()
+check(StreamMessage.parseHeader(camOffer).map { $0.kind == .camera && !$0.isKeyframe } == true
+      && camOffer[camOffer.startIndex + StreamMessage.headerLength] == CameraMessage.typeFormat, "an offer: kind 46, type 1")
+let camDemand = CameraMessage.message(.demand(CameraDemand(width: 1280, height: 720, fps: 30, token: 1)), now: 1)!.serialized()
+check(camDemand[camDemand.startIndex + StreamMessage.headerLength] == CameraMessage.typeDemand, "a demand: kind 46, type 3")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
@@ -365,6 +426,8 @@ if let out {
         "clipboardMessage": clipboardMessage.base64EncodedString(),
         "windowListDesktopStops": String(decoding: Wire.encode(named), as: UTF8.self),
         "nextDisplayMessage": nextMessage.base64EncodedString(),
+        "windowListCamera": String(decoding: Wire.encode(withCam), as: UTF8.self),
+        "cameraFrameMessage": camFrameMessage.base64EncodedString(),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }

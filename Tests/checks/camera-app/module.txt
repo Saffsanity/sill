@@ -1,0 +1,6 @@
+# Compiled as one module by ../module.py with main.swift: Sill.app's side of Sill Camera (Foundation only), with Sill
+# Camera's own rules, whose encodings the sink's policy shares.
+Sources/SillMenuBar/CameraExtensionState.swift
+Sources/CameraFeed/CameraFeedPolicy.swift
+Sources/CameraFeed/CameraSinkPolicy.swift
+flags: -package-name sill

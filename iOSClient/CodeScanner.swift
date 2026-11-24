@@ -40,6 +40,15 @@ struct CodeScanner: View {
     /// Whether this device can scan at all; false in the simulator.
     static var isSupported: Bool { DataScannerViewController.isSupported }
 
+    /// Live scanners on screen now: Share Camera pauses while one shows (CameraPolicy's `scanner`), and
+    /// `liveChanged` says when the count changes. Main thread.
+    static private(set) var live = 0
+    static let liveChanged = Notification.Name("SillCodeScannerLiveChanged")
+    fileprivate static func scannerShown(_ shown: Bool) {
+        live = max(0, live + (shown ? 1 : -1))
+        NotificationCenter.default.post(name: liveChanged, object: nil)
+    }
+
     /// The camera as it stands: refused (or restricted) means the typed path and a way to Settings.
     static var cameraDenied: Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -151,6 +160,7 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
                                                 recognizesMultipleItems: false, isHighFrameRateTrackingEnabled: false,
                                                 isPinchToZoomEnabled: true, isGuidanceEnabled: false, isHighlightingEnabled: true)
         scanner.delegate = context.coordinator
+        CodeScanner.scannerShown(true)
         return scanner
     }
 
@@ -161,6 +171,7 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {
         scanner.stopScanning()
+        CodeScanner.scannerShown(false)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onPayload: onPayload) }

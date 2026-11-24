@@ -232,6 +232,16 @@ struct ContentView: View {
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
 ///   switch and its footnote (#291).
+///   `-SillSettingsScroll camera` at Share Camera's rows and their footnote (docs/camera-plan.md).
+/// * `-SillCameraCase <case>` — what the mock Mac says of this device's camera, for the Settings group's
+///   Share Camera rows (with `-Sill.shareCamera 1` for the switch on; it starts off at every launch):
+///   `off`, `update`, `notready`, `unpaired`, `idle`, `inuse`, `another`, and while FaceTime wants it the
+///   device's pauses `denied` (Open Settings), `multitasking`, `busy`, `thermal`, `nocamera`
+///   (MockCatalog.seedCamera). `-SillCameraChip on|paused` shows Share Camera's indicator over the stream
+///   (FaceTime using it, or paused), in the clipboard chip's corner; with `-SillFullScreen 1`, the camera
+///   symbol alone. Nothing captures in the harness. `-SillCameraSource pattern` (a live session only, never a
+///   photo) sends CameraPattern's moving pattern instead of the camera, on VideoToolbox's software encoder in
+///   the simulator.
 /// * `-SillSettingsScrollArea 1` — with `-SillSettings 1`: each of Settings' scroll views outlined in
 ///   orange, so a still photo shows where a drag scrolls the rows (the whole screen in one column, out to
 ///   its edges; each page around the fold); none where the rows fit without scrolling.
