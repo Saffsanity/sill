@@ -392,7 +392,7 @@ used)"; #323: "as a toggle".
     own use); the window server keeps the hide count apart from the cursor's image ("cursorShow:%d (cursorHideCount)",
     "cursorVisState") and says "%s Unwound cursor hides", consistent with a connection's hides ending with it. That the
     hide is counted per connection and ends with the process is the long-known behaviour this rests on, not measured
-    here: Noah's step 2 (a `killall -9 Sill` while dark) is its proof. `PointerCalls` (PrivacyCurtain.swift) looks the
+    here: Noah's step 3 (a `killall -9 Sill` while dark) is its proof. `PointerCalls` (PrivacyCurtain.swift) looks the
     two calls up by name (dlopen of the already loaded CoreGraphics, then SkyLight's own names; never linked), beside
     the virtual display's surface, the lock's SACLockScreenImmediate and the shortcuts' getters, Sill's other private
     calls: missing, darkening goes on and the log says once that the pointer stays visible. `PointerHider` keeps at most
@@ -421,7 +421,7 @@ used)"; #323: "as a toggle".
   - *Every way the black ends, and the pointer:* 1, the last device gone and the wait over: shown, then lit (the rule's
     order; a key in the wait the same); 2, the switch off: shown, then lit; 3, Sill quits: shown, lit, its line, and
     the process's end anyway; 4, Sill crashes or is killed: the window server ends the dead connection's hide with it
-    (Noah's step 2); 5, the watchdog: `_exit`, as 4; 6, the Mac locked and unlocked at the Mac: shown as the lock screen
+    (Noah's step 3); 5, the watchdog: `_exit`, as 4; 6, the Mac locked and unlocked at the Mac: shown as the lock screen
     shows, lit at the Mac's own unlock with the pointer already shown (a device's unlock: hidden again, still dark);
     7, a sleep and wake: the lock screen at the wake shows it; without a password the hide stays, made again at the wake
     (a show and a hide, the count still one); 8, another user: shown at the switch; 9, a display added or removed: the
@@ -487,3 +487,27 @@ used)"; #323: "as a toggle".
        another user and back: lit.
     10. *From away with the lock:* Only while away on, #402's lock on; the iPhone through Tailscale: black; close Sill:
         the black holds about 30 s, then the lock screen; again, a key in those 30 s: locks at once.
+  - *Verified in run 6* (at 82019be0, in one hold of heavy.sh's slot B, 17:52 to 19:45; logs in sill-handoff's
+    next/privacy-darken/run6/logs): `swift build -c release` 52 s (50.76 s), no warning; the darken check, 445 checks, 0
+    failed (332 before), the model holding I1 to I12 through 20,000 random sessions that now also draw Settings' wait and
+    the pointer's switch (23,884 pointers hidden, 656 keys or clicks lighting a screen in a wait with no lock to follow,
+    2,870 holds begun); its mutants, 180 of 180 caught (3,594 s; 39 new, 15 patterns repaired for the changed code, and
+    the hold for no lock under way, listed as equivalent before, now a mutant its line catches); the privacy check, 217
+    checks, its mutants 87 of 87 (1,369 s); away-quality, 197 checks, its mutants 78 of 78 (300 s; AQ-D10 to D20 new);
+    `Scripts/privacy-check/darken.py OUT all`, 60 of 60 verdicts (255 s): 59 in the hold, and the `pass` case's
+    start-line verdict, which failed on the script's own stale string (the line now goes on past "reach its apps"),
+    true with the string fixed (5ba45171) on that same host run's saved log, rather than in a second hold: the disk
+    stood at 24.7 GiB after the hold, under the 25 GB floor, and the only code between the two heads is that line. The
+    new cases: the pointer hidden once after the black is up (1.08 s), both private calls found by name and never
+    called, shown for the lock screen (4.08 s), lit at the Mac's own unlock with it shown, SIGTERM showing it before the
+    lift, `--darken-pointer=show` never touching it; lit 5.25 s after the last device left by default and 30.15 s after
+    with `--darken-wait=30` (no test shortcut); a key 1.09 s after the departure lit it with nothing locking, a device
+    back after it dark again at once, back inside the next wait kept dark; with `--lock-after-session` a key in the wait
+    locked as before; the switch case's pointer shown at once (18.13 s) and its five keys saved and removed. Also
+    `live.py OUT all` 48 of 48 (184 s); the previews from the bare binary, 341 PNGs (8 s), the darkening's 15 looked at;
+    H2 against main d9b3e995's CLI built in the same hold (47 s), no new flag: idle 9 and 9 lines (the 7 others identical
+    masked), a test client 35 and 35 (the 12 others identical, the same 7 statistic names); `Tests/checks/run-all.sh`, all
+    78 pure checks passed (761 s); CI green at 82019be0 (run 45392480338, 20 m 38 s).
+  - *Not verified in run 6*, and why: the pointer's hide on a real screen (no agent may hide this Mac's pointer: Noah's
+    steps 1 to 4); that the hide ends with the process (step 3); the shape while hidden (step 1); the hide made again at a
+    wake (no test may sleep this Mac: step 9); a deliberate leave told apart (left out: it needs the wire).
