@@ -907,3 +907,91 @@ every live run a synthetic test host on 127.0.0.1 with the software encoder, its
   with a test client identical (18 and 11), started locked #395's one "Displays:" line (11 and 10). Sill for Mac's
   previews from the bare SillMenuBar: 353 files, each byte for byte the same as run 4's (no word or view of Sill for Mac
   changed). The iOS app was left to GitHub's CI, which built it on every head of this run.
+
+**Sixth part (2026-11-25, run 6): main 22ab5a3e brought in, an iPhone's Virtual Desktop pixel for pixel (part A), and
+custom sizes (part B).** Main moved to 22ab5a3e (#414, Hold, Then Drag on by default; #393, Settings on a device as a
+whole-screen pane in one column): `virtual-desktop-2a` took it with no conflict (18a47362; nothing under Sources/ changed,
+so the Mac is as it was), and this branch took that head (023201d5) with one conflict, docs/LAYOUT.md's paragraph naming
+MockCatalog, HostSettingsLedger and HostSettingsPanel: main's whole-screen pane kept as main wrote it, with this branch's
+words in it (the `vdesk…` cases, the ledger's eighth field and rule 11, the Virtual Desktop's switch among the Mac's
+part's groups). git placed the Virtual Desktop's switch and its footnotes after Virtual Display's row inside #393's
+`macPart`, where default 23 had said it would go. GitHub's CI on both merges passed every step (2a: run 45498083096; 2b:
+run 45498202041), the iOS app with #393's pane and this branch's switch among them.
+
+**Part A: the iPhone's size.** Noah was shown three choices for an iPhone: as it was (the 800-point floor, about half
+size), life size (its own points: macOS barely fits), and in between, one Mac pixel on one iPhone pixel (its own pixels
+made as a 2x desktop: about two thirds size and the sharpest). His decision, whole (2026-11-24): "middle one for iPhones,
+and leaving iPads as they are." So while Match the device is chosen:
+- **An iPhone's Virtual Desktop is its picture's space counted in its own pixels, made as a 2x desktop of that many
+  pixels** (`VirtualDesktopSize.phone`): rule A's space (the viewport's panel, not the whole screen unless the picture has
+  it) times the screen's pixels a point, each side halved for a 2x desktop. An iPad keeps `device(space:)` as it was (its
+  own points at 2x, the shorter side grown to 800 points), and so does a device that says nothing of its screen.
+- **Which devices are iPhones**: the device says so itself, by its idiom (UIDevice's `.phone`): every iPhone, and the
+  iPhone Duo on both its screens (default 46 below). Nothing on the Mac keeps a table of models.
+- **How the Mac knows the pixels**: every viewport from a device of this branch carries `screen` (`ViewportScreen`, kind
+  9, optional): the screen's own pixels held upright (`nativeBounds`: an iPhone 15 Pro's 1179 × 2556), the pixels a
+  point the picture is drawn at (`scale`: 3) and `phone`. The Duo's window moves between its screens as it folds, and
+  the viewport it sends then names the screen it is on. A Mac takes a screen within ViewportBounds.screen (1 to 32768
+  pixels a side, 1 to 4 pixels a point) and ignores any other; it never refuses a viewport for it, so a later device
+  with a screen past these bounds is served as one that says nothing. An older device (sends none) gets what it had: the
+  800-point floor. An older Mac skips the key (JSONDecoder) and keeps its own rule (this branch's run 5: the floor; a
+  Mac before 0.7 has no Virtual Desktop at all).
+- **Odd pixel counts**: a 2x desktop has an even number of pixels a side, and an iPhone's side can be odd (an iPhone 15
+  Pro upright with Full Screen: 393 × 793 points, 1179 × 2379 pixels). The desktop takes the even count below (589 × 1189
+  points, 1178 × 2378 pixels), one pixel short at most. Fitted aspect-fit that picture would be scaled by 1179/1178, a
+  hair, which resamples every pixel; so the device draws a picture that is its pane's own pixels less at most two a side
+  one for one, from the pane's top-left pixel (`PictureFit`, new, `Tests/checks/picture-fit`), and the spare pixel is a
+  hairline at its right or bottom edge (black with Full Screen, the panel's grey otherwise). The stream view's frame
+  (ZoomedStreamView), the pointer sprite (HEVCDisplayView) and every touch (InputOverlay) take the same rectangle, so a
+  touch lands where the finger is; a pinch still scales the whole pane about its middle.
+- **The layouts of an iPhone 15 Pro** (393 × 852 points at 3x, 1179 × 2556 pixels; the spaces as its console prints
+  them):
+
+  | Layout | The space | Its pixels | The Virtual Desktop | On the iPhone |
+  |---|---|---|---|---|
+  | Upright, Full Screen | 393 × 793 pt | 1179 × 2379 | 589 × 1189 pt @2× | pixel for pixel, two thirds size |
+  | On its side, Full Screen | 734 × 393 pt | 2202 × 1179 | 1101 × 589 pt @2× | pixel for pixel |
+  | On its side, its controls showing | 718 × 299 pt | 2154 × 897 | 1077 × 448 pt @2× | pixel for pixel |
+  | Upright, its controls showing (the 16:10 pane) | 377 × 235 pt | 1131 × 705 | 800 × 499 pt @2× | scaled to 0.71 (default 47) |
+
+  Run 5 made them 800 × 1614, 1494 × 800, 1921 × 800 and 1283 × 800.
+- **The one bend of his rule** (default 47, the first for Noah to confirm): where a layout's pixel-for-pixel desktop would
+  have a side under 400 points, or both sides under 800, it is grown evenly from the space's shape until it has neither,
+  and the picture is scaled to fit. Why there: macOS kept no display of Sill's at 2x with both sides under 800 points
+  (the stage's 754 × 784 came up at 800 × 832 at 1x, five times: VirtualDisplaySize), and a desktop shorter than 400
+  points leaves under 370 below its 30-point menu bar, too little for a Mac window with its title bar and toolbar. Every
+  layout of a current iPhone but one is past both: the 16:10 pane over an upright iPhone's controls (565 × 352 at 2x on an
+  iPhone 15 Pro: both sides under 800, and 352 tall) becomes 800 × 499. 400 sits clear of every iPhone's own shortest
+  layout (on its side with its controls: 444 on an iPhone 12 to 14, 448 on a 15 Pro, about 489 on a Pro Max), so none is
+  scaled by a hair. An iPhone SE (2x) and a mini are bent more often.
+- **What macOS does at these sizes is not known**: no display narrower than 744 points was ever made on Noah's Mac (P1:
+  1133 × 744). Probe P3 (`Scripts/display-modes-probe/p3/`, Noah's, about a minute and a half) makes each size an iPhone
+  15 Pro gets for a few seconds, reads back its mode, its menu bar and the room under it, follows the first in place to
+  the others, and removes it. Until it says, Sill falls back by itself: **a make** that comes up elsewhere (at 1x, or
+  another size), throws or never comes up is made again at once at the size that works (the 800-point floor, which macOS
+  has always kept at 2x), with one line ("Virtual Desktop: macOS did not keep 589×1189 pt @2× (it came up at 800×1615 pt
+  @1×); made it at 800×1614 pt @2×, the size that works, the picture scaled."), and that size is not asked again this
+  run (`afterMake`, `notKeptAtMake`); **a follow in place** to one that does not land falls back to the size it had, says
+  so in one line, and follows the size that works next, in place, after the spacing (`phoneSizeNotKept`). Never without a
+  desktop. TEST ONLY: `SILL_TEST_VD_STEPS=short-1x` makes a test host's said display do what macOS did with the stage's
+  754 × 784 to any side under 744 points.
+- **Rules A and B, the timing and the follow in place still hold**: the space is still the viewport's panel (rule A); the
+  4096-pixel backing holds every iPhone's pixel-for-pixel size either way round (the largest, the Duo's inner screen flat,
+  1426 × 1003 points, is 2852 pixels); the cause and its timing (a tap at once, a turn after 1 s) are the space's, not the
+  size's; a size of the display's own orientation lands in one step, a turn in two (the said display does both at these
+  sizes in the gate; P3 does them on a real display).
+- **A chosen Resolution changes nothing**: it keeps its own size and rate, for an iPhone too. The headless display of a
+  Mac with no screen (#395) keeps its own rule (the floor): it is the Mac's only display, its login window included.
+- **The lines**: the make's names an iPhone's pixels ("… for iPhone (its picture: 393×793 pt, 1179×2379 px; pixel for
+  pixel)."; grown: "…; scaled to fit: an iPhone's desktop is at least 800×400 pt"), a follow's ends ", pixel for pixel.",
+  and the fall back's one line above.
+
+**Defaults taken for Noah to confirm** (this part's; 1 to 45 stand):
+46. **The iPhone Duo is an iPhone on both its screens**: pixel for pixel on its outer screen (466 × 678 points at 3x:
+    about 699 × 1017 with Full Screen upright) and on its inner one (669 × 951 at 3x: flat with Full Screen 1426 × 1003
+    points, two thirds size and sharp, where the iPad's rule would give 1137 × 800, larger and scaled).
+47. **The one bend**: no side of an iPhone's Virtual Desktop under 400 points and the longer at least 800, grown evenly
+    from the space's shape where it would be smaller, the picture then scaled: only the 16:10 pane over an upright iPhone's
+    controls on a current iPhone (800 × 499 on an iPhone 15 Pro, scaled to 0.71).
+48. **The spare pixel** of an odd side is a hairline at the picture's right or bottom edge, never a hair's scaling.
+49. **A size macOS does not keep** is never asked again in that run of Sill; the next run tries pixel for pixel again.
