@@ -519,12 +519,12 @@ def the_iphone(out):
     env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3"}
     h = Host(out, "vd-phone", env, args=["--virtual-desktop"])
     try:
-        # P, an iPhone 15 Pro held upright with Full Screen (393×793, 1179×2379 px): onto it at 3 (589×1189); on its side
-        # with Full Screen at 6 (734×393: 1101×589 after 1 s, a turn: 1x then the switch); its controls back at 9.5 (718×299:
-        # 1077×448 at once, one step); upright with its controls at 12 (377×235: grown to 800×499 after 1 s, one step: both
-        # are wide); Full Screen on upright at 15 (589×1189 at once: a turn of the display); gone at 18.
+        # P, an iPhone 15 Pro held upright with Full Screen (393×793, 1179×2379 px), from 1 s on the host's clock: onto it at
+        # 3 (589×1189); on its side with Full Screen at 7 (734×393: 1101×589 after 1 s, a turn of the display made upright:
+        # 1x, then the switch); its controls back at 10.5 (718×299: 1077×448 at once); upright with its controls at 13 (377×235:
+        # grown to 800×499 after 1 s); Full Screen on upright at 16 (589×1189 at once); gone at 19.
         p, rp = client(h, out, "vdphone-p", 18, ["desktop", "--fps=120", "--panel=393x793", "--room=393x793", PRO15, "--device=iPhone",
-                                                 "--next-display@1", "--next-display@3", "--view-after=734x393,734x393@6",
+                                                 "--next-display@1", "--next-display@2", "--view-after=734x393,734x393@6",
                                                  "--view-after=718x299@9.5", "--view-after=377x235,393x793@12", "--view-after=393x793@15"], 1)
         p.join()
         h.at(21)
@@ -533,25 +533,27 @@ def the_iphone(out):
     def took(l, size, own):
         m = re.search(r"followed in place in (\d+) ms: " + re.escape(size) + r" pt @2× at 120 Hz" + (", pixel for pixel" if own else "") + r"\.$", l)
         return int(m.group(1)) if m else None
-    made = vd_lines(h, 3, 6)
+    # A test host's Desktop streams its said display's points at 1x on the software encoder, each side rounded down to
+    # even (589×1189 → 588×1188); a Mac's at Retina is its pixels, 1178×2378.
+    made = vd_lines(h, 3, 7)
     verdict(len(made) == 1 and "589×1189 pt @2× at 120 Hz" in made[0][2] and "(its picture: 393×793 pt, 1179×2379 px; pixel for pixel)" in made[0][2],
-            f"VD iPhone: upright with Full Screen, made pixel for pixel (393×793 pt, 1179×2379 px → 589×1189 @2×): {made or said(h, 3, 6)}")
-    on = [x for x in streams(h, 3, 6) if x[1] == "Virtual Desktop"]
-    verdict(bool(on) and on[-1][2] == "589×1189", f"VD iPhone: the Desktop on it at that size: {on}")
-    side = h.all(r"^Virtual Desktop: iPhone turned; ", 6.5, 9.5)
-    verdict(len(side) == 1 and 6.9 <= side[0][0] <= 8.6 and took(side[0][1], "1101×589", True) is not None,
-            f"VD iPhone: on its side with Full Screen after 1 s, in place, pixel for pixel (734×393 → 1101×589): {side or said(h, 6.5, 9.5)}")
-    controls = h.all(r"^Virtual Desktop: iPhone showed its controls; ", 9.5, 12)
-    verdict(len(controls) == 1 and controls[0][0] <= 10.6 and took(controls[0][1], "1077×448", True) is not None,
-            f"VD iPhone: its controls on its side at once, pixel for pixel (718×299 → 1077×448): {controls or said(h, 9.5, 12)}")
-    pane = h.all(r"^Virtual Desktop: iPhone turned; ", 12, 15)
-    verdict(len(pane) == 1 and took(pane[0][1], "800×499", False) is not None,
-            f"VD iPhone: upright with its controls, the 16:10 pane grown to 800×499 (default 1), not pixel for pixel: {pane or said(h, 12, 15)}")
-    back = h.all(r"^Virtual Desktop: iPhone hid its controls; ", 15, 18)
-    verdict(len(back) == 1 and back[0][0] <= 16.4 and took(back[0][1], "589×1189", True) is not None,
-            f"VD iPhone: Full Screen upright again at once, pixel for pixel (589×1189): {back or said(h, 15, 18)}")
-    last = [x for x in streams(h, 15, 18.5) if x[1] == "Virtual Desktop"]
-    verdict(bool(last) and last[-1][2] == "589×1189", f"VD iPhone: …the Desktop on it at that size: {last}")
+            f"VD iPhone: upright with Full Screen, made pixel for pixel (393×793 pt, 1179×2379 px → 589×1189 @2×): {made or said(h, 3, 7)}")
+    on = [x for x in streams(h, 3, 7) if x[1] == "Virtual Desktop"]
+    verdict(bool(on) and on[-1][2] == "588×1188", f"VD iPhone: the Desktop on it at that size (the test host's 1x, even): {on}")
+    side = h.all(r"^Virtual Desktop: iPhone turned; ", 7.5, 10.5)
+    verdict(len(side) == 1 and 7.9 <= side[0][0] <= 9.6 and took(side[0][1], "1101×589", True) is not None,
+            f"VD iPhone: on its side with Full Screen after 1 s, in place, pixel for pixel (734×393 → 1101×589): {side or said(h, 7.5, 10.5)}")
+    controls = h.all(r"^Virtual Desktop: iPhone showed its controls; ", 10.5, 13)
+    verdict(len(controls) == 1 and controls[0][0] <= 11.6 and took(controls[0][1], "1077×448", True) is not None,
+            f"VD iPhone: its controls on its side at once, pixel for pixel (718×299 → 1077×448): {controls or said(h, 10.5, 13)}")
+    pane = h.all(r"^Virtual Desktop: iPhone turned; ", 13, 16)
+    verdict(len(pane) == 1 and pane[0][0] >= 13.9 and took(pane[0][1], "800×499", False) is not None,
+            f"VD iPhone: upright with its controls, the 16:10 pane grown to 800×499 (default 1), not pixel for pixel: {pane or said(h, 13, 16)}")
+    back = h.all(r"^Virtual Desktop: iPhone hid its controls; ", 16, 19)
+    verdict(len(back) == 1 and back[0][0] <= 17.4 and took(back[0][1], "589×1189", True) is not None,
+            f"VD iPhone: Full Screen upright again at once, pixel for pixel (589×1189): {back or said(h, 16, 19)}")
+    last = [x for x in streams(h, 16, 19.5) if x[1] == "Virtual Desktop"]
+    verdict(bool(last) and last[-1][2] == "588×1188", f"VD iPhone: …the Desktop on it at that size: {last}")
     verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1 and not h.all(r"macOS did not keep|beyond the backing", 0, 1e9),
             f"VD iPhone: made once, every change in place, nothing refused: {said(h)}")
     the_iphone_refused(out)

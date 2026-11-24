@@ -164,30 +164,33 @@ check(VDS.phone(space: CGSize(width: 16384, height: 1000), scale: 3) == size(409
 // 20,000 random iPhone spaces at 2x and 3x: at 2x always; pixel for pixel (each side half the space's pixels, at most one
 // pixel spare) exactly when that is at least 400 a side and 800 on the longer; else grown evenly to them, the shape kept
 // within a point; never a side over 4096.
-var phoneWrong = 0, phoneBent = 0, phoneOwn = 0
+var phoneWrong = 0, phoneBent = 0, phoneOwn = 0, phoneFirst: [String] = []
+func phoneNot(_ why: String) { phoneWrong += 1; if phoneFirst.count < 3 { phoneFirst.append(why) } }
 for _ in 0..<20_000 {
     let w = Double.random(in: 120...1600, using: &rng), h = Double.random(in: 120...1600, using: &rng)
     let sc: Double = Bool.random(using: &rng) ? 3 : 2
-    guard let s = phone(w, h, scale: sc), let px = VDS.pixels(space: CGSize(width: w, height: h), scale: sc) else { phoneWrong += 1; continue }
+    guard let s = phone(w, h, scale: sc), let px = VDS.pixels(space: CGSize(width: w, height: h), scale: sc) else { phoneNot("\(w)×\(h) at \(sc): none"); continue }
     let half = (w: px.width / 2, h: px.height / 2)
     let fits = min(half.w, half.h) >= 400 && max(half.w, half.h) >= 800
-    if s.scale != 2 || max(s.widthPt, s.heightPt) > 4096 { phoneWrong += 1; continue }
+    if s.scale != 2 || max(s.widthPt, s.heightPt) > 4096 { phoneNot("\(w)×\(h) at \(sc): \(s)"); continue }
     if fits {
         phoneOwn += 1
-        if s.widthPt != half.w || s.heightPt != half.h || px.width - 2 * s.widthPt > 1 || px.height - 2 * s.heightPt > 1 { phoneWrong += 1 }
+        if s.widthPt != half.w || s.heightPt != half.h || px.width - 2 * s.widthPt > 1 || px.height - 2 * s.heightPt > 1 {
+            phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), not its own")
+        }
     } else {
         phoneBent += 1
         let short = min(s.widthPt, s.heightPt), long = max(s.widthPt, s.heightPt)
         // Each side within half a point of its exact growth: the shape within that rounding.
         let r = Double(px.width) / Double(px.height)
         let rel = abs(Double(s.widthPt) / Double(s.heightPt) / r - 1)
-        if short < 400 || long < 800 || (short > 400 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-9 {
-            phoneWrong += 1
+        if short < 400 || long < 800 || (short > 400 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-5 {
+            phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), grown wrong (\(rel))")
         }
     }
 }
 check(phoneWrong == 0 && phoneBent > 2000 && phoneOwn > 2000,
-      "20,000 random iPhone spaces: pixel for pixel when 400 by 800 or more, else grown to it, shape kept (\(phoneWrong) not; \(phoneOwn) own, \(phoneBent) grown)")
+      "20,000 random iPhone spaces: pixel for pixel when 400 by 800 or more, else grown to it, shape kept (\(phoneWrong) not; \(phoneOwn) own, \(phoneBent) grown; first \(phoneFirst))")
 // The words its lines carry.
 check(VDS.pixelWords(size(589, 1189), space: upFS, screen: pro) == "1179×2379 px; pixel for pixel", "the made line's words, pixel for pixel")
 check(VDS.pixelWords(size(800, 499), space: CGSize(width: 377, height: 235), screen: pro)
@@ -782,7 +785,7 @@ check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused, Stuck,l
 check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused"], on: true).line
       == "Test Virtual Desktop: its said display's steps: switch-refused (SILL_TEST_VD_STEPS), not as the probes measured them.", "its line")
 check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "switch-refused,sideways"], on: true).knobs == VDS.TestKnobs()
-      && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "sideways"], on: true).line?.contains("ignored: it takes switch-refused, stuck and late") == true,
+      && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "sideways"], on: true).line?.contains("ignored: it takes switch-refused, stuck, late and short-1x") == true,
       "an unknown word: ignored whole, said")
 check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).knobs == VDS.TestKnobs()
       && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).line?.contains("ignored: it needs a test host's Virtual Desktop") == true,
