@@ -151,6 +151,18 @@ final class StreamServer {
         /// Its hello said it shows a Mac's off-console view (`Hello.offConsoleView`; docs/off-console-plan.md):
         /// it is sent the view's window list (`broadcastList`), every other device the plain one.
         var viewsOffConsole = false
+        /// Its clipboard subscription takes images while this Mac's Include images is on (HostClipboard's
+        /// word, `setClipboardImages`): only then may its kind 32 be up to 12 MiB
+        /// (StreamMessage.maxClientPayload(for:clipboardImages:)).
+        var clipboardImages = false
+        /// The clipboard's image path (`sendClipboardImage`): the newest image waiting for its connection to
+        /// be idle, and the bytes of the one crossing it (handed over, not taken yet). While either is
+        /// there its frames are withheld (`imageBusy`).
+        var pendingImage: Data?
+        var imageBytesInFlight = 0
+        var imageBusy: Bool { pendingImage != nil || imageBytesInFlight > 0 }
+        /// Since when an image has waited for it or crossed it without a break (ClipboardPolicy.imageStalls).
+        var imageSince: TimeInterval?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -1365,12 +1377,29 @@ final class StreamServer {
             client.withheldThisSecond = 0
             client.takenThisSecond = 0
             if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
-            guard client.route.isRemote else { continue }
             let silent = now - client.lastHeardAt
+            if client.pendingImage != nil { pumpImage(client) }      // a backstop: each message taken also looks
+            // An image that neither starts nor crosses (a device that pings and takes nothing): dropped as not
+            // draining, at either door (ClipboardPolicy.imageStalls).
+            if client.imageBusy, let since = client.imageSince,
+               ClipboardPolicy.imageStalls(busyFor: now - since, bytes: client.imageBytesInFlight + (client.pendingImage?.count ?? 0)) {
+                print("Client not taking a clipboard image for \(Int(now - since)) s, dropping: \(client.connection.endpoint)")
+                client.connection.cancel()
+                continue
+            }
+            guard client.route.isRemote else {
+                // A clipboard image waits for it or crosses it: its frames are withheld, so the drain eviction
+                // never meets it; silence does (ClipboardPolicy.dropsSilentWhileImage).
+                if client.imageBusy, ClipboardPolicy.dropsSilentWhileImage(silentFor: silent, connectedFor: now - client.connectedAt) {
+                    print("Client silent for \(Int(silent)) s while a clipboard image was on its way, dropping: \(client.connection.endpoint)")
+                    client.connection.cancel()
+                }
+                continue
+            }
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
                 print("Client silent for \(Int(silent)) s, dropping: \(client.connection.endpoint)")
                 client.connection.cancel()   // its state handler forgets it
-            } else if client.needsKeyframe, client.keyframeWanted, !client.awaitingFirstKeyframe,
+            } else if client.needsKeyframe, client.keyframeWanted, !client.awaitingFirstKeyframe, !client.imageBusy,
                       client.pendingBytes <= Self.remoteIdleBytes, client.connection.state == .ready {
                 waiting.append(client)
             }
@@ -1522,9 +1551,11 @@ final class StreamServer {
             client.lastHeardAt = Date().timeIntervalSince1970
             if self.clients[ObjectIdentifier(c)] === client { self.heard(ObjectIdentifier(c)) }
             // A header can announce up to 4 GiB and the read below would wait for all of it. No
-            // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
-            if header.payloadLength > StreamMessage.maxClientPayload {
-                print("Closing \(c.endpoint): it announced a \(header.payloadLength)-byte message (the limit is 1 MB).")
+            // client message comes near a megabyte but a clipboard image (12 MiB at most, and only from a
+            // connection whose clipboard subscription takes them), so a bigger one is a broken or hostile peer.
+            let cap = StreamMessage.maxClientPayload(for: header.kind, clipboardImages: client.clipboardImages)
+            if header.payloadLength > cap {
+                print("Closing \(c.endpoint): it announced a \(header.payloadLength)-byte message (the limit is \(cap >> 20) MB).")
                 c.cancel()
                 return
             }
@@ -1608,12 +1639,49 @@ final class StreamServer {
                 self.receiveLoop(client)
             }
             if header.payloadLength == 0 { deliver(Data()); return }
-            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
-                guard let data else {
-                    if isComplete || error != nil { c.cancel() }
-                    return
-                }
-                deliver(data)
+            self.readPayload(client, length: header.payloadLength, into: nil, deliver: deliver)
+        }
+    }
+
+    /// The most of a client's payload one read asks for: every message but a clipboard image is one read,
+    /// as before; an image's is many, each a sign of life.
+    static let payloadPiece = 256 * 1024
+
+    /// A message's payload that grows over reads (`readPayload`).
+    private final class PayloadBuffer {
+        var data = Data()
+        init(capacity: Int) { data.reserveCapacity(capacity) }
+    }
+
+    /// On `queue`: the payload of a message from `client`, `length` bytes, in reads of at most
+    /// `payloadPiece`, then `deliver`. Each read is a sign of life as a header is (`lastHeardAt`, `heard`):
+    /// read whole, an image of 11 MB from a device on a slow uplink was one read of more than 8 s while
+    /// its pings waited behind it, and the remote door dropped the device as silent in the middle of its
+    /// Paste (#300's D3). The device reads the Mac's messages the same way (MessageReader). The end or an
+    /// error in the middle of a payload closes the connection, as between messages.
+    private func readPayload(_ client: Client, length: Int, into buffer: PayloadBuffer?, deliver: @escaping (Data) -> Void) {
+        let c = client.connection
+        let want = min(length - (buffer?.data.count ?? 0), Self.payloadPiece)
+        c.receive(minimumIncompleteLength: want, maximumLength: want) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            guard let data, !data.isEmpty else {
+                if isComplete || error != nil { c.cancel() }
+                return
+            }
+            // The whole payload in one read (every message but an image): delivered as it came, no copy.
+            if buffer == nil, data.count == length { deliver(data); return }
+            client.lastHeardAt = Date().timeIntervalSince1970
+            if self.clients[ObjectIdentifier(c)] === client { self.heard(ObjectIdentifier(c)) }
+            let into = buffer ?? PayloadBuffer(capacity: length)
+            into.data.append(data)
+            if into.data.count >= length {
+                let payload = into.data
+                into.data = Data()
+                deliver(payload)
+            } else if isComplete || error != nil {
+                c.cancel()
+            } else {
+                self.readPayload(client, length: length, into: into, deliver: deliver)
             }
         }
     }
@@ -1641,6 +1709,13 @@ final class StreamServer {
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
             for client in clients.values where client.connection.state == .ready {
+                if message.kind == .frame, client.imageBusy {
+                    // A clipboard image waits for this connection or crosses it: the picture waits for it, not
+                    // counted against its link, and comes back through a keyframe (`imageCrossed`).
+                    Stats.shared.bump("net.waitKey")
+                    client.needsKeyframe = true
+                    continue
+                }
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue
@@ -1670,6 +1745,92 @@ final class StreamServer {
                 }
                 send(data, to: client, isFrame: message.kind == .frame)
             }
+        }
+    }
+
+    // MARK: The clipboard's images (kind 32; HostClipboard, docs/clipboard-plan.md "Generation 2")
+    //
+    // An image copied on the Mac (or sent by another device) is one message of up to 11 MB of JSON, and
+    // nothing else reaches the device while it crosses. Sent like any message it held every frame behind
+    // it, and the device was dropped as not draining, at home within 4 s (#300's D4). So it goes on a path
+    // of its own, as the sound's: never counted in `inflight`, `inflightFrames` or the drain eviction, its
+    // bytes counted in `pendingBytes` and, once taken, `takenThisSecond`, so the link judge and remote
+    // pacing see the link carry it. It waits for the connection to be idle
+    // (ClipboardPolicy.hostMaySendImage); from the moment it waits until it has been taken, the device's
+    // frames are withheld (not counted against its link: the picture waits for the image, as for a first
+    // keyframe), and a keyframe brings the picture back after. Only the newest image waits: a newer copy
+    // replaces one not yet started. Meanwhile the home drain eviction never meets a device that has gone,
+    // so the sweep drops one of either door that has been silent (`dropsSilentWhileImage`).
+
+    /// Whether `connection`'s clipboard subscription takes images while the Mac's Include images is on
+    /// (HostClipboard): its kind 32 may then be up to 12 MiB. Thread-safe.
+    func setClipboardImages(_ connection: NWConnection, _ on: Bool) {
+        let id = ObjectIdentifier(connection)
+        queue.async { [self] in clients[id]?.clipboardImages = on }
+    }
+
+    /// A clipboard image (a whole kind 32) to each of `connections`, on the path above: withheld from all
+    /// while the Mac reads locked (LockPolicy), as `send(each:)` withholds a kind 32. Thread-safe.
+    func sendClipboardImage(_ message: StreamMessage, to connections: [NWConnection]) {
+        let data = message.serialized()
+        let ids = connections.map(ObjectIdentifier.init)
+        queue.async { [self] in
+            for id in ids {
+                guard let client = clients[id], client.connection.state == .ready else { continue }
+                if lockGate.withholds(.clipboard) { withheld(.clipboard, for: id); continue }
+                if !client.imageBusy { client.imageSince = Date().timeIntervalSince1970 }
+                client.pendingImage = data
+                client.needsKeyframe = true      // its frames wait from now on (`imageBusy`)
+                pumpImage(client)
+            }
+        }
+    }
+
+    /// On `queue`: starts `client`'s waiting image once its connection is idle (ClipboardPolicy
+    /// .hostMaySendImage) and none crosses; once that one is taken, the picture's keyframe is asked for
+    /// (at once at home; away as remote pacing asks, `keyframeWanted`) and the next waiting image, if any,
+    /// is looked at. Called when one is queued, after every message the connection takes, and by the sweep.
+    private func pumpImage(_ client: Client) {
+        guard client.imageBytesInFlight == 0, let data = client.pendingImage else { return }
+        guard ClipboardPolicy.hostMaySendImage(pendingBytes: client.pendingBytes, keyframesInFlight: client.keyframesInFlight.count) else { return }
+        client.pendingImage = nil
+        let id = ObjectIdentifier(client.connection)
+        // Locked since it was queued: dropped, as the gate drops every kind 32 then.
+        if lockGate.withholds(.clipboard) {
+            withheld(.clipboard, for: id)
+            imageCrossed(client)
+            return
+        }
+        client.imageBytesInFlight = data.count
+        client.pendingBytes += data.count
+        client.lastSentAt = Date().timeIntervalSince1970
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
+            guard let self, let client else { return }
+            client.imageBytesInFlight = 0
+            client.pendingBytes -= data.count
+            client.takenThisSecond += data.count
+            self.imageCrossed(client)
+        })
+        Stats.shared.bump("clip.sent")
+    }
+
+    /// On `queue`: `client`'s image has crossed (or was dropped): the next one if one waits, else its picture
+    /// back through a keyframe.
+    private func imageCrossed(_ client: Client) {
+        if client.pendingImage != nil {
+            // Progress: the next one is timed from now, so images copied one after another never add up to a
+            // stall (`imageStalls`).
+            client.imageSince = Date().timeIntervalSince1970
+            pumpImage(client)
+            return
+        }
+        guard !client.imageBusy, clients[ObjectIdentifier(client.connection)] === client else { return }
+        client.imageSince = nil
+        client.needsKeyframe = true
+        if client.route.isRemote {
+            client.keyframeWanted = true     // asked for when its queue is idle and one is due (`paceRemote`, `sweep`)
+        } else {
+            onKeyframeNeeded?()
         }
     }
 
@@ -1738,11 +1899,12 @@ final class StreamServer {
         client.audioUnsent += 1
         client.lastSentAt = Date().timeIntervalSince1970
         client.pendingBytes += data.count
-        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
             guard let client else { return }
             client.audioUnsent -= 1
             client.pendingBytes -= data.count
             client.takenThisSecond += data.count
+            if client.pendingImage != nil { self?.pumpImage(client) }
         })
         Stats.shared.bump("aud.sent")
     }
@@ -1888,7 +2050,7 @@ final class StreamServer {
             client.inflightFrames += 1
             if client.oldestUnackedFrameAt == nil { client.oldestUnackedFrameAt = now }
         }
-        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+        client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] _ in
             guard let client else { return }
             client.inflight -= 1
             client.pendingBytes -= data.count
@@ -1909,6 +2071,9 @@ final class StreamServer {
                     client.oldestUnackedFrameAt = Date().timeIntervalSince1970
                 }
             }
+            // A clipboard image waiting for the connection to be idle looks again (`pumpImage`), once this
+            // message's bytes and keyframe are off the books.
+            if client.pendingImage != nil { self?.pumpImage(client) }
         })
     }
 }

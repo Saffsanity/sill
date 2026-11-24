@@ -137,7 +137,7 @@ enum MockCatalog {
             }
         }
         // The clipboard (docs/clipboard-plan.md): `-SillClipboardChip 1` offers the chip over the
-        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted|sending|unreadable` shows a
         // Paste's note in its place and under the Settings group's Paste (`pasted`: with ⌘V, paste right
         // away); neither goes away by itself here.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
@@ -155,6 +155,12 @@ enum MockCatalog {
             case "pasted":
                 let note = ClipboardPolicy.receiptNote(pasted: true, mac: "Mac mini")
                 client.clipboardNote = ClipboardNote(text: note.text, spoken: note.spoken, warning: false, at: 0)
+            case "sending":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.sending(mac: "Mac mini"),
+                                                     spoken: ClipboardPolicy.Copy.sendingSpoken(mac: "Mac mini"), warning: false, at: 0)
+            case "unreadable":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.imageUnreadable, spoken: ClipboardPolicy.Copy.imageUnreadable,
+                                                     warning: true, at: 0)
             default:
                 break
             }
@@ -440,8 +446,12 @@ enum MockCatalog {
         // A Mac from this build takes the trackpad gestures (its window list says so); an older one
         // does not, and its Settings panel says to update it.
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
-        // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
-        client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
+        // …and shares its clipboard (`WindowList.clipboard` 2, text and images): the Settings panel's Share
+        // Clipboard and Include Images. `-SillMockClipboard 1`: a Mac that shares text alone (a Mac before
+        // images, or one whose Include images is off), with no Include Images row.
+        let defaults = UserDefaults.standard
+        let generation = defaults.object(forKey: "SillMockClipboard") != nil ? defaults.integer(forKey: "SillMockClipboard") : ClipboardPolicy.generation
+        client.hostClipboard = c == .legacy ? nil : generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's

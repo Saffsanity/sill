@@ -75,6 +75,15 @@ package struct HostConfig: Equatable, Sendable {
     /// DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it on. Applied at once
     /// (`StreamCoordinator.setTarget`: the lock's gate takes it), never by a restart of its own.
     package var offConsoleView: Bool
+    /// Include images, under Share clipboard with devices (docs/clipboard-plan.md, "Generation 2"): the
+    /// Mac owner's say on images. On, the lists say `clipboard` 2 and the Mac sends an image copied here
+    /// to each device whose Include Images is on, and takes the one a device sends with Paste; off, they
+    /// say 1 and no image goes either way (ClipboardPolicy.hostGeneration). On in `standard` and `app`
+    /// (the evaluation of #300: a device's own switch, off unless turned on, is the one opt-in), the CLI's
+    /// `--no-clipboard-images` turns it off. The Mac's alone, like Share clipboard: absent from
+    /// StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`, so no
+    /// device turns it on. Applied at once (`StreamCoordinator.setTarget`), not between pipelines.
+    package var shareClipboardImages: Bool
     /// Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; issues #283 and #275): 30 s after
     /// the last session ends, unless one comes back, the Mac locks and (`lockSleepsDisplay`) its display sleeps
     /// (PrivacyPolicy, PrivacyLock). Off in both `standard` and `app`; the CLI takes it only with --synthetic, and only
@@ -98,8 +107,8 @@ package struct HostConfig: Equatable, Sendable {
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, shareClipboardImages: Bool,
+                 offConsoleView: Bool, lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -114,6 +123,7 @@ package struct HostConfig: Equatable, Sendable {
         self.requirePairing = requirePairing
         self.shareClipboard = shareClipboard
         self.sendAudio = sendAudio
+        self.shareClipboardImages = shareClipboardImages
         self.offConsoleView = offConsoleView
         self.lockAfterSession = lockAfterSession
         self.lockSleepsDisplay = lockSleepsDisplay
@@ -128,7 +138,8 @@ package struct HostConfig: Equatable, Sendable {
     /// exposure. 7455 is unassigned at IANA and below the ephemeral range. Away from home, Low ·
     /// Standard (Noah, 2026-09-25): a slow connection never starts at the home quality. Require
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
-    /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too.
+    /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too; and
+    /// its Include images on, the Mac owner's veto (each device's Include Images is off until turned on).
     /// Send Audio off here; Sill.app's is on since 2026-10-27
     /// (`app`). Lock this Mac when the last device leaves off in both: a Mac locks by itself only once its user says so;
     /// under it, Turn off its display too on and Only after a device away from home off (the plan's recommendations).
@@ -137,6 +148,7 @@ package struct HostConfig: Equatable, Sendable {
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
+                                             shareClipboardImages: true,
                                              offConsoleView: false, lockAfterSession: false,
                                              lockSleepsDisplay: true, lockOnlyAfterAway: false)
 
@@ -176,8 +188,8 @@ package struct HostConfig: Equatable, Sendable {
     /// per 60 fps, Retina → points, away bitrate 4 → 15 Mbps per 60 fps, away points → Retina, speed
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
     /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
-    /// send audio off → on, lock when the last device leaves off → on, its display off with the lock on → off, lock
-    /// only after a device away from home off → on".
+    /// clipboard images on → off, send audio off → on, lock when the last device leaves off → on, its display off with
+    /// the lock on → off, lock only after a device away from home off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -195,6 +207,9 @@ package struct HostConfig: Equatable, Sendable {
         if internetAccess != new.internetAccess { parts.append("internet access \(onOff(internetAccess)) → \(onOff(new.internetAccess))") }
         if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
         if shareClipboard != new.shareClipboard { parts.append("share clipboard \(onOff(shareClipboard)) → \(onOff(new.shareClipboard))") }
+        if shareClipboardImages != new.shareClipboardImages {
+            parts.append("clipboard images \(onOff(shareClipboardImages)) → \(onOff(new.shareClipboardImages))")
+        }
         if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
         if offConsoleView != new.offConsoleView { parts.append("off-console view \(onOff(offConsoleView)) → \(onOff(new.offConsoleView))") }
         if lockAfterSession != new.lockAfterSession {

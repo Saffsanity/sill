@@ -16,8 +16,8 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, offConsoleView, lockAfterSession,
-///                                              lockSleepsDisplay, lockOnlyAfterAway,
+///                                              shareClipboard, shareClipboardImages, offConsoleView,
+///                                              lockAfterSession, lockSleepsDisplay, lockOnlyAfterAway,
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -371,6 +371,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
+        case "shareClipboardImages": config.shareClipboardImages = flag
         case "offConsoleView": config.offConsoleView = flag
         case "lockAfterSession": config.lockAfterSession = flag
         case "lockSleepsDisplay": config.lockSleepsDisplay = flag
@@ -438,13 +439,14 @@ enum DebugHooks {
             }
         }
         // General's clipboard section in each of macOS's answers (ClipboardPolicy.MacAccess), and with
-        // the switch off, when it says nothing of them.
-        let clipboardSamples: [(String, Bool, ClipboardPolicy.MacAccess)] = [
-            ("allowed", true, .allowed), ("notasked", true, .notAsked), ("asks", true, .asks), ("denied", true, .denied),
-            ("off-denied", false, .denied),
+        // the switch off, when it says nothing of them; Include images on under it, and off
+        // ("images-off"), and dimmed with the switch off.
+        let clipboardSamples: [(String, Bool, Bool, ClipboardPolicy.MacAccess)] = [
+            ("allowed", true, true, .allowed), ("notasked", true, true, .notAsked), ("asks", true, true, .asks),
+            ("denied", true, true, .denied), ("off-denied", false, true, .denied), ("images-off", true, false, .allowed),
         ]
-        for (sampleName, on, access) in clipboardSamples {
-            let section = Form { ClipboardSection(shareClipboard: .constant(on), access: access) }
+        for (sampleName, on, images, access) in clipboardSamples {
+            let section = Form { ClipboardSection(shareClipboard: .constant(on), images: .constant(images), access: access) }
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))

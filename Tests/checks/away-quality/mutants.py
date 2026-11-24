@@ -59,6 +59,16 @@ MUTANTS = [
     ("AQ17 standard shares no clipboard", H + "HostConfig.swift", "requirePairing: true, shareClipboard: true, sendAudio: false,", "requirePairing: true, shareClipboard: false, sendAudio: false,"),
     ("AQ18 the clipboard's change unnamed", H + "HostConfig.swift", '        if shareClipboard != new.shareClipboard { parts.append("share clipboard \\(onOff(shareClipboard)) → \\(onOff(new.shareClipboard))") }\n', ""),
     ("AQ19 the clipboard's switch never stored", H + "HostConfig.swift", "        self.shareClipboard = shareClipboard\n", "        self.shareClipboard = true\n"),
+    # Include images (#300 finished): the Mac owner's say on the clipboard's images, on by default.
+    ("AQ-I1 standard takes no clipboard images", H + "HostConfig.swift", "                                             shareClipboardImages: true,\n",
+     "                                             shareClipboardImages: false,\n"),
+    ("AQ-I2 Include images' change unnamed", H + "HostConfig.swift",
+     '            parts.append("clipboard images \\(onOff(shareClipboardImages)) → \\(onOff(new.shareClipboardImages))")\n', ""),
+    ("AQ-I3 Include images never stored", H + "HostConfig.swift", "        self.shareClipboardImages = shareClipboardImages\n",
+     "        self.shareClipboardImages = true\n"),
+    ("AQ-I4 Include images named before Share clipboard", H + "HostConfig.swift",
+     '        if shareClipboard != new.shareClipboard { parts.append("share clipboard \\(onOff(shareClipboard)) → \\(onOff(new.shareClipboard))") }\n        if shareClipboardImages != new.shareClipboardImages {\n            parts.append("clipboard images \\(onOff(shareClipboardImages)) → \\(onOff(new.shareClipboardImages))")\n        }\n',
+     '        if shareClipboardImages != new.shareClipboardImages {\n            parts.append("clipboard images \\(onOff(shareClipboardImages)) → \\(onOff(new.shareClipboardImages))")\n        }\n        if shareClipboard != new.shareClipboard { parts.append("share clipboard \\(onOff(shareClipboard)) → \\(onOff(new.shareClipboard))") }\n'),
     # Send Audio, a device's to set too (docs/audio-plan.md, Q8 as Noah revised it on 2026-10-27).
     ("AQ20 a device's Send Audio dropped, as the beta's hosts did", H + "DeviceSettings.swift",
      "var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)",

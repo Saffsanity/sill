@@ -223,6 +223,7 @@ struct ContentView: View {
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
+///   `-SillSettingsScroll clipboardgroup` at the clipboard group's first row (its switches, Include Images among them),
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
 ///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
@@ -257,10 +258,12 @@ struct ContentView: View {
 ///   stepper's changes are saved for the next run; this one keeps 0.3). The console says
 ///   "thumbnails: hold 0.3 s" when a bar's thumbnails first read it and at each change.
 /// * `-Sill.shareClipboard 0` — not a harness argument either: this device's Share Clipboard (the
-///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
-///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
-///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
-///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+///   Settings panel's This iPad group) off for one run, in the normal app too; `-Sill.clipboardImages 1`
+///   its Include Images on for one run (off unless turned on), in the normal app too. The mock Mac shares
+///   its clipboard (`WindowList.clipboard` 2, text and images) in every settings case but `legacy`, whose
+///   group then has no clipboard rows; `-SillMockClipboard 1` makes it a Mac that shares text alone (one
+///   before images, or with its Include images off: no Include Images row). `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
+///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted|sending|unreadable` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another

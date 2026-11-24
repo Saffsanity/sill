@@ -94,13 +94,40 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false,
+                          requirePairing: true, shareClipboard: false, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
                           lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(!off.applying(all).shareClipboard && !off.applyingAway(all).shareClipboard
           && standard.applying(all).shareClipboard && standard.applyingAway(all).shareClipboard,
+          "a device's change never moves it, at home or away")
+}
+
+// Include images (docs/clipboard-plan.md, "Generation 2"; #300 finished): the Mac owner's say on the
+// clipboard's images, under Share clipboard with devices: on in `standard` and `app` (each device's Include
+// Images is off until turned on, the one opt-in), named in the log's line, kept by `validated`, stored as
+// made, and the Mac's alone, so no change a device sends moves it.
+do {
+    check(standard.shareClipboardImages && HostConfig.app.shareClipboardImages, "standard and app: Include images on")
+    var off = standard
+    off.shareClipboardImages = false
+    eq(standard.changes(to: off), "clipboard images on → off", "changes: Include images")
+    eq(off.changes(to: standard), "clipboard images off → on", "changes: and back")
+    var both = standard
+    both.shareClipboard = false
+    both.shareClipboardImages = false
+    eq(standard.changes(to: both), "share clipboard on → off, clipboard images on → off", "changes: both, Share clipboard first")
+    check(!off.validated().shareClipboardImages && standard.validated().shareClipboardImages, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: false, offConsoleView: false,
+                          lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
+    check(!made.shareClipboardImages && made.shareClipboard, "a HostConfig made with it off has it off, Share clipboard on (as Sill.app's settings make one)")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true)
+    check(!off.applying(all).shareClipboardImages && !off.applyingAway(all).shareClipboardImages
+          && standard.applying(all).shareClipboardImages && standard.applyingAway(all).shareClipboardImages,
           "a device's change never moves it, at home or away")
 }
 
@@ -115,7 +142,7 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: true,
                           lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
@@ -137,8 +164,8 @@ do {
     check(on.validated().lockAfterSession && !standard.validated().lockAfterSession, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
+                          lockAfterSession: true, lockSleepsDisplay: true, lockOnlyAfterAway: false)
     check(made.lockAfterSession && !made.offConsoleView, "a HostConfig made with it on has it on, and the off-console view as given")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
@@ -176,8 +203,8 @@ do {
           && !standard.validated().lockOnlyAfterAway, "validated keeps both either way, with the lock's switch off")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: false, lockOnlyAfterAway: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, shareClipboardImages: true, offConsoleView: false,
+                          lockAfterSession: true, lockSleepsDisplay: false, lockOnlyAfterAway: true)
     check(!made.lockSleepsDisplay && made.lockOnlyAfterAway && made.lockAfterSession, "a HostConfig made with them has them as given")
     let change = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                     directWireless: true, sendAudio: true)

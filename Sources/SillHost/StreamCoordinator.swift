@@ -466,7 +466,8 @@ package final class StreamCoordinator {
         let launch = UUID().uuidString
         launchID = launch
         // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
-        clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
+        clipboard = HostClipboard(server: server, enabled: config.shareClipboard, images: config.shareClipboardImages,
+                                  launchID: launch, synthetic: synthetic)
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -969,6 +970,8 @@ package final class StreamCoordinator {
         // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
         // out now, not after a restart. The lists say `clipboard` again (or no longer).
         if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
+        // Include images, the same way: the lists say 2 or 1 (ClipboardPolicy.hostGeneration).
+        if clipboard.setImages(new.shareClipboardImages) { broadcastList() }
         // Show this account while another user is on the screen (docs/off-console-plan.md), at once too: the
         // gate takes it now (off stops this session's pictures before the next frame), the stream follows.
         let view = lockGate.setOffConsoleView(new.offConsoleView)
@@ -1219,7 +1222,10 @@ package final class StreamCoordinator {
         // paired session at a locked screen, nobody off console), and from any other only the up of what
         // it holds down, where the pointer is. What the lock refuses wakes nothing either.
         let reading = LockPolicy.restrictive(arrived, lockReading)
-        switch lockDecision(message, input: input, from: sender, arrived: arrived) {
+        // A device's clipboard decoded once, for the lock and for HostClipboard: an image's is up to 11 MB of
+        // JSON (#300's D7: it was decoded three times here, where every device's input is handled).
+        let clip = message.kind == .clipboard ? Wire.decode(Clipboard.self, from: message.payload) : nil
+        switch lockDecision(message, input: input, clip: clip, from: sender, arrived: arrived) {
         case .take:
             break
         case .letGo:
@@ -1447,11 +1453,12 @@ package final class StreamCoordinator {
             guard let r = Wire.decode(FetchMenu.self, from: message.payload) else { return }
             menus.fetch(r, from: connection, who: deviceName(connection))
         case .clipboard:
-            // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
-            // it reads and writes the pasteboard at once, and says nothing per copy. A text that came while
-            // this Mac read locked was refused above; one the gate turned locked since, HostClipboard
-            // drops itself (its own look at the gate), said here, a line a minute at most.
-            if !clipboard.received(message.payload, from: connection, who: deviceName(connection)) {
+            // The clipboard (HostClipboard): a subscription, a device's text or image, or its stop. No
+            // `await`: it reads and writes the pasteboard at once, and says nothing per copy. A text or an
+            // image that came while this Mac read locked was refused above (LockPolicy.clipboardRequest);
+            // one the gate turned locked since, HostClipboard drops itself (its own look at the gate), said
+            // here, a line a minute at most.
+            if !clipboard.received(clip, from: connection, who: deviceName(connection), away: routes[sender]?.isAway ?? false) {
                 refusedWhileLocked(.clipboard, message, from: connection)
             }
         case .pressMenuItem:
@@ -1681,7 +1688,7 @@ package final class StreamCoordinator {
     /// What the lock makes of a device's message at `reading` (LockPolicy.decide). Unlocked, nothing is
     /// decoded or looked up; locked, whether the session is paired is (input comes up to 120 times a
     /// second, and only while locked does it matter).
-    private func lockDecision(_ message: StreamMessage, input: InputEvent?, from id: ObjectIdentifier,
+    private func lockDecision(_ message: StreamMessage, input: InputEvent?, clip: Clipboard?, from id: ObjectIdentifier,
                               arrived: LockPolicy.Reading) -> LockPolicy.Decision {
         let now = lockReading
         guard arrived.locked || now.locked else { return .take }
@@ -1705,7 +1712,7 @@ package final class StreamCoordinator {
         case .gesture:
             request = .gesture
         case .clipboard:
-            request = Wire.decode(Clipboard.self, from: message.payload)?.text != nil ? .clipboardText : .clipboardSubscription
+            request = LockPolicy.clipboardRequest(clip)
         default:
             return .take
         }

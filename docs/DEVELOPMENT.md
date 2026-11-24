@@ -1457,6 +1457,24 @@ DEBUG `-SillPasteDelay <s>` moves it after the receipt (0: right behind it);
 `-SillSettings 1 -SillSettingsCloseAt <s>` holds the Settings panel over the
 chip until then; the console's "clipboard: …" lines say what happened.
 
+Images (generation 2, #300 finished; docs/clipboard-plan.md, "Generation 2: images"). On the Mac,
+Include images under Share clipboard with devices (saved as `shareClipboardImages`, on by default,
+applied at once; `-SillSetAfter '<s> shareClipboardImages=0'` in the bare app) and the CLI's
+`--no-clipboard-images`: off, the lists say `clipboard` 1 and no image is read, sent or taken. On the
+device, Include Images under Paste on ‹Mac› Right Away (`Sill.clipboardImages`, off unless turned on,
+`-Sill.clipboardImages 1` for one run), shown while the Mac says 2: on, the subscription says
+`{"accepts":2}`, the Paste control takes an image too (text wins), the chip lights for one, and the
+Mac's copied image (a screenshot, an image copied in any app; never a Finder copy's icon) is written
+to the device's clipboard as its text is. Images go as they are when PNG or JPEG within 8 MB, else
+made smaller to fit (upright, photographs as JPEG), and 2 MB away from home. An image is one message:
+while it crosses, the device's picture waits and comes back with a keyframe. A Paste over 256 KB says
+"Sending to ‹Mac›…" until its receipt, which waits for its bytes at 2 Mbit/s too. The log says
+"Clipboard: iPad (iPad14,1) shares the clipboard, images too." and "Clipboard: … takes no images
+now." when its switch moves. `sillclient.py --clipboard-images` subscribes taking images and prints
+each image's size and type, `--copy-image=FILE@T` sends a file's bytes as a device's Paste of an image;
+in the harness `-SillMockClipboard 1` is a Mac that shares text alone (no Include Images row) and
+`-SillClipboardNote sending|unreadable` the image's notes.
+
 ## The Mac's menus on the device
 
 The app a device streams keeps its menu bar on the Mac, and the device shows

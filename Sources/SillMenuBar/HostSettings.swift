@@ -50,6 +50,7 @@ final class HostSettings {
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
+        static let shareClipboardImages = "shareClipboardImages"
         static let sendAudio = "sendAudio"
         static let offConsoleView = "offConsoleView"
         static let lockAfterSession = "lockAfterSession"
@@ -141,6 +142,9 @@ final class HostSettings {
             Key.updateCheck: true,
             // On, like the CLI: each device has its own switch.
             Key.shareClipboard: base.shareClipboard,
+            // On, like the CLI: the Mac owner's veto on images; each device's Include Images is off until
+            // turned on, the one opt-in.
+            Key.shareClipboardImages: base.shareClipboardImages,
             // On, unlike the CLI (Noah, 2026-10-27: "Send Audio should be on by default"); a saved key
             // wins. The Mac keeps playing its own sound too.
             Key.sendAudio: base.sendAudio,
@@ -172,6 +176,7 @@ final class HostSettings {
                             requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio),
+                            shareClipboardImages: defaults.bool(forKey: Key.shareClipboardImages),
                             offConsoleView: defaults.bool(forKey: Key.offConsoleView),
                             lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
                             lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
@@ -201,6 +206,7 @@ final class HostSettings {
         if config.remotePort != old.remotePort { defaults.set(config.remotePort, forKey: Key.remotePort) }
         if config.internetAccess != old.internetAccess { defaults.set(config.internetAccess, forKey: Key.internetAccess) }
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
+        if config.shareClipboardImages != old.shareClipboardImages { defaults.set(config.shareClipboardImages, forKey: Key.shareClipboardImages) }
         if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
         if config.offConsoleView != old.offConsoleView { defaults.set(config.offConsoleView, forKey: Key.offConsoleView) }
         if config.lockAfterSession != old.lockAfterSession { defaults.set(config.lockAfterSession, forKey: Key.lockAfterSession) }
