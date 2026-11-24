@@ -588,7 +588,8 @@ come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
 (below; off unless turned on), Reverse Scrolling (below; off unless turned on),
 Hold to Show Window Controls (below, Holding a window's thumbnail; 0.5 s unless
 changed) and Three-Finger Gestures (below, Trackpad gestures; on unless turned
-off), none of them ever sent to the Mac, and last Take the Tour.
+off), then on an iPhone a Keys group with Arrow Keys (below; off unless turned
+on), none of them ever sent to the Mac, and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
@@ -614,9 +615,17 @@ a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
 it, and nothing under it moves. Under it come Apps, Aa, Keyboard, Desktop and
 Settings, as wide as the row; the window thumbnails; esc, tab, ctrl, opt, cmd
 and shift; and the trackpad in the rest. The Keyboard button stays above the
-software keyboard, so it always takes it down. There are no arrow keys or
-Spotlight key there: Spotlight is cmd, then space on the keyboard. The
-trackpad counts a stroke down it as far as the same stroke across a 16:10
+software keyboard, so it always takes it down. There is no Spotlight key there:
+Spotlight is cmd, then space on the keyboard. Nor, unless Arrow Keys is on
+(Settings › This iPhone › Keys, off unless turned on; issue #287, PR #315,
+`PhoneKeyRow`), are there arrow keys: with it on, ← ↓ ↑ → follow shift and the
+row scrolls sideways, as the thumbnails do, every cap at least 44 pt wide (six
+whole and over half of ← at rest, five and over half of shift at Display Zoom's
+320 pt, where the six alone are 42 pt), the cut cap fading at the edge; a swipe
+brings the arrows in beside shift, and held they repeat on the Mac as an iPad's
+do. VoiceOver's action on every cap, Show the arrow keys (Show the modifier keys
+at the end), scrolls the row there and back. The row's height is the same, so
+nothing else moves. The trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
@@ -2429,6 +2438,11 @@ simulator:
   Chinese (Pinyin) keyboard beside English. A switch behaves differently
   before and after the keyboard is first put away (iOS reports it only
   before): test both.
+- Arrow Keys: `-Sill.arrowKeys 1` turns an iPhone's switch on for one run (in
+  the normal app too), so the key row upright scrolls with the arrows after
+  shift; `-SillKeyScroll end` starts it scrolled to them, and `-SillSettings 1
+  -SillSettingsScroll keys` shows the switch in its Keys group. The pure rule,
+  `PhoneKeyRow`, is checked by `Tests/checks/phone-key-row`.
 - Larger Picture: `-Sill.largerPicture 1` turns the device's switch on for
   one run (in the normal app too); it acts while a window streams, which the
   mock does unless `-SillActive desktop` (or `none`) says otherwise, and the

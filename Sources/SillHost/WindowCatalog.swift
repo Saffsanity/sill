@@ -13,9 +13,10 @@ import StreamProtocol
 /// Idle means idle: with no client connected nothing here runs on a timer. The window list is
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
-/// thumbnails. The installed-app scan runs once at startup, off the main thread. So after a spell
-/// with no client the last look can be hours old and its display gone: the coordinator looks again
-/// before it builds a capture from it (CatalogLook, `lookAge`).
+/// thumbnails. The installed-app scan runs at startup, off the main thread, and looks at the Mac's
+/// other volumes when a device connects, again when they changed (`lookAtVolumesIfDue`, #370). So
+/// after a spell with no client the last look can be hours old and its display gone: the coordinator
+/// looks again before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
 final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
@@ -50,7 +51,8 @@ final class WindowCatalog {
     /// connected; with none it is just stored, and `allIcons` hands it to the next client.
     var onNewIcon: ((String, Data) -> Void)?
     /// The installed-app scan finished (it runs in the background after launch). A client that
-    /// connected before this saw an empty "All apps" list; the coordinator re-sends it.
+    /// connected before this saw an empty "All apps" list; the coordinator re-sends it. Again when a
+    /// later look changed the list: the volumes read, or a volume mounted or gone (#370).
     var onInstalledAppsReady: (([AppInfo]) -> Void)?
 
     /// Thumbnails cost a screenshot per window; only take them while someone is looking. They are
@@ -245,12 +247,13 @@ final class WindowCatalog {
     /// is the test pattern anyway. Read off the main actor by the bounded lookup below.
     nonisolated(unsafe) static var screenless = false
 
-    /// Starts the one-time installed-app scan, and polling if a client is already connected.
-    /// Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
-    func start() {
+    /// Starts the installed-app scan, and polling if a client is already connected. `volumes`: the
+    /// scan also reads the volumes of one's own (InstalledApps) once a device connects, not on a test
+    /// host. Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
+    func start(volumes: Bool) {
         guard !started else { return }
         started = true
-        scanInstalledApps()
+        scanInstalledApps(volumes: volumes)
         if clientCount > 0 { startPolling() }
     }
 
@@ -498,8 +501,10 @@ final class WindowCatalog {
     var mainDisplay: SCDisplay? { lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first }
 
     /// A device is connected again after none was: a choice older than its span is forgotten, so the
-    /// session begins on the main display (DesktopDisplays.keepsChoice).
+    /// session begins on the main display (DesktopDisplays.keepsChoice); and the Apps list looks at the
+    /// volumes when that is due.
     private func devicesArrived() {
+        lookAtVolumesIfDue()                // the Apps list's second look, when it is due (#370)
         defer { devicesLeftAt = nil }
         guard desktopDisplayUUID != nil, let left = devicesLeftAt else { return }
         let gone = CatalogLook.seconds(ContinuousClock.now - left)
@@ -592,38 +597,151 @@ final class WindowCatalog {
 
     // MARK: Installed apps
 
-    /// Once at startup. Listing ~100 bundles and rendering their icons takes 150–300 ms, which on
-    /// the main actor would hold up startup and the first window refresh, so all of it runs on a
-    /// utility-priority thread and only the results hop back.
-    private func scanInstalledApps() {
-        Task.detached(priority: .utility) { [weak self] in
+    /// At startup: this Mac's own disk, at once. The second look, with the volumes of one's own too
+    /// (InstalledApps, #370), waits for a device (`lookAtVolumesIfDue`), and a test host never takes it:
+    /// macOS would ask the app that runs it (Terminal, an agent's) whether it may read a removable volume.
+    private func scanInstalledApps(volumes: Bool) {
+        readsVolumes = volumes
+        lookAtApps(volumes: false, cause: nil)
+        lookAtVolumesIfDue()
+    }
+
+    /// The second look, when it is due (InstalledApps.secondLookDue): a device is connected, and the
+    /// volumes of one's own are not the ones the last second look was asked with. So macOS's question
+    /// whether Sill may read a removable volume comes when a device connects, never at a login. The
+    /// mount table and the I/O Registry: nothing on a volume is read here.
+    private func lookAtVolumesIfDue() {
+        guard readsVolumes else { return }
+        let own = InstalledApps.volumes(InstalledApps.mounted())
+        guard InstalledApps.secondLookDue(devices: clientCount, own: own, asked: volumesAsked) else { return }
+        let cause: String? = volumesAsked == nil ? nil : "the volumes changed"
+        volumesAsked = own
+        lookAtApps(volumes: true, cause: cause)
+    }
+
+    /// The looks run here, one after another, in the order asked. A queue of its own rather than the
+    /// cooperative pool: a look at a removable volume can wait for as long as macOS's question whether
+    /// Sill may read it goes unanswered (the first look reads no other volume, so the Mac's own apps
+    /// never wait for it).
+    nonisolated private static let appsQueue = DispatchQueue(label: "me.saffer.sill.installed-apps", qos: .utility)
+    /// The bundle IDs whose icons a look has rendered: a later look renders only new ones. On `appsQueue` alone.
+    nonisolated(unsafe) private static var iconsRendered: Set<String> = []
+    /// Each look's number, and the newest one that landed: a look that lands after a newer one is dropped.
+    private var appsLooks = 0
+    private var appsLookLanded = 0
+    /// Where each listed app is, from the look that landed: a launch's way to an app Launch Services
+    /// does not know (one on another disk it never registered, #370).
+    private var installedPaths: [String: String] = [:]
+    /// This host takes the second look (`start(volumes:)`): not a test host.
+    private var readsVolumes = false
+    /// The volumes of one's own (InstalledApps.volumes) when the newest look at them was asked for, nil
+    /// before one was: a change that leaves them as they were brings no look, also while a look waits
+    /// on macOS's question (Time Machine mounts its snapshots every hour).
+    private var volumesAsked: [String]?
+    private var volumeObservers: [NSObjectProtocol] = []
+    private var volumesSettle: Task<Void, Never>?
+    /// How long after a volume mounts, unmounts or is renamed the volumes are looked at: a disk with
+    /// several volumes mounts them one by one.
+    static let volumesSettleTime: Duration = .seconds(2)
+
+    /// This Mac's applications folders, read by every look in this order (the first bundle with an ID wins).
+    /// Both Utilities folders are read twice, as a folder inside /Applications or /System/Applications and as
+    /// given: harmless, since the first bundle with an ID wins and the second read finds the same ones.
+    nonisolated private static var applicationFolders: [String] {
+        ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities",
+         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
+    }
+
+    /// One look, off the main thread: listing ~100 bundles and rendering their icons takes 150–300 ms,
+    /// which on the main actor would hold up startup and the first window refresh, so all of it runs on
+    /// `appsQueue` and only the results hop back. Without `volumes` it reads this Mac's own disk alone;
+    /// with them, also the Applications folder at the top of each volume of one's own, and what a link
+    /// or an alias points at there. `cause`: why it looks again, nil for the first look of each kind.
+    private func lookAtApps(volumes: Bool, cause: String?) {
+        appsLooks += 1
+        let look = appsLooks
+        Self.appsQueue.async { [weak self] in
             let t0 = Date()
-            let found = WindowCatalog.findInstalledApps()
+            let own = volumes ? InstalledApps.volumes(InstalledApps.mounted()) : nil
+            let read = InstalledApps.applicationFolders(on: own ?? [])
+            let found = InstalledApps.find(in: Self.applicationFolders + read, reach: InstalledApps.Reach(volumes: own))
             let t1 = Date()
-            let rendered: [(bundleID: String, png: Data)] = found.compactMap { app in
-                WindowCatalog.png(NSWorkspace.shared.icon(forFile: app.path), size: 64).map { (app.bundleID, $0) }
-            }
+            let rendered = Self.renderIcons(found)
             let t2 = Date()
-            print("installed apps: \(found.count) in \(Int(t1.timeIntervalSince(t0) * 1000)) ms"
-                  + " (+ icons \(Int(t2.timeIntervalSince(t1) * 1000)) ms, off the main thread)")
-            await self?.installedAppsFound(found.map { AppInfo(name: $0.name, bundleID: $0.bundleID) }, icons: rendered)
+            let took = "\(Int(t1.timeIntervalSince(t0) * 1000)) ms (+ icons \(Int(t2.timeIntervalSince(t1) * 1000)) ms"
+            if let own {
+                // Only with a volume of one's own, or after a change: a Mac with none prints what it always did.
+                if !own.isEmpty || cause != nil {
+                    let listed: [String] = read.map { folder -> String in
+                        "\(folder): \(found.filter { InstalledApps.inside($0.path, folder) }.count)"
+                    }
+                    let with: String = own.isEmpty ? "no other volume" : own.joined(separator: ", ")
+                    let why: String = cause.map { " (\($0))" } ?? ""
+                    let from: String = listed.isEmpty ? "" : "; listed from " + listed.joined(separator: ", ")
+                    print("installed apps with \(with)\(why): \(found.count) in \(took))\(from)")
+                }
+            } else {
+                print("installed apps: \(found.count) in \(took), off the main thread)")
+            }
+            Task { @MainActor in self?.installedAppsFound(found, icons: rendered, look: look) }
         }
     }
 
-    private func installedAppsFound(_ apps: [AppInfo], icons rendered: [(bundleID: String, png: Data)]) {
-        installedApps = apps
-        // A running app's icon, announced by a window refresh meanwhile, wins over the file icon.
+    /// The icons of the apps no earlier look rendered, 64 pixels square. On `appsQueue` alone.
+    nonisolated private static func renderIcons(_ found: [InstalledApps.App]) -> [(bundleID: String, png: Data)] {
+        var rendered: [(bundleID: String, png: Data)] = []
+        for app in found where !iconsRendered.contains(app.bundleID) {
+            iconsRendered.insert(app.bundleID)
+            if let icon = png(NSWorkspace.shared.icon(forFile: app.path), size: 64) { rendered.append((app.bundleID, icon)) }
+        }
+        return rendered
+    }
+
+    private func installedAppsFound(_ found: [InstalledApps.App], icons rendered: [(bundleID: String, png: Data)], look: Int) {
+        // A running app's icon, announced by a window refresh meanwhile, wins over the file icon. A look's
+        // icons count even when a newer look landed first: that one renders none of them again.
         for (id, png) in rendered where !announcedIcons.contains(id) { announce(bundleID: id, png: png) }
+        guard look > appsLookLanded else { return }
+        let first = appsLookLanded == 0
+        appsLookLanded = look
+        let apps = found.map { AppInfo(name: $0.name, bundleID: $0.bundleID) }
+        let changed = apps != installedApps
+        installedApps = apps
+        installedPaths = Dictionary(found.map { ($0.bundleID, $0.path) }, uniquingKeysWith: { kept, _ in kept })
+        // The first look always goes out (a device that connected before it saw an empty list), a later
+        // one when it changed the list.
+        guard first || changed else { return }
         if clientCount > 0 && !withholding { onInstalledAppsReady?(apps) } else if withholding { appsWithheld = true }   // the unlock sends them
     }
 
-    /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).
-    nonisolated private static func findInstalledApps() -> [(name: String, bundleID: String, path: String)] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        // Both Utilities folders are read twice, as a folder inside /Applications or /System/Applications
-        // and as given: harmless, since the first bundle with an ID wins and the second read finds the same ones.
-        return InstalledApps.find(in: ["/Applications", "/Applications/Utilities", "/System/Applications",
-                                       "/System/Applications/Utilities", home.appendingPathComponent("Applications").path])
+    /// Where the Apps list found the app with this bundle ID, if it did: a launch's way to an app Launch
+    /// Services does not know (one on another disk it never registered, #370).
+    func installedAppURL(for bundleID: String) -> URL? {
+        installedPaths[bundleID].map { URL(fileURLWithPath: $0) }
+    }
+
+    /// Under the AppKit loop (Sill.app; the CLI's dispatchMain never delivers these): a volume mounted,
+    /// unmounted or renamed brings a look at the volumes again, `volumesSettleTime` after the last of a
+    /// burst, when it is due (`lookAtVolumesIfDue`): while a device is connected, and when the volumes of
+    /// one's own are not the ones the newest look was asked for with. A disk image, a share or Recovery
+    /// coming and going brings none; a change with no device connected waits for the next one.
+    func watchVolumes() {
+        guard volumeObservers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
+            volumeObservers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in self?.volumesChanged() }
+            })
+        }
+    }
+
+    private func volumesChanged() {
+        volumesSettle?.cancel()
+        volumesSettle = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.volumesSettleTime)
+            guard !Task.isCancelled, let self else { return }
+            self.lookAtVolumesIfDue()
+        }
     }
 
     // MARK: Image encoding (thread-safe)

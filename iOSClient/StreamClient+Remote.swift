@@ -598,6 +598,32 @@ extension StreamClient {
         }
     }
 
+    /// Picture in Picture ended with Sill in the background (PictureInPicturePolicy.endsSession, #379): the
+    /// session ends now, its connection closed from this side, so the Mac stops capturing for this device at
+    /// once and reads nothing as a slow link. The connect screen says what a loss says, and the automatic
+    /// reconnect is held until Sill is back (`reconnectAtReturn`), then starts as for a loss seen then: as
+    /// after a stay in the background that iOS suspended, whose loss is only seen on the return. Started now,
+    /// a remote dial could connect in the background (its dials do not wait for the foreground, as a row's
+    /// do), and its 120 s could run out while the device is locked. From StreamClient's
+    /// `endSessionIfAway`. Main thread.
+    func endSessionInBackground() {
+        guard connected, let c = connection else { return }
+        let s = session
+        let saved = s?.macID.flatMap { savedMac($0) }
+        let name = saved.map { displayName($0.macID) } ?? hostName
+        let outcome = GoodbyePolicy.outcome(nil, mac: name, device: Self.deviceWord, saved: saved != nil)
+        #if DEBUG
+        print("pip: Picture in Picture ended with Sill in the background: the session ends; its reconnect waits for Sill's return")
+        #endif
+        connection = nil        // its close, which its state handler reports, is a stale callback from here
+        c.cancel()
+        cancelRemoteDial()
+        tearDown(status: outcome.text)
+        reconnect = nil
+        reconnectAtReturn = lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed)
+        updateDiscovery()
+    }
+
     /// A session ended by a notice (GoodbyePolicy): the Mac's words as the status line, spoken like
     /// every ended session's line (ConnectScreen), and no reconnect unless the Mac asked for one:
     /// nothing dials that Mac again until the person taps its row. A remote session refused before
