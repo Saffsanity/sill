@@ -162,7 +162,9 @@ package struct KeyStrokes: Sendable {
 
     /// The client sends UIKeyModifierFlags bits. They sit at the same bit positions as the
     /// CGEventFlags masks, but build the flags explicitly rather than reinterpreting the number:
-    /// anything else in there (numeric pad, iOS-only bits) has no business reaching the Mac.
+    /// anything else in there (numeric pad, iOS-only bits) has no business reaching the Mac. The one
+    /// exception is bit 23, fn (the Globe key): UIKit has no flag for it, so only Sill's own window tiling
+    /// shortcuts set it (MacShortcut, 2026-11-02), and it is CGEventFlags' maskSecondaryFn.
     package static func flags(fromDevice modifiers: UInt64) -> UInt64 {
         var flags: UInt64 = 0
         if modifiers & (1 << 16) != 0 { flags |= capsLock }
@@ -170,12 +172,19 @@ package struct KeyStrokes: Sendable {
         if modifiers & (1 << 18) != 0 { flags |= control }
         if modifiers & (1 << 19) != 0 { flags |= option }
         if modifiers & (1 << 20) != 0 { flags |= command }
+        if modifiers & (1 << 23) != 0 { flags |= fn }
         return flags
     }
 
     /// CGEventFlags' masks, as plain bits (CoreGraphics is not imported here): maskAlphaShift,
     /// maskShift, maskControl, maskAlternate, maskCommand.
     package static let capsLock: UInt64 = 0x01_0000
+    /// maskSecondaryFn: the Globe key.
+    package static let fn: UInt64 = 0x80_0000
+
+    /// The window list's `fnKey`: 1 from macOS 15, whose Globe-Control shortcuts tile windows (the device's
+    /// Keys menu); none before, where an arrow already carries fn and fn⌃← would be ⌃←, a Space away.
+    package static func fnKey(macOSMajor: Int) -> Int? { macOSMajor >= 15 ? 1 : nil }
     package static let shift: UInt64 = 0x02_0000
     package static let control: UInt64 = 0x04_0000
     package static let option: UInt64 = 0x08_0000

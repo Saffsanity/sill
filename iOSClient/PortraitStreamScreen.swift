@@ -343,7 +343,7 @@ struct PortraitStreamScreen: View {
         KeyRow(metrics: metrics.keyboardRow(caps: rect.height), keys: .full, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop)
+               showSpotlight: client.active == .desktop, macTakesFn: client.macTakesFn)
     }
 
     /// The Keyboard toggle (Noah, 2026-11-10): the bar's look, lit, the key row's Keyboard symbol; a tap puts
@@ -588,6 +588,7 @@ struct PortraitStreamScreen: View {
                           setSettings(false, false)
                           overlay.toggleKeyboard()
                       })
+                .contextMenu { KeysMenu(macTakesFn: client.macTakesFn, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
@@ -686,7 +687,7 @@ struct PortraitStreamScreen: View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop, hidden: hidden)
+               showSpotlight: client.active == .desktop, macTakesFn: client.macTakesFn, hidden: hidden)
             .tourTarget(.keys)
     }
 
@@ -999,6 +1000,8 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// The Keys menu's window tiling (`WindowList.fnKey`).
+    let macTakesFn: Bool
     /// Out of sight and touch under another row (the halves' key row while the laptop pose's key row
     /// stands alone above the software keyboard, #215): a cap held as that happens comes up at once, as
     /// it would leaving the screen, not when the finger that held it lifts.
@@ -1099,6 +1102,7 @@ private struct KeyRow: View {
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
+            .contextMenu { KeysMenu(macTakesFn: macTakesFn, send: send) }
         case .spotlight:
             cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
