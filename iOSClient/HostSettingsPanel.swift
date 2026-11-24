@@ -965,7 +965,7 @@ struct HostSettingsPanel: View {
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
         // Share Camera (docs/camera-plan.md §10), after the clipboard's rows as the 2026-11-18 overview's §2.2 orders
-        // This ‹device›: they move into settings-pane's whole-screen pane, its device part, with the rest of this group.
+        // This ‹device›: in the whole-screen pane's device part (#393), with the rest of this group.
         cameraRows
         // Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off (Noah, 2026-11-20), this device's
         // own, never sent.
