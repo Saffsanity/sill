@@ -446,8 +446,11 @@ do {
         var now = 0.0
         let capacity = 2
         for _ in 0..<rng.int(5...80) {
-            now += Double(rng.int(1...400)) / 1000
-            if rng.chance(0.55) {
+            // Mostly a frame's time, sometimes a stall of up to a second and a half (Sill Camera's side busy, or no
+            // app reading it), so a frame can wait past its second.
+            now += Double(rng.chance(0.1) ? rng.int(400...1500) : rng.int(1...400)) / 1000
+            let step = rng.int(0...99)
+            if step < 50 {
                 // A decoded frame arrives.
                 switch slots.arrive(count: queue.count, capacity: capacity, at: now) {
                 case .enqueue:
@@ -462,7 +465,7 @@ do {
                     if pending == nil || queue.count < capacity { check(false, "life \(life): replaced nothing"); break outer }
                     dropped += 1; pending = now
                 }
-            } else if !queue.isEmpty {
+            } else if step < 80, !queue.isEmpty {
                 // Sill Camera takes one.
                 queue.removeFirst()
                 let goes = slots.freed(count: queue.count, capacity: capacity, at: now)
@@ -481,7 +484,7 @@ do {
         }
         lives += 1
     }
-    check(lives == 20_000 && inQueue > 100_000 && dropped > 10_000 && late > 1_000, "every life ran (\(lives)), reaching every part: \(inQueue) in, \(dropped) dropped for a newer, \(late) too old by then")
+    check(lives == 20_000 && inQueue > 100_000 && dropped > 10_000 && late > 100, "every life ran (\(lives)), reaching every part: \(inQueue) in, \(dropped) dropped for a newer, \(late) too old by then")
     print("sink lives: \(inQueue) frames in, \(dropped) dropped for a newer one, \(late) too old by the time there was room")
 }
 
