@@ -613,11 +613,11 @@ func line(_ why: VDS.Cause, _ step: VDS.FollowStep, _ outcome: IP.Action? = nil,
     VDS.followLine(device: device, why: why, from: mini, to: to, step: step, outcome: outcome, hz: 60, backing: bk(4096, 4096))
 }
 check(line(turnCause, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
-      "in place: \(line(turn, .inPlace, .done(ms: 650)) ?? "nil")")
+      "in place: \(line(turnCause, .inPlace, .done(ms: 650)) ?? "nil")")
 check(line(hideCause, .inPlace, .done(ms: 320), to: size(1218, 800)) == "Virtual Desktop: iPad mini hid its controls; followed in place in 320 ms: 1218×800 pt @2× at 60 Hz.",
-      "Full Screen on: \(line(hide, .inPlace, .done(ms: 320), to: size(1218, 800)) ?? "nil")")
+      "Full Screen on: \(line(hideCause, .inPlace, .done(ms: 320), to: size(1218, 800)) ?? "nil")")
 check(line(showCause, .inPlace, .done(ms: 330), to: size(1446, 800)) == "Virtual Desktop: iPad mini showed its controls; followed in place in 330 ms: 1446×800 pt @2× at 60 Hz.",
-      "Full Screen off: \(line(show, .inPlace, .done(ms: 330), to: size(1446, 800)) ?? "nil")")
+      "Full Screen off: \(line(showCause, .inPlace, .done(ms: 330), to: size(1446, 800)) ?? "nil")")
 for why in [VDS.Cause.room(turned: false), .controls(hidden: nil), .unknown] {
     check(line(why, .inPlace, .done(ms: 300), to: size(1000, 800)) == "Virtual Desktop: iPad mini's picture changed size; followed in place in 300 ms: 1000×800 pt @2× at 60 Hz.",
           "\(why): \(line(why, .inPlace, .done(ms: 300), to: size(1000, 800)) ?? "nil")")
@@ -628,10 +628,10 @@ check(line(.shown, .inPlace, .done(ms: 640)) == "Virtual Desktop: iPad mini show
       "shown again: \(line(.shown, .inPlace, .done(ms: 640)) ?? "nil")")
 check(line(turnCause, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in 980 ms; the next one is made at 800×1218 pt.",
-      "fallen back: \(line(turn, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
+      "fallen back: \(line(turnCause, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
 check(line(turnCause, .inPlace, .remove(.switchRefused(1001)))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001), and it did not come back to 1218×800 pt @2×; removed it: the next one is made at 800×1218 pt.",
-      "removed: \(line(turn, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
+      "removed: \(line(turnCause, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
 check(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800))
       == "Virtual Desktop: iPad shows it now; 2200×800 pt @2× is beyond the backing it was made with (4096×4096 px); the next one is made at 2200×800 pt.",
       "beyond: \(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800)) ?? "nil")")
