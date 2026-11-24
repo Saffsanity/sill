@@ -148,6 +148,10 @@ for (name, w, h, sc, ew, eh, own) in phoneSpaces {
 }
 check(VDS.pixels(space: CGSize(width: 377.3333, height: 235.6667), scale: 3).map { [$0.width, $0.height] } == [1132, 707],
       "a side within a thousandth of a pixel of a whole number is that number")
+// A pane of fractions of a pixel (377.8667 points at 3x is 1133.6 pixels): the whole pixels it holds, never one past its
+// edge, which the device would then draw scaled down by a hair.
+check(VDS.pixels(space: CGSize(width: 377.8667, height: 793), scale: 3).map { [$0.width, $0.height] } == [1133, 2379]
+      && phone(377.8667, 793) == size(566, 1189), "a pane's pixels rounded down: 1133.6 pixels hold 1133, and 566 points at 2x")
 check(VDS.phoneShort == 400 && VDS.phoneLong == 800, "an iPhone's desktop: at least 400 points a side and 800 on its longer")
 // The iPad keeps its rule, as before; so does a device that says nothing of its screen, and a size macOS did not keep.
 for (name, w, h, _, _) in spaces {
