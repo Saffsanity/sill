@@ -427,6 +427,8 @@ final class AppModel {
             print("Status: \(line)")
         }
         let snapshot = coordinator?.status.snapshot
+        // The devices that said their screen, kept for the Virtual Desktop's custom sizes (Settings › Displays, part B).
+        settings.rememberDevices(snapshot?.virtualDesktop.devices ?? [])
         holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0,
                       lockWait: snapshot?.privacyLock.pending ?? false)
         // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).

@@ -245,22 +245,29 @@ do {
           && HostConfig.app.virtualDesktopHz == 0, "standard and app: the size and rate the device's")
     check(made.virtualDesktopSize == "1920x1080@2" && made.virtualDesktopHz == 60 && made.validated() == made,
           "a size and a rate offered: kept as made, and by validated")
-    for bad in ["", "Device", "1920x1080", "1920x1080@3", "999x999@2", "main ", "8192x8192@2"] {
+    // A size the person typed (part B, 2026-11-25) is kept when it can be a display (each side 640 to 8192 pixels, a Retina
+    // one 1600 or more on a side), whatever a device's budget (each device gets it scaled to its own); anything else is the
+    // device's, as before. A rate typed, 24 to 120 Hz, kept; anything else the device's.
+    for bad in ["", "Device", "1920x1080", "1920x1080@3", "700x700@2", "main ", "8192x8192@2", "639x800@1", "01920x1080@1"] {
         var b = made; b.virtualDesktopSize = bad
-        check(b.validated().virtualDesktopSize == "device", "validated: a size not offered (\(bad)) is the device's")
+        check(b.validated().virtualDesktopSize == "device", "validated: a size neither offered nor one that can be a display (\(bad)) is the device's")
     }
-    for good in ["device", "main", "1440x900@2", "2560x1440@2", "3440x1440@1"] {
+    for good in ["device", "main", "1440x900@2", "2560x1440@2", "3440x1440@1", "2752x2064@2", "7680x2160@1", "999x999@2", "8192x640@1"] {
         var g = made; g.virtualDesktopSize = good
         check(g.validated().virtualDesktopSize == good, "validated: \(good) kept")
     }
-    for hz in [-1, 1, 24, 59, 75, 90, 144, 240] {
+    for hz in [-1, 1, 23, 121, 144, 240] {
         var b = made; b.virtualDesktopHz = hz
-        check(b.validated().virtualDesktopHz == 0, "validated: a rate not offered (\(hz)) is the device's")
+        check(b.validated().virtualDesktopHz == 0, "validated: a rate not allowed (\(hz)) is the device's")
     }
-    for hz in [0, 30, 60, 120] {
+    for hz in [0, 24, 30, 59, 60, 75, 90, 120] {
         var g = made; g.virtualDesktopHz = hz
         check(g.validated().virtualDesktopHz == hz, "validated: \(hz) kept")
     }
+    var typedSize = standard
+    typedSize.virtualDesktopSize = "2752x2064@2"; typedSize.virtualDesktopHz = 90
+    eq(standard.changes(to: typedSize), "virtual desktop size Match the device → Custom: 5504 × 4128 pixels, Retina, virtual desktop rate Match the device → 90 Hz",
+       "changes: a typed size and rate, in pixels")
     var sized = standard
     sized.virtualDesktopSize = "1920x1080@2"; sized.virtualDesktopHz = 60
     eq(standard.changes(to: sized), "virtual desktop size Match the device → 1920 × 1080 (Retina), virtual desktop rate Match the device → 60 Hz",

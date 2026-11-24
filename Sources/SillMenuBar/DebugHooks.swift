@@ -438,7 +438,8 @@ enum DebugHooks {
         for sample in virtualDesktopSamples() {
             let section = Form {
                 VirtualDesktopSection(on: .constant(sample.on), size: .constant(sample.size), hz: .constant(sample.hz),
-                                      snapshot: sample.status, accessibility: sample.accessibility, tryAgain: nil)
+                                      snapshot: sample.status, accessibility: sample.accessibility, tryAgain: nil,
+                                      known: sample.known, draft: sample.draft)
             }
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -744,7 +745,11 @@ enum DebugHooks {
     /// The Virtual Desktop's section in Settings › Displays (phase 2b): off; on and available; on with a size chosen (5K at
     /// Retina, wider than 4096 pixels); on and showing on an iPad mini; made and kept; without Accessibility; where it
     /// cannot be made (Screen Recording); while the guard for #380 holds.
-    static func virtualDesktopSamples() -> [(name: String, on: Bool, size: String, hz: Int, status: HostStatusSnapshot, accessibility: Bool)] {
+    /// Custom… (part B, 2026-11-25): its fields empty with no device known; a size within the budget for the devices this
+    /// Mac knows (an iPad Pro 13-inch as it is, an iPhone 15 Pro scaled); one over the ceiling (its sentence); one in use
+    /// that this Mac's encoder takes only scaled (its note); and one an iPad mini gets scaled.
+    static func virtualDesktopSamples() -> [(name: String, on: Bool, size: String, hz: Int, status: HostStatusSnapshot, accessibility: Bool,
+                                            known: [VirtualDesktopBudget.Device], draft: (width: String, height: String, retina: Bool, hz: String)?)] {
         var available = HostStatusSnapshot()
         available.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: true, note: nil, shown: false)
         var showing = available
@@ -760,15 +765,26 @@ enum DebugHooks {
         var held = HostStatusSnapshot()
         held.displayMakeHeld = true
         held.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: false, note: VirtualDesktopWords.guardHolds, shown: false)
+        let pro13 = VirtualDesktopBudget.largestIPad
+        let iPhone = VirtualDesktopBudget.Device(name: "iPhone 15 Pro", pixelWidth: 1179, pixelHeight: 2556, phone: true, fps: 120)
+        let mini = VirtualDesktopBudget.Device(name: "iPad mini", pixelWidth: 1488, pixelHeight: 2266, phone: false, fps: 60)
+        var encoderHeld = available
+        encoderHeld.virtualDesktop.encoder = VirtualDesktopBudget.Encoder(widest: 4096, fps: 38)
+        encoderHeld.virtualDesktop.encoderFor = "7680x4320@1:60"
         return [
-            ("off", false, "device", 0, available, true),
-            ("on", true, "device", 0, available, true),
-            ("on-5k", true, "2560x1440@2", 60, available, true),
-            ("showing", true, "device", 0, showing, true),
-            ("kept", true, "device", 0, kept, true),
-            ("noaccessibility", true, "device", 0, available, false),
-            ("norecording", true, "device", 0, noRecording, true),
-            ("guard", true, "device", 0, held, true),
+            ("off", false, "device", 0, available, true, [], nil),
+            ("on", true, "device", 0, available, true, [], nil),
+            ("on-5k", true, "2560x1440@2", 60, available, true, [], nil),
+            ("showing", true, "device", 0, showing, true, [], nil),
+            ("kept", true, "device", 0, kept, true, [], nil),
+            ("noaccessibility", true, "device", 0, available, false, [], nil),
+            ("norecording", true, "device", 0, noRecording, true, [], nil),
+            ("guard", true, "device", 0, held, true, [], nil),
+            ("custom-empty", true, "device", 0, available, true, [], ("", "", true, "")),
+            ("custom-within", true, "device", 0, available, true, [pro13, iPhone], ("5504", "4128", true, "120")),
+            ("custom-over", true, "device", 0, available, true, [pro13, iPhone], ("6016", "5000", false, "120")),
+            ("custom-encoder", true, "7680x4320@1", 60, encoderHeld, true, [pro13], nil),
+            ("custom-scaled", true, "device", 0, available, true, [mini, iPhone], ("7680", "2160", false, "120")),
         ]
     }
 

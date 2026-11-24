@@ -118,12 +118,14 @@ package struct HostConfig: Equatable, Sendable {
     package var virtualDesktop: Bool
     /// The Virtual Desktop's size, the person's choice (Noah, 2026-11-18: "allow the user to select resolution"):
     /// "device" (This device, the default: the size of the device that shows it, VirtualDesktopSize.device), "main" (Same
-    /// as main display) or one of VirtualDesktopSize.offered as "WxH@S"; anything else is This device (`validated`). Set
-    /// on the Mac (Sill.app's Settings › Displays, its key `virtualDesktopSize`; the CLI's --virtual-desktop=…); a
-    /// device's pickers and their wire fields are phase 3's. Taken the next time the Virtual Desktop is made.
+    /// as main display), one of VirtualDesktopSize.offered as "WxH@S", or since 2026-11-25 a size the person typed in the
+    /// same form (VirtualDesktopSize.custom: Noah, 2026-11-24, custom sizes up to a device's budget, VirtualDesktopBudget);
+    /// anything else is This device (`validated`), and a Sill for Mac before custom sizes reads a typed one so too. Set on
+    /// the Mac (Sill.app's Settings › Displays, its key `virtualDesktopSize`; the CLI's --virtual-desktop=…); a device's
+    /// pickers and their wire fields are phase 3's. Taken the next time the Virtual Desktop is made.
     package var virtualDesktopSize: String
-    /// Its refresh rate: 0 (the device's, the default), 30, 60 or 120 Hz (VirtualDesktopSize.rateChoices), held to the
-    /// Frame Rate limit; anything else is the device's (`validated`).
+    /// Its refresh rate: 0 (the device's, the default), or 24 to 120 Hz (VirtualDesktopSize.rateAllowed: the picker's
+    /// 30, 60 and 120, or one typed), held to the Frame Rate limit; anything else is the device's (`validated`).
     package var virtualDesktopHz: Int
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
@@ -210,7 +212,7 @@ package struct HostConfig: Equatable, Sendable {
         c.awayBitrate = min(max(awayBitrate, 1_000_000), 200_000_000)
         if remotePort != 0 && !(1024...65535).contains(remotePort) { c.remotePort = Self.defaultRemotePort }
         if VirtualDesktopSize.choice(virtualDesktopSize) == nil { c.virtualDesktopSize = VirtualDesktopSize.deviceChoice }
-        if !VirtualDesktopSize.rateChoices.contains(virtualDesktopHz) { c.virtualDesktopHz = 0 }
+        if !VirtualDesktopSize.rateAllowed(virtualDesktopHz) { c.virtualDesktopHz = 0 }
         return c
     }
 

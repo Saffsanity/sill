@@ -27,7 +27,9 @@ the iPhone held upright with Full Screen after the iPad (800×1614 pt, past run 
 the iPhone back on it within its grace after a change while away (its space then, 1 s steady). An iPhone that says its
 screen (Noah, 2026-11-24): pixel for pixel upright and on its side, with Full Screen and its controls, the 16:10 pane
 over its controls grown to 800×499; and on a host whose said display refuses a short side (short-1x), the make and a
-follow falling back to the size that works.
+follow falling back to the size that works. A size of the person's own (part B): said at its size, held to an encoder
+said to take no more than 4096 pixels (SILL_TEST_ENCODER), scaled for an iPhone SE's budget while it shows it too, and
+the CLI refusing one over the largest current iPad's budget.
 Each host is killed at the end; nothing is posted, warped or captured.
 
     Scripts/desktop-check/live.py OUT
@@ -587,6 +589,53 @@ def the_iphone_refused(out):
     verdict(len(back) == 1 and len(then) == 1 and len(follow) == 1 and follow[0][0] - then[0][0] >= 0.9,
             f"VD iPhone refused: in place, back, then the size that works 1 s later: {said(h, 6.5, 11)}")
     verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1, f"VD iPhone refused: made once (the refused one said, never streamed): {vd_lines(h)}")
+    custom_sizes(out)
+
+
+def custom_sizes(out):
+    """Part B (Noah, 2026-11-24: custom sizes "up to 2x native resolution of device panel and 120Hz"): a test host with a
+    size of its own (--virtual-desktop=5120x2880@1:60) whose encoder is said to take no picture wider than 4096 pixels and
+    to carry it at 31 fps (SILL_TEST_ENCODER): it says what it would make, its encoder's note at start, the picture held to
+    4096 × 2304 for the encoder (#295's EncoderLimit); an iPhone SE joining (its budget, 480,240,000 pixels a second, under
+    5120 × 2880 at 60 Hz) gets the picture scaled to its budget, the display keeping its size, and once it leaves the picture
+    is the encoder's again; and the CLI refusing a size over the largest current iPad's budget with its sentence."""
+    r = subprocess.run([HOST, "--synthetic", "--virtual-desktop=3840x2160@2:120"], capture_output=True, text=True, timeout=30,
+                       env={**os.environ, **BASE_ENV})
+    verdict(r.returncode == 2 and "That’s more than Sill sends to iPad Pro 13-inch: up to 5504 × 4128 at 120 Hz" in r.stdout,
+            f"VD custom: the CLI refuses 7680 × 4320 at 120 Hz with the ceiling's sentence: exit {r.returncode}, {r.stdout.strip()[:200]!r}")
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3", "SILL_TEST_ENCODER": "widest=4096,fps=31"}
+    h = Host(out, "vd-custom", env, args=["--virtual-desktop=5120x2880@1:60"])
+    try:
+        # P, an iPad Pro 13-inch (its screen 2064×2752 at 2x) from 1 s: onto the Virtual Desktop at 3; Q, an iPhone SE (750×1334
+        # at 2x, 60 Hz) from 8 to 14, showing the same Desktop; P gone at 19.
+        p, rp = client(h, out, "vdcustom-p", 18, ["desktop", "--fps=120", "--panel=1376x1032", "--room=1376x1032", "--screen=2064x2752@2",
+                                                  "--device=iPad Pro", "--next-display@1", "--next-display@2"], 1)
+        q, rq = client(h, out, "vdcustom-q", 6, ["desktop", "--fps=60", "--panel=667x375", "--room=667x375", "--screen=750x1334@2:phone",
+                                                 "--device=iPhone SE"], 8)
+        p.join(); q.join()
+        h.at(20)
+    finally:
+        h.stop()
+    verdict(bool(h.all(r"^Virtual Desktop on for this run \(Resolution: Custom: 5120 × 2880 pixels, Refresh Rate: 60 Hz\): ", 0, 2)),
+            "VD custom: --virtual-desktop's line names the size of its own and its rate")
+    verdict(bool(h.all(r"^Test encoder: widest=4096,fps=31 \(SILL_TEST_ENCODER\)", 0, 2))
+            and bool(h.all(r"^Virtual Desktop: Custom: 5120 × 2880 pixels at 60 Hz: This Mac’s video encoder takes at most 4096 pixels a side: "
+                           r"Sill streams this scaled down to 4096 × 2304, at about 31 frames a second\.$", 0, 2)),
+            f"VD custom: what this Mac's encoder carries, said at start: {said(h, 0, 2)}")
+    made = vd_lines(h, 2, 6)
+    verdict(len(made) == 1 and "Virtual Desktop 5120×2880 pt @1× at 60 Hz: said, never made" in made[0][2] and "its picture" not in made[0][2],
+            f"VD custom: made (said) at its own size, 5120 × 2880 at 1x, 60 Hz: {made or said(h, 2, 6)}")
+    held = h.all(r"^This Mac's hardware video encoder doesn’t take 5120×2880: streaming .* at 4096×2304, scaled down\.", 2, 7)
+    on = [x for x in streams(h, 2, 7) if x[1] == "Virtual Desktop"]
+    verdict(bool(held) and bool(on) and on[-1][2] == "4096×2304", f"VD custom: over the encoder's widest: the picture 4096 × 2304, the display 5120 × 2880: {held} {on}")
+    budget = h.all(r"^Virtual Desktop: 5120×2880 at 60 Hz is more than iPhone SE takes \(480240000 pixels a second\): streaming it at 3772×2120\.$", 8, 13)
+    on_q = [x for x in streams(h, 8, 13.5) if x[1] == "Virtual Desktop"]
+    verdict(len(budget) == 1 and bool(on_q) and on_q[-1][2] == "3772×2120",
+            f"VD custom: the iPhone SE joins: the picture scaled to its budget (3772 × 2120 at 60 Hz), the display kept: {budget} {on_q}")
+    after = [x for x in streams(h, 14, 19) if x[1] == "Virtual Desktop"]
+    verdict(bool(after) and after[-1][2] == "4096×2304", f"VD custom: the iPhone SE gone: the encoder's picture again (4096 × 2304): {after}")
+    verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1 and not h.all(r"followed in place|turned|beyond the backing", 0, 1e9),
+            f"VD custom: made once, never followed (a size of its own keeps its size): {said(h)}")
 
 
 if __name__ == "__main__":

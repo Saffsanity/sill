@@ -196,8 +196,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `VirtualDisplaySize`, the size of Sill's virtual display, no side under 800
   points, which macOS kept at 2x (an iPhone's 754×784 came up at 1x), and of
   the window on it, 1 to 65536 points a side, the most a host takes, so a
-  full-screen window's crop keeps the panel's shape (`windowSize`); pure,
-  `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
+  full-screen window's crop keeps the panel's shape (`windowSize`); and `EncoderLimit` (#295, addhumal's, merged
+  2026-11-25: a stream past 4096 pixels on its longer side held to 4096, its shape kept, when this Mac's hardware
+  encoder makes no session of its size, `HEVCEncoder.hardwareTakes`; `side` given for a test host's
+  SILL_TEST_ENCODER); pure, `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
   SILL_TEST_PATTERN=picture:<path> shows a still picture instead, under
   SILL_TEST_DISPLAYS the shown stop's number and name drawn on it,
@@ -310,6 +312,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   might do with an iPhone's); `DisplayMakeGuard`, #380's
   guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `VirtualDesktopBudget` (part B, 2026-11-25: a size the person types, up to a device's budget, twice its screen each
+  way at 120 Hz, Noah's; `current`, every current iPhone's and iPad's screen from Xcode's simulator profiles; the
+  ceiling, the largest budget known; the entry's refusals and their sentences; what a device gets, as it is or scaled,
+  `view`, `fitted`; what this Mac's encoder carries, `encoderNote`; TEST ONLY SILL_TEST_ENCODER; pure,
+  `Tests/checks/virtual-desktop`),
   `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
   the roles changing hands with the headless display, never the main display beside a real screen;
   pure; its make's line, a test host's grace and the TEST ONLY hook SILL_TEST_VIRTUAL_DESKTOP) and
@@ -487,7 +494,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (all status copy; the Virtual Desktop's card row and menu subtitle from VirtualDesktopWords), `StatusCard`,
   `StatusGlyph`, `SettingsWindow` (its height capped to the screen, issue #59; the fourth tab "Displays", raw
   value `virtualDisplay`) + `SettingsPanes` (Displays' `VirtualDesktopSection`: the switch, Resolution and
-  Refresh Rate from VirtualDesktopSize's choices, its status, Try Again for the guard),
+  Refresh Rate from VirtualDesktopSize's choices, Resolution's Custom… (part B, 2026-11-25: a width and a height in
+  pixels, Retina, a rate of 24 to 120 Hz, refused with VirtualDesktopBudget's sentence over the largest budget among
+  the devices this Mac knows, each known device's line, this Mac's encoder's note), its status, Try Again for the
+  guard; HostSettings keeps the known devices, `knownDevices`, under `virtualDesktopDevices`),
   `SettingsWindowFit` (how tall Settings may be on its screen and where it
   goes; pure, `Tests/checks/settings-window`), `Permissions`, `LoginItem`,
   `LogWindow`, `MainMenu` (key
@@ -739,7 +749,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   a way back that never lands removing it; rule A: made with the controls showing, Full Screen on and off at once, a
   turn with the controls showing, two changes close together, the iPhone upright after the iPad; an iPhone that says
   its screen, pixel for pixel upright and on its side, and on a host whose said display refuses a short side, the
-  make's and a follow's fall back to the size that works), a verdict per rule.
+  make's and a follow's fall back to the size that works; a size of the person's own, held to an encoder said to take
+  no more than 4096 pixels and to an iPhone SE's budget, and the CLI's refusal over the ceiling), a verdict per rule.
   `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
   docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,

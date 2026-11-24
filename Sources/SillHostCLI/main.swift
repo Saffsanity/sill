@@ -81,7 +81,8 @@ if let lockFlag = CommandLine.arguments.first(where: { $0 == "--lock-after-sessi
 // the size of that device. Without --virtual-display none is made either way (it needs the AppKit loop).
 config.headlessDisplay = !CommandLine.arguments.contains("--no-headless-display")
 
-// `SillHost --virtual-desktop[=device|main|WxH@S[:HZ]]`: the Virtual Desktop for this run (phase 2b of
+// `SillHost --virtual-desktop[=device|main|WxH@S[:HZ]]` (WxH@S: one of Sill for Mac's sizes, or since 2026-11-25 one of your
+// own, in points at 1x or 2x; HZ 24 to 120): the Virtual Desktop for this run (phase 2b of
 // docs/virtual-desktop-plan.md; HostConfig.virtualDesktop): a desktop of Sill's own after this Mac's screens, the Desktop
 // button's last stop, made while a device shows it and 30 s after. By default the size and rate of the device that shows it
 // (`device`); `main` the main display's mode, or a size from Sill for Mac's list ("1920x1080@2"), and a rate after a colon
@@ -91,11 +92,14 @@ let virtualDesktopFlag = CommandLine.arguments.first { $0 == "--virtual-desktop"
 if let flag = virtualDesktopFlag {
     config.virtualDesktop = true
     if flag.hasPrefix("--virtual-desktop=") {
-        guard let chosen = VirtualDesktopSize.flag(String(flag.dropFirst("--virtual-desktop=".count))) else {
-            print("--virtual-desktop=… takes device, main or a size of Sill for Mac's list (" + VirtualDesktopSize.offered.map(VirtualDesktopSize.id)
-                  .joined(separator: ", ") + "), then :30, :60 or :120 for its rate.")
+        // A size of the list or one of your own (part B, 2026-11-25: up to the largest current iPad's budget, since the CLI
+        // knows no device yet: VirtualDesktopBudget), and a rate of 24 to 120 Hz; anything else refused with its sentence.
+        let value = String(flag.dropFirst("--virtual-desktop=".count))
+        if let refusal = VirtualDesktopBudget.flagRefusal(value) {
+            print(refusal)
             exit(2)
         }
+        guard let chosen = VirtualDesktopSize.flag(value) else { exit(2) }
         config.virtualDesktopSize = chosen.size
         config.virtualDesktopHz = chosen.hz
     }

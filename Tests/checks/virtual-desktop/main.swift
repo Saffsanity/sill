@@ -854,28 +854,36 @@ for s in VS.offered {
 }
 check(VS.offered.contains(VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)) && VS.offered.contains(VS.Size(widthPt: 3440, heightPt: 1440, scale: 1)),
       "4K at Retina and the 34-inch ultrawide at 1x among them")
-for bad in ["", "Device", "1920x1080", "1920x1080@3", "1280x720@2", "999x999@2", " main", "3840x2160@2"] {
-    check(VS.choice(bad) == nil, "\(bad.debugDescription): not offered")
+for bad in ["", "Device", "1920x1080", "1920x1080@3", " main", "8192x8192@2", "300x300@2", "700x700@2", "639x800@1", "8193x800@1",
+            "01920x1080@1", "+1920x1080@1", "1920x1080@01", "1920x-1080@1", "1920×1080@1"] {
+    check(VS.choice(bad) == nil, "\(bad.debugDescription): neither offered nor a size that can be a display")
 }
 check(VS.id(VS.Size(widthPt: 1920, heightPt: 1080, scale: 2)) == "1920x1080@2", "an id, as VirtualDesktopState.size writes a size")
 check(VS.words("device") == "Match the device" && VS.words("main") == "Same as main display" && VS.words("1920x1080@2") == "1920 × 1080 (Retina)"
       && VS.words("3440x1440@1") == "3440 × 1440" && VS.words("nonsense") == "Match the device", "the choices' words")
-check(VS.rateChoices == [0, 30, 60, 120] && VS.rateWords(0) == "Match the device" && VS.rateWords(120) == "120 Hz" && VS.rateWords(75) == "Match the device",
-      "the rates and their words")
+check(VS.rateChoices == [0, 30, 60, 120] && VS.rateWords(0) == "Match the device" && VS.rateWords(120) == "120 Hz" && VS.rateWords(75) == "75 Hz"
+      && VS.rateWords(23) == "Match the device" && VS.rateWords(121) == "Match the device", "the rates and their words (a typed one too)")
 check(VS.rate(choice: 0, viewportFPS: 120, limit: 120) == 120 && VS.rate(choice: 0, viewportFPS: nil, limit: 120) == 60,
       "the rate: the device's by default")
 check(VS.rate(choice: 30, viewportFPS: 120, limit: 120) == 30 && VS.rate(choice: 120, viewportFPS: 60, limit: 120) == 120,
       "…a chosen rate, whatever the device's")
 check(VS.rate(choice: 120, viewportFPS: 60, limit: 60) == 60, "…held to the Frame Rate limit")
-check(VS.rate(choice: 75, viewportFPS: 120, limit: 120) == 120, "…one not offered is the device's")
+check(VS.rate(choice: 75, viewportFPS: 120, limit: 120) == 75 && VS.rate(choice: 24, viewportFPS: 120, limit: 120) == 24,
+      "…one typed, 24 to 120 Hz, as it is")
+check(VS.rate(choice: 23, viewportFPS: 120, limit: 120) == 120 && VS.rate(choice: 121, viewportFPS: 60, limit: 120) == 60,
+      "…one outside them is the device's")
+check(VS.rateAllowed(0) && VS.rateAllowed(24) && VS.rateAllowed(90) && VS.rateAllowed(120) && !VS.rateAllowed(23) && !VS.rateAllowed(121)
+      && !VS.rateAllowed(-60), "the rates allowed: the device's, or 24 to 120 Hz")
 // The CLI's --virtual-desktop=VALUE.
 check(VS.flag("device")! == ("device", 0) && VS.flag("main")! == ("main", 0) && VS.flag("1920x1080@2")! == ("1920x1080@2", 0),
       "the CLI's flag: a size choice alone, the device's rate")
 check(VS.flag("device:120")! == ("device", 120) && VS.flag("3440x1440@1:60")! == ("3440x1440@1", 60) && VS.flag("main:30")! == ("main", 30),
       "…with a rate after a colon")
-for bad in ["", "Device", "1920x1080", "device:", "device:0", "device:75", "device:60:60", "8K", ":60", "1920x1080@2:x"] {
+for bad in ["", "Device", "1920x1080", "device:", "device:0", "device:121", "device:23", "device:060", "device:60:60", "8K", ":60", "1920x1080@2:x"] {
     check(VS.flag(bad) == nil, "the CLI's flag refuses \(bad.debugDescription)")
 }
+check(VS.flag("device:75")! == ("device", 75) && VS.flag("2752x2064@2:120")! == ("2752x2064@2", 120) && VS.flag("7680x2160@1")! == ("7680x2160@1", 0),
+      "…a typed rate, and a typed size (part B)")
 // Same as main display, the 11-12 plan's §2 table.
 let mainRows: [(String, CGSize, Int, VS.Size)] = [
     ("14-inch MacBook Pro", CGSize(width: 1512, height: 982), 2, VS.Size(widthPt: 1512, heightPt: 982, scale: 2)),
@@ -913,6 +921,163 @@ for _ in 0..<2_000 {
     if !grown { ok = ok && abs(Double(m.widthPt) - w * fit) < 1.0001 && abs(Double(m.heightPt) - h * fit) < 1.0001 }
     check(ok, "main \(w)×\(h)@\(scale): \(m)")
 }
+
+// MARK: Custom sizes and each device's budget (part B, 2026-11-25; Noah, 2026-11-24: "up to 2x native resolution of device
+// panel and 120Hz ... any resolution/refresh rate that is less than 2726461440 pixels per second")
+
+typealias VB = VirtualDesktopBudget
+// A size typed in pixels, as its id: what can be a display (each side 640 to 8192 pixels; at 2x one side of 1600 or more).
+for (id, want) in [("2752x2064@2", VS.Size(widthPt: 2752, heightPt: 2064, scale: 2)), ("7680x2160@1", VS.Size(widthPt: 7680, heightPt: 2160, scale: 1)),
+                   ("640x640@1", VS.Size(widthPt: 640, heightPt: 640, scale: 1)), ("8192x640@1", VS.Size(widthPt: 8192, heightPt: 640, scale: 1)),
+                   ("4096x4096@2", VS.Size(widthPt: 4096, heightPt: 4096, scale: 2)), ("800x320@2", VS.Size(widthPt: 800, heightPt: 320, scale: 2)),
+                   ("1280x720@2", VS.Size(widthPt: 1280, heightPt: 720, scale: 2)), ("999x999@2", VS.Size(widthPt: 999, heightPt: 999, scale: 2))] {
+    check(VS.custom(id) == want && VS.choice(id) == .fixed(want), "\(id): a size typed, \(want)")
+}
+check(VS.custom("4097x800@2") == nil && VS.custom("799x799@2") == nil && VS.custom("320x319@2") == nil && VS.custom("8192x639@1") == nil,
+      "past 8192 pixels, a Retina desktop under 1600 on both sides, under 640 pixels: none")
+check(VS.words("2752x2064@2") == "Custom: 5504 × 4128 pixels, Retina" && VS.words("7680x2160@1") == "Custom: 7680 × 2160 pixels"
+      && VS.words("1920x1080@2") == "1920 × 1080 (Retina)", "a typed size's words: its pixels; the list's as before")
+// What an older Sill for Mac does with a saved typed size: its `choice` knew the list alone, so validated took This device.
+func olderChoice(_ id: String) -> VS.Choice? {
+    if id == "device" { return .device }
+    if id == "main" { return .main }
+    return VS.offered.first { VS.id($0) == id }.map { .fixed($0) }
+}
+check(olderChoice("2752x2064@2") == nil && olderChoice("1920x1080@2") != nil && VS.choice("2752x2064@2") != nil,
+      "an older Sill for Mac reads a typed size as none of its choices: Match the device, never a crash (HostConfig.validated)")
+check(VS.rateAllowed(90) && ![0, 30, 60, 120].contains(90), "…and a typed rate as none of its rates: the device's")
+
+// The budget: twice each way at 120 Hz, for every current iPhone's and iPad's screen (Xcode 27.1's simulator profiles).
+let budgets: [(String, Int)] = [
+    ("iPhone 15 Pro", 1_446_491_520), ("iPhone 16", 1_446_491_520), ("iPhone 16 Plus", 1_731_283_200), ("iPhone 16e", 1_421_971_200),
+    ("iPhone 17e", 1_421_971_200), ("iPhone 17", 1_517_823_360), ("iPhone Air", 1_654_732_800), ("iPhone 17 Pro", 1_517_823_360),
+    ("iPhone 17 Pro Max", 1_817_164_800), ("iPhone 18 Pro", 1_517_823_360), ("iPhone 18 Pro Max", 1_817_164_800), ("iPhone SE", 480_240_000),
+    ("iPhone Duo, outer screen", 1_364_895_360), ("iPhone Duo, inner screen", 2_748_466_080), ("iPad mini", 1_618_467_840),
+    ("iPad", 1_857_792_000), ("iPad Air 11-inch", 1_857_792_000), ("iPad Air 13-inch", 2_685_665_280), ("iPad Pro 11-inch", 1_937_548_800),
+    ("iPad Pro 13-inch", 2_726_461_440),
+]
+check(VB.current.count == budgets.count, "every current iPhone and iPad listed (\(VB.current.count))")
+for (name, want) in budgets {
+    let d = VB.current.first { $0.name == name }
+    check(d.map(VB.budget) == want, "\(name)'s budget: \(want) pixels a second (\(d.map(VB.budget).map(String.init) ?? "missing"))")
+}
+check(VB.budget(VB.largestIPad) == 2_726_461_440 && VB.budget(pixelWidth: 2064, pixelHeight: 2752) == 5504 * 4128 * 120,
+      "an iPad Pro 13-inch: 5504 × 4128 at 120 Hz, 2,726,461,440 pixels a second (Noah's number)")
+check(VB.current.allSatisfy { $0.phone == $0.name.hasPrefix("iPhone") } && VB.current.allSatisfy { [60, 120].contains($0.fps) },
+      "each an iPhone's or an iPad's, at 60 or 120 Hz")
+// The ceiling: the largest budget this Mac knows, else the largest current iPad's (the Duo's inner screen is larger).
+let iPhone15 = VB.current.first { $0.name == "iPhone 15 Pro" }!, miniDevice = VB.current.first { $0.name == "iPad mini" }!
+let duoIn = VB.current.first { $0.name == "iPhone Duo, inner screen" }!
+check(VB.ceiling(known: []) == VB.largestIPad && VB.ceiling(known: [iPhone15, miniDevice]) == miniDevice && VB.ceiling(known: [iPhone15]) == iPhone15
+      && VB.ceiling(known: [miniDevice, duoIn, iPhone15]) == duoIn, "the ceiling: the largest budget known, else the largest current iPad's")
+// The entry: what may be typed, and its one sentence.
+func typed(_ w: Int?, _ h: Int?, _ retina: Bool = false, _ hz: Int? = 0, _ ceiling: VB.Device = VB.largestIPad) -> String {
+    switch VB.entry(width: w, height: h, retina: retina, hz: hz, ceiling: ceiling) {
+    case .success(let e): return "\(VS.id(e.size)):\(e.hz)"
+    case .failure(let r): return VB.sentence(r)
+    }
+}
+check(typed(5504, 4128, true, 120) == "2752x2064@2:120", "Noah's 5504 × 4128 at 120 Hz, Retina: taken (at the ceiling, which it includes)")
+check(typed(5504, 4128, false, 120) == "5504x4128@1:120" && typed(4128, 5504, false, 120) == "4128x5504@1:120", "…at 1x, and upright")
+check(typed(5504, 4130, false, 120).hasPrefix("That’s more than Sill sends to iPad Pro 13-inch: up to 5504 × 4128 at 120 Hz"),
+      "two pixels past the ceiling at 120 Hz: refused, the ceiling named in its device's terms")
+check(typed(3840, 2160, true, 120) == "1920x1080@2:120" && typed(7680, 2160, false, 120) == "7680x2160@1:120" && typed(7680, 4320, false, 60) == "7680x4320@1:60",
+      "4K at 120, a 32:9 ultrawide at 120, 8K at 60: within (Noah's examples)")
+check(typed(7680, 4320, false, 120).hasPrefix("That’s more than Sill sends to iPad Pro 13-inch"), "8K at 120: over")
+check(typed(7680, 4320, false, 0).hasPrefix("That’s more"), "the device's rate counts as 120 Hz, the most it may be")
+check(typed(3840, 2160, false, 120, iPhone15) == "3840x2160@1:120" && typed(5504, 4128, true, 120, iPhone15).hasPrefix("That’s more than Sill sends to iPhone 15 Pro: up to 5112 × 2358 at 120 Hz"),
+      "known an iPhone 15 Pro alone: its budget the ceiling (5112 × 2358 at 120 Hz)")
+check(typed(nil, 1080) == "Type a width and a height in pixels." && typed(1920, nil) == "Type a width and a height in pixels.", "a side not typed")
+check(typed(639, 1080) == "Each side needs at least 640 pixels." && typed(8193, 1080) == "Each side can be at most 8192 pixels."
+      && typed(1080, 639) == "Each side needs at least 640 pixels." && typed(1080, 8193) == "Each side can be at most 8192 pixels.",
+      "the floor and the ceiling of each side")
+check(typed(1921, 1080, true) == "A Retina desktop needs an even number of pixels each way."
+      && typed(1920, 1081, true) == "A Retina desktop needs an even number of pixels each way." && typed(1921, 1081, false) == "1921x1081@1:0",
+      "an odd Retina side, either; at 1x any count")
+check(typed(1598, 1598, true) == "A Retina desktop needs one side of 1600 pixels or more: macOS shows a smaller one at standard resolution."
+      && typed(1600, 640, true) == "800x320@2:0", "a Retina desktop under 1600 pixels on both sides; 1600 on one: taken")
+check(typed(1920, 1080, false, 23) == "The refresh rate can be 24 to 120 Hz." && typed(1920, 1080, false, 121) == "The refresh rate can be 24 to 120 Hz."
+      && typed(1920, 1080, false, nil) == "The refresh rate can be 24 to 120 Hz." && typed(1920, 1080, false, 24) == "1920x1080@1:24",
+      "a rate out of 24 to 120 Hz, or not a number")
+check(typed(1920, 1080, false, 90) == "1920x1080@1:90", "90 Hz, which no picker offers: taken")
+// Every typed size the entry takes is a size VirtualDesktopSize takes as saved, and the other way round within the ceiling.
+var entryWrong = 0
+for _ in 0..<20_000 {
+    let w = Int.random(in: 500...8400, using: &rng), h = Int.random(in: 500...8400, using: &rng), r = Bool.random(using: &rng)
+    let hz = [0, 24, 30, 60, 90, 120, 23, 121][Int.random(in: 0...7, using: &rng)]
+    let result = VB.entry(width: w, height: h, retina: r, hz: hz, ceiling: VB.largestIPad)
+    let displayable = (640...8192).contains(w) && (640...8192).contains(h) && (!r || (w % 2 == 0 && h % 2 == 0 && max(w, h) >= 1600))
+    let rateOK = hz == 0 || (24...120).contains(hz)
+    let within = w * h * (hz == 0 ? 120 : hz) <= 2_726_461_440
+    switch result {
+    case .success(let e):
+        if !(displayable && rateOK && within) || VS.custom(VS.id(e.size)) != e.size || e.size.widthPt * e.size.scale != w || e.hz != hz { entryWrong += 1 }
+    case .failure:
+        if displayable && rateOK && within { entryWrong += 1 }
+    }
+}
+check(entryWrong == 0, "20,000 random entries: taken exactly when they can be a display at a rate of 24 to 120 Hz within the ceiling, as saved (\(entryWrong) not)")
+check(VB.fields("2752x2064@2").map { [$0.width, $0.height, $0.retina ? 1 : 0] } == [5504, 4128, 1] && VB.fields("device") == nil
+      && VB.fields("1920x1080@1").map { [$0.width, $0.height, $0.retina ? 1 : 0] } == [1920, 1080, 0], "the entry's fields from a size in use")
+check(VB.upTo(VB.largestIPad, known: false) == "No device has connected yet: up to 5504 × 4128 at 120 Hz, the largest current iPad’s, or as many pixels a second at a lower rate."
+      && VB.upTo(iPhone15, known: true) == "Up to 5112 × 2358 at 120 Hz for iPhone 15 Pro, or as many pixels a second at a lower rate.", "what may be typed, said")
+// The CLI: no device known, so the largest current iPad's ceiling.
+check(VB.flagRefusal("2752x2064@2:120") == nil && VB.flagRefusal("device") == nil && VB.flagRefusal("1920x1080@2:60") == nil, "the CLI takes them")
+check(VB.flagRefusal("3840x2160@2:120")?.hasPrefix("That’s more than Sill sends to iPad Pro 13-inch") == true, "…refuses 7680 × 4320 at 120 Hz with the ceiling's sentence")
+check(VB.flagRefusal("8K")?.hasPrefix("--virtual-desktop=… takes device, main, a size of Sill for Mac's list (") == true
+      && VB.flagRefusal("device:150")?.hasPrefix("--virtual-desktop=… takes") == true, "…and says its forms for anything else")
+check(VB.flagRefusal("1920x1080@2:150") == "The refresh rate can be 24 to 120 Hz."
+      && VB.flagRefusal("700x700@2") == "A Retina desktop needs one side of 1600 pixels or more: macOS shows a smaller one at standard resolution."
+      && VB.flagRefusal("9000x800@1") == "Each side can be at most 8192 pixels.", "…and a size of its own written right that cannot be, its own sentence")
+// What a device gets: its own rate, the picture as it is within its budget, else scaled down evenly to it.
+check(VB.view(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == VB.View(width: 5504, height: 4128, hz: 120, scaled: false),
+      "an iPad Pro 13-inch: 5504 × 4128 at 120 Hz as it is")
+let phoneView = VB.view(width: 5504, height: 4128, hz: 120, device: iPhone15)
+check(phoneView.scaled && phoneView.hz == 120 && phoneView.width * phoneView.height * 120 <= 1_446_491_520 && phoneView.width % 2 == 0
+      && phoneView.height % 2 == 0 && abs(Double(phoneView.width) / Double(phoneView.height) - 5504.0 / 4128) < 0.002 && phoneView.width >= 3990,
+      "an iPhone 15 Pro: scaled down evenly to its budget at 120 Hz (\(phoneView))")
+check(VB.view(width: 5504, height: 4128, hz: 120, device: miniDevice) == VB.View(width: 5504, height: 4128, hz: 60, scaled: false),
+      "an iPad mini: at its own 60 Hz, the same picture is within its budget")
+check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == "iPad Pro 13-inch: as it is, at 120 Hz."
+      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: iPhone15) == "iPhone 15 Pro: scaled to \(phoneView.width) × \(phoneView.height) at 120 Hz."
+      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: miniDevice) == "iPad mini: as it is, at 60 Hz.", "Settings' lines beside it")
+var fitWrong = 0
+for _ in 0..<20_000 {
+    let w = Int.random(in: 640...8192, using: &rng), h = Int.random(in: 640...8192, using: &rng), fps = [24, 30, 60, 90, 120][Int.random(in: 0...4, using: &rng)]
+    let budget = VB.budget(VB.current[Int.random(in: 0..<VB.current.count, using: &rng)])
+    guard let f = VB.fitted(width: w, height: h, fps: fps, budget: budget) else {
+        if w * h * fps > budget { fitWrong += 1 }
+        continue
+    }
+    let shape = abs(Double(f.width) / Double(f.height) / (Double(w) / Double(h)) - 1)
+    if w * h * fps <= budget || f.width * f.height * fps > budget || f.width % 2 != 0 || f.height % 2 != 0 || f.width > w || f.height > h
+        || shape > 2.0 / Double(f.width) + 2.0 / Double(f.height) + 1e-6 || (f.width + 4) * (f.height + 4) * fps <= budget { fitWrong += 1 }
+}
+check(fitWrong == 0, "20,000 random sizes and budgets: scaled only past the budget, then within it, even, the shape kept, the largest such (\(fitWrong) not)")
+// What this Mac's encoder carries, beside a chosen size (Noah's agreed point 2), from what Sill measured at run time.
+check(VB.encoderNote(width: 5504, height: 4128, hz: 120, encoder: VB.Encoder()) == nil, "nothing known: no note")
+check(VB.encoderNote(width: 3840, height: 2160, hz: 60, encoder: VB.Encoder(fps: 90)) == nil, "it carries it: no note")
+check(VB.encoderNote(width: 3840, height: 2160, hz: 120, encoder: VB.Encoder(fps: 61.7)) == "This Mac streams this at about 61 frames a second.",
+      "slower than asked: about how fast")
+check(VB.encoderNote(width: 5120, height: 2880, hz: 60, encoder: VB.Encoder(widest: 4096)) == "This Mac’s video encoder takes at most 4096 pixels a side: Sill streams this scaled down to 4096 × 2304.",
+      "wider than its hardware takes: scaled down (#295's 5K)")
+check(VB.encoderNote(width: 7680, height: 4320, hz: 60, encoder: VB.Encoder(widest: 4096, fps: 38))
+      == "This Mac’s video encoder takes at most 4096 pixels a side: Sill streams this scaled down to 4096 × 2304, at about 38 frames a second.", "both")
+check(VB.encoderNote(width: 4000, height: 2000, hz: 60, encoder: VB.Encoder(widest: 4096)) == nil, "within its widest: no note")
+check(VB.encoderNote(width: 2880, height: 5120, hz: 60, encoder: VB.Encoder(widest: 4096)) == "This Mac’s video encoder takes at most 4096 pixels a side: Sill streams this scaled down to 2304 × 4096.",
+      "upright too: its longer side held")
+check(VB.encoderNote(width: 1920, height: 1080, hz: 60, encoder: VB.Encoder(software: true))?.hasPrefix("This Mac streams on its software encoder") == true,
+      "on the software encoder: that")
+check(VB.encoderNote(width: 1920, height: 1080, hz: 60, encoder: VB.Encoder(fps: 58.5)) == nil, "within two frames of the rate: no note")
+// TEST ONLY: SILL_TEST_ENCODER, a test host's encoder said.
+check(VB.testEncoder(environment: [:], testHost: true) == (nil, nil), "no variable: none")
+check(VB.testEncoder(environment: ["SILL_TEST_ENCODER": "widest=4096,fps=31"], testHost: true).encoder == VB.Encoder(widest: 4096, fps: 31),
+      "widest and fps")
+check(VB.testEncoder(environment: ["SILL_TEST_ENCODER": "widest=4096"], testHost: false).encoder == nil
+      && VB.testEncoder(environment: ["SILL_TEST_ENCODER": "widest=4096"], testHost: false).line?.contains("ignored: only a --synthetic test host") == true,
+      "never Sill.app's")
+check(VB.testEncoder(environment: ["SILL_TEST_ENCODER": "wide=4096"], testHost: true).encoder == nil
+      && VB.testEncoder(environment: ["SILL_TEST_ENCODER": "fps=-1"], testHost: true).encoder == nil, "a word it does not know, or a rate that is none: ignored")
 
 // MARK: VirtualDesktopLife: when the Virtual Desktop exists (plan §6 and §10)
 

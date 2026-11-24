@@ -995,3 +995,91 @@ and leaving iPads as they are." So while Match the device is chosen:
     controls on a current iPhone (800 × 499 on an iPhone 15 Pro, scaled to 0.71).
 48. **The spare pixel** of an odd side is a hairline at the picture's right or bottom edge, never a hair's scaling.
 49. **A size macOS does not keep** is never asked again in that run of Sill; the next run tries pixel for pixel again.
+
+**Part B: custom sizes.** Noah, 2026-11-24, whole: "For Virtual Desktop, I would also like to allow users to be able to set
+custom resolutions/refresh rates up to 2x native resolution of device panel and 120Hz. So for an iPad Pro 13" for example,
+max would be 5504 × 4128 at 120Hz or any resolution/refresh rate that is less than 2726461440 pixels per second (so 4K at
+same refresh would work, ultra wide, higher res at 60Hz, etc). What do you think?" He was answered that the rule is good,
+with one addition (the Mac, not the device's panel, stops people first: some Macs refuse a picture wider than about 4096
+pixels, and no Mac known encodes 2.7 billion pixels a second in real time), in four points: the budget is the ceiling of
+what can be typed, refused above it with a plain sentence; Sill says what this Mac can carry; a desktop larger than the
+encoder takes still works, the picture scaled down to fit it (as a contributor's open pull request does for wide
+windows); Match the device stays the default; and, the setting being the Mac's and the budget a device's, the display keeps
+its size and a device with a smaller budget gets the picture scaled for it. His answer, whole: "I agree with your
+assessment on the custom sizes, implement it. Make it work depending on the device (iPhone, iPad, etc as you described).
+Add to the pull request before it merges please."
+- **Where** (B1): Settings › Displays, Resolution's last entry "Custom…": a width and a height in pixels, Retina (a 2x
+  desktop: half as many points each way; on by default) and a refresh rate typed (24 to 120 Hz, whole numbers; empty: the
+  device's), taken by Use This Size. Rates: any whole number from 24 (the least Sill streams at, its floor for every
+  rate) to 120 (the most any iPhone or iPad shows); a rate that does not divide the device's own (90 on a 120 Hz iPad)
+  shows uneven motion, which is the person's choice to make. The saved value is the list's form, "WxH@S" in points
+  (`HostConfig.virtualDesktopSize`, `virtualDesktopHz`; no new key and no new parameter of HostConfig's initializer), so
+  a Sill for Mac before custom sizes reads a typed one as none of its choices and takes Match the device (its `choice`
+  knew the list alone; validated() then: never a crash), and a typed rate as the device's. The CLI's
+  `--virtual-desktop=WxH@S[:HZ]` takes the same, refused over the largest current iPad's budget (it knows no device) with
+  the same sentence. A device's own pickers stay phase 3's (default 50). A device shows the Mac's choice as it showed any
+  size: its Settings' "Its size: 2752 × 2064 at 120 Hz." (points, from kind 16's `virtualDesktopState.size`, whose form and
+  parse are the same: an older device reads a typed size as it read the list's, and nothing new is sent to any device).
+- **The ceiling, by device** (B2, `VirtualDesktopBudget`): a device's budget is (2 × its screen's pixels wide) × (2 × its
+  screen's pixels high) × 120 pixels a second, "at most" including the number itself: an iPad Pro 13-inch's 2064 × 2752 is
+  5504 × 4128 at 120 Hz, 2,726,461,440. The screen is the one its viewport names (`Viewport.screen`, part A's field), and
+  `current` lists every current iPhone's and iPad's, from Xcode 27.1's simulator profiles (CoreSimulator's DeviceTypes,
+  each one's ScreenDimensionsCapability: Apple's own numbers), the iPhone Duo's two screens among them. What may be
+  typed: the largest budget among the devices this Mac knows (Sill for Mac keeps each device that connected and said its
+  screen, `HostSettings.knownDevices`, saved as JSON under `virtualDesktopDevices`), or the largest current iPad's when it
+  knows none (default 51). Beside the entry, each known device's line: "iPad Pro 13-inch: as it is, at 120 Hz." or
+  "iPhone 15 Pro: scaled to 4008 × 3006 at 120 Hz."; with none known, "No device has connected yet: up to 5504 × 4128 at
+  120 Hz, the largest current iPad’s, or as many pixels a second at a lower rate." Refused, with one sentence each: a side
+  not typed ("Type a width and a height in pixels."), under 640 or over 8192 pixels, an odd Retina side, a Retina desktop
+  under 1600 pixels on both sides (macOS shows it at standard resolution: the stage's 754 × 784), a rate out of 24 to 120
+  Hz, and over the ceiling: "That’s more than Sill sends to iPad Pro 13-inch: up to 5504 × 4128 at 120 Hz, or as many pixels
+  a second at a lower rate." (the device's own name and size when it is one this Mac knows).
+- **What this Mac can carry** (B3): Sill already learns at launch whether its hardware encoder answers (one small frame,
+  `EncoderProbe.hardwareResponds`), and while it streams on the software encoder, how fast the hardware runs at the
+  stream's size (`throughput`, the re-check of docs/steps/2026-09-24-encoder-recovery.md, kept as `enginePixelRate`);
+  #295 adds whether the hardware takes a picture that wide at all (`HEVCEncoder.hardwareTakes`). For a chosen size and rate
+  the coordinator asks the last two once a run, off the main actor (`lookAtVirtualDesktopEncoder`: the width at once, the
+  rate only while no device is connected, so no stream is disturbed; else when the last device leaves), and Settings shows
+  one line beside the size in use when it cannot run at full size or full rate: "This Mac’s video encoder takes at most
+  4096 pixels a side: Sill streams this scaled down to 4096 × 2304, at about 38 frames a second." (or either half), "This
+  Mac streams this at about 61 frames a second.", or on the software encoder, that (`encoderNote`). The same line goes to
+  the log. No agent ran either measure: in the gates and previews they are given (TEST ONLY `SILL_TEST_ENCODER=widest=
+  4096,fps=31`, a test host's alone, never its hardware's).
+- **Above the encoder's limit** (B4): the contributor addhumal's #295 ("Hold a stream to 4096 px when the Mac's hardware
+  encoder refuses its size (#278)") is merged into this branch, its commit kept, its one conflict settled (below). Judged
+  sound: it asks the hardware for a session that must be hardware only for a size past 4096 pixels (once a size, about 1
+  ms, 200 ms the first time), holds the encoder and the capture to 4096 pixels on the longer side with the shape kept when
+  that fails, compares a window's new size with the size asked before the hold (no restart loop), holds the re-check's
+  test the same way (a way back from the software encoder), in integer arithmetic, with its check (20,000 sizes) and six
+  mutants; a Mac whose hardware takes the size is unchanged. Extended: `EncoderLimit.held` takes the side (a test host's
+  said widest), the Virtual Desktop's capture at a chosen size goes through it like any source's (the display keeps its
+  size, the picture is scaled to fit), and a test host on the software encoder says and makes the same hold under
+  SILL_TEST_ENCODER.
+- **A smaller device** (B5): while the Desktop streams the Virtual Desktop at a chosen size, its picture is held to the
+  smallest budget among the devices connected that say their screen (`virtualDesktopBudgetHold`: `fitted`, the largest
+  even size of its shape whose pixels a second at the stream's rate are within it), the display keeping its size, one
+  line ("Virtual Desktop: 5120×2880 at 60 Hz is more than iPhone SE takes (480240000 pixels a second): streaming it at
+  3772×2120."). Sill streams one picture to every connected device, so a second device of another kind showing the
+  Desktop too gets the same picture: an iPad Pro beside an iPhone 15 Pro gets the iPhone's (4008 × 3006 for 5504 × 4128 at
+  120 Hz), shown scaled up to fill its screen, until the iPhone leaves; then the Desktop starts again at the full size
+  (or the encoder's). A device's rate is its own (the display's, held to what it shows), as for every stream. A device that
+  says nothing of its screen (before 0.7) adds no budget. Match the device and the main display's size never are held.
+- **The rest at a custom size** (B6): every touch is a fraction of the picture, and lands on the display's own rectangle
+  (InputLanding), whatever the picture's scale; a pinch scales the picture on the device; the keyboard is the Mac's. A
+  chosen size never follows the device (it keeps its size and may show bars, as every chosen Resolution does); its 30 s
+  life, the lock's and the darkening's rules are the display's, unchanged. Its backing is its own pixels (as every chosen
+  size's): 5504 × 4128 is 87 MiB a frame at 4 bytes a pixel (macOS may keep two or three; not measured), 8192 × 4608 at 60
+  Hz 144 MiB; the hard stop is 8192 pixels a side (VirtualDisplay's ceiling, and the entry's). Match the device stays the
+  default, and nothing changes for a person who never opens Custom….
+- **#295's conflict**: Sources/SillHost/StreamCoordinator.swift, where main's #399 added `followTabSwap` right before the
+  `encoderWidth` and `encoderHeight` that #295 replaces with `encoderAsked`: both kept (followTabSwap as main has it;
+  `encoderAsked` in place of the two, which nothing else reads).
+
+**Defaults taken for Noah to confirm** (part B's; 1 to 49 stand):
+50. **The choice is the Mac's**: Settings › Displays' Custom… and the CLI's flag; a device's own pickers stay phase 3's.
+51. **The ceiling** with no device known is the largest current iPad's budget (5504 × 4128 at 120 Hz); with devices known,
+    the largest of theirs (the iPhone Duo's inner screen, 2007 × 2853, is a little larger than an iPad Pro 13-inch's).
+52. **Rates** of 24 to 120 Hz, whole numbers; empty is the device's.
+53. **A Retina desktop** needs one side of 1600 pixels or more, and even sides; each side 640 to 8192 pixels.
+54. **One picture for every device**: two devices of different budgets showing it both get the smaller one's picture.
+55. **Sill measures the encoder** at a chosen size once a run, its rate only while no device is connected.

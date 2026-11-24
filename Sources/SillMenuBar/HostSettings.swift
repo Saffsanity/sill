@@ -58,6 +58,7 @@ final class HostSettings {
         static let headlessDisplay = "headlessDisplay"
         static let virtualDesktop = "virtualDesktop"
         static let virtualDesktopSize = "virtualDesktopSize", virtualDesktopHz = "virtualDesktopHz"
+        static let virtualDesktopDevices = "virtualDesktopDevices"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -118,6 +119,28 @@ final class HostSettings {
         }
     }
     @ObservationIgnored var onPairingWindowSharingChange: (@MainActor () -> Void)?
+
+    /// The devices this Mac knows, as the Virtual Desktop's budget counts them (part B: VirtualDesktopBudget.Device, each
+    /// device that connected and said its screen, by its name, the newest kept), for Settings › Displays' Custom…: what may
+    /// be typed (the largest budget among them, VirtualDesktopBudget.ceiling) and which get a size as it is and which
+    /// scaled. Saved as JSON under `virtualDesktopDevices`; empty on a Mac that has seen none (the largest current iPad's
+    /// budget is then the ceiling). Forgotten with Sill's settings.
+    private(set) var knownDevices: [VirtualDesktopBudget.Device] = []
+
+    /// Keeps `devices` (the host's connected ones that said their screen) among the known: by name, the newest screen and
+    /// rate kept, at most 24 (the oldest dropped). Saved only when something changed.
+    func rememberDevices(_ devices: [VirtualDesktopBudget.Device]) {
+        guard !devices.isEmpty else { return }
+        var next = knownDevices
+        for d in devices {
+            next.removeAll { $0.name == d.name }
+            next.append(d)
+        }
+        if next.count > 24 { next.removeFirst(next.count - 24) }
+        guard next != knownDevices else { return }
+        knownDevices = next
+        if let data = try? JSONEncoder().encode(next) { defaults.set(data, forKey: Key.virtualDesktopDevices) }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -199,6 +222,9 @@ final class HostSettings {
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
         askedAccessibility = defaults.bool(forKey: Key.askedAccessibility)
         logShowsStats = defaults.bool(forKey: Key.logShowsStats)
+        // Saved by a later Sill for Mac in a form this one cannot read: none known, as on a Mac that has seen no device.
+        knownDevices = defaults.data(forKey: Key.virtualDesktopDevices)
+            .flatMap { try? JSONDecoder().decode([VirtualDesktopBudget.Device].self, from: $0) } ?? []
     }
 
     /// Writes only the keys that changed, so a launch-argument override of another key is not

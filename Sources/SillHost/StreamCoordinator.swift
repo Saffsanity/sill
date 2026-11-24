@@ -297,6 +297,18 @@ package final class StreamCoordinator {
     /// An iPhone's pixel-for-pixel sizes macOS did not keep this run (VirtualDesktopSize.id; at a make, or in place): each
     /// is asked as the size that works from then on (VirtualDesktopSize.device(space:screen:refused:), its line once).
     private var phoneRefused: Set<String> = []
+    /// A chosen size's picture held to the smallest budget among the devices connected (part B, VirtualDesktopBudget): the
+    /// Desktop's capture size before the hold and after it, while the Desktop streams the Virtual Desktop at a chosen size;
+    /// nil otherwise. Its line, once a hold.
+    private var budgetHold: (from: (width: Int, height: Int), fps: Int, to: (width: Int, height: Int))?
+    private var budgetHoldLine: String?
+    /// What this Mac's encoder carries of the chosen size (`lookAtVirtualDesktopEncoder`), by the size's id and rate it was
+    /// asked for ("2752x2064@2:120"), so each is asked once a run; its line once.
+    private var encoderCarried: [String: VirtualDesktopBudget.Encoder] = [:]
+    private var encoderCarriedLine: String?
+    private var encoderMeasuring = false
+    /// TEST ONLY (SILL_TEST_ENCODER, a test host): what its encoder is said to carry (`widest`, `fps`), for the gates; nil.
+    private let testEncoder: VirtualDesktopBudget.Encoder?
     /// TEST ONLY: a test host's said Virtual Desktop as Noah's probes measured a display (VirtualDesktopSize.TestDisplay),
     /// and SILL_TEST_VD_STEPS' knobs for it.
     private var testVirtualDisplay: VirtualDesktopSize.TestDisplay?
@@ -561,6 +573,9 @@ package final class StreamCoordinator {
         desktopLife = VirtualDesktopLife(grace: vdHook.grace ?? VirtualDesktopLife.grace)
         let vdSteps = VirtualDesktopSize.testSteps(environment: env, on: vdHook.on)
         testVirtualDesktopKnobs = vdSteps.knobs
+        // TEST ONLY: what a test host's encoder is said to carry (part B), never its hardware's.
+        let encoderHook = VirtualDesktopBudget.testEncoder(environment: env, testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks))
+        testEncoder = encoderHook.encoder
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                        environment: env)
@@ -569,7 +584,7 @@ package final class StreamCoordinator {
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
                          noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, testHeadless.line,
-                         guardHook.line].compactMap { $0 } + vdHook.lines + [vdSteps.line].compactMap { $0 }
+                         guardHook.line].compactMap { $0 } + vdHook.lines + [vdSteps.line, encoderHook.line].compactMap { $0 }
         status = HostStatus()
         privacy = PrivacyLock(on: config.lockAfterSession, sleeps: config.lockSleepsDisplay, onlyAway: config.lockOnlyAfterAway,
                               real: PrivacyPolicy.locksForReal(synthetic: synthetic, bundled: !testHooks),
@@ -772,6 +787,8 @@ package final class StreamCoordinator {
                 // asks for the Desktop on it (adoptVirtualDesktopDevice), or it is made again (plan §5).
                 if self.virtualDesktopNow?.device == id { self.virtualDesktopNow?.device = nil }
                 if self.showVirtualDesktopTo == id { self.showVirtualDesktopTo = nil }
+                // A chosen size: the picture the devices left allow, and a measure of the encoder that waited for none.
+                self.lookAtVirtualDesktopBudget()
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
@@ -831,6 +848,8 @@ package final class StreamCoordinator {
                 }
                 // The Virtual Desktop: shown no more once the last device left (its grace starts), or by a device that came.
                 self.lookAtVirtualDesktop()
+                // Its chosen size: a measure of this Mac's encoder that waited for no device to be connected (part B).
+                if count == 0 { self.lookAtVirtualDesktopEncoder() }
             }
         }
         cursorShapes.onChange = { [weak self] blob in
@@ -1053,6 +1072,8 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
+        // The Virtual Desktop's chosen size: what this Mac's encoder carries of it (part B), once the launch probe is done.
+        lookAtVirtualDesktopEncoder()
         // The Apps list: this Mac's own disk at once; its other volumes too once a device connects
         // (#370: macOS may ask whether Sill may read one, and nothing is asked at launch), never on a
         // test host; under the AppKit loop again as they come and go while a device is connected.
@@ -1258,6 +1279,11 @@ package final class StreamCoordinator {
         if old.headlessDisplay != next.headlessDisplay { headlessSwitched(on: next.headlessDisplay) }
         // The Virtual Desktop's switch (Settings › Displays, the menu, a paired device): its stop and its display, at once.
         if old.virtualDesktop != next.virtualDesktop { virtualDesktopSwitched(on: next.virtualDesktop) }
+        // Its chosen size or rate, or the Resolution its capture runs at: what this Mac's encoder carries of it (part B).
+        if old.virtualDesktop != next.virtualDesktop || old.virtualDesktopSize != next.virtualDesktopSize
+            || old.virtualDesktopHz != next.virtualDesktopHz || old.captureScale != next.captureScale {
+            lookAtVirtualDesktopEncoder()
+        }
     }
 
     /// The person turned "Make a display when this Mac has no screen" off or on (HostConfig.headlessDisplay; Sill.app's
@@ -2706,6 +2732,12 @@ package final class StreamCoordinator {
                     fps = rate
                     judgeLinks(LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
                 }
+                // The said Virtual Desktop at a chosen size: held to the devices' budgets, as a Mac's (part B).
+                if stop.display.id == Self.testVirtualDesktopID {
+                    (width, height) = virtualDesktopBudgetHold(width: width, height: height, fps: fps)
+                } else {
+                    budgetHold = nil
+                }
             } else if synthetic {
                 // TEST ONLY: with SILL_TEST_HEADLESS, Sill's display is judged on the file's list as on a Mac's, and
                 // only said to be made; the test pattern streams either way.
@@ -2736,6 +2768,12 @@ package final class StreamCoordinator {
                 // The stop's own refresh rate, now that its display is known (a look during the awaits can
                 // have moved the Desktop to a stop of another rate), or Sill's own display's: judged at the rate it runs.
                 holdDesktopRate(onDisplay: plan.displayID)
+                // The Virtual Desktop at a chosen size: its picture held to the devices' budgets (part B).
+                if desktopOnSills(plan.displayID), desktopLife.role == .virtualDesktop {
+                    (width, height) = virtualDesktopBudgetHold(width: width, height: height, fps: fps)
+                } else {
+                    budgetHold = nil
+                }
             }
         }
 
@@ -2974,6 +3012,12 @@ package final class StreamCoordinator {
                 print("This Mac's hardware video encoder doesn’t take \(width)×\(height): streaming \(describe) at \(fit.width)×\(fit.height), scaled down.")
                 (width, height) = fit
             }
+        } else if let widest = testEncoder?.widest, let held = EncoderLimit.held(width: width, height: height, side: widest) {
+            // TEST ONLY (SILL_TEST_ENCODER, a test host on the software encoder): the hold a Mac whose hardware takes no
+            // picture past `widest` makes, said and made, so the gates see it (part B: the Virtual Desktop at a size of its own).
+            print("This Mac's hardware video encoder doesn’t take \(width)×\(height): streaming \(describe) at \(held.width)×\(held.height), scaled down."
+                  + " (TEST ONLY: \(VirtualDesktopBudget.testEncoderVariable))")
+            (width, height) = held
         }
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
@@ -3927,7 +3971,11 @@ package final class StreamCoordinator {
         let note = virtualDesktopNote()
         catalog.virtualDesktopStop = config.virtualDesktop && note == nil
         let shown = virtualDesktopShown && displays.exists(.desktop) && desktopLife.role == .virtualDesktop
-        status.update { $0.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: note == nil, note: note, shown: shown) }
+        status.update {
+            $0.virtualDesktop.available = note == nil
+            $0.virtualDesktop.note = note
+            $0.virtualDesktop.shown = shown
+        }
     }
 
     /// A device streams the Desktop on the Virtual Desktop's stop now: it chose that stop, it is listed, the Desktop streams
@@ -4153,6 +4201,123 @@ package final class StreamCoordinator {
     /// floor (VirtualDesktopSize.device(space:)), which macOS has always kept at 2x.
     private func worksSize(_ v: Viewport) -> VirtualDesktopSize.Size? {
         VirtualDesktopSize.device(space: Self.space(v))
+    }
+
+    // MARK: The Virtual Desktop at a chosen size: each device's budget, and what this Mac's encoder carries (part B)
+
+    /// The devices connected that say their screen (Viewport.screen), as the budget counts them (VirtualDesktopBudget): their
+    /// names, screens and the rates their viewports ask. Sill for Mac keeps them, so its Settings knows them.
+    private var budgetDevices: [VirtualDesktopBudget.Device] {
+        viewports.compactMap { id, v -> VirtualDesktopBudget.Device? in
+            guard let s = Self.screen(v) else { return nil }
+            return VirtualDesktopBudget.Device(name: deviceName(id: id), pixelWidth: s.pixelWidth, pixelHeight: s.pixelHeight,
+                                               phone: s.phone, fps: v.fps ?? 60)
+        }.sorted { ($0.name, $0.pixelWidth) < ($1.name, $1.pixelWidth) }
+    }
+
+    /// Whether the Virtual Desktop's size is the person's choice (a size of the list or one typed), not one that follows a
+    /// device or the main display's.
+    private var virtualDesktopChosenSize: Bool {
+        if case .fixed? = VirtualDesktopSize.choice(config.virtualDesktopSize) { return true }
+        return false
+    }
+
+    /// The Desktop's capture of the Virtual Desktop at a chosen size, `width` × `height` pixels at `fps`, held to the
+    /// smallest budget among the devices connected that say their screen (part B: the display keeps its size; Sill streams
+    /// one picture to every device, so the smallest budget is every device's picture): scaled down evenly to it, its shape
+    /// kept (VirtualDesktopBudget.fitted), one line when it is. As it was for any other source, size or device.
+    private func virtualDesktopBudgetHold(width: Int, height: Int, fps: Int) -> (width: Int, height: Int) {
+        guard virtualDesktopChosenSize, let tightest = budgetDevices.min(by: { VirtualDesktopBudget.budget($0) < VirtualDesktopBudget.budget($1) }),
+              let held = VirtualDesktopBudget.fitted(width: width, height: height, fps: fps, budget: VirtualDesktopBudget.budget(tightest)) else {
+            budgetHold = nil
+            budgetHoldLine = nil
+            return (width, height)
+        }
+        budgetHold = (from: (width: width, height: height), fps: fps, to: held)
+        let line = "Virtual Desktop: \(width)×\(height) at \(fps) Hz is more than \(tightest.name) takes "
+            + "(\(VirtualDesktopBudget.budget(tightest)) pixels a second): streaming it at \(held.width)×\(held.height)."
+        if line != budgetHoldLine { print(line) }
+        budgetHoldLine = line
+        return held
+    }
+
+    /// A device came, left or sent a viewport while the Desktop streams the Virtual Desktop at a chosen size: the picture
+    /// the smallest budget now allows differs from the one streaming (a smaller device came, the last one left), so the
+    /// Desktop starts again at it (`select`: the same capture, held anew).
+    private func lookAtVirtualDesktopBudget() {
+        status.update { $0.virtualDesktop.devices = self.budgetDevices }
+        guard virtualDesktopChosenSize, active == .desktop, !switching, !placeholderStreams, !shuttingDown,
+              desktopLife.role == .virtualDesktop || (testVirtualDesktop && displays.isSaid(.desktop)),
+              desktopOnSills(desktopStreamDisplay) else { return }
+        let from = budgetHold?.from ?? (width: encoderAsked.width, height: encoderAsked.height)
+        let fps = budgetHold?.fps ?? self.fps
+        let tightest = budgetDevices.map(VirtualDesktopBudget.budget).min()
+        let want = tightest.flatMap { VirtualDesktopBudget.fitted(width: from.width, height: from.height, fps: fps, budget: $0) } ?? from
+        guard want.width != encoderAsked.width || want.height != encoderAsked.height else { return }
+        Task { @MainActor in
+            guard self.active == .desktop, !self.switching else { return }
+            await self.select(.desktop)
+        }
+    }
+
+    /// What this Mac's encoder carries of the Virtual Desktop's chosen size and rate (part B; Noah's agreed point 2: "Sill
+    /// says what this Mac can carry"), for Sill for Mac's Settings and one line: whether its hardware takes a picture that
+    /// wide (#295's check, HEVCEncoder.hardwareTakes: a session asked for and let go, a few milliseconds) and, while no
+    /// device is connected, the frames a second it encodes that size at (EncoderProbe.throughput: about 0.1 to 0.3 s), each
+    /// once a size and rate a run, off the main actor. On the software encoder, that. Never on a test host's hardware: a
+    /// test host's are SILL_TEST_ENCODER's, said. Asked at start, at each change of the size or rate, and when the last
+    /// device leaves (a measure that waited for it).
+    private func lookAtVirtualDesktopEncoder() {
+        guard config.virtualDesktop, case .fixed(let size)? = VirtualDesktopSize.choice(config.virtualDesktopSize) else {
+            status.update { $0.virtualDesktop.encoder = nil; $0.virtualDesktop.encoderFor = nil }
+            return
+        }
+        let hz = config.virtualDesktopHz
+        let key = VirtualDesktopSize.id(size) + ":\(hz)"
+        // The Desktop's capture of it: its points at the Resolution knob, held to its own scale (CaptureScale).
+        let knob = CaptureScale.effective(knob: config.captureScale, displayScale: CGFloat(size.scale))
+        let px = (width: evenPixels(CGFloat(size.widthPt) * knob), height: evenPixels(CGFloat(size.heightPt) * knob))
+        func publish(_ e: VirtualDesktopBudget.Encoder) {
+            encoderCarried[key] = e
+            status.update { $0.virtualDesktop.encoder = e; $0.virtualDesktop.encoderFor = key }
+            let note = VirtualDesktopBudget.encoderNote(width: px.width, height: px.height, hz: hz, encoder: e)
+            let line = "Virtual Desktop: \(VirtualDesktopSize.words(config.virtualDesktopSize)) at \(VirtualDesktopSize.rateWords(hz)): "
+                + (note ?? "this Mac's encoder carries it" + (e.fps == nil && e.widest == nil ? " as far as Sill knows (not measured yet)." : "."))
+            if line != encoderCarriedLine { print(line) }
+            encoderCarriedLine = line
+        }
+        if let known = encoderCarried[key], known.fps != nil || synthetic { publish(known); return }
+        if synthetic || softwareOnly {
+            // TEST ONLY: said, never measured.
+            publish(testEncoder ?? VirtualDesktopBudget.Encoder(software: useSoftwareEncoder && !synthetic))
+            return
+        }
+        if useSoftwareEncoder { publish(VirtualDesktopBudget.Encoder(software: true)); return }
+        guard !encoderMeasuring else { return }
+        let idle = catalog.clientCount == 0 && EncoderProbe.stuckProbes == 0
+        encoderMeasuring = true
+        Task { @MainActor in
+            defer { self.encoderMeasuring = false }
+            let result = await withCheckedContinuation { (c: CheckedContinuation<VirtualDesktopBudget.Encoder, Never>) in
+                // A GCD thread, as the re-check's own test: the probe waits on a semaphore.
+                DispatchQueue.global(qos: .utility).async {
+                    var e = VirtualDesktopBudget.Encoder()
+                    var size = px
+                    if let held = EncoderLimit.held(width: px.width, height: px.height),
+                       !HEVCEncoder.hardwareTakes(width: px.width, height: px.height) {
+                        e.widest = EncoderLimit.side
+                        size = held
+                    }
+                    if idle {
+                        let t = EncoderProbe.throughput(width: size.width, height: size.height)
+                        if t.ok { e.fps = t.fps }
+                    }
+                    c.resume(returning: e)
+                }
+            }
+            guard !self.shuttingDown else { return }
+            publish(result)
+        }
     }
 
     /// The space a device's picture has now (VirtualDesktopSize's rule A, Noah 2026-11-24): its viewport's panel, the
@@ -4385,6 +4550,7 @@ package final class StreamCoordinator {
     /// is on, each device's own state says the size the Virtual Desktop would have for it (kind 16).
     private func virtualDesktopViewport(_ v: Viewport, before: Viewport?, from id: ObjectIdentifier) {
         if target.virtualDesktop { publishSettings() }
+        if before?.screen != v.screen || before?.fps != v.fps { lookAtVirtualDesktopBudget() }   // a chosen size: each device's budget
         adoptVirtualDesktopDevice()                     // the one it was for left: this device's space may be the one now
         // Only This device follows a device (a size the person chose, or the main display's, stays as chosen).
         guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,

@@ -276,20 +276,50 @@ package enum VirtualDesktopSize {
     /// Every id the person may choose, in the pickers' order.
     package static var choiceIDs: [String] { [deviceChoice, mainChoice] + offered.map(id) }
 
-    /// The choice an id names; nil for anything not offered (HostConfig.validated takes This device then).
+    /// The choice an id names: This device, the main display, one of `offered`, or a size the person typed (`custom`, part
+    /// B of 2026-11-25); nil for anything else (HostConfig.validated takes This device then, as a Sill for Mac before custom
+    /// sizes does with one: its `choice` knew only the offered ids).
     package static func choice(_ id: String) -> Choice? {
         if id == deviceChoice { return .device }
         if id == mainChoice { return .main }
-        return offered.first { Self.id($0) == id }.map { .fixed($0) }
+        if let o = offered.first(where: { Self.id($0) == id }) { return .fixed(o) }
+        return custom(id).map { .fixed($0) }
     }
 
-    /// The refresh rates offered: 0, the device's (the default), then 30, 60 and 120 Hz.
+    /// A size typed in pixels, as its id ("2752x2064@2": points and scale, the offered sizes' form) when it can be a
+    /// display: each side `customSides` pixels, and at 2x (Retina) one side of `customRetinaLong` pixels or more; the id
+    /// written as `id` writes it (no sign, no leading zero); nil otherwise. Whether a device takes it is the budget's
+    /// question (VirtualDesktopBudget), never the saved value's: a size over a device's budget is streamed to it scaled.
+    package static func custom(_ id: String) -> Size? {
+        let at = id.split(separator: "@", omittingEmptySubsequences: false)
+        guard at.count == 2, let scale = Int(at[1]), scale == 1 || scale == 2, String(scale) == at[1] else { return nil }
+        let wh = at[0].split(separator: "x", omittingEmptySubsequences: false)
+        guard wh.count == 2, let w = Int(wh[0]), let h = Int(wh[1]), String(w) == wh[0], String(h) == wh[1] else { return nil }
+        guard customSides.contains(w * scale), customSides.contains(h * scale) else { return nil }
+        if scale == 2, max(w, h) * 2 < customRetinaLong { return nil }
+        return Size(widthPt: w, heightPt: h, scale: scale)
+    }
+
+    /// A typed size's pixels a side: 640 (a 1x desktop of 640 points, a Retina one of 320; VirtualDisplay takes 320 × 240
+    /// points at least) to 8192 (VirtualDisplay's ceiling: a 2x desktop at most 4096 points).
+    package static let customSides: ClosedRange<Int> = 640...8192
+    /// A Retina desktop's longer side at least, in pixels: macOS ran no display of Sill's at 2x with both sides under 800
+    /// points (the stage's 754 × 784 came up at 800 × 832 at 1x; VirtualDisplaySize).
+    package static let customRetinaLong = 1600
+
+    /// The refresh rates the picker offers: 0, the device's (the default), then 30, 60 and 120 Hz; Custom… takes any of
+    /// `customRates`.
     package static let rateChoices = [0, 30, 60, 120]
+    /// A rate the person may type: a whole number of 24 (the least Sill streams at, `rate`) to 120 Hz (the most any iPhone
+    /// or iPad shows).
+    package static let customRates: ClosedRange<Int> = 24...120
+    /// Whether `hz` is a rate the person may have chosen: 0 (the device's) or one of `customRates`.
+    package static func rateAllowed(_ hz: Int) -> Bool { hz == 0 || customRates.contains(hz) }
 
     /// The display's rate for the person's choice `choice` (0: the device's, `rate(viewportFPS:limit:)`), held to 24 and
-    /// to the Mac's Frame Rate limit (`limit`); an unknown choice is the device's.
+    /// to the Mac's Frame Rate limit (`limit`); a choice not allowed is the device's.
     static func rate(choice: Int, viewportFPS: Int?, limit: Int) -> Int {
-        guard choice != 0, rateChoices.contains(choice) else { return rate(viewportFPS: viewportFPS, limit: limit) }
+        guard choice != 0, customRates.contains(choice) else { return rate(viewportFPS: viewportFPS, limit: limit) }
         return min(max(24, limit), choice)
     }
 
@@ -308,28 +338,31 @@ package enum VirtualDesktopSize {
         return Size(widthPt: max(1, Int(w)), heightPt: max(1, Int(h)), scale: 1)
     }
 
-    /// The CLI's `--virtual-desktop=VALUE`: a size choice (`device`, `main` or one of `offered` as "WxH@S"), and a rate
-    /// after a colon (`:30`, `:60`, `:120`; none: the device's). Nil for anything else.
+    /// The CLI's `--virtual-desktop=VALUE`: a size choice (`device`, `main`, one of `offered` or a size typed, as "WxH@S"),
+    /// and a rate after a colon (`:24` to `:120`; none: the device's). Nil for anything else; whether a typed size is
+    /// within the budget is the CLI's question (VirtualDesktopBudget.flagRefusal).
     package static func flag(_ value: String) -> (size: String, hz: Int)? {
         let parts = value.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         guard (1...2).contains(parts.count), choice(parts[0]) != nil else { return nil }
         guard parts.count == 2 else { return (parts[0], 0) }
-        guard let hz = Int(parts[1]), hz != 0, rateChoices.contains(hz) else { return nil }
+        guard let hz = Int(parts[1]), String(hz) == parts[1], customRates.contains(hz) else { return nil }
         return (parts[0], hz)
     }
 
     /// The person's choice in words, for Sill for Mac's pickers and the log: "Match the device", "Same as main display",
-    /// "1920 × 1080 (Retina)", "3440 × 1440"; an id not offered reads as This device.
+    /// "1920 × 1080 (Retina)", "3440 × 1440", and a size typed in its pixels, "Custom: 5504 × 4128 pixels, Retina"; an id
+    /// that is none of them reads as This device.
     package static func words(_ id: String) -> String {
         switch choice(id) ?? .device {
         case .device: return "Match the device"
         case .main: return "Same as main display"
-        case .fixed(let s): return "\(s.widthPt) × \(s.heightPt)" + (s.scale == 2 ? " (Retina)" : "")
+        case .fixed(let s) where offered.contains(s): return "\(s.widthPt) × \(s.heightPt)" + (s.scale == 2 ? " (Retina)" : "")
+        case .fixed(let s): return "Custom: \(s.widthPt * s.scale) × \(s.heightPt * s.scale) pixels" + (s.scale == 2 ? ", Retina" : "")
         }
     }
 
-    /// A rate choice in words: "Match the device", "30 Hz", "60 Hz", "120 Hz".
-    package static func rateWords(_ hz: Int) -> String { hz == 0 || !rateChoices.contains(hz) ? "Match the device" : "\(hz) Hz" }
+    /// A rate choice in words: "Match the device", "30 Hz", "60 Hz", "120 Hz", "90 Hz"; one not allowed reads as the device's.
+    package static func rateWords(_ hz: Int) -> String { hz == 0 || !customRates.contains(hz) ? "Match the device" : "\(hz) Hz" }
 
     // MARK: Following the device (phase 2b, docs/virtual-desktop-plan.md §5 as revised 2026-11-18; probes P2, P2b, P2c)
 

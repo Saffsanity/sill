@@ -143,6 +143,7 @@ MUTANTS = [
      "        return (width * side / longer & ~1, height * side / longer & ~1)\n"),
     ("E6 the sides swapped", "        return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))\n",
      "        return (max(height * side / longer & ~1, 2), max(width * side / longer & ~1, 2))\n"),
+    ("E7 the side given ignored", "        guard longer > side else { return nil }\n", "        guard longer > EncoderLimit.side else { return nil }\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

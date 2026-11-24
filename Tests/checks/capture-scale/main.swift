@@ -528,6 +528,11 @@ check(held(2880, 5120) == "2304×4096", "the 5K display upright: 2304×4096 (\(h
 check(held(6016, 3384) == "4096×2304", "a 6K display: 4096×2304 (\(held(6016, 3384)))")
 check(held(4096, 2304) == "nil" && held(2560, 1440) == "nil" && held(4096, 4096) == "nil", "within 4096 a side: nothing held")
 check(held(4097, 3001) == "4096×3000", "a side just over: held, the other side rounded down to even (\(held(4097, 3001)))")
+// Part B (2026-11-25): another side given (a test host's SILL_TEST_ENCODER), and the Virtual Desktop at a size of its own.
+func heldTo(_ w: Int, _ h: Int, _ side: Int) -> String { EncoderLimit.held(width: w, height: h, side: side).map { "\($0.width)×\($0.height)" } ?? "nil" }
+check(heldTo(5120, 2880, 3840) == "3840×2160" && heldTo(3840, 2160, 3840) == "nil" && heldTo(2880, 5120, 3840) == "2160×3840",
+      "held to another side: 5K at 3840 is 3840×2160, upright too; at it, nothing")
+check(held(5504, 4128) == "4096×3072" && held(7680, 2160) == "4096×1152", "the Virtual Desktop at Noah's 5504 × 4128 and a 32:9 7680 × 2160: held")
 var heldWrong = 0
 for _ in 0..<20_000 {
     let w = 2 * Int(1 + next() % 8192), h = 2 * Int(1 + next() % 8192)

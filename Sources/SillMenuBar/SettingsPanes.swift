@@ -563,7 +563,8 @@ private struct VirtualDisplayPane: View {
             VirtualDesktopSection(on: $settings.config.virtualDesktop, size: $settings.config.virtualDesktopSize,
                                   hz: $settings.config.virtualDesktopHz, snapshot: snapshot,
                                   accessibility: model.permissions.accessibility,
-                                  tryAgain: model.coordinator.map { c in { c.tryDisplaysAgain() } })
+                                  tryAgain: model.coordinator.map { c in { c.tryDisplaysAgain() } },
+                                  known: settings.knownDevices)
             // A Mac with no working screen (PR #200, #61, #298): Sill's own display, on by default (Noah on #61), with a
             // switch of its own (Noah, 2026-11-18: "Anything that it would make sense to add a toggle to you should add a
             // toggle"), apart from "Stream from a virtual display", which is the windows'. A row while the display exists.
@@ -605,7 +606,11 @@ private struct VirtualDisplayPane: View {
 }
 
 /// Settings › Displays' Virtual Desktop section: the switch, the size and rate the person may choose (This device by
-/// default), and what it is doing now (VirtualDesktopWords: every sentence that names it).
+/// default), and what it is doing now (VirtualDesktopWords: every sentence that names it). Resolution's Custom… (part B of
+/// 2026-11-25; Noah, 2026-11-24: custom sizes and rates "up to 2x native resolution of device panel and 120Hz"): a width
+/// and a height in pixels, Retina or not, a rate of 24 to 120 Hz (none: the device's), refused with one sentence over the
+/// largest budget among the devices this Mac knows (VirtualDesktopBudget), each known device's line beside it (as it is,
+/// or scaled for it), and what this Mac's encoder carries of the size in use (`encoderNote`).
 struct VirtualDesktopSection: View {
     @Binding var on: Bool
     @Binding var size: String
@@ -614,18 +619,50 @@ struct VirtualDesktopSection: View {
     let accessibility: Bool
     /// The coordinator's Try Again for the guard for #380; nil without one (the previews).
     let tryAgain: (() -> Void)?
+    /// The devices this Mac knows (HostSettings.knownDevices), for Custom…'s ceiling and lines.
+    var known: [VirtualDesktopBudget.Device] = []
+
+    /// Custom…'s fields: what is typed, before Use This Size takes it.
+    @State private var customOpen: Bool
+    @State private var widthText: String
+    @State private var heightText: String
+    @State private var retina: Bool
+    @State private var rateText: String
+
+    /// Custom…'s tag in the Resolution picker.
+    static let customTag = "custom"
+
+    /// `draft`: Custom…'s fields as given (the previews: width, height, Retina, rate; "" for one not typed); nil: from the
+    /// size in use when it is one typed, else empty.
+    init(on: Binding<Bool>, size: Binding<String>, hz: Binding<Int>, snapshot: HostStatusSnapshot, accessibility: Bool,
+         tryAgain: (() -> Void)?, known: [VirtualDesktopBudget.Device] = [],
+         draft: (width: String, height: String, retina: Bool, hz: String)? = nil) {
+        _on = on; _size = size; _hz = hz
+        self.snapshot = snapshot; self.accessibility = accessibility; self.tryAgain = tryAgain; self.known = known
+        let typed = Self.isCustom(size.wrappedValue) ? VirtualDesktopBudget.fields(size.wrappedValue) : nil
+        _customOpen = State(initialValue: draft != nil || typed != nil)
+        _widthText = State(initialValue: draft?.width ?? typed.map { String($0.width) } ?? "")
+        _heightText = State(initialValue: draft?.height ?? typed.map { String($0.height) } ?? "")
+        _retina = State(initialValue: draft?.retina ?? typed?.retina ?? true)
+        _rateText = State(initialValue: draft?.hz ?? (typed != nil && hz.wrappedValue != 0 ? String(hz.wrappedValue) : ""))
+    }
 
     var body: some View {
         Section {
             Toggle(VirtualDesktopWords.macSwitch, isOn: $on)
-            Picker("Resolution", selection: $size) {
+            Picker("Resolution", selection: resolution) {
                 ForEach(VirtualDesktopSize.choiceIDs, id: \.self) { id in
                     Text(Self.sizeTitle(id)).tag(id)
                 }
+                Text("Custom…").tag(Self.customTag)
             }
-            Picker("Refresh Rate", selection: $hz) {
-                ForEach(VirtualDesktopSize.rateChoices, id: \.self) { hz in
-                    Text(VirtualDesktopSize.rateWords(hz)).tag(hz)
+            if customOpen {
+                customEntry
+            } else {
+                Picker("Refresh Rate", selection: $hz) {
+                    ForEach(Self.rates(including: hz), id: \.self) { hz in
+                        Text(VirtualDesktopSize.rateWords(hz)).tag(hz)
+                    }
                 }
             }
             LabeledContent("Status") {
@@ -644,9 +681,109 @@ struct VirtualDesktopSection: View {
             VStack(alignment: .leading, spacing: 6) {
                 Footnote(VirtualDesktopWords.macFootnote)
                 Footnote(VirtualDesktopWords.pickersFootnote)
-                if Self.wide(size) { Footnote(VirtualDesktopWords.wideFootnote) }
+                if !customOpen, Self.wide(size) { Footnote(VirtualDesktopWords.wideFootnote) }
             }
         }
+    }
+
+    /// Resolution's selection: the size in use, or Custom… while its fields show; Custom… fills them from the size in use.
+    private var resolution: Binding<String> {
+        Binding(get: { customOpen ? Self.customTag : size },
+                set: { pick in
+                    if pick == Self.customTag {
+                        if let f = VirtualDesktopBudget.fields(size) {
+                            widthText = String(f.width); heightText = String(f.height); retina = f.retina
+                        }
+                        rateText = hz == 0 ? "" : String(hz)
+                        customOpen = true
+                    } else {
+                        customOpen = false
+                        size = pick
+                    }
+                })
+    }
+
+    /// Custom…'s fields, its one sentence or its lines, and Use This Size.
+    @ViewBuilder private var customEntry: some View {
+        LabeledContent("Size") {
+            HStack(spacing: 6) {
+                TextField("Width", text: $widthText).frame(width: 64).multilineTextAlignment(.trailing)
+                Text("×")
+                TextField("Height", text: $heightText).frame(width: 64).multilineTextAlignment(.trailing)
+                Text("pixels")
+            }
+        }
+        Toggle("Retina (half as many points each way)", isOn: $retina)
+        LabeledContent("Refresh Rate") {
+            HStack(spacing: 6) {
+                TextField("Device’s", text: $rateText).frame(width: 64).multilineTextAlignment(.trailing)
+                Text("Hz")
+            }
+        }
+        let typed = entry
+        LabeledContent {
+            Button("Use This Size") {
+                if case .success(let e) = typed {
+                    size = VirtualDesktopSize.id(e.size)
+                    hz = e.hz
+                }
+            }
+            .disabled(!typed.ok || inUse)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(lines(typed).enumerated()), id: \.offset) { _, line in
+                    Text(line).font(.callout).foregroundStyle(typed.ok ? Color.secondary : Color.red)
+                }
+            }
+        }
+    }
+
+    /// What is typed, judged: the size and rate, or why not (VirtualDesktopBudget.entry), the ceiling the largest budget
+    /// among the devices this Mac knows. A rate left empty is the device's.
+    private var entry: Result<(size: VirtualDesktopSize.Size, hz: Int), VirtualDesktopBudget.Refusal> {
+        let rate = rateText.trimmingCharacters(in: .whitespaces)
+        return VirtualDesktopBudget.entry(width: Int(widthText.trimmingCharacters(in: .whitespaces)),
+                                          height: Int(heightText.trimmingCharacters(in: .whitespaces)), retina: retina,
+                                          hz: rate.isEmpty ? 0 : Int(rate), ceiling: VirtualDesktopBudget.ceiling(known: known))
+    }
+
+    /// The entry is the size and rate in use already.
+    private var inUse: Bool {
+        if case .success(let e) = entry { return VirtualDesktopSize.id(e.size) == size && e.hz == hz }
+        return false
+    }
+
+    /// Beside the entry: its one sentence when it is refused (nothing typed yet: what may be typed); else each device this
+    /// Mac knows as it gets it, and what this Mac's encoder carries of it once it is in use and Sill has looked.
+    private func lines(_ typed: Result<(size: VirtualDesktopSize.Size, hz: Int), VirtualDesktopBudget.Refusal>) -> [String] {
+        let ceiling = VirtualDesktopBudget.ceiling(known: known)
+        switch typed {
+        case .failure(.missing) where widthText.isEmpty && heightText.isEmpty:
+            return [VirtualDesktopBudget.upTo(ceiling, known: !known.isEmpty)]
+        case .failure(let r):
+            return [VirtualDesktopBudget.sentence(r)]
+        case .success(let e):
+            let w = e.size.widthPt * e.size.scale, h = e.size.heightPt * e.size.scale
+            var out = known.isEmpty ? [VirtualDesktopBudget.upTo(ceiling, known: false)]
+                                    : known.map { VirtualDesktopBudget.deviceLine(width: w, height: h, hz: e.hz, device: $0) }
+            let key = VirtualDesktopSize.id(e.size) + ":\(e.hz)"
+            if snapshot.virtualDesktop.encoderFor == key, let enc = snapshot.virtualDesktop.encoder,
+               let note = VirtualDesktopBudget.encoderNote(width: w, height: h, hz: e.hz, encoder: enc) {
+                out.append(note)
+            }
+            return out
+        }
+    }
+
+    /// A size typed (Custom…'s), not This device, the main display's or one of the list's.
+    static func isCustom(_ id: String) -> Bool {
+        !VirtualDesktopSize.choiceIDs.contains(id) && VirtualDesktopSize.custom(id) != nil
+    }
+
+    /// The Refresh Rate picker's rates: the list's, and a rate typed in Custom… while it is the one in use.
+    static func rates(including hz: Int) -> [Int] {
+        VirtualDesktopSize.rateChoices.contains(hz) || !VirtualDesktopSize.rateAllowed(hz) ? VirtualDesktopSize.rateChoices
+            : VirtualDesktopSize.rateChoices + [hz]
     }
 
     /// "Match the device", "Same as main display (1512 × 982)", "1920 × 1080 (Retina)".
@@ -676,6 +813,10 @@ struct VirtualDesktopSection: View {
         if !accessibility { return VirtualDesktopWords.withoutAccessibility }
         return VirtualDesktopWords.available
     }
+}
+
+private extension Result {
+    var ok: Bool { if case .success = self { return true } else { return false } }
 }
 
 // MARK: Permissions

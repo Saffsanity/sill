@@ -547,9 +547,16 @@ turns it on is shown it at once. It is made then, at the device's size by defaul
 (the space its picture has, the viewport's panel, as a window on the virtual
 display is fitted to it: the pane under the bar or the upper half's with the
 controls showing, the whole room with Full Screen; at Retina, grown to 800
-points and held to 4096, as for a Mac with no screen) and rate, or the main
-display's mode or a size chosen in Settings › Displays (taken the next time it
-is made); kept while a device shows it and 30 s after, while locked until the
+points and held to 4096, as for a Mac with no screen; on an iPhone, which says
+its screen in its viewport, pixel for pixel: the space counted in the iPhone's
+own pixels, made as a 2x desktop of that many, at least 800 × 400 points, the
+size that works if macOS does not keep it) and rate, or the main display's mode,
+a size chosen in Settings › Displays, or one typed there (Custom…: pixels,
+Retina, 24 to 120 Hz, up to the largest budget of the devices this Mac knows,
+twice a device's screen each way at 120 Hz; a device with a smaller budget gets
+the picture scaled, and a picture wider than this Mac's encoder takes is scaled
+to fit it) (taken the next time it is made); kept while a device shows it and
+30 s after, while locked until the
 unlock; removed at once off console or when turned off; at most one make or
 removal every 3 s and ten a minute; never the main display beside a real
 screen. The windows on it move to the main display as it goes and come back as
@@ -583,7 +590,9 @@ s since the last change).", "Settings from iPad mini: virtual desktop off → on
 On test hosts only: `SILL_TEST_VIRTUAL_DESKTOP=1` with `SILL_TEST_DISPLAYS` (its
 screens) says it makes it, as one more stop, and makes none;
 `SILL_TEST_VD_GRACE=<s>` shortens its 30 s; `SILL_TEST_VD_STEPS` makes its said
-display refuse a switch or never land; `Scripts/desktop-check/live.py OUT`
+display refuse a switch or never land, or a short side (`short-1x`);
+`SILL_TEST_ENCODER=widest=4096,fps=31` says what its encoder carries;
+`Scripts/desktop-check/live.py OUT`
 runs its scenarios; `Tests/checks/virtual-desktop` checks its rules. The real
 trials (it makes a display) are Noah's, in the step file of 2026-11-18
 (`docs/steps/2026-11-18-virtual-desktop-2b.md`).

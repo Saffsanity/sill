@@ -193,13 +193,15 @@ enum VirtualDisplaySize {
 /// The size a hardware encoder that refuses a stream's size is asked for instead (#278): on a 5K Intel
 /// iMac, VideoToolbox has no hardware HEVC session at 5120×2880 and quietly makes a software one
 /// ("HW Encoder is not available", VTEncoderXPCService at 1000 % CPU, the stream stalling; #62), while
-/// its benchmark put the hardware's limit at 4096 pixels. Pure (Tests/checks/capture-scale).
+/// its benchmark put the hardware's limit at 4096 pixels. The Virtual Desktop at a size the person chose
+/// (part B, 2026-11-25) is held the same way: the display keeps its size and the picture fits the encoder.
+/// Pure (Tests/checks/capture-scale).
 enum EncoderLimit {
     static let side = 4096
 
-    /// The size held to `side` pixels on its longer side, its shape kept, even sides of at least 2;
-    /// nil when both sides are within it.
-    static func held(width: Int, height: Int) -> (width: Int, height: Int)? {
+    /// The size held to `side` pixels on its longer side (4096 unless a test host says another,
+    /// SILL_TEST_ENCODER), its shape kept, even sides of at least 2; nil when both sides are within it.
+    static func held(width: Int, height: Int, side: Int = EncoderLimit.side) -> (width: Int, height: Int)? {
         let longer = max(width, height)
         guard longer > side else { return nil }
         return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))

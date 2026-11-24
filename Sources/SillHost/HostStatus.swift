@@ -185,9 +185,18 @@ package struct HostStatusSnapshot: Equatable {
         package var available = false
         package var note: String?
         package var shown = false
+        /// The devices connected that say their screen, as its budget counts them (part B: VirtualDesktopBudget): Sill.app
+        /// keeps each, so Settings › Displays knows which get a chosen size as it is and which scaled.
+        package var devices: [VirtualDesktopBudget.Device] = []
+        /// What this Mac's encoder carries of the chosen size and rate (`encoderFor`, "2752x2064@2:120"), for the note beside
+        /// it (VirtualDesktopBudget.encoderNote); nil before it is known, and for This device and the main display's.
+        package var encoder: VirtualDesktopBudget.Encoder?
+        package var encoderFor: String?
 
-        package init(available: Bool = false, note: String? = nil, shown: Bool = false) {
+        package init(available: Bool = false, note: String? = nil, shown: Bool = false, devices: [VirtualDesktopBudget.Device] = [],
+                     encoder: VirtualDesktopBudget.Encoder? = nil, encoderFor: String? = nil) {
             self.available = available; self.note = note; self.shown = shown
+            self.devices = devices; self.encoder = encoder; self.encoderFor = encoderFor
         }
     }
 
