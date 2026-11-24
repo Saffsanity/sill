@@ -878,3 +878,22 @@ every live run a synthetic test host on 127.0.0.1 with the software encoder, its
   CLI's paths); #408 read MERGEABLE and CLEAN. On 272567ab (run 45407341666) `protocol` failed once by chance ("generate:
   digits uniform (chi² 28.5 < 27.9, 9 df, p 0.001)": the pairing code's random digits, a one-in-a-thousand test of a file
   this branch does not touch); it passed on the next head.
+- The heavy lock's fourth hold (the release build of the head, the gates, H2, the previews) never began: from 23:00 to
+  01:23 the disk stood at 24.1 to 24.3 GB free (`df -g`: 24) with no heavy job running anywhere, under the 25 GB floor at
+  which a hold may start, and nothing of this run's was left to remove (both worktrees' `.build` folders were gone
+  already). So the live gates ran outside the lock, where nothing compiles (01:24–01:45, load 2 to 3), on hold 2's build
+  of ad38e4dd, whose host code differs from the head's only in 272567ab's words for a turn, which none of these scenarios
+  meets (each turn in them is an exact swap of the room's sides): `Scripts/desktop-check/live.py` 84 of 84 (the 82 above,
+  and the iPhone back on it within its grace: nothing while it showed the main display and Full Screen went on; back on
+  it, "iPhone shows it again; followed in place in 666 ms: 800×1614 pt", 1.7 s after the step, its 1 s settle and the
+  two steps); `Scripts/headless-check/live.py OUT all` 66 of 66; `Scripts/privacy-check/live.py OUT all` 48 of 48. This
+  Mac's own screen was locked then (`IOConsoleLocked`), which #396's sound gate, #399's smoke and H2's runs read (they do
+  not set SILL_TEST_LOCK_IGNORE_MAC): their first run gave every host the locked placeholder (3 of 17, 5 of 6, and #395's
+  locked "Displays:" line in all four of H2's runs). Again with SILL_TEST_LOCK_IGNORE_MAC=1 for both CLIs: the sound gate
+  17 of 17, the smoke 6 of 6, and H2 against main d9b3e995's CLI (as privacy-darken's run 6 built it at 18:02 from
+  `git archive d9b3e995`, `swift build -c release --product SillHost`), run one right after the other: idle identical (8
+  distinct lines, 3 statistics), with a test client identical (15 and 11), with `--virtual-display` and a test client
+  identical (18 and 11); started locked, #395's one line, "Displays: N online, …" (11 and 10). Not run: `lock-check`,
+  whose keyframe decoder (`Scripts/lock-check/build.sh`) compiles (this run changes nothing of the lock's); Sill for Mac's
+  previews (no build of SillMenuBar; its sources are unchanged since run 4's 353 previews); the release build of the head
+  here (CI built it on fab40170 and 73f09137).
