@@ -489,10 +489,12 @@ display (951×669 sideways, 669×951 upright); while streaming the status bar
 hides in every pose, so the picture has the top upright and the full width
 sideways; every other screen keeps it. Half folded sideways, the
 book pose, the picture runs across the fold, but nothing you touch sits on
-it: the thumbnails end short of it, the bar's buttons begin past it, and
-the Settings panel, the tour's cards, the window lights, the link's line and
+it: the thumbnails end short of it, the bar's buttons begin past it,
+Settings has a column on each page (the Mac's under its name, this device's
+under Done), and the tour's cards, the window lights, the link's line and
 the connect screen stay on one side. Half folded upright, the laptop pose, the picture is above the fold and the bar, the keys
-and the trackpad below it, and the connect screen's list scrolls above the
+and the trackpad below it, Settings has the Mac's part above it and this
+device's below, and the connect screen's list scrolls above the
 fold; with the software keyboard up there, the key row alone sits between the
 fold and the keyboard (its Keyboard cap takes the keyboard down) and the bar
 comes back with the keyboard down (issue #215); under a keyboard too tall for
@@ -560,7 +562,8 @@ than today's picture and row 1's six buttons would be under 44 pt
 (`PhonePortraitLayout.largerPictureGains`). The Apps drawer opens above row 1,
 over the picture's room, so neither keyboard covers it, the Mac's or the one
 its search field brings. A change of the switch, or of what streams, shows when
-the Settings panel closes, so the panel never moves under the finger.
+Settings closes, so nothing under it changes while it is open (no new viewport
+goes to the Mac meanwhile).
 
 The first time a Mac's picture shows on a device, and nothing is touched, sent,
 used (by any means, VoiceOver's double tap included) or opened in the second
@@ -2233,8 +2236,20 @@ simulator:
 - `-SillLive 1`: a real client inside that frame. Otherwise the Mac is a mock,
   and `-SillActive none|desktop|<windowID>` picks what it streams.
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
-  settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
-  panel or the connect screen in a given state.
+  settings of the mock Mac) and `-SillConnectCase …`: the drawer, Settings or
+  the connect screen in a given state. Settings is a whole-screen pane
+  (docs/settings-pane-plan.md): the console's `settings: …` line says how it
+  sits on the screen ("two columns 423.5 pt wide, the Mac's at 16, this
+  device's at 511.5, their scroll views 0–455.5 and 495.5–951, the fold
+  455.5–495.5 between (951×669, 34 pt kept at the bottom)" in the book pose;
+  "one column 600 pt wide at 266.5, its scroll view 0–1133 (…)" on an iPad
+  mini on its side; the last the home indicator's room it was given), and
+  `-SillSettingsEnd 1` starts each of its parts at its end. Large type and
+  right to left need no flag of Sill's: the system's own launch arguments,
+  `-UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL`
+  and `-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES`, set them
+  for one run (`Scripts/harness-photos/settings-pane-duo.cases` and
+  `settings-pane-ipad.cases` photograph the pane with them).
 - `-SillConnectCase tiles`: the connect screen's tiles (six, in Home, Work and
   Other: the Mac mini twice, its Wired row taken for it by its name and its
   Remote row, with its one picture; two more saved Macs with a picture each;

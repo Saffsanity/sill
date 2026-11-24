@@ -215,10 +215,15 @@ struct ContentView: View {
 ///   -SillPathTest 'wifi=fe80::…%en0:PORT cable=fe80::…%en14:PORT 3:+cable'` moves the session to
 ///   the cable 2 s after the cable is listed, and the host logs "Client connected: …%en14" and
 ///   "Client left: …%en0". The console says what happened ("path: …").
-/// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
+/// * `-SillSettings 1` — start with Settings open, the whole-screen pane (a real Mac's state under
+///   `-SillLive 1`; docs/settings-pane-plan.md). The console's `settings: …` line says how it sits
+///   ("two columns 423.5 pt wide, the Mac's at 16, this device's at 511.5, their scroll views
+///   0–455.5 and 495.5–951, the fold 455.5–495.5 between (951×669, 34 pt kept at the bottom)", the
+///   book pose; "one column 600 pt wide at 266.5, its scroll view 0–1133 (…)", an iPad mini on its
+///   side; the last the home indicator's room it was given).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
-///   iPad, Take the Tour, the version). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   iPad, Take the Tour, the version); in the book pose's columns or the laptop pose's pages, each part at its own end. `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
@@ -237,6 +242,13 @@ struct ContentView: View {
 ///   symbol alone. Nothing captures in the harness. `-SillCameraSource pattern` (a live session only, never a
 ///   photo) sends CameraPattern's moving pattern instead of the camera, on VideoToolbox's software encoder in
 ///   the simulator.
+/// * `-SillSettingsScrollArea 1` — with `-SillSettings 1`: each of Settings' scroll views outlined in
+///   orange, so a still photo shows where a drag scrolls the rows (the whole screen in one column, out to
+///   its edges; each page around the fold); none where the rows fit without scrolling.
+/// * `-SillSettingsSystemEdge 1` — with `-SillSettings 1`: Settings' scroll views keep iOS's own scroll
+///   edge effect (iOS 26 and later), which the pane otherwise turns off on every edge
+///   (`SettingsPane.Layout.systemEdgeEffectHidden`), so a photo shows what it does: on the 13-inch iPad's
+///   sideways screen, drawn a quarter turn round (below), a blur over all but the last rows.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -588,7 +600,12 @@ struct ContentView: View {
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
-/// (`sips -r 270 shot.png`). Touches follow the rotation. One that fits neither way (the Duo's
+/// (`sips -r 270 shot.png`). Touches follow the rotation. Turned so that it fills the simulator (the
+/// 13-inch iPad's own 1376×1032 on it), a scroll view as wide as the fake screen lies along the
+/// simulator's top and bottom edges, and iOS 26's scroll edge effect blurred Settings' from its top down
+/// over nearly its whole height (2026-11-24, docs/steps/2026-11-18-settings-pane.md): the harness's
+/// alone, not the mini's 1133×744 turned, nor right to left (turned the other way). Settings turns the
+/// system's effect off on its scroll views (`-SillSettingsSystemEdge 1` keeps it). One that fits neither way (the Duo's
 /// 710×1000 on an iPhone) is drawn scaled down to fit, upright or turned, whichever is larger
 /// (`Fit`); only the drawing shrinks, the stream screen still lays out at the fake size, and the
 /// console says so ("harness: 710x1000 drawn at 0.62"). A fake screen that reaches into the
