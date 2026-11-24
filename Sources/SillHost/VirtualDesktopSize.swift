@@ -315,7 +315,8 @@ package enum VirtualDesktopSize {
         /// or came back (false), or neither (nil: the Duo's pane open flat, at its picture's shape, changed with it). A
         /// tap: the device has let it settle already (it sends a viewport 0.25 s after its panel's last change).
         case controls(hidden: Bool?)
-        /// Its room changed: it turned (`turned`: from upright to sideways or back), its window was resized or folded.
+        /// Its room changed: it turned (`turned`: from upright to sideways or back, its shorter side the same), its window
+        /// was resized or folded.
         case room(turned: Bool)
         /// A device that sends no room (a build before 0.7, which sends its panel alone): a tap or a turn, not known.
         case unknown
@@ -340,7 +341,12 @@ package enum VirtualDesktopSize {
     /// before (nil: none) and now; each side compared within a point (a device's sides can be fractions).
     static func cause(roomBefore: CGSize?, room: CGSize?, panelBefore: CGSize?, panel: CGSize) -> Cause {
         guard let room, let roomBefore else { return .unknown }
-        guard same(room, roomBefore) else { return .room(turned: (room.width > room.height) != (roomBefore.width > roomBefore.height)) }
+        guard same(room, roomBefore) else {
+            // A turn: wide became tall or tall wide, its shorter side the same (an iPhone's Dynamic Island moves from the
+            // top to the side, so its longer side changes); a fold or a resized window changes a side of its own.
+            let flipped = (room.width > room.height) != (roomBefore.width > roomBefore.height)
+            return .room(turned: flipped && abs(min(room.width, room.height) - min(roomBefore.width, roomBefore.height)) <= 1)
+        }
         let hidden = same(panel, room)
         guard let panelBefore, same(panelBefore, room) != hidden else { return .controls(hidden: nil) }
         return .controls(hidden: hidden)

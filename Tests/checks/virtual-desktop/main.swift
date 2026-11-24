@@ -358,7 +358,9 @@ check(VDS.cause(roomBefore: roomL, room: roomU, panelBefore: roomL, panel: roomU
 check(VDS.cause(roomBefore: cs(393, 793), room: cs(734, 393), panelBefore: cs(377, 235), panel: cs(718, 299)) == .room(turned: true),
       "an iPhone turned (its Dynamic Island's inset moves)")
 check(VDS.cause(roomBefore: cs(669, 951), room: cs(669, 496), panelBefore: cs(653, 439), panel: cs(653, 480)) == .room(turned: false),
-      "the Duo half folded: its room, not a turn")
+      "the Duo half folded: its room, not a turn (wider than tall now, its shorter side not the one it had)")
+check(VDS.cause(roomBefore: cs(1000, 700), room: cs(1000, 1200), panelBefore: cs(984, 600), panel: cs(984, 1100)) == .room(turned: false),
+      "a window resized taller than wide: not a turn")
 check(VDS.cause(roomBefore: nil, room: roomL, panelBefore: nil, panel: roomL) == .unknown
       && VDS.cause(roomBefore: roomL, room: nil, panelBefore: roomL, panel: cs(1117, 618)) == .unknown, "no room from it: not known")
 check(VDS.Cause.controls(hidden: true).settle == 0 && VDS.Cause.controls(hidden: nil).settle == 0 && VDS.Cause.device.settle == 0,
@@ -399,7 +401,7 @@ var newest = VDS.Follow(made: mini, at: 0)
 newest.saw(miniUp, cause: turnCause, at: 10)
 newest.saw(size(1000, 800), cause: turnCause, at: 10.5)
 check(newest.due(now: 11) == .wait(until: 11.5) && newest.due(now: 11.5) == .follow(size(1000, 800), turnCause), "the newest size wins, after its own settle")
-var closeBy = VDS.Follow(made: mini, at: 0)                  // Full Screen on, then a turn while it is followed
+var closeBy = VDS.Follow(made: size(1446, 800), at: 0)     // made with the controls showing; Full Screen on, then a turn while it is followed
 closeBy.saw(size(1218, 800), cause: hideCause, at: 10)
 check(closeBy.due(now: 10) == .follow(size(1218, 800), hideCause), "Full Screen on: at once")
 closeBy.started(size(1218, 800))
