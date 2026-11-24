@@ -6,9 +6,8 @@ import CoreGraphics
 /// the size of the device whose Desktop asked for it, so the lock screen and the desktop fill that device; phase 2b's
 /// Virtual Desktop takes the same default ("This device").
 ///
-/// This device: the device's room (its picture with Sill's controls hidden, phase 2b's `Viewport.room`), else its
-/// panel (the viewport's `width` and `height`, which every device build sends as its stream screen appears), in its
-/// points, at Retina (2x), so an iPad gets one Mac pixel for each of its own:
+/// This device: the space the device's picture has now (`device(space:)`, rule A below), in its points, at Retina (2x),
+/// so an iPad gets one Mac pixel for each of its own:
 /// 1. each side rounded to whole points;
 /// 2. no side under `minSide` (800 points): both sides grow by one factor until the shorter is 800, keeping the shape
 ///    (VirtualDisplaySize.minSide: macOS ran Sill's displays smaller than that at 1x, and most Mac windows do not fit
@@ -21,10 +20,30 @@ import CoreGraphics
 /// 1920 × 1080. The rate: the device's (the viewport's `fps`: 120 on ProMotion, 60 otherwise and in Low Power Mode),
 /// held to 24…the Mac's Frame Rate limit; 60 with no viewport.
 ///
-/// Following the device (phase 2b, plan §5; `Follow`, `followStep`, `InPlace`): the matched device's room, turned, folded
-/// or resized, or another device's once that one is the matched device, is taken after 1 s steady and at most once every
-/// 3 s, in place on the live display as Noah's probes of 2026-11-23 showed it can be (`followWay`; P2b and P2c,
-/// Scripts/display-modes-probe), inside the backing it was made with (`backing`), else at its next make.
+/// Rule A (Noah, 2026-11-24, after his first try on a real display: "size the window to be as large as the available
+/// space, the same way Virtual Display works", at the start, "when the device is rotated" and "when full screen is enabled
+/// or disabled"): the space is the viewport's panel (`width` × `height`), the very rectangle the stage fits a window to
+/// (VirtualStage.windowSize: the panel ÷ Aa; Aa never resizes the Desktop), so the two agree. In each layout (the device's
+/// StreamScreen, PortraitStreamScreen; its DEBUG console's "viewport:" lines):
+/// - an iPad held sideways, an iPhone on its side, the iPhone Duo's displays sideways: the pane under the bar (an iPad
+///   mini's 1117 × 618, an iPhone 15 Pro's 718 × 299);
+/// - an iPad upright and the Duo's inner display upright (the halves): the upper half's pane (an iPad mini's 728 × 535;
+///   the Duo half-folded above the fold, open flat at the picture's own shape);
+/// - an iPhone upright: its 16:10 pane over the controls (377 × 235 on an iPhone 15 Pro), or with Larger Picture,
+///   which acts only while a window streams, its taller room;
+/// - with Full Screen, in every layout: Full Screen's room, the viewport's `room` (1133 × 744, 393 × 793).
+/// The device keeps the panel as it is while the software keyboard comes up, the key row lifts above a tall one (#418),
+/// Settings, the drawer, Aa's ruler or a thumbnail's lights open, and a pinch zooms the picture (none of them ever resized
+/// a Mac window either); it changes when the device turns, its window is resized or folded, Full Screen goes on or off,
+/// the controls come back by themselves, or what streams changes the phone's arrangement. Every device build sends the
+/// panel, 0.6.2 among them; phase 2b's `room` (Full Screen's room, whether the controls show or not) only tells a turn
+/// from a tap (`Cause`). Before 2026-11-24 the room sized it: the whole screen's shape, so the controls left black bars.
+///
+/// Following the device (phase 2b, plan §5; `Follow`, `followStep`, `InPlace`): the matched device's space, while it
+/// shows the Virtual Desktop, is taken in place on the live display as Noah's probes of 2026-11-23 showed it can be
+/// (`followWay`; P2b and P2c, Scripts/display-modes-probe): at once after a tap (its controls), after 1 s steady after a
+/// turn of the hand, and never sooner than 1 s after the last follow; inside the backing it was made with (`backing`),
+/// which holds every iPhone's and iPad's space both ways; else at its next make.
 ///
 /// Pure (CoreGraphics); checked by Tests/checks/virtual-desktop.
 package enum VirtualDesktopSize {
@@ -46,10 +65,10 @@ package enum VirtualDesktopSize {
     /// No viewport from any device: #200's size, at Retina.
     static let fallback = Size(widthPt: 1920, heightPt: 1080, scale: 2)
 
-    /// The display for a device whose room is `room` (nil: it sends none, every build before phase 2b) and whose panel
-    /// is `panel`, in device points; nil when neither has two sides that are positive numbers.
-    static func device(room: CGSize?, panel: CGSize?) -> Size? {
-        guard let source = [room, panel].compactMap({ $0 }).first(where: usable) else { return nil }
+    /// The display for a device whose picture has `space` now (rule A: its viewport's panel; nil: no viewport), in device
+    /// points; nil when it has no two sides that are positive numbers.
+    static func device(space: CGSize?) -> Size? {
+        guard let source = space, usable(source) else { return nil }
         var w = Double(source.width).rounded(), h = Double(source.height).rounded()
         w = max(w, 1); h = max(h, 1)
         let short = min(w, h)
@@ -109,7 +128,7 @@ package enum VirtualDesktopSize {
 
     /// The Virtual Desktop's size as the person chooses it (HostConfig.virtualDesktopSize: Sill for Mac's Settings ›
     /// Displays, the CLI's --virtual-desktop=…; a device's pickers are phase 3's): This device (`deviceChoice`, the
-    /// default: `device(room:panel:)`, and it follows the device), the main display's mode (`mainChoice`: `main`), or one
+    /// default: `device(space:)`, and it follows the device), the main display's mode (`mainChoice`: `main`), or one
     /// of `offered` by its id ("1920x1080@2"). None but This device follows a device.
     package enum Choice: Equatable {
         case device
@@ -165,7 +184,7 @@ package enum VirtualDesktopSize {
         let box = w >= h ? (wide: 3840.0, high: 2160.0) : (wide: 2160.0, high: 3840.0)
         let fit = min(1, box.wide / (w * Double(s)), box.high / (h * Double(s)))
         if fit < 1 { w = (w * fit + 1e-9).rounded(.down); h = (h * fit + 1e-9).rounded(.down) }   // the box's own edge kept whole
-        if s == 2 { return device(room: CGSize(width: w, height: h), panel: nil) }
+        if s == 2 { return device(space: CGSize(width: w, height: h)) }
         return Size(widthPt: max(1, Int(w)), heightPt: max(1, Int(h)), scale: 1)
     }
 
@@ -230,25 +249,28 @@ package enum VirtualDesktopSize {
         package init(wide: Int, high: Int) { self.wide = wide; self.high = high }
     }
 
-    /// The backing's floor and cap for a display that follows a device, in pixels a side. The floor holds every iPhone's
-    /// and iPad's This device size both ways, as far as is known (an iPhone Pro Max held sideways, clear of its Dynamic
-    /// Island, about 1510 × 800 points; an iPad Pro 13-inch 1376 × 1032; at 2x under 3072 pixels a side), so the device it
-    /// is made for may turn, and another may take it over, though neither was connected when it was made. The cap: no
-    /// side past 4096 pixels in place, the widest picture every Mac's encoder takes (#295), and at most 4096 × 4096 × 4
-    /// bytes (64 MiB) if macOS keeps the whole backing (not measured).
-    static let backingFloor = 3072
+    /// The backing of a display that follows a device, in pixels a side: 4096, the widest picture every Mac's encoder
+    /// takes (#295), so no size it is followed to is wider than the encoder takes. It holds every space any iPhone or iPad
+    /// gives in a layout of its own, either way round, at 2x under the 800-point floor (`device(space:)`): the widest, an
+    /// iPhone's on its side with its controls showing, 734 × 296 points on an iPhone 12 to 14 and 16e, is 1984 × 800, 3968
+    /// pixels (an iPhone 15 Pro's 718 × 299 is 1921 × 800; held upright with Full Screen, 393 × 793 is 800 × 1614, 3228
+    /// pixels; an iPad Pro 13-inch's 1376 × 1032 is 2752). Only a window much wider (or taller) than any screen, a shape
+    /// past 2.56 : 1 (2048 × 800 points), as Stage Manager or Split View can make on an iPad, does not fit: it waits for
+    /// the next make. A square of it is 64 MiB at 4 bytes a pixel if macOS keeps it whole (not measured); the stage's own
+    /// display is made larger than that for every window an iPad mini streams (its envelope, 2234 points square at 2x for
+    /// a 1117-point panel, is its mode, not only its backing). Run 4's backing, a square of the longest size among the
+    /// devices connected when it was made, at least 3072, left an iPhone held upright beyond an iPad's display (3228 px):
+    /// Noah's first try, 2026-11-24.
     static let backingCap = 4096
 
     /// The backing a display made at `made` gets: its own pixels; and, when it follows a device (This device: `follows`),
-    /// a square of the longest side among it and `devices` (each connected device's This device size, either way round:
-    /// each may turn), at least `backingFloor` and at most `backingCap`, never less than its own pixels each way. A
+    /// a square of `backingCap` pixels, never less than its own pixels each way, so the device it is made for, and any
+    /// device that takes it over later, connected when it was made or not, is followed in place either way round. A
     /// person's chosen size or the main display's never follows, so it is made as every display Sill made: its own pixels.
-    static func backing(made: Size, devices: [Size], follows: Bool) -> Backing {
+    static func backing(made: Size, follows: Bool) -> Backing {
         let own = Backing(wide: made.widthPt * made.scale, high: made.heightPt * made.scale)
         guard follows else { return own }
-        let longest = ([made] + devices).map { max($0.widthPt, $0.heightPt) * $0.scale }.max() ?? 0
-        let side = min(backingCap, max(backingFloor, longest))
-        return Backing(wide: max(own.wide, side), high: max(own.high, side))
+        return Backing(wide: max(own.wide, backingCap), high: max(own.high, backingCap))
     }
 
     /// Whether `size`'s pixels fit `backing` (a turn landing at 1x first takes the same pixels: P2c).
@@ -273,37 +295,83 @@ package enum VirtualDesktopSize {
     }
 
     /// How the display at `display`, whose backing is `backing`, follows the size `to` in the way `way`: nothing locked;
-    /// in place only for a device that sends its room (`sendsRoom`: every build from phase 2b; a device before it, 0.6.2
-    /// among them, sends its panel, which may change as its own controls come and go, and is taken at the next make, as
-    /// before), and only inside the backing; the headless display (the Mac's only screen) never removed and made again.
-    static func followStep(to: Size, display: Size, backing: Backing, sendsRoom: Bool, way: FollowWay, headless: Bool,
-                           locked: Bool) -> FollowStep {
+    /// in place inside the backing, for every device (its panel is its space, rule A: a device before phase 2b, 0.6.2
+    /// among them, sends it too); the headless display (the Mac's only screen) never removed and made again.
+    static func followStep(to: Size, display: Size, backing: Backing, way: FollowWay, headless: Bool, locked: Bool) -> FollowStep {
         if to == display { return .nothing }
         if locked { return .later }
         switch way {
         case .nextMake: return .nextMake
         case .newModes:
-            guard sendsRoom else { return .nextMake }
             return fits(to, backing) ? .inPlace : .beyondBacking
         case .remake: return headless ? .nextMake : .remake
         }
     }
 
-    /// The matched device's room over time, and when the display takes it (plan §5): once the room has kept a new size for
-    /// `settle` (1 s), and at most once every `spacing` (3 s) from the display's make or its last follow; a room that comes
-    /// back to the size taken within the settle changes nothing, and the newest size wins. A size here is `device`'s for
-    /// the room, so a change too small to change the display is none. The room is Full Screen's, so Sill's controls, its
-    /// drawer, Settings or the keyboard coming and going never change it. Times are seconds on one clock.
+    /// What changed the space of the device it is for (rule A's timing), read from that device's viewport before and this
+    /// one (`cause`), or from who shows it: a tap is taken at once, a turn of the hand once it has kept still (`settle`).
+    enum Cause: Equatable {
+        /// Its room the same, its panel not: its controls went (Full Screen on: the panel is the room now; `hidden` true)
+        /// or came back (false), or neither (nil: the Duo's pane open flat, at its picture's shape, changed with it). A
+        /// tap: the device has let it settle already (it sends a viewport 0.25 s after its panel's last change).
+        case controls(hidden: Bool?)
+        /// Its room changed: it turned (`turned`: from upright to sideways or back), its window was resized or folded.
+        case room(turned: Bool)
+        /// A device that sends no room (a build before 0.7, which sends its panel alone): a tap or a turn, not known.
+        case unknown
+        /// Another device is the one it is for now: it stepped onto it, or the one it was for left and its Desktop came
+        /// back to it (plan §5's matched device).
+        case device
+        /// The one it is for shows it again (back from a window or another stop): the space it has now, which may still
+        /// change as what streams changed its arrangement (an iPhone's Larger Picture).
+        case shown
+
+        /// How long the space must keep a new size before it is taken: none for a tap or another device, `Follow.settle`
+        /// for a turn of the hand, a device that cannot tell, or the Desktop shown again.
+        var settle: Double {
+            switch self {
+            case .controls, .device: return 0
+            case .room, .unknown, .shown: return Follow.settle
+            }
+        }
+    }
+
+    /// The cause of a change of a device's space: its room before (`roomBefore`; nil: none) and now (`room`), its panel
+    /// before (nil: none) and now; each side compared within a point (a device's sides can be fractions).
+    static func cause(roomBefore: CGSize?, room: CGSize?, panelBefore: CGSize?, panel: CGSize) -> Cause {
+        guard let room, let roomBefore else { return .unknown }
+        guard same(room, roomBefore) else { return .room(turned: (room.width > room.height) != (roomBefore.width > roomBefore.height)) }
+        let hidden = same(panel, room)
+        guard let panelBefore, same(panelBefore, room) != hidden else { return .controls(hidden: nil) }
+        return .controls(hidden: hidden)
+    }
+
+    /// Two sizes the same within a point a side.
+    static func same(_ a: CGSize, _ b: CGSize) -> Bool { abs(a.width - b.width) <= 1 && abs(a.height - b.height) <= 1 }
+
+    /// The space of the device it is for over time, and when the display takes it (plan §5, rule A's timing): once the
+    /// space has kept a new size for its cause's settle (none for a tap, `settle` for a turn of the hand), never while a
+    /// follow is under way (`started`), and never sooner than `spacing` after the display's make or its last follow's end;
+    /// a space back at the size the display has or is going to changes nothing, and the newest size wins, with its own
+    /// cause. A size here is `device(space:)`'s, so a change too small to change the display is none. The coordinator
+    /// feeds it only while the Virtual Desktop shows (the phone's arrangement and the Duo's pane follow a window's shape
+    /// meanwhile). Times are seconds on one clock.
     struct Follow: Equatable {
+        /// A turn of the hand: the plan's settle.
         static let settle: Double = 1
-        static let spacing: Double = 3
+        /// From the make or a follow's end to the next follow: each is one or two calls of about 0.3 s that hold the main
+        /// actor, and a restart of the Desktop's stream; so a run of taps follows about once a second, the newest last.
+        static let spacing: Double = 1
 
         /// The size the display was made at, or last took (or left for its next make).
         private(set) var taken: Size
-        /// A size the room has had since `since`, not yet taken.
+        /// A follow under way, to this size (`started`), until it is done or fell back (`took`).
+        private(set) var going: Size?
+        /// A size the space has had since `since`, not yet taken, and its cause.
         private(set) var pending: Size?
+        private(set) var cause: Cause = .unknown
         private(set) var since: Double = 0
-        /// The display's make or its last follow.
+        /// The display's make or its last follow's end.
         private(set) var lastChange: Double
 
         init(made size: Size, at now: Double) {
@@ -311,36 +379,35 @@ package enum VirtualDesktopSize {
             lastChange = now
         }
 
-        /// The matched device's room at `now`, as a display size (each of its viewports).
-        mutating func saw(_ size: Size, at now: Double) {
-            if size == taken { pending = nil; return }
-            if size != pending { pending = size; since = now }
+        /// The space of the device it is for at `now`, as a display size, and what changed it.
+        mutating func saw(_ size: Size, cause c: Cause, at now: Double) {
+            if size == (going ?? taken) { pending = nil; return }
+            if size != pending { pending = size; cause = c; since = now }
         }
 
-        enum Due: Equatable { case nothing, wait(until: Double), follow(Size) }
+        enum Due: Equatable { case nothing, wait(until: Double), follow(Size, Cause) }
 
-        /// Whether a follow is due at `now`: the size to follow to, or when to look again.
+        /// Whether a follow is due at `now`: the size to follow to and why, or when to look again.
         func due(now: Double) -> Due {
-            guard let pending else { return .nothing }
-            let ready = max(since + Self.settle, lastChange + Self.spacing)
-            return now >= ready ? .follow(pending) : .wait(until: ready)
+            guard going == nil, let pending else { return .nothing }
+            let ready = max(since + cause.settle, lastChange + Self.spacing)
+            return now >= ready ? .follow(pending, cause) : .wait(until: ready)
         }
 
-        /// The follow to `size` was done at `now` (or left for the next make: `FollowStep.nextMake`); a newer size the room
-        /// has meanwhile stays pending.
+        /// A follow in place to `size` begins: a space that comes back to the size the display has meanwhile is pending.
+        mutating func started(_ size: Size) {
+            going = size
+            if pending == size { pending = nil }
+        }
+
+        /// The follow to `size` ended at `now`, done or fallen back (or left for the next make: `FollowStep.nextMake`); a
+        /// newer size the space has meanwhile stays pending.
         mutating func took(_ size: Size, at now: Double) {
             taken = size
+            going = nil
             if pending == size { pending = nil }
             lastChange = now
         }
-    }
-
-    /// Why a follow changes the size: the device it is for turned, its room changed otherwise, or another device is now
-    /// the one it is for (plan §5's matched device: it stepped onto it, or the one it was for left).
-    enum FollowWhy: Equatable { case turned, room, device }
-
-    static func followWhy(from: Size, to: Size, newDevice: Bool) -> FollowWhy {
-        newDevice ? .device : (to == from.turned ? .turned : .room)
     }
 
     /// One follow in place, step by step: P2b's and P2c's way as a machine the coordinator drives (a Mac's display through
@@ -533,16 +600,21 @@ package enum VirtualDesktopSize {
     /// The follow's line once it is decided or done: in place ("Virtual Desktop: iPad mini turned; followed in place in 650
     /// ms: 800×1218 pt @2× at 60 Hz."), fallen back ("…; not followed in place: macOS refused the switch to its 2x mode
     /// (complete 1001); back at 1218×800 pt @2× in 980 ms; the next one is made at 800×1218 pt."), removed (the way back
-    /// failed too: made again at the size by the Desktop that still shows its stop), beyond the backing, at the next make (no way in place, a device before phase 2b), made again (phase 3);
-    /// nil when nothing is done. `display` names whose (the headless display's: "Headless display"); `device` the device
-    /// it is for now.
-    static func followLine(_ display: String = "Virtual Desktop", device: String, why: FollowWhy, from: Size, to: Size,
+    /// failed too: made again at the size by the Desktop that still shows its stop), beyond the backing, at the next make
+    /// (no way in place), made again (phase 3); nil when nothing is done. `display` names whose (the headless display's:
+    /// "Headless display"); `device` the device it is for now; `why` its words: "turned", "hid its controls", "showed its
+    /// controls", "'s picture changed size" (a fold, a resized window, a device that cannot tell), "shows it now",
+    /// "shows it again".
+    static func followLine(_ display: String = "Virtual Desktop", device: String, why: Cause, from: Size, to: Size,
                            step: FollowStep, outcome: InPlace.Action? = nil, hz: Int? = nil, backing: Backing? = nil) -> String? {
         let what: String
         switch why {
-        case .turned: what = "\(device) turned"
-        case .room: what = "\(device) changed its room"
+        case .room(turned: true): what = "\(device) turned"
+        case .controls(hidden: true?): what = "\(device) hid its controls"
+        case .controls(hidden: false?): what = "\(device) showed its controls"
+        case .room(turned: false), .controls(hidden: nil), .unknown: what = "\(device)'s picture changed size"
         case .device: what = "\(device) shows it now"
+        case .shown: what = "\(device) shows it again"
         }
         let size = "\(to.widthPt)×\(to.heightPt) pt"
         let next = "the next one is made at \(size)."

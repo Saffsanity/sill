@@ -117,8 +117,19 @@ check(coordinator.contains("let said = testHeadlessMade && headlessDisplay == ni
 check(coordinator.contains("newDisplay = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, refreshHz: Double(hz),"),
       "the Virtual Desktop is made by SillDisplays, as the Desktop's display")
 check(coordinator.contains("refreshHz: Double(hz),\n                                           backing: (backing.wide, backing.high))")
-      && coordinator.contains("let backing = VirtualDesktopSize.backing(made: asked, devices: connected, follows: follows)"),
+      && coordinator.contains("let backing = VirtualDesktopSize.backing(made: asked, follows: follows)"),
       "the Virtual Desktop is made with the backing its follow in place needs (VirtualDesktopSize.backing)")
+// Rule A (Noah, 2026-11-24): its size is the space the device's picture has, the viewport's panel, as the stage fits a
+// window to it; never the room (Full Screen's whether the controls show or not), which only tells a turn from a tap.
+check(coordinator.contains("private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.width, height: v.height) }"),
+      "the space is a viewport's panel")
+let sized = coordinator.components(separatedBy: "VirtualDesktopSize.device(space: ").dropFirst().map { String($0.prefix(30)) }
+check(sized.count == 5 && sized.allSatisfy { $0.hasPrefix("vp.map(Self.space))") || $0.hasPrefix("Self.space(v))") },
+      "every size the coordinator asks of a device is its space, never its room (\(sized))")
+check(occurrences("VirtualDesktopSize.cause(roomBefore: before?.room", coordinator) == 1,
+      "the room tells a turn from a tap, from the device's viewport before and this one")
+check(coordinator.contains("guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,"),
+      "its device's space is followed only while it shows (a window's arrangement never resizes it)")
 // Its size changes in place only in the coordinator's follow (driveInPlace), through VirtualDisplay's applyModes and
 // switchToListed: never elsewhere in the host.
 check(hostFiles.filter { $0 != "VirtualDisplay.swift" && $0 != "StreamCoordinator.swift"

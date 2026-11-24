@@ -22,7 +22,7 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String) {
 
 typealias VDS = VirtualDesktopSize
 func size(_ w: Int, _ h: Int) -> VDS.Size { VDS.Size(widthPt: w, heightPt: h, scale: 2) }
-func panel(_ w: Double, _ h: Double) -> VDS.Size? { VDS.device(room: nil, panel: CGSize(width: w, height: h)) }
+func panel(_ w: Double, _ h: Double) -> VDS.Size? { VDS.device(space: CGSize(width: w, height: h)) }
 extension VirtualDesktopSize.Size {
     /// The same points at another scale (a turn's pixels at 1x: P2c's 1600×2436 @1×).
     func withScale(_ s: Int) -> VirtualDesktopSize.Size { VirtualDesktopSize.Size(widthPt: widthPt, heightPt: heightPt, scale: s) }
@@ -58,17 +58,33 @@ check(panel(1, 16384) == size(800, 4096), "1×16384: 800×4096, held")
 check(panel(1, 1) == size(800, 800), "a point square: 800×800")
 check(panel(4096, 800) == size(4096, 800), "5.12:1, the longest shape kept: as it is")
 check(panel(500, 100) == size(4000, 800), "5:1 small: grown to 4000×800, the shape kept")
-// The room (phase 2b's Viewport.room) before the panel; none, or one with no area, the panel.
-let room = VDS.device(room: CGSize(width: 1376, height: 1032), panel: CGSize(width: 1376, height: 950))
-check(room == size(1376, 1032), "the room before the panel (an iPad's whole screen, not its pane under the bar)")
-check(VDS.device(room: nil, panel: CGSize(width: 1376, height: 950)) == size(1376, 950), "no room (every build before 2b): the panel")
-check(VDS.device(room: CGSize(width: 0, height: 900), panel: CGSize(width: 1180, height: 820)) == size(1180, 820), "a room with no area: the panel")
-check(VDS.device(room: nil, panel: nil) == nil, "nothing: none (the caller's fallback)")
-check(VDS.device(room: nil, panel: CGSize(width: 0, height: 0)) == nil, "a panel with no area: none")
-check(VDS.device(room: nil, panel: CGSize(width: -5, height: 300)) == nil, "a negative side: none")
-check(VDS.device(room: CGSize(width: Double.nan, height: 900), panel: nil) == nil, "NaN: none")
-check(VDS.device(room: CGSize(width: Double.infinity, height: 900), panel: CGSize(width: 1180, height: 820)) == size(1180, 820),
-      "an infinite room: the panel")
+// Rule A (Noah, 2026-11-24): the space the picture has, the viewport's panel, in each layout, as the devices' consoles
+// print it ("viewport: W×H pt …", the harness's iPad mini and iPhone 15 Pro), and Full Screen's room; never bars.
+let spaces: [(String, Double, Double, Int, Int)] = [
+    ("iPad mini sideways, the controls showing (the pane under the bar)", 1117, 618, 1446, 800),
+    ("iPad mini sideways, Full Screen (its whole screen)", 1133, 744, 1218, 800),
+    ("iPad mini upright, the controls showing (the upper half's pane)", 728, 535, 1089, 800),
+    ("iPad mini upright, Full Screen", 744, 1133, 800, 1218),
+    ("iPhone 15 Pro upright, the controls showing (its 16:10 pane)", 377, 235, 1283, 800),
+    ("iPhone 15 Pro upright, Full Screen (clear of its Dynamic Island): Noah's 800×1614", 393, 793, 800, 1614),
+    ("iPhone 15 Pro on its side, the controls showing", 718, 299, 1921, 800),
+    ("iPhone 15 Pro on its side, Full Screen: Noah's 1494×800", 734, 393, 1494, 800),
+    ("iPhone 12 to 14 on its side, the controls showing: the widest space of any iPhone", 734, 296, 1984, 800),
+]
+for (name, w, h, ew, eh) in spaces {
+    check(panel(w, h) == size(ew, eh), "\(name): \(Int(w))×\(Int(h)) → \(ew)×\(eh) (\(String(describing: panel(w, h))))")
+}
+// Its shape is the space's, within the rounding of a point: the picture fills it, no bars (the device draws it aspect-fit).
+for (name, w, h, _, _) in spaces {
+    guard let s = panel(w, h) else { continue }
+    let bars = abs(Double(s.widthPt) / Double(s.heightPt) - w / h) / (w / h)
+    check(bars < 0.002, "\(name): the picture's shape kept (\(bars))")
+}
+check(VDS.device(space: nil) == nil, "no viewport: none (the caller's fallback)")
+check(VDS.device(space: CGSize(width: 0, height: 0)) == nil, "a space with no area: none")
+check(VDS.device(space: CGSize(width: -5, height: 300)) == nil, "a negative side: none")
+check(VDS.device(space: CGSize(width: Double.nan, height: 900)) == nil, "NaN: none")
+check(VDS.device(space: CGSize(width: Double.infinity, height: 900)) == nil, "an infinite side: none")
 check(VDS.fallback == size(1920, 1080), "the fallback with no viewport: #200's 1920×1080 at Retina")
 check(VDS.minSide == 800 && VDS.maxSide == 4096 && VDS.scale == 2, "800 to 4096 points a side, at 2x")
 
@@ -272,88 +288,131 @@ check(VDS.followWay == .newModes,
       "the probes' verdict (P2b and P2c, 2026-11-23): in place, by applySettings: with the size alone and a switch for a turn")
 check(VDS.FollowWay.allCases == [.nextMake, .newModes, .remake], "no way by the modes listed at creation (P2b: refused, complete 1001)")
 
-// The backing: its own pixels; following a device, a square of the longest side among it and the devices connected, at
-// least 3072 and at most 4096 pixels a side, never less than its own.
+// The backing: its own pixels; following a device, a square of 4096 pixels (the encoder's widest picture, #295), never
+// less than its own, which holds every iPhone's and iPad's space both ways (rule B, Noah's first try of 2026-11-24).
 func bk(_ w: Int, _ h: Int) -> VDS.Backing { VDS.Backing(wide: w, high: h) }
-check(VDS.backingFloor == 3072 && VDS.backingCap == 4096, "the floor 3072 px, the cap 4096 px")
-check(VDS.backing(made: mini, devices: [], follows: true) == bk(3072, 3072), "an iPad mini's: the floor's square, its turn inside")
-check(VDS.backing(made: size(1376, 1032), devices: [], follows: true) == bk(3072, 3072), "an iPad Pro 13-inch's: the floor's square")
-check(VDS.backing(made: mini, devices: [size(1496, 800)], follows: true) == bk(3072, 3072), "with an iPhone's room: inside the floor")
-check(VDS.backing(made: mini, devices: [size(1900, 800)], follows: true) == bk(3800, 3800),
-      "a device's longer room (a Stage Manager window): the square of its long side (\(VDS.backing(made: mini, devices: [size(1900, 800)], follows: true)))")
-check(VDS.backing(made: mini, devices: [size(800, 1900)], follows: true) == bk(3800, 3800), "the same upright: either way round")
-check(VDS.backing(made: mini, devices: [size(2600, 800), size(1496, 800)], follows: true) == bk(4096, 4096), "past the cap: 4096")
-check(VDS.backing(made: size(2600, 800), devices: [], follows: true) == bk(5200, 4096),
-      "a display made past the cap: its own pixels that way, the cap the other (\(VDS.backing(made: size(2600, 800), devices: [], follows: true)))")
-check(VDS.backing(made: size(1920, 1080), devices: [size(1496, 800)], follows: false) == bk(3840, 2160),
-      "a chosen size never follows: its own pixels, as every display Sill made")
-check(VDS.backing(made: VDS.Size(widthPt: 1920, heightPt: 1080, scale: 1), devices: [], follows: false) == bk(1920, 1080), "at 1x: its points")
+check(VDS.backingCap == 4096, "the cap 4096 px")
+check(VDS.backing(made: mini, follows: true) == bk(4096, 4096), "an iPad mini's: the cap's square")
+check(VDS.backing(made: size(1376, 1032), follows: true) == bk(4096, 4096), "an iPad Pro 13-inch's: the cap's square")
+check(VDS.backing(made: size(2600, 800), follows: true) == bk(5200, 4096),
+      "a display made past the cap: its own pixels that way, the cap the other (\(VDS.backing(made: size(2600, 800), follows: true)))")
+check(VDS.backing(made: size(1920, 1080), follows: false) == bk(3840, 2160), "a chosen size never follows: its own pixels, as every display Sill made")
+check(VDS.backing(made: VDS.Size(widthPt: 1920, heightPt: 1080, scale: 1), follows: false) == bk(1920, 1080), "at 1x: its points")
 check(VDS.fits(miniUp, bk(3072, 3072)) && VDS.fits(size(1536, 800), bk(3072, 3072)) && !VDS.fits(size(1537, 800), bk(3072, 3072))
       && !VDS.fits(size(800, 1537), bk(3072, 3072)) && VDS.fits(size(1536, 1536), bk(3072, 3072)),
       "fits: its pixels each way inside, to the pixel")
 check(VDS.fits(size(1218, 800), bk(2436, 1600)) && !VDS.fits(miniUp, bk(2436, 1600)), "the made size's own backing holds it and not its turn")
-for _ in 0..<2_000 {
-    let made = size(Int.random(in: 800...2200, using: &rng), Int.random(in: 800...2200, using: &rng))
-    let devices = (0..<Int.random(in: 0...3, using: &rng)).map { _ in size(Int.random(in: 800...2400, using: &rng), 800) }
-    let b = VDS.backing(made: made, devices: devices, follows: true)
-    var ok = b.wide >= made.widthPt * 2 && b.high >= made.heightPt * 2
-    ok = ok && b.wide <= max(VDS.backingCap, made.widthPt * 2) && b.high <= max(VDS.backingCap, made.heightPt * 2)
-    ok = ok && min(b.wide, b.high) >= min(VDS.backingCap, VDS.backingFloor)
-    for d in [made] + devices where max(d.widthPt, d.heightPt) * 2 <= VDS.backingCap {
-        ok = ok && VDS.fits(d, b) && VDS.fits(d.turned, b)
+// Every space of the table above, and every iPhone's and iPad's in a layout of its own, made for one and followed to by
+// any other, either way round: inside the backing made for any of them. Noah's first try: an iPad's display (3072 px)
+// and the iPhone upright with Full Screen (800×1614, 3228 px): now inside.
+let anyDevice = spaces.compactMap { panel($0.1, $0.2) } + [panel(393, 793)!, size(1376, 1032), size(1032, 1376)]
+for made in anyDevice {
+    let b = VDS.backing(made: made, follows: true)
+    for other in anyDevice {
+        check(VDS.fits(other, b) && VDS.fits(other.turned, b), "\(other) both ways inside the backing made for \(made) (\(b))")
     }
-    check(ok, "random backing for \(made) and \(devices): \(b)")
+}
+check(VDS.fits(size(2048, 800), bk(4096, 4096)) && !VDS.fits(size(2049, 800), bk(4096, 4096)) && !VDS.fits(size(800, 2049), bk(4096, 4096)),
+      "a shape past 2.56 : 1 (a Stage Manager window wider than any screen) does not fit: the next make")
+for _ in 0..<2_000 {
+    let made = size(Int.random(in: 800...2600, using: &rng), Int.random(in: 800...2600, using: &rng))
+    let other = size(Int.random(in: 800...2048, using: &rng), Int.random(in: 800...2048, using: &rng))
+    let b = VDS.backing(made: made, follows: true)
+    var ok = b.wide >= made.widthPt * 2 && b.high >= made.heightPt * 2
+    ok = ok && b.wide == max(VDS.backingCap, made.widthPt * 2) && b.high == max(VDS.backingCap, made.heightPt * 2)
+    ok = ok && VDS.fits(made, b) && VDS.fits(other, b) && VDS.fits(other.turned, b)
+    check(ok, "random backing for \(made), another device's \(other): \(b)")
 }
 
-// The step: nothing for the size it has, nothing locked; in place for a device that sends its room, inside the backing.
-func step(_ way: VDS.FollowWay, to: VDS.Size = miniUp, backing: VDS.Backing = bk(3072, 3072), sendsRoom: Bool = true, headless: Bool = false,
+// The step: nothing for the size it has, nothing locked; in place for every device (its panel is its space), inside the
+// backing.
+func step(_ way: VDS.FollowWay, to: VDS.Size = miniUp, backing: VDS.Backing = bk(4096, 4096), headless: Bool = false,
           locked: Bool = false) -> VDS.FollowStep {
-    VDS.followStep(to: to, display: mini, backing: backing, sendsRoom: sendsRoom, way: way, headless: headless, locked: locked)
+    VDS.followStep(to: to, display: mini, backing: backing, way: way, headless: headless, locked: locked)
 }
 for way in VDS.FollowWay.allCases {
     check(step(way, to: mini) == .nothing && step(way, to: mini, headless: true, locked: true) == .nothing, "\(way): the size it has: nothing")
     check(step(way, locked: true) == .later && step(way, headless: true, locked: true) == .later, "\(way): locked: at the unlock")
 }
 check(step(.nextMake) == .nextMake && step(.nextMake, headless: true) == .nextMake, "no way in place: the next make")
-check(step(.newModes) == .inPlace && step(.newModes, to: size(1496, 800)) == .inPlace, "a turn, another device: in place inside the backing")
-check(step(.newModes, to: size(1900, 800)) == .beyondBacking && step(.newModes, backing: bk(2436, 1600)) == .beyondBacking,
+check(step(.newModes) == .inPlace && step(.newModes, to: size(1496, 800)) == .inPlace && step(.newModes, to: size(800, 1614)) == .inPlace,
+      "a turn, another device, the iPhone upright after the iPad: in place inside the backing")
+check(step(.newModes, to: size(2100, 800)) == .beyondBacking && step(.newModes, backing: bk(2436, 1600)) == .beyondBacking,
       "beyond the backing: the next make (P2b: never taken)")
-check(step(.newModes, sendsRoom: false) == .nextMake && step(.newModes, to: size(1900, 800), sendsRoom: false) == .nextMake,
-      "a device before phase 2b (no room, its panel): the next make, as before")
 check(step(.remake) == .remake, "the remake (phase 3)")
 check(step(.remake, headless: true) == .nextMake, "never the headless display: the Mac's only screen is never removed and made again")
-check(VDS.followWhy(from: mini, to: miniUp, newDevice: false) == .turned && VDS.followWhy(from: mini, to: size(1000, 800), newDevice: false) == .room
-      && VDS.followWhy(from: mini, to: miniUp, newDevice: true) == .device, "why: a turn, a room, another device")
 
+// What changed the space: its room (a turn, a fold) or its controls (Full Screen), from two viewports; none known
+// without a room.
+func cs(_ w: Double, _ h: Double) -> CGSize { CGSize(width: w, height: h) }
+let roomL = cs(1133, 744), roomU = cs(744, 1133)
+check(VDS.cause(roomBefore: roomL, room: roomL, panelBefore: cs(1117, 618), panel: roomL) == .controls(hidden: true), "Full Screen on: hid")
+check(VDS.cause(roomBefore: roomL, room: roomL, panelBefore: roomL, panel: cs(1117, 618)) == .controls(hidden: false), "Full Screen off: showed")
+check(VDS.cause(roomBefore: roomL, room: roomL, panelBefore: cs(653, 439), panel: cs(653, 420)) == .controls(hidden: nil),
+      "the pane changed under the same room, neither hidden: the pane's own change")
+check(VDS.cause(roomBefore: roomL, room: roomL, panelBefore: nil, panel: roomL) == .controls(hidden: nil), "no panel before: not said which")
+check(VDS.cause(roomBefore: roomL, room: cs(1133.6, 744.4), panelBefore: cs(1117, 618), panel: cs(1133.6, 744.4)) == .controls(hidden: true),
+      "within a point: the same room")
+check(VDS.cause(roomBefore: roomL, room: roomU, panelBefore: cs(1117, 618), panel: cs(728, 535)) == .room(turned: true), "a turn, the controls showing")
+check(VDS.cause(roomBefore: roomL, room: roomU, panelBefore: roomL, panel: roomU) == .room(turned: true), "a turn, Full Screen on")
+check(VDS.cause(roomBefore: cs(393, 793), room: cs(734, 393), panelBefore: cs(377, 235), panel: cs(718, 299)) == .room(turned: true),
+      "an iPhone turned (its Dynamic Island's inset moves)")
+check(VDS.cause(roomBefore: cs(669, 951), room: cs(669, 496), panelBefore: cs(653, 439), panel: cs(653, 480)) == .room(turned: false),
+      "the Duo half folded: its room, not a turn")
+check(VDS.cause(roomBefore: nil, room: roomL, panelBefore: nil, panel: roomL) == .unknown
+      && VDS.cause(roomBefore: roomL, room: nil, panelBefore: roomL, panel: cs(1117, 618)) == .unknown, "no room from it: not known")
+check(VDS.Cause.controls(hidden: true).settle == 0 && VDS.Cause.controls(hidden: nil).settle == 0 && VDS.Cause.device.settle == 0,
+      "a tap, another device: at once")
+check(VDS.Cause.room(turned: true).settle == 1 && VDS.Cause.room(turned: false).settle == 1 && VDS.Cause.unknown.settle == 1
+      && VDS.Cause.shown.settle == 1 && VDS.Follow.settle == 1, "a turn of the hand, not known, shown again: 1 s steady")
+
+// The follow over time: at once for a tap, 1 s steady for a turn, never within 1 s of the make or the last follow's end,
+// never during a follow, a space back at the size it has or is going to nothing, the newest size winning.
+let turn = VDS.Cause.room(turned: true), hide = VDS.Cause.controls(hidden: true), show = VDS.Cause.controls(hidden: false)
+check(VDS.Follow.spacing == 1, "1 s from the make or a follow's end")
 var follow = VDS.Follow(made: mini, at: 0)
-check(follow.due(now: 0) == .nothing && follow.taken == mini && follow.lastChange == 0, "made: nothing due")
-follow.saw(mini, at: 0.5)
-check(follow.due(now: 0.6) == .nothing, "the room it was made for: nothing")
-follow.saw(miniUp, at: 4)
+check(follow.due(now: 0) == .nothing && follow.taken == mini && follow.lastChange == 0 && follow.going == nil, "made: nothing due")
+follow.saw(mini, cause: turn, at: 0.5)
+check(follow.due(now: 0.6) == .nothing, "the space it was made for: nothing")
+follow.saw(miniUp, cause: turn, at: 4)
 check(follow.due(now: 4.5) == .wait(until: 5), "turned at 4: 1 s steady (\(follow.due(now: 4.5)))")
-follow.saw(miniUp, at: 4.6)
-check(follow.due(now: 4.7) == .wait(until: 5), "the same room again: the settle counts from its first viewport")
-check(follow.due(now: 5) == .follow(miniUp), "steady 1 s: followed")
-follow.took(miniUp, at: 5)
-check(follow.due(now: 5) == .nothing && follow.taken == miniUp && follow.lastChange == 5 && follow.pending == nil, "taken")
-follow.saw(mini, at: 5.5)
-check(follow.due(now: 6.5) == .wait(until: 8), "turned back half a second later: 3 s from the last follow (\(follow.due(now: 6.5)))")
-check(follow.due(now: 8) == .follow(mini), "…then")
-follow.saw(miniUp, at: 7.5)
-check(follow.due(now: 9) == .nothing && follow.pending == nil, "back to the size taken within the wait: nothing changes")
-var newest = VDS.Follow(made: mini, at: 0)
-newest.saw(miniUp, at: 10)
-newest.saw(size(1000, 800), at: 10.5)
-check(newest.due(now: 11) == .wait(until: 11.5) && newest.due(now: 11.5) == .follow(size(1000, 800)), "the newest size wins, after its own settle")
-var during = VDS.Follow(made: mini, at: 0)
-during.saw(miniUp, at: 10)
-during.saw(size(1000, 800), at: 11.2)                 // a newer room while the follow to miniUp is done
-during.took(miniUp, at: 11.5)
-check(during.pending == size(1000, 800) && during.due(now: 12) == .wait(until: 14.5) && during.due(now: 14.5) == .follow(size(1000, 800)),
-      "a newer room during a follow stays pending, and waits the spacing")
+follow.saw(miniUp, cause: hide, at: 4.6)
+check(follow.due(now: 4.7) == .wait(until: 5) && follow.cause == turn, "the same space again: the settle and the cause from its first viewport")
+check(follow.due(now: 5) == .follow(miniUp, turn), "steady 1 s: followed")
+follow.started(miniUp)
+check(follow.going == miniUp && follow.due(now: 5.1) == .nothing, "under way: nothing more is due")
+follow.saw(mini, cause: show, at: 5.2)                // back while the turn is under way
+check(follow.pending == mini && follow.due(now: 5.3) == .nothing, "a space back at the size it has, during a follow: pending, not due yet")
+follow.took(miniUp, at: 5.6)
+check(follow.taken == miniUp && follow.going == nil && follow.lastChange == 5.6 && follow.due(now: 5.7) == .wait(until: 6.6),
+      "the follow ended: the one back waits 1 s from its end (\(follow.due(now: 5.7)))")
+check(follow.due(now: 6.6) == .follow(mini, show), "…then followed back: the device's last word stands")
+follow.took(mini, at: 7)
+follow.saw(miniUp, cause: hide, at: 9)
+check(follow.due(now: 9) == .follow(miniUp, hide), "a tap 2 s after the last follow: at once")
+follow.saw(mini, cause: show, at: 9.1)
+check(follow.due(now: 9.2) == .nothing && follow.pending == nil, "back to the size taken before it was taken: nothing changes")
 var fresh = VDS.Follow(made: mini, at: 100)
-fresh.saw(miniUp, at: 100.2)
-check(fresh.due(now: 101.2) == .wait(until: 103), "within 3 s of the make: waits for them")
+fresh.saw(miniUp, cause: hide, at: 100.2)
+check(fresh.due(now: 100.3) == .wait(until: 101) && fresh.due(now: 101) == .follow(miniUp, hide), "a tap within 1 s of the make: 1 s from it")
+var newest = VDS.Follow(made: mini, at: 0)
+newest.saw(miniUp, cause: turn, at: 10)
+newest.saw(size(1000, 800), cause: turn, at: 10.5)
+check(newest.due(now: 11) == .wait(until: 11.5) && newest.due(now: 11.5) == .follow(size(1000, 800), turn), "the newest size wins, after its own settle")
+var closeBy = VDS.Follow(made: mini, at: 0)                  // Full Screen on, then a turn while it is followed
+closeBy.saw(size(1218, 800), cause: hide, at: 10)
+check(closeBy.due(now: 10) == .follow(size(1218, 800), hide), "Full Screen on: at once")
+closeBy.started(size(1218, 800))
+closeBy.saw(miniUp, cause: turn, at: 10.2)
+closeBy.took(size(1218, 800), at: 10.5)
+check(closeBy.pending == miniUp && closeBy.due(now: 11) == .wait(until: 11.5) && closeBy.due(now: 11.5) == .follow(miniUp, turn),
+      "two changes close together: the turn after the first follow's end, 1 s steady and 1 s after it")
+var takeover = VDS.Follow(made: mini, at: 0)
+takeover.saw(size(1494, 800), cause: .device, at: 5)
+check(takeover.due(now: 5) == .follow(size(1494, 800), .device), "another device: at once")
+var shownAgain = VDS.Follow(made: mini, at: 0)
+shownAgain.saw(miniUp, cause: .shown, at: 5)
+check(shownAgain.due(now: 5.5) == .wait(until: 6) && shownAgain.due(now: 6) == .follow(miniUp, .shown), "shown again: 1 s steady")
 
 // InPlace against the display the probes measured (TestDisplay: P2b, P2c), driven as the coordinator drives it.
 typealias IP = VDS.InPlace
@@ -550,27 +609,38 @@ for run in 0..<2_000 {
 }
 
 // The lines (the plan's words, Noah's "… turned; followed in place in N ms").
-func line(_ why: VDS.FollowWhy, _ step: VDS.FollowStep, _ outcome: IP.Action? = nil, device: String = "iPad mini", to: VDS.Size = miniUp) -> String? {
-    VDS.followLine(device: device, why: why, from: mini, to: to, step: step, outcome: outcome, hz: 60, backing: bk(3072, 3072))
+func line(_ why: VDS.Cause, _ step: VDS.FollowStep, _ outcome: IP.Action? = nil, device: String = "iPad mini", to: VDS.Size = miniUp) -> String? {
+    VDS.followLine(device: device, why: why, from: mini, to: to, step: step, outcome: outcome, hz: 60, backing: bk(4096, 4096))
 }
-check(line(.turned, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
-      "in place: \(line(.turned, .inPlace, .done(ms: 650)) ?? "nil")")
+check(line(turn, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
+      "in place: \(line(turn, .inPlace, .done(ms: 650)) ?? "nil")")
+check(line(hide, .inPlace, .done(ms: 320), to: size(1218, 800)) == "Virtual Desktop: iPad mini hid its controls; followed in place in 320 ms: 1218×800 pt @2× at 60 Hz.",
+      "Full Screen on: \(line(hide, .inPlace, .done(ms: 320), to: size(1218, 800)) ?? "nil")")
+check(line(show, .inPlace, .done(ms: 330), to: size(1446, 800)) == "Virtual Desktop: iPad mini showed its controls; followed in place in 330 ms: 1446×800 pt @2× at 60 Hz.",
+      "Full Screen off: \(line(show, .inPlace, .done(ms: 330), to: size(1446, 800)) ?? "nil")")
+for why in [VDS.Cause.room(turned: false), .controls(hidden: nil), .unknown] {
+    check(line(why, .inPlace, .done(ms: 300), to: size(1000, 800)) == "Virtual Desktop: iPad mini's picture changed size; followed in place in 300 ms: 1000×800 pt @2× at 60 Hz.",
+          "\(why): \(line(why, .inPlace, .done(ms: 300), to: size(1000, 800)) ?? "nil")")
+}
 check(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) == "Virtual Desktop: iPhone shows it now; followed in place in 300 ms: 1496×800 pt @2× at 60 Hz.",
       "another device: \(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) ?? "nil")")
-check(line(.turned, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
+check(line(.shown, .inPlace, .done(ms: 640)) == "Virtual Desktop: iPad mini shows it again; followed in place in 640 ms: 800×1218 pt @2× at 60 Hz.",
+      "shown again: \(line(.shown, .inPlace, .done(ms: 640)) ?? "nil")")
+check(line(turn, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in 980 ms; the next one is made at 800×1218 pt.",
-      "fallen back: \(line(.turned, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
-check(line(.turned, .inPlace, .remove(.switchRefused(1001)))
+      "fallen back: \(line(turn, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
+check(line(turn, .inPlace, .remove(.switchRefused(1001)))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001), and it did not come back to 1218×800 pt @2×; removed it: the next one is made at 800×1218 pt.",
-      "removed: \(line(.turned, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
-check(line(.device, .beyondBacking, device: "iPad", to: size(1900, 800))
-      == "Virtual Desktop: iPad shows it now; 1900×800 pt @2× is beyond the backing it was made with (3072×3072 px); the next one is made at 1900×800 pt.",
-      "beyond: \(line(.device, .beyondBacking, device: "iPad", to: size(1900, 800)) ?? "nil")")
-check(line(.turned, .nextMake) == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the next make, as before")
-check(line(.room, .remake, device: "iPad", to: size(1000, 800)) == "Virtual Desktop: iPad changed its room; made again at 1000×800 pt.", "a room that is no turn, remade")
-check(VDS.followLine("Headless display", device: "iPhone", why: .turned, from: mini, to: miniUp, step: .inPlace, outcome: .done(ms: 700))
+      "removed: \(line(turn, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
+check(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800))
+      == "Virtual Desktop: iPad shows it now; 2200×800 pt @2× is beyond the backing it was made with (4096×4096 px); the next one is made at 2200×800 pt.",
+      "beyond: \(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800)) ?? "nil")")
+check(line(turn, .nextMake) == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the next make, as before")
+check(line(.room(turned: false), .remake, device: "iPad", to: size(1000, 800)) == "Virtual Desktop: iPad's picture changed size; made again at 1000×800 pt.",
+      "a space that is no turn, remade")
+check(VDS.followLine("Headless display", device: "iPhone", why: turn, from: mini, to: miniUp, step: .inPlace, outcome: .done(ms: 700))
       == "Headless display: iPhone turned; followed in place in 700 ms: 800×1218 pt @2×.", "the headless display's, no rate known")
-check(line(.turned, .nothing) == nil && line(.turned, .later) == nil && line(.turned, .inPlace) == nil && line(.turned, .inPlace, .wait) == nil,
+check(line(turn, .nothing) == nil && line(turn, .later) == nil && line(turn, .inPlace) == nil && line(turn, .inPlace, .wait) == nil,
       "nothing done, or not yet: no line")
 for (f, w) in [(IP.Failure.refused, "applySettings: answered NO"), (.late, "the display did not change in time"),
                (.elsewhere(size(1000, 700)), "the display went to 1000×700 instead"), (.elsewhere(nil), "the display went to no mode instead"),
@@ -592,32 +662,42 @@ check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).knob
       && VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "late"], on: false).line?.contains("ignored: it needs a test host's Virtual Desktop") == true,
       "without the test host's Virtual Desktop: ignored, said")
 
-// 2,000 random rooms: a follow only to a size the room has kept 1 s and 3 s after the last change, never to the size
-// taken, and always once both have passed.
-let rooms = [mini, miniUp, size(1000, 800), size(1496, 800)]
+// 2,000 random spaces, each change a tap or a turn, the follows in place taking a random while: a follow only to a size
+// the space has kept for its cause's settle (none for a tap, 1 s for a turn), 1 s after the make or the last follow's end,
+// never while one is under way, never to the size the display has; always once those have passed; and the display ends
+// at the space's last size once the device keeps still.
+let rooms = [mini, miniUp, size(1446, 800), size(1089, 800), size(1000, 800), size(1494, 800), size(800, 1614)]
 for run in 0..<2_000 {
     var tracker = VDS.Follow(made: mini, at: 0)
-    var room = mini, roomSince = 0.0, last = 0.0, taken = mini, t = 0.0
+    var room = mini, roomSince = 0.0, cause = VDS.Cause.device, last = 0.0, taken = mini, t = 0.0
+    var going: (size: VDS.Size, until: Double)?
     var bad: String?
     while t < 40, bad == nil {
         t += Double.random(in: 0.05...0.7, using: &rng)
-        if Double.random(in: 0..<1, using: &rng) < (run % 3 == 0 ? 0.5 : 0.15) {
+        if let g = going, t >= g.until { tracker.took(g.size, at: t); taken = g.size; last = t; going = nil }
+        if t < 30, Double.random(in: 0..<1, using: &rng) < (run % 3 == 0 ? 0.5 : 0.15) {
             let next = rooms.randomElement(using: &rng)!
-            if next != room { room = next; roomSince = t }
+            let c: VDS.Cause = Bool.random(using: &rng) ? .controls(hidden: Bool.random(using: &rng)) : .room(turned: Bool.random(using: &rng))
+            if next != room { room = next; roomSince = t; cause = c }
         }
-        tracker.saw(room, at: t)
+        tracker.saw(room, cause: cause, at: t)
         switch tracker.due(now: t) {
-        case .follow(let s):
-            if s != room || s == taken || t - roomSince < 1 - 1e-9 || t - last < 3 - 1e-9 { bad = "followed \(s) at \(t): the room \(room) since \(roomSince), the last change \(last)" }
-            tracker.took(s, at: t); taken = s; last = t
+        case .follow(let s, let c):
+            if going != nil { bad = "followed \(s) at \(t) while one is under way" }
+            if s != room || s == taken || t - roomSince < c.settle - 1e-9 || t - last < 1 - 1e-9 || c != cause {
+                bad = "followed \(s) (\(c)) at \(t): the space \(room) (\(cause)) since \(roomSince), the last change \(last)"
+            }
+            tracker.started(s)
+            going = (s, t + Double.random(in: 0.3...0.8, using: &rng))
         case .wait(let until):
-            if room == taken || until <= t { bad = "a wait at \(t) until \(until) for \(room), \(taken) taken" }
-            if until > max(roomSince + 1, last + 3) + 1e-9 { bad = "waits past its time at \(t): \(until)" }
+            if going != nil || room == taken || until <= t { bad = "a wait at \(t) until \(until) for \(room), \(taken) taken" }
+            if until > max(roomSince + cause.settle, last + 1) + 1e-9 { bad = "waits past its time at \(t): \(until)" }
         case .nothing:
-            if room != taken { bad = "nothing at \(t) with \(room) since \(roomSince), \(taken) taken" }
+            if going == nil, room != taken { bad = "nothing at \(t) with \(room) since \(roomSince), \(taken) taken" }
         }
     }
-    check(bad == nil, "random rooms \(run): \(bad ?? "")")
+    if bad == nil, going == nil, taken != room { bad = "ended at \(taken), the space \(room)" }
+    check(bad == nil, "random spaces \(run): \(bad ?? "")")
 }
 
 // MARK: The person's choice of its size and rate (Noah, 2026-11-18: "allow the user to select resolution")
@@ -882,13 +962,17 @@ check(Life.removedLine(.grace, moved: 0, of: 0, to: "x", grace: 4) == "Virtual D
 check(Life.words(.grace) == "no device has shown it for 30 s" && Life.words(.switchedOff, grace: 4) == "turned off", "the words, the grace's own")
 // The make's line (the coordinator's), from the mode it came up at.
 let made = VirtualDesktopSize.Size(widthPt: 1218, heightPt: 800, scale: 2)
+check(Life.madeLine(came: made, asked: made, hz: 60, id: 7, ms: 412, device: "iPad mini", space: CGSize(width: 1133, height: 744))
+      == "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini (its picture: 1133×744 pt).", "the make's line, with the space it is sized to")
 check(Life.madeLine(came: made, asked: made, hz: 60, id: 7, ms: 412, device: "iPad mini")
-      == "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini (its screen).", "the make's line, as the plan words it")
+      == "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini.", "…a size the person chose: no space")
+check(Life.madeLine(came: made, asked: made, hz: 60, id: 7, ms: 412, device: "iPad mini", space: CGSize(width: 1116.6, height: Double.nan))
+      == "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad mini.", "…a side that is no number: none said, no trap")
 check(Life.madeLine(came: VirtualDesktopSize.Size(widthPt: 1218, heightPt: 800, scale: 1), asked: made, hz: 60, id: 7, ms: 9, device: nil)
       == "Virtual Desktop 1218×800 pt @1× at 60 Hz (asked 1218×800 @2×) id 7: made in 9 ms at 1920×1080: no device's screen known yet.",
       "…the mode it came up at, the one asked too, and no device known")
-check(Life.madeLine(came: made, asked: made, hz: 120, id: nil, ms: 0, device: "sillclient")
-      == "Virtual Desktop 1218×800 pt @2× at 120 Hz: said, never made (TEST ONLY, SILL_TEST_VIRTUAL_DESKTOP), for sillclient (its screen).",
+check(Life.madeLine(came: made, asked: made, hz: 120, id: nil, ms: 0, device: "sillclient", space: CGSize(width: 1133.4, height: 743.6))
+      == "Virtual Desktop 1218×800 pt @2× at 120 Hz: said, never made (TEST ONLY, SILL_TEST_VIRTUAL_DESKTOP), for sillclient (its picture: 1133×744 pt).",
       "…a test host's, said and never made")
 // A test host's grace (SILL_TEST_VD_GRACE): the same rules, its seconds.
 var quick = Life(grace: 3)

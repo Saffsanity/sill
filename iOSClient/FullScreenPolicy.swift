@@ -457,9 +457,10 @@ enum FullScreenPolicy {
     /// The room the picture has with the controls hidden (`room`), measured from the stream screen's reader whether they
     /// show now or not: the whole window is the reader plus the safe area it keeps (`readerInsets`, its own: none while
     /// hidden, when it ignores every edge; the top, the sides and no bottom while the controls show), and the fold's top,
-    /// in the reader's space, moves down by the top it keeps. What sizes the Mac's Virtual Desktop by default
-    /// (`Viewport.room`, phase 2b of docs/virtual-desktop-plan.md), so the controls, the drawer, Settings or the keyboard
-    /// coming and going never change it, and a turn, a fold or a resized window does.
+    /// in the reader's space, moves down by the top it keeps. The viewport's `room` (phase 2b of
+    /// docs/virtual-desktop-plan.md): the controls, the drawer, Settings or the keyboard coming and going never change it,
+    /// and a turn, a fold or a resized window does, so the Mac tells a turn from a tap on Full Screen by it (its Virtual
+    /// Desktop is sized to the panel, the space the picture has, since 2026-11-24).
     static func hiddenRoom(reader: CGSize, readerInsets: Insets, insets: Insets, choice: Room, topIsStatusBar: Bool = false,
                            foldTop: CGFloat? = nil) -> CGRect {
         let whole = CGSize(width: reader.width + readerInsets.left + readerInsets.right,

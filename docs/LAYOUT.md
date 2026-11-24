@@ -15,9 +15,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LockedMac` (the device's words for a locked Mac: why, the drawer's and the
   panel's line, the cover over the stream and its "Unlocking…", checked with the
   host's LockPolicy) and image blob framing. `Viewport.swift` —
-  `Viewport` (kind 9: the device's panel, Aa's scale and its rate, and from phase 2b its
-  `room`, `ViewportRoom`: the picture's room with Sill's controls hidden, which sizes the
-  Virtual Desktop),
+  `Viewport` (kind 9: the device's panel, the space its picture has, which the stage fits a window to and sizes
+  the Virtual Desktop, Aa's scale and its rate, and from phase 2b its
+  `room`, `ViewportRoom`: the picture's room with Sill's controls hidden, which tells the
+  Mac a turn from a tap on Full Screen),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
@@ -293,8 +294,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
-  size and rate, the device's, and (phase 2b) following the device, `Follow`, `followStep`, `followWay`
-  (in place, by Noah's probes P2b and P2c of 2026-11-23), the `backing` it is made with, `InPlace` (a
+  size and rate, the device's (rule A, 2026-11-24: the space its picture has, its panel), and (phase 2b)
+  following the device, `Follow` (a tap at once, a turn after 1 s steady: `Cause`), `followStep`, `followWay`
+  (in place, by Noah's probes P2b and P2c of 2026-11-23), the `backing` it is made with (4096 px square for
+  This device: every iPhone's and iPad's space both ways), `InPlace` (a
   follow's steps: applySettings: with the size alone, the switch for a turn, each read back with a
   bounded wait, a fall back to the size it had at 2x, else its removal) and, TEST ONLY, `TestDisplay`
   (the display as the probes measured one) and SILL_TEST_VD_STEPS' knobs; `DisplayMakeGuard`, #380's
@@ -717,11 +720,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   software decoder and prints each one's size and luma, so the placeholder's
   black is measured. `Scripts/desktop-check/live.py OUT` (TEST ONLY; docs/virtual-desktop-plan.md): the Desktop's
   stops on a test host (SILL_TEST_DISPLAYS: steps, taps, rates, the lock, the span), and from phase 2b the Virtual
-  Desktop on four more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's room, its
+  Desktop on five more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's space, its
   turn followed in place as the probes measured a display, its grace, locked and off console, the span; a paired
   device's switch shown at once, an unpaired one's refused, the switch flipped four times a second against the spacing;
-  SILL_TEST_VD_STEPS: a refused switch falling back, another device taken over in place, a room beyond the backing,
-  a way back that never lands removing it), a verdict per rule.
+  SILL_TEST_VD_STEPS: a refused switch falling back, another device taken over in place, a space beyond the backing,
+  a way back that never lands removing it; rule A: made with the controls showing, Full Screen on and off at once, a
+  turn with the controls showing, two changes close together, the iPhone upright after the iPad), a verdict per rule.
   `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
   docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,
@@ -936,7 +940,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   geometry with DuoPosture's split and PhonePortraitLayout), the pointer's dwell at the edge, when it is
   offered, when the controls come back by themselves, the shake (`Sill.shakeToShowControls`), the Settings
   rows' place, the hint, the room (and `hiddenRoom`, the same room measured while the controls show: the
-  viewport's `room` for the Mac's Virtual Desktop, phase 2b), the words; pure, `Tests/checks/full-screen`;
+  viewport's `room`, by which the Mac's Virtual Desktop tells a turn from a tap, phase 2b), the words; pure,
+  `Tests/checks/full-screen`;
   pbxproj A279/F279),
   `RevealEdgePan` (the swipe in's recognizer, a UIPanGestureRecognizer of Sill's on its window, only while
   hidden, which other recognizers wait for it, `EdgeRecognizers.waits` (never one that only watches,

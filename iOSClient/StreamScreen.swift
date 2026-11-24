@@ -239,7 +239,8 @@ struct StreamScreen: View {
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
     /// The room the picture has with the controls hidden (Full Screen's, FullScreenPolicy.hiddenRoom), in points, measured
-    /// whether they show now or not: the viewport's `room`, which sizes the Mac's Virtual Desktop by default (phase 2b).
+    /// whether they show now or not: the viewport's `room` (phase 2b), by which the Mac tells a turn from a tap on Full
+    /// Screen; its Virtual Desktop is sized to the panel, the space the picture has.
     @State private var hiddenRoomSize: CGSize = .zero
     /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
     /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
@@ -569,7 +570,7 @@ struct StreamScreen: View {
         .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
-        // The room with the controls hidden (a turn, a fold, a resized window): the Mac's Virtual Desktop follows it.
+        // The room with the controls hidden (a turn, a fold, a resized window): the Mac tells a turn from a tap by it.
         .onChange(of: hiddenRoomSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }

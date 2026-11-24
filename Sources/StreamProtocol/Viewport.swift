@@ -21,10 +21,13 @@ public struct Viewport: Codable, Hashable {
     /// pipeline when that changes.
     public var fps: Int?
     /// The room the picture has on this device with Sill's controls hidden (`ViewportRoom`; phase 2b of
-    /// docs/virtual-desktop-plan.md as revised 2026-11-18), which sizes the Virtual Desktop and Sill's display for a Mac
-    /// with no screen by default (the device's resolution, Noah's rule). Nil from every device before 2b: a host takes the
-    /// panel (`width`, `height`) then. An older host skips the key. A host from 2b refuses a viewport whose room is out of
-    /// bounds whole, as it refuses a side (`ViewportBounds.refusal`), and a device from 2b holds it to them (`held`).
+    /// docs/virtual-desktop-plan.md as revised 2026-11-18). The Virtual Desktop is sized to the panel (`width`,
+    /// `height`: the space the picture has now, as the stage fits a window to it; Noah, 2026-11-24); the room, the same
+    /// whether the controls show or not, tells the host whether a new panel is a turn, a fold or a resized window (the
+    /// room changed: followed once still) or Full Screen turned on or off (the room the same: followed at once). Nil from
+    /// every device before 2b: a host follows its panel as a turn then. An older host skips the key. A host from 2b
+    /// refuses a viewport whose room is out of bounds whole, as it refuses a side (`ViewportBounds.refusal`), and a device
+    /// from 2b holds it to them (`held`).
     public var room: ViewportRoom?
 
     public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil,
@@ -38,7 +41,7 @@ public struct Viewport: Codable, Hashable {
 /// for the person's Room choice), in the window's current orientation, in device points. The whole screen on an iPad;
 /// clear of the Dynamic Island on an iPhone held sideways; the part above the fold in the Duo's laptop pose; the window
 /// in Stage Manager or Split View. Sill's controls, its drawer, Settings or the keyboard coming and going never change
-/// it, so they never change the Mac's display (#312's rule); a turn, a fold or a resized window does.
+/// it (#312's rule); a turn, a fold or a resized window does: so a host tells the two apart.
 public struct ViewportRoom: Codable, Hashable {
     public var width: Double
     public var height: Double

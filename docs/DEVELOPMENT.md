@@ -544,7 +544,9 @@ the CLI's `--virtual-desktop[=device|main|WxH@S[:HZ]]` (`virtualDesktop`,
 `virtualDesktopSize`, `virtualDesktopHz` in `me.saffer.sill.mac`). A device steps
 onto it with its Desktop button (its dashed screen over "Virtual"); a device that
 turns it on is shown it at once. It is made then, at the device's size by default
-(its room with Sill's controls hidden, `Viewport.room`, at Retina, grown to 800
+(the space its picture has, the viewport's panel, as a window on the virtual
+display is fitted to it: the pane under the bar or the upper half's with the
+controls showing, the whole room with Full Screen; at Retina, grown to 800
 points and held to 4096, as for a Mac with no screen) and rate, or the main
 display's mode or a size chosen in Settings › Displays (taken the next time it
 is made); kept while a device shows it and 30 s after, while locked until the
@@ -552,22 +554,26 @@ unlock; removed at once off console or when turned off; at most one make or
 removal every 3 s and ten a minute; never the main display beside a real
 screen. The windows on it move to the main display as it goes and come back as
 it returns (Accessibility; memory only), and Quit moves them first. It follows
-the device it is for in place (Noah's probes P2b and P2c of 2026-11-23,
-`Scripts/display-modes-probe/p2b|p2c`; `VirtualDesktopSize.InPlace`): a turn
-held 1 s takes about 0.7 s (applySettings: with the turned size alone lands at
-1x, then a CoreGraphics switch to its 2x mode), another device's room of the
-same shape about 0.3 s (one applySettings:), and the Desktop restarts once, at
-the new size; a step refused or late falls back to the size it had and waits
-for its next make, as does a size past the backing it was made with (a square
-of 3072 to 4096 pixels a side for This device) or a device before 0.7. A device
+the device it is for in place while it shows (Noah's probes P2b and P2c of
+2026-11-23, `Scripts/display-modes-probe/p2b|p2c`; `VirtualDesktopSize.InPlace`):
+Full Screen turned on or off at once, a turn after 1 s steady, never sooner than
+1 s after the last follow; a change that keeps it wide (or tall) takes about
+0.3 s (one applySettings:), one that turns it about 0.7 s (applySettings: with
+the turned size alone lands at 1x, then a CoreGraphics switch to its 2x mode), and
+the Desktop restarts once, at the new size; a step refused or late falls back
+to the size it had and waits for its next make, as does a size past the backing
+it was made with (a square of 4096 pixels for This device, which holds every
+iPhone's and iPad's space both ways). A device
 that steps onto it takes it over, and so does the next device to ask for the
 Desktop on it once the one it was for has left. It is the same display as a
 Mac with no screen's (one display in two roles): with no real screen it is that
 display. Sill.log: "Desktop: display 3 of 3 (Virtual Desktop), asked by iPad
-mini.", "Virtual Desktop 1218×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad
-mini (its screen).", "Virtual Desktop: iPad mini turned; followed in place in
-650 ms: 800×1218 pt @2× at 60 Hz." (with a detail line of its steps before it),
-"Virtual Desktop: iPhone shows it now; …", "…; not followed in place: macOS
+mini.", "Virtual Desktop 1446×800 pt @2× at 60 Hz id 7: made in 412 ms for iPad
+mini (its picture: 1117×618 pt).", "Virtual Desktop: iPad mini hid its controls;
+followed in place in 320 ms: 1218×800 pt @2× at 60 Hz.", "Virtual Desktop: iPad
+mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz." (with a
+detail line of its steps before it), "…showed its controls; …", "Virtual
+Desktop: iPhone shows it now; …", "…; not followed in place: macOS
 refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in
 980 ms; the next one is made at 800×1218 pt.", "Virtual Desktop: no device has shown it for 30 s; moved 3
 windows to Built-in Retina Display and removed it.", "Virtual Desktop: 2 of 3

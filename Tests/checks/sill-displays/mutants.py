@@ -91,6 +91,17 @@ MUTANTS = [
     (COORD, "W34 Quit waits for a full-screen window", "moveVirtualDesktopWindowsOut(waitsForFullScreen: false) }",
      "moveVirtualDesktopWindowsOut(waitsForFullScreen: true) }"),
     (COORD, "W35 macOS's removal of the Desktop's display unheard", "        displays.onLost[.desktop] = { [weak self] in self?.desktopDisplayLost() }\n", ""),
+    # Rule A (2026-11-24): its size is the device's space, the viewport's panel
+    (COORD, "W36 the space read as the room", "private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.width, height: v.height) }",
+     "private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.room?.width ?? v.width, height: v.room?.height ?? v.height) }"),
+    (COORD, "W37 the make sized by the room", "            return (VirtualDesktopSize.device(space: vp.map(Self.space)) ?? VirtualDesktopSize.fallback, hz)",
+     "            return (VirtualDesktopSize.device(space: vp?.room.map { CGSize(width: $0.width, height: $0.height) }) ?? VirtualDesktopSize.fallback, hz)"),
+    (COORD, "W38 made with its own pixels alone", "let backing = VirtualDesktopSize.backing(made: asked, follows: follows)",
+     "let backing = VirtualDesktopSize.backing(made: asked, follows: false)"),
+    (COORD, "W39 followed while it does not show", "guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,",
+     "guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device,"),
+    (COORD, "W40 a tap told from a turn by this viewport alone", "VirtualDesktopSize.cause(roomBefore: before?.room",
+     "VirtualDesktopSize.cause(roomBefore: v.room"),
 ]
 caught = 0
 originals = {}
