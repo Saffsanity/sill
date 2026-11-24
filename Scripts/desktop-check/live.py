@@ -23,7 +23,8 @@ turned size by the Desktop that still shows its stop. And rule A (Noah, 2026-11-
 made at the space with the controls showing (an iPad mini's 1117×618 pane: 1446×800), Full Screen on and off followed
 in place at once (1218×800 and back), a turn with the controls showing after 1 s (its upright pane, 1089×800), Full
 Screen on upright (800×1218: 1x, then the switch), two changes close together ending at the right size with no make,
-and the iPhone held upright with Full Screen after the iPad (800×1614 pt, past run 4's 3072 px backing: in place now).
+the iPhone held upright with Full Screen after the iPad (800×1614 pt, past run 4's 3072 px backing: in place now), and
+the iPhone back on it within its grace after a change while away (its space then, 1 s steady).
 Each host is killed at the end; nothing is posted, warped or captured.
 
     Scripts/desktop-check/live.py OUT
@@ -444,11 +445,14 @@ def the_space(out):
         p.join()
         # Q, the iPhone 15 Pro held upright with Full Screen on (393×793), 1 s after P left: its Desktop back on the stop
         # (the span), the Virtual Desktop its own in place (800×1614 pt, 3228 px: past run 4's backing, inside 4096); then its
-        # controls back at 3 (its 16:10 pane, 377×235: 1283×800).
-        q, rq = client(h, out, "vdspace-q", 6, ["desktop", "--fps=120", "--panel=393x793", "--room=393x793", "--device=iPhone",
-                                                "--view-after=377x235@3"], 23)
+        # controls back at 3 (its 16:10 pane, 377×235: 1283×800). Then away from it at 4 (onto the main display), Full Screen
+        # on while away at 4.5 (nothing: it does not show), back onto it at 5 and 5.6 within its 3 s grace: shown again, its
+        # space then (800×1614) after 1 s steady.
+        q, rq = client(h, out, "vdspace-q", 10, ["desktop", "--fps=120", "--panel=393x793", "--room=393x793", "--device=iPhone",
+                                                 "--view-after=377x235@3", "--next-display@4", "--view-after=393x793@4.5",
+                                                 "--next-display@5", "--next-display@5.6"], 23)
         q.join()
-        h.at(30)
+        h.at(34)
     finally:
         h.stop()
     def took(l, size):
@@ -487,9 +491,14 @@ def the_space(out):
             f"VD space: the iPhone held upright after the iPad: followed in place, inside the backing (800×1614): {iphone or said(h, 23, 25.5)}")
     phone_up = [x for x in streams(h, 23, 26) if x[1] == "Virtual Desktop"]
     verdict(bool(phone_up) and phone_up[-1][2] == "800×1614", f"VD space: the Desktop on it upright: {phone_up}")
-    controls = h.all(r"^Virtual Desktop: iPhone showed its controls; ", 26, 29)
+    controls = h.all(r"^Virtual Desktop: iPhone showed its controls; ", 26, 27.9)
     verdict(len(controls) == 1 and took(controls[0][1], "1283×800") is not None,
-            f"VD space: the iPhone's controls back: its 16:10 pane's 1283×800: {controls or said(h, 26, 29)}")
+            f"VD space: the iPhone's controls back: its 16:10 pane's 1283×800: {controls or said(h, 26, 27.9)}")
+    away = h.all(r"^Virtual Desktop: iPhone ", 27.9, 29.5)
+    verdict(not away, f"VD space: away from it (the main display), Full Screen on changes nothing: {away}")
+    again = h.all(r"^Virtual Desktop: iPhone shows it again; ", 29.5, 33)
+    verdict(len(again) == 1 and again[0][0] >= 29.9 and took(again[0][1], "800×1614") is not None,
+            f"VD space: back on it within its grace: its space then (800×1614), after 1 s steady: {again or said(h, 27.9, 33)}")
     verdict(not h.all(r"beyond the backing", 0, 1e9), f"VD space: nothing beyond the backing: {said(h)}")
     verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1, f"VD space: made once, never again: {vd_lines(h)}")
 
