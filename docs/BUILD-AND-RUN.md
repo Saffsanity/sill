@@ -52,7 +52,9 @@ Scripts/steps.sh new | list | find 349  # the step files (docs/steps): this bran
 python3 Scripts/migrate-notes.py        # once, in a branch opened before 2026-11-12, right after `git merge origin/main` stops
 Scripts/agent-simulators.sh create      # once: the agents' simulators "Sill agents Duo" (iOS 27.1) and "Sill agents iPad" (iOS 27.0), shut down
 Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main   # harness photos of HEAD (committed) on the agents' Duo, pixel for pixel against main's, in the heavy lock
-Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
+Scripts/pacing/run.sh                   # pacing away and at home and the link's judge, this tree against origin/main, no encoder, all on loopback (~30 min; --full ~50; --list)
+Scripts/pacing/run.sh --cases homeslow,homefive,homecable --max-seconds 53   # issue #359's backlog at home, five connections, a cable; no host past a minute
+DEVICES=5 RSS_STOP_MB=400 DOOR=Home python3 Scripts/pacing/run.py NAME new 30 --home -- --rate-mbps 6 -- --plain   # one run by hand: five devices, the host's memory each second (NAME.rss.txt), stopped past 400 MB
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it

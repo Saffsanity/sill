@@ -1,7 +1,7 @@
 #!/bin/bash
-# The pacing harness (docs/remote-bundle-plan.md §3 and §11, H3): the host's remote pacing, base
-# against new, with no encoder, no Screen Recording and no device. Each case runs a host, a shaped
-# path and a device, all on loopback:
+# The pacing harness (docs/remote-bundle-plan.md §3 and §11, H3): the host's pacing away from home
+# and at home (FramePacing), base against new, with no encoder, no Screen Recording and no device.
+# Each case runs a host, a shaped path and a device (or several), all on loopback:
 #   - the host (main.swift, built by build.sh): StreamServer.swift as it is at BASE (base) and in
 #     the working tree (new), serving a remote session over RemoteTLS's TLS 1.3 parameters (home: a
 #     home client over plain TCP), fed fake frames of the case's sizes (a keyframe when asked for
@@ -27,6 +27,8 @@
 #                                          the same with it (as "new": the host's and device.py's --audio;
 #                                          docs/audio-plan.md H6), so the gates judge the run with sound
 #   Scripts/pacing/run.sh --list           the cases and their arguments
+#   Scripts/pacing/run.sh --max-seconds 53 every case at most 53 s, so no host runs a minute (run.py gives
+#                                          it 6 s more); gates that count a minute count what ran
 #   Scripts/pacing/summarize.py DIR        the table again, from a finished matrix
 # Everything goes to .build/pacing (git-ignored): the two packages, the device's key, and each
 # matrix's runs in .build/pacing/runs/<date-time>/.
@@ -71,14 +73,27 @@
 #   8 Mbit/s, Low suggested for Pro), dip (behind within 3 s of the end of the host's first second
 #   withholding frames, which waits for the dip's 1 MB queue to fill; fine within 10 s of its end),
 #   slowkfB (never behind or stalled after the first keyframe) and home (never behind)
+#   At home (docs/steps/2026-11-24-home-backlog.md; issue #359's backlog: a home client that reads
+#   slower than the stream; every run's host memory is sampled, NAME.rss.txt, and stops at 400 MB):
+#   homeslow  Balanced-sized frames (100 KB keyframes, 25 KB deltas at 60 fps) on a 6 Mbit/s home
+#            link, the path dead both ways from 35 s: the frame age settles and the host's memory
+#            stays flat (base: both grow, half the frames keyframes), then one "dropping" line
+#   homefive  the same with five connections from one device (DEVICES=5, the iPad app on a Mac with
+#            five windows), the path dead from 22 s: each settles, the stream stays deltas
+#   homecable Pro · Retina-sized frames (1.5 MB keyframes, 83 KB deltas) on a 400 Mbit/s cable: nothing
+#            dropped, the same as base
+#   homestall Balanced-sized frames (250 KB keyframes, 31 KB deltas) on a 50 Mbit/s Wi-Fi that stalls for
+#            1.5 s at 12 s: the frame age back at 45 ms within 5 s (base: the storm the stall starts,
+#            a keyframe every other frame, outlives it)
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
-#   (the old device's liveness: whole messages) and home (a home client, plain TCP: unchanged).
+#   (the old device's liveness: whole messages), home (a home client, plain TCP: unchanged) and
+#   homeext (Extreme at 120 fps at home, 2 MB keyframes and 312.5 KB deltas, on 600 Mbit/s).
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 out="$root/.build/pacing"
-base=origin/main full=0 repeat=1 only="" list=0 sound=0
+base=origin/main full=0 repeat=1 only="" list=0 sound=0 cap=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) base="$2"; shift 2 ;;
@@ -87,8 +102,9 @@ while [ $# -gt 0 ]; do
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
         --sound) sound=1; shift ;;
-        -h|--help) sed -n '2,76p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--sound] [--list]" >&2; exit 2 ;;
+        --max-seconds) cap="$2"; shift 2 ;;
+        -h|--help) sed -n '2,88p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--sound] [--max-seconds S] [--list]" >&2; exit 2 ;;
     esac
 done
 
@@ -109,6 +125,10 @@ cases=(
   "linkdead|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --blackhole-at 20 -- --reconnect --liveness-bytes"
   "linkdown|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --rate-at 20:0 -- --reconnect --liveness-bytes"
   "linkrestart|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 --bitrate 40000000 --restart-at 20:0.1,30:0.1 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "homeslow|45|1|Home|bottleneck|--kf 100000 --delta 25000 --home -- --rate-mbps 6 --delay-ms 10 --queue-bytes 262144 --blackhole-at 35 -- --plain --reconnect"
+  "homefive|30|1|Home|bottleneck|--kf 100000 --delta 25000 --home -- --rate-mbps 6 --delay-ms 10 --queue-bytes 262144 --blackhole-at 22 -- --plain --reconnect"
+  "homecable|30|1|Home|bottleneck|--kf 1500000 --delta 83000 --home -- --rate-mbps 400 --delay-ms 2 --queue-bytes 262144 -- --plain"
+  "homestall|30|1|Home|bottleneck|--kf 250000 --delta 31000 --home -- --rate-mbps 50 --delay-ms 5 --queue-bytes 262144 --rate-at 12:0,13.5:50 -- --plain --reconnect"
 )
 full_cases=(
   "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
@@ -118,7 +138,10 @@ full_cases=(
   "over8|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 --bitrate 40000000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "slowkf|50|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "home|30|1|Home|bottleneck|--kf 150000 --delta 8000 --home -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
+  "homeext|25|1|Home|bottleneck|--kf 2000000 --delta 312500 --fps 120 --home -- --rate-mbps 600 --delay-ms 2 --queue-bytes 262144 -- --plain"
 )
+# How many devices a case runs at once (run.py's DEVICES); one unless named here.
+devices_for() { case "$1" in homefive) echo 5 ;; *) echo 1 ;; esac; }
 all=("${cases[@]}" "${full_cases[@]}")
 if [ "$list" = 1 ]; then
     for c in "${all[@]}"; do IFS='|' read -r name secs reps door relay rest <<< "$c"; printf '%-9s %3s s  %-6s %-10s %s\n' "$name" "$secs" "$door" "$relay" "$rest"; done
@@ -166,6 +189,7 @@ missed=0
 trap 'exit 130' INT TERM
 for c in "${selected[@]}"; do
     IFS='|' read -r name secs reps door relay rest <<< "$c"
+    if [ "$cap" -gt 0 ] && [ "$secs" -gt "$cap" ]; then secs="$cap"; fi
     n="$repeat"; if [ "$full" = 1 ] && [ -z "$only" ]; then n="$reps"; fi
     read -r -a argv <<< "$rest"
     for i in $(seq 1 "$n"); do
@@ -181,7 +205,8 @@ for c in "${selected[@]}"; do
                 fi
                 start="$(load1)"
                 echo "$(date +%T) $run (${secs} s, load $start)" | tee -a "$runs/load.txt"
-                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$build" "$secs" "${args[@]}" > "$runs/$run.run.txt" 2>&1; then
+                if ! DOOR="$door" RELAY="$relay" DEVICES="$(devices_for "$name")" RSS_STOP_MB=400 \
+                     python3 "$here/run.py" "$run" "$build" "$secs" "${args[@]}" > "$runs/$run.run.txt" 2>&1; then
                     echo "    $run did not run: $(tail -n 1 "$runs/$run.run.txt")" | tee -a "$runs/load.txt"
                     missed=$((missed + 1)); break
                 fi

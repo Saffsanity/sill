@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """The pacing harness's table: each run's numbers from its host log ([1s] counters, evictions), its
 device's per-second lines (fps, frame age, rtt, liveness) and its relay (rate changes), then each
-case's base and new side by side with the new build's gate. run.sh prints it at the end of a
-matrix; run it again on a runs folder to read one later.
+case's base and new side by side with the new build's gate, and for the cases at home the host's
+memory (NAME.rss.txt), each device's frame age while the path lives, the lines that dropped a
+device, and which statistics the host's [1s] lines named. run.sh prints it at the end of a matrix;
+run it again on a runs folder to read one later.
 usage: summarize.py RUNS_DIR [--skip S]
 Runs are named CASE-I-BUILD (real24-1-base, real24-1-new, …). The first S seconds after the device
 connected (default 5: the catalog and the first keyframe) are left out of every figure except
@@ -14,7 +16,7 @@ device showing the last frame before the spell or a later one, and the longest i
 new build's Link lines (LinkJudge, docs/remote-bundle-plan.md §6, H11): each run's link changes,
 seconds from the device's first connection, and each case's link gate."""
 import os, re, statistics, sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 args = sys.argv[1:]
 if not args or args[0].startswith("-"): sys.exit(__doc__)
@@ -62,8 +64,9 @@ def one(name):
     sent = drop = wait = wait_after_key = n = evict = 0
     evict_at = None
     withheld_ends = []   # the end of each host second that withheld a frame (dropped, or waited for a keyframe)
+    stat_keys = set()    # every statistic the host's [1s] lines named
     for l in host:
-        if "silent for" in l or "not draining" in l:
+        if "silent for" in l or "not draining" in l or "too far behind" in l:
             evict += 1
             m = re.match(r"\S+ (\d\d:\d\d:\d\d\.\d+) ", l)
             if m and evict_at is None: evict_at = secs(m.group(1)) - t0
@@ -71,6 +74,7 @@ def one(name):
         if not m: continue
         t = secs(m.group(1))
         kv = dict((k, int(v)) for k, v in re.findall(r"([a-zA-Z]+\.[a-zA-Z]+) (\d+)", m.group(2)))
+        stat_keys.update(kv)
         # A [1s] line counts the second before its stamp: one wholly after the first keyframe.
         if first_key is not None and t - 1 > first_key: wait_after_key += kv.get("net.waitKey", 0)
         if kv.get("net.dropped", 0) + kv.get("net.waitKey", 0) > 0: withheld_ends.append(t - t0)
@@ -103,6 +107,19 @@ def one(name):
     # queue, then the kernel's socket buffers): the end of its first second that withheld a frame after
     # the rate fell.
     withheld_at = next((u for u in withheld_ends if drop_at is not None and u > drop_at), None)
+    # At home (docs/steps/2026-11-24-home-backlog.md): while the path lives (from 10 s to its blackhole, else the run's
+    # end), the host's memory (its own pid's resident size, run.py) and each device's frame age; the lines that
+    # dropped a device, by endpoint (each once); what LinkJudge said was waiting when it stalled.
+    end = dark_at if dark_at is not None else (seconds[-1][0] - t0 if seconds else 0)
+    rss_lines = read(name, "rss.txt")
+    rss = [(secs(m.group(1)) - t0, int(m.group(2)) / 1024) for m in (re.match(r"(\d\d:\d\d:\d\d\.\d+) (\d+)$", l) for l in rss_lines) if m]
+    rss10 = next((mb for u, mb in rss if u >= 10), None)
+    rss_end = next((mb for u, mb in reversed(rss) if u <= end), None)
+    rss_stopped = next((l for l in rss_lines if l.startswith("stopped")), None)
+    devices = [window(dev, t0, end, "dev")] + [window(read(name, f"device-{k}.txt"), t0, end, f"dev{k}")
+                                               for k in range(2, 33) if os.path.exists(os.path.join(RUNS, f"{name}.device-{k}.txt"))]
+    dropping = Counter(l.split("dropping: ", 1)[1].strip() for l in host if "dropping: " in l)
+    stalled = [m.group(1) for m in (re.search(r"Link: stalled .*?([\d.]+ [kM]B) waiting", l) for l in host) if m]
     return {"links": links, "firstKey": None if first_key is None else first_key - t0, "dropAt": drop_at, "riseAt": rise_at, "darkAt": dark_at,
             "withheldAt": withheld_at,
             "fps": statistics.mean(fps) if fps else 0.0, "p10": pct(fps, 10), "fpsK": statistics.mean(after_key) if after_key else 0.0,
@@ -111,7 +128,23 @@ def one(name):
             "rttmax": max(worst_rtt) if worst_rtt else 0, "lost": lost, "evict": evict, "rec": rec, "drops": drop,
             "gap": gap, "evictAt": evict_at,
             "stills": len(fresh), "stale": sum(x is None for x in fresh),
-            "freshMax": max((x for x in fresh if x is not None), default=None)}
+            "freshMax": max((x for x in fresh if x is not None), default=None),
+            "statKeys": stat_keys, "end": end, "rss10": rss10, "rssEnd": rss_end, "rssMax": max((mb for _, mb in rss), default=None),
+            "rssStopped": rss_stopped, "devices": devices, "dropping": dropping, "stalled": stalled}
+
+def window(lines, t0, end, tag):
+    """One device's seconds from 10 s after the first connection to `end`: the worst frame age of each second (p95,
+    and the median of each half, to see whether it grows), its frames a second and its keyframes a minute."""
+    rows = [(secs(m.group(1)) - t0, int(m.group(2)), m.group(3), int(m.group(6))) for m in map(DEV.match, lines) if m]
+    rows = [r for r in rows if 10 <= r[0] < end]
+    ages = [int(a.split("/")[1]) for _, _, a, _ in rows if a != "–"]
+    half = 10 + (end - 10) / 2
+    first = [int(a.split("/")[1]) for u, _, a, _ in rows if u < half and a != "–"]
+    second = [int(a.split("/")[1]) for u, _, a, _ in rows if u >= half and a != "–"]
+    span = max(len(rows), 1) / 60
+    return {"tag": tag, "age95": pct(ages, 95), "ageFirst": statistics.median(first) if first else float("nan"),
+            "ageSecond": statistics.median(second) if second else float("nan"),
+            "fps": statistics.mean(f for _, f, _, _ in rows) if rows else 0.0, "keys": sum(k for *_, k in rows) / span}
 
 names = sorted({f[: -len(".device.txt")] for f in os.listdir(RUNS) if f.endswith(".device.txt")})
 # Runs that ended with the Mac busy (run.sh's load.txt: the load at 20 or more after its last try).
@@ -167,6 +200,11 @@ for name, r in runs.items():
 def no_worse(new, base):   # within noise of the base or better: 2 fps, one drop a minute
     return new["fps"] >= base["fps"] - 2 and new["drop"] <= base["drop"] + 1
 
+def settles(r, grows):     # a home client that reads slower than the stream: bounded, not growing
+    ok_devices = all(d["age95"] < 3000 and d["ageSecond"] <= d["ageFirst"] + 500 and d["keys"] <= 40 for d in r["devices"])
+    return (ok_devices and r["rss10"] is not None and r["rssEnd"] is not None and r["rssEnd"] - r["rss10"] < grows
+            and max(r["dropping"].values(), default=0) <= 1)
+
 GATES = {
     "real24": ("≥ 55 fps, 0 dropped", lambda r, b: r["fps"] >= 55 and r["drops"] == 0),
     "kf25m32": ("≥ 55 fps", lambda r, b: r["fps"] >= 55),
@@ -185,7 +223,16 @@ GATES = {
     "over8": ("recorded; ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "low": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
     "switch": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
-    "home": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
+    "home": ("no worse than its base run (2 fps, 1 drop a minute), the same statistics named",
+             lambda r, b: b is None or (no_worse(r, b) and r["statKeys"] == b["statKeys"])),
+    "homeslow": ("settles: each device's frame age p95 < 3 s from 10 s to the blackhole, its second half's median ≤ the first's + 0.5 s, "
+                 "≤ 40 keyframes a minute; the host's memory grows < 10 MB; each drop printed once", lambda r, b: settles(r, 10)),
+    "homefive": ("the same on each of the five, the host's memory growing < 20 MB", lambda r, b: settles(r, 20)),
+    "homecable": ("nothing dropped, no worse than its base run, the same statistics named",
+                  lambda r, b: r["drops"] == 0 and (b is None or (no_worse(r, b) and r["statKeys"] == b["statKeys"]))),
+    "homeext": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
+    "homestall": ("the frame age back at 45 ms within 5 s of the stall's end, ≤ 30 keyframes a minute",
+                  lambda r, b: r["rec"] is not None and r["rec"] <= 5 and r["keys"] <= 30),
     "slowkf": ("recorded: the old device's liveness (whole messages)", None),
 }
 print(f"\n{'case':10} {'runs':>4}  {'base fps':>9} {'new fps':>9}  {'base drop/m':>11} {'new drop/m':>10}  {'base rec':>8} {'new rec':>8}  gate (new)")
@@ -207,6 +254,31 @@ for case in sorted(cases, key=lambda c: (list(GATES).index(c) if c in GATES else
     print(f"{case:10} {len(n):4d}  {fpss(b):>9} {fpss(n):>9}  {f(mean(b, 'drop'), '11.1f'):>11} {f(mean(n, 'drop'), '10.1f'):>10}  "
           f"{recs(b):>8} {recs(n):>8}  {verdict}")
 print("\nbase: BASE's StreamServer.swift; new: the working tree's. fps: each run's mean (runs joined by /).")
+
+# At home (docs/steps/2026-11-24-home-backlog.md): the host's memory, each device's frame age while the path lives,
+# the drops' lines, and the statistics the [1s] lines named, base against new.
+homes = [(n, r) for n, r in runs.items() if n.startswith("home")]
+if homes:
+    print(f"\nAt home, from 10 s to the blackhole or the end (the host's memory: its resident size, ps -o rss):")
+    print(f"{'run':20} {'end s':>5} {'MB@10s':>7} {'MB@end':>7} {'grew':>7} {'MB max':>7}  {'device':6} {'age95':>7} {'1st':>6} {'2nd':>6} {'fps':>5} {'keys/m':>6}  drops (most per endpoint), stalled with")
+    for name, r in homes:
+        f1 = lambda v: "–" if v is None or v != v else f"{v:.1f}"
+        grew = None if r["rss10"] is None or r["rssEnd"] is None else r["rssEnd"] - r["rss10"]
+        drops = f"{sum(r['dropping'].values())} ({max(r['dropping'].values(), default=0)})"
+        for i, d in enumerate(r["devices"]):
+            head = (f"{name:20} {f1(r['end']):>5} {f1(r['rss10']):>7} {f1(r['rssEnd']):>7} {f1(grew):>7} {f1(r['rssMax']):>7}" if i == 0
+                    else f"{'':20} {'':>5} {'':>7} {'':>7} {'':>7} {'':>7}")
+            tail = (f"  {drops}, {', '.join(r['stalled']) or '–'}" + (f"; {r['rssStopped']}" if r["rssStopped"] else "")) if i == 0 else ""
+            print(f"{head}  {d['tag']:6} {f(d['age95'], '7.0f'):>7} {f(d['ageFirst'], '6.0f'):>6} {f(d['ageSecond'], '6.0f'):>6} "
+                  f"{d['fps']:5.1f} {d['keys']:6.1f}{tail}")
+    for case in sorted({re.match(r"(.+)-\d+-(?:base|new)$", n).group(1) for n, _ in homes if re.match(r"(.+)-\d+-(?:base|new)$", n)}):
+        b = [r for n, r in homes if re.match(rf"{case}-\d+-base$", n)]; nw = [r for n, r in homes if re.match(rf"{case}-\d+-new$", n)]
+        if b and nw:
+            kb, kn = set().union(*(r["statKeys"] for r in b)), set().union(*(r["statKeys"] for r in nw))
+            same = "the same" if kb == kn else f"base only {sorted(kb - kn) or '–'}, new only {sorted(kn - kb) or '–'}"
+            print(f"  {case}: the statistics named in the [1s] lines, base and new: {same}")
+    print("  age95: the 95th percentile of each second's worst frame age (ms); 1st, 2nd: the median of each half of the window;"
+          "\n  drops: the host's lines that dropped a device (silent, not draining, too far behind), and the most for one endpoint.")
 
 # The link (docs/remote-bundle-plan.md §6, H11): the new build's Link lines, and each case's gate.
 def after(r, t):

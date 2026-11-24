@@ -117,7 +117,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   two lines; pure, `Tests/checks/away-quality`), `LinkJudge` (each device's
   link judged once a second from the sweep: fine, behind, stalled, the carried
   rate, the suggestion, the host's lines, and which restarts judge afresh
-  (`judgedAfresh`); pure, `Tests/checks/link-judge`),
+  (`judgedAfresh`); pure, `Tests/checks/link-judge`), `FramePacing` (which
+  frame each device is sent, at home by how long its oldest frame has waited
+  in its connection and away by the bytes it holds, the keyframe asked for on
+  a device's behalf at once after a one-off loss at home and otherwise once
+  its queue has drained and a request is due, the ceiling and drain backstop
+  that drop a device once with one line, `FrameTimes`; pure, with a model of a
+  connection in virtual time, `Tests/checks/frame-pacing`;
+  docs/steps/2026-11-24-home-backlog.md),
   `HostStatus` (the snapshot the app shows, pushed on events; `onChange`
   publishes the devices' settings state; `firewall`, the macOS firewall's
   verdict), `FirewallRule` (what the macOS firewall's read-only answers mean
@@ -201,8 +208,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`--encoder-selftest`), `CursorShapeWatcher` (NSCursor.currentSystem →
   `.cursorShape`), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
-  a remote client's frames paced by the bytes its connection has not taken
-  (`paceRemote`, docs/remote-bundle-plan.md §3); one sweep a second closing
+  every client's frames paced as FramePacing says for its route (`pace`; away,
+  docs/remote-bundle-plan.md §3), a client too far behind or no longer reading
+  dropped once, before a frame and at the sweep (`evicts`); one sweep a second closing
   every client's second into its LinkJudge (`onClientLinkChanged`), the judges
   reset only at another quality (`resetLinks`, apart from `resetForNewStream`);
   `send(each:)`, kind 16 per connection; a session `closeSessions` cuts off
@@ -404,7 +412,7 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
-  and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
+  and `takenThisSecond`, so each device's LinkJudge sees them; FramePacing
   drops only frames).
   A sleeping display (issue #134): `DisplayWake` (which of a device's messages
   are a person at it, so the host declares user activity on the Mac for it, as
@@ -669,21 +677,28 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   device away from home. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
-  through). `Scripts/pacing/` is the remote pacing harness
-  (docs/remote-bundle-plan.md §3 and §11): `build.sh [BASE]` makes two
+  through). `Scripts/pacing/` is the pacing harness, away and at home
+  (docs/remote-bundle-plan.md §3 and §11; at home, docs/steps/2026-11-24-home-backlog.md):
+  `build.sh [BASE]` makes two
   throwaway packages under `.build/pacing`, BASE's StreamServer.swift (default
   origin/main) and the working tree's, each with its neighbours (the Door's
-  files too since pairing at home, and `PACING_SERVE_BEFORE_HOME_PAIRING` for a
+  files too since pairing at home, FramePacing where the side has it, and
+  `PACING_SERVE_BEFORE_HOME_PAIRING` for a
   BASE from before it, whose `serve` takes no hello) and fed fake
   frames by `main.swift` (no encoder: a binary that links a media framework is
   refused; on cue, new sizes, a still window or a restart); `run.sh [--full]
-  [--cases a,b] [--repeat N] [--base REF] [--list]`
+  [--cases a,b] [--repeat N] [--base REF] [--max-seconds S] [--list]`
   runs each case on both, host → `bottleneck.py` (a downlink rate on a virtual
   clock, a delay, a finite queue, rate changes) or `Scripts/sillrelay.py` →
   `device.py` (the device's reader, pings, stats and liveness;
-  `--liveness-bytes` for MessageReader's rule), everything on 127.0.0.1 and
+  `--liveness-bytes` for MessageReader's rule), several at once for a case
+  that asks (`run.py`'s DEVICES, the home cases' five connections), the host's
+  own resident memory sampled each second (`NAME.rss.txt`, a run stopped past
+  `RSS_STOP_MB`, 400 from run.sh), everything on 127.0.0.1 and
   each run only while the load average is under 20; `summarize.py` prints the
-  table and each case's gate.
+  table and each case's gate, and for the cases at home the host's memory,
+  each device's frame age while the path lives, the lines that dropped a
+  device and the statistics the [1s] lines named, base against new.
   `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
   `run.sh` builds and runs those that never touch an encoder (the probe and
   encoder checks, which run in real time with tight bounds and so stay out of
