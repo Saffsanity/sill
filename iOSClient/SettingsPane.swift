@@ -151,6 +151,20 @@ enum SettingsPane {
         /// A rect of the leading-edge space in the screen's own, left to right (the checks' view of it).
         func onScreen(_ r: CGRect) -> CGRect { Self.leading(r, width: size.width, rightToLeft: rightToLeft) }
 
+        /// A part's column inside its scroll view, as the scroll view's content margins at its sides (HostSettingsPanel's
+        /// `part`): from the scroll view's leading edge to the column's, down to the display's pixel grid (`scale`
+        /// pixels a point; 0 for none), and the rest of the scroll view's width beyond the column. So the rows are laid
+        /// out the column's whole width from a whole pixel, as when each scroll view was only its column's width (its
+        /// own frame then took any part of a pixel). Half a pixel off the grid, at 34.5 pt on a 3x screen (the Duo's
+        /// inner display upright, 669 pt wide), the rows' text was laid out a little narrower, and Full Screen's
+        /// footnote broke "them back." onto a second line (the photos of 0fe6f77a and d02c139b, 2026-11-23 and 24).
+        static func contentMargins(column: CGRect, in scroll: CGRect, scale: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+            let exact = max(0, column.minX - scroll.minX)
+            let pixels = exact * scale
+            let leading = scale > 0 ? (abs(pixels - pixels.rounded()) < 0.001 ? pixels.rounded() : pixels.rounded(.down)) / scale : exact
+            return (leading, max(0, scroll.width - leading - column.width))
+        }
+
         /// The header's span, x and width in the leading-edge space: the Mac's column (one column, the laptop
         /// pose's upper page), and in the book pose from the leading page's column across the fold to the
         /// trailing page's column's far edge, where Done goes. Pinned over the scroll view, it keeps to the column,

@@ -239,6 +239,10 @@ struct ContentView: View {
 ///   edge effect (iOS 26 and later), which the pane otherwise turns off on every edge
 ///   (`SettingsPane.Layout.systemEdgeEffectHidden`), so a photo shows what it does: on the 13-inch iPad's
 ///   sideways screen, drawn a quarter turn round (below), a blur over all but the last rows.
+/// * `-SillSettingsColumnGrid points|exact` — with `-SillSettings 1`: Settings' rows placed in their scroll
+///   view from a whole point, or at their column's own place, instead of from a whole pixel
+///   (`SettingsPane.Layout.contentMargins`), so a photo shows what each does to their text (`exact` at
+///   34.5 pt on a 3x screen: Full Screen's footnote breaks "them back." onto a second line).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
