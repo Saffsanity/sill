@@ -68,12 +68,9 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   and bounce only when they do not fit. Each scroll view spans its page, the whole screen in one column, out
   to the screen's edges through the safe area beside it (the pane is laid out in the safe area and each
   scroll view reaches past it, `ignoresSafeArea`, as far as the pane's own reader says the safe area goes),
-  and the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`), so a
-  drag beside them scrolls them as a drag on them does; a tap there does nothing. Padded into their column
-  inside the wider scroll view, the rows' text can be laid out a pixel narrower where the column's edge falls
-  between two pixels (34.5 pt on the Duo's inner display upright, on a 3x screen): there Full Screen's
-  footnote, which fitted its line with about a point to spare, breaks its last two words onto a second line,
-  and so it does on an iPad. Their edges fade over 12 pt
+  and the rows keep to their column inside it (`SettingsPane.Layout`'s `macScroll` and `deviceScroll`; the
+  column is the scroll view's content margins, so the rows are laid out at its width as before), so a drag
+  beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt
   where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
   laptop pose's fold left a sliver of a line); the fade runs the scroll view's width, which holds nothing
   beside the column, so it reads as before. The scroll indicator is the scroll view's, so it sits at the
