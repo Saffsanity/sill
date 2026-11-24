@@ -361,3 +361,129 @@ used)"; #323: "as a toggle".
   menu under the black (added to its defects); and a main-thread stall need not be a keychain prompt: WindowSizer is the
   main actor's, so Accessibility waiting on an app that hangs while Sill sizes its window can reach the watchdog's 10 s
   and end the session (named in the defects; WindowSizer itself is outside this pull request).
+- **Run 6 (2026-11-24): the pointer hidden while dark, and dark 5 s after the last device leaves.** Noah installed a
+  test build with this branch today and tried it with his iPad and iPhone. Sill.log: "Privacy: this Mac’s screen is
+  dark while a device is connected (1 display)." 14 ms after "Client connected", and "this Mac’s screen is lit again."
+  30.2 s after the last device left. His words, in order: the cursor still shows on the darkened screen and the screen
+  does not undarken when the client disconnects; then "Scratch that, it does work, 30 seconds seems to long. Why did
+  you choose that and could we make it fast?"; then "The cursor is still shown when darkened". His log has, twice, a
+  few seconds after his device left and while the screen was still black for its 30 s, "Privacy: locking this Mac:
+  someone pressed a key or clicked on it.": he touched his Mac in the wait, and it locked on him. That was "does not
+  undarken". Why 30 s: a connection that drops and comes back (a Wi-Fi blip, a network switch, a moment in another
+  app) never showed the desktop to the room in between, and it matched the lock's own wait (#402). Main d9b3e995
+  (#410, #406, #405) merged in (8af2688d, no conflict).
+  - *The pointer, hidden (rule 15; the plan's open decision 14 decided by Noah: "The cursor is still shown when
+    darkened").* While the black is up and the Mac reads unlocked, with Settings' Hide the pointer too on (on by
+    default, `HostConfig.darkenHidesPointer`), the pointer is hidden: after the black is up and its line and hint, never
+    over the desktop. Shown for the lock screen (macOS's own, in front of the black) and another user's session, and
+    hidden again at a device's unlock. Shown before the black comes down, whichever way it ends (below). How: macOS has
+    one pointer; CoreGraphics' public CGDisplayHideCursor and CGDisplayShowCursor hide and show it on every screen at
+    once (the SDK's CGDirectDisplay.h: "Hide the mouse cursor and increment the hide cursor count. The `display'
+    parameter is ignored."), but act only for the app in front unless the app's own connection to the window server
+    says it may set the pointer from the background: the connection property "SetsCursorInBackground", set with the
+    private CGSSetConnectionProperty on Sill's own connection (CGSMainConnectionID). Sill.app stays in the background
+    while a device uses the Mac (activating it would take the keys from the app the device uses), and its black
+    windows must ignore the mouse for the device's input, so no cursor of theirs can do it: nothing public hides an
+    app-in-the-background's pointer, and the private property is what macOS's own frameworks use for it. Read, not
+    run, on this Mac (macOS 27.2.1): `dyld_info -exports` of CoreGraphics re-exports `_CGSSetConnectionProperty`,
+    `_CGSMainConnectionID` and `_CGDisplayHideCursor` from SkyLight's `_SLS…`/`_SL…`; the dyld shared cache has
+    "SetsCursorInBackground" in SkyLight's event code (beside `CGXTrackBackgroundEventShape`), and in ViewBridge as
+    "CGSSetConnectionProperty (SetsCursorInBackground)" and "settingMousePointerImageInBackgroundIsAllowed" (macOS's
+    own use); the window server keeps the hide count apart from the cursor's image ("cursorShow:%d (cursorHideCount)",
+    "cursorVisState") and says "%s Unwound cursor hides", consistent with a connection's hides ending with it. That the
+    hide is counted per connection and ends with the process is the long-known behaviour this rests on, not measured
+    here: Noah's step 2 (a `killall -9 Sill` while dark) is its proof. `PointerCalls` (PrivacyCurtain.swift) looks the
+    two calls up by name (dlopen of the already loaded CoreGraphics, then SkyLight's own names; never linked), beside
+    the virtual display's surface, the lock's SACLockScreenImmediate and the shortcuts' getters, Sill's other private
+    calls: missing, darkening goes on and the log says once that the pointer stays visible. `PointerHider` keeps at most
+    one hide outstanding, sets the property just before it and takes it back just after the show, and hides again at a
+    wake. Every test host's dry run says what it would do and looks the two calls up by name (found on this Mac), never
+    calling them; the pointer of this Mac was never hidden by an agent.
+  - *What the device draws, unchanged (b).* The host never reports the pointer's visibility: the frames never carry the
+    cursor (`showsCursor` false), kind 26 says where the pointer is (CGEvent(source: nil)'s location, whatever its
+    visibility) and kind 14 what shape (CursorShapeWatcher, NSCursor.currentSystem at 20 Hz). AppKit's
+    `currentSystemCursor` (disassembled here with `dyld_info -disassemble`) reads the registered cursor
+    "com.apple.coregraphics.GlobalCurrent"'s images (two calls, the second with that name and five out-arguments: the
+    shape of CGSCopyRegisteredCursorImages): the image, not its visibility, which the hide count does not change. So a
+    device's pointer keeps its place and its shape over text and links while the Mac's is hidden. An app that hides the
+    Mac's cursor with the hide count (a video player, a game) was never told to a device (docs/pointer-visibility-plan.md
+    Q8: "no public API tells another app's cursor is hidden"; the device's arrow stays), and one that sets a blank
+    cursor image still blanks the device's pointer as before: nothing the host reported can now be mistaken for Sill's
+    hide, and nothing new is told apart or lost. Were the shape to read nil while hidden (not expected), the device would
+    keep the last shape until the screen is lit (the watcher keeps the last); were it to read blank, the device's
+    pointer would vanish while dark: Noah's step 1 looks at exactly this. (CursorClass is ready-175's, not in main: the
+    standard cursors told from an app's own, by shape; no visibility either.)
+  - *More than one screen (d).* macOS hides its one pointer on every screen at once, so the rule goes by what the person
+    at the Mac needs: no pointer while every screen they can see is black (a screen just plugged in is about to be;
+    Sill's own displays are seen by nobody at the Mac), and the pointer whenever they are to use the Mac: every screen
+    lit (taken back by their own unlock, the wait over, a key after the last device left, the switch off, a quit), the
+    lock screen in front, another user's session.
+  - *Every way the black ends, and the pointer:* 1, the last device gone and the wait over: shown, then lit (the rule's
+    order; a key in the wait the same); 2, the switch off: shown, then lit; 3, Sill quits: shown, lit, its line, and
+    the process's end anyway; 4, Sill crashes or is killed: the window server ends the dead connection's hide with it
+    (Noah's step 2); 5, the watchdog: `_exit`, as 4; 6, the Mac locked and unlocked at the Mac: shown as the lock screen
+    shows, lit at the Mac's own unlock with the pointer already shown (a device's unlock: hidden again, still dark);
+    7, a sleep and wake: the lock screen at the wake shows it; without a password the hide stays, made again at the wake
+    (a show and a hide, the count still one); 8, another user: shown at the switch; 9, a display added or removed: the
+    hide covers every screen, a screen not yet covered included; with no screen left, shown, then lit. And
+    WindowCurtain's lift shows it whatever the rule said: never a pointer left hidden.
+  - *Dark 5 s after the last device leaves (rule 6, as Noah asked).* Settings' new row under Darken this Mac's screen,
+    Stay dark after the last device leaves: 5 seconds (the default) or 30 seconds (`HostConfig.darkenWait`). With no lock
+    to follow, the departure's hint says "This Mac’s screen comes back within 5 seconds. Press any key or click to bring
+    it back now.", and a key or click at the Mac lights the screen at once and locks nothing: the lock at a key is for
+    while a device is connected. With Lock this Mac when the last device leaves on, nothing changes: the black holds
+    until the lock shows (bounded by the lock's own 30 s + its 3 s confirmation + 1 s, `DarkenPolicy.lockGrace`), and a
+    key or click in that wait, or during the hold, locks at once. A device back inside the wait: still dark, the hint
+    reworded; back after a key lit it: dark again at once. Two devices of which one leaves: no wait. The watchdog beats
+    while the black is up, the wait included, as before; the lock's own wait and its lines are part 1's, unchanged
+    (main's behaviour). A wait chosen while one runs: it ends by the new choice at the next tick.
+  - *A deliberate leave (d) is not told apart, so left out.* The host can tell a connection the device closed cleanly
+    (end of stream, no error) from one that timed out or stopped draining, but a clean close is not a deliberate leave:
+    the device's own liveness check closes its connection the same way (NWConnection.cancel(), after 6 s without
+    hearing the Mac) and then reconnects, so a blip that ends with that close reaching the Mac would light the room a
+    second later; and a relay on this Mac closes the host's side cleanly whatever happened to the device. Telling them
+    apart needs a word from the device, a change to the wire the task rules out: every departure waits the same.
+  - *Settings › Devices* gets two rows under Darken this Mac's screen, after A key or click on this Mac locks it: **Hide
+    the pointer too** (on) and **Stay dark after the last device leaves** (5 seconds, or 30 seconds), worded as the
+    section's rows and as #402's Turn off its display too; the footnote says the wait, and with #402's lock on that the
+    black holds for its lock screen. Saved as `darkenHidesPointer` and `darkenWait` (seconds) in me.saffer.sill.mac;
+    `-SillSetAfter` takes `darkenWait=5|30` and `darkenHidesPointer`; the CLI `--darken-wait=5|30` and
+    `--darken-pointer=hide|show` (with `--synthetic` only); no device sets them. Previews: pane-devices-darkenlong (30 s,
+    the pointer shown), pane-devices-darkenlock (the footnote with #402's lock on) and privacy-hint-left.
+  - *The rule and its check* (DarkenPolicy, `Tests/checks/darken`): rule 15 (`shouldHidePointer`, `.pointer(hidden:)`:
+    after the raise, before the lift, by the reading and its switch), rule 6's `wait` (Settings' choice, or a test
+    host's SILL_TEST_PRIVACY_GRACE as before) apart from `lockGrace` (the lock's own wait, the hold's bound),
+    `lightsAtKey` (the wait with no lock to follow and no lock being confirmed), the departure's hint `.left(seconds)`,
+    `holding` (a line when the dark holds for a lock), `litByKey`. HostConfig's two knobs in away-quality (AQ-D10 to
+    D20). The check's cases written before run 6 run with the long wait and the pointer's switch off, so their actions
+    stay as they were; run 6's cases and Pair's use the defaults.
+  - *Defaults taken in run 6* (the pull request lists them for Noah): the pointer hidden while dark, with a switch (on);
+    shown for the lock screen and another user's session; one pointer for every screen (hidden while every screen one
+    can see is black); 5 s by default, 30 s the other choice; the wait's hint and a key or click lighting it with no lock
+    to follow; #402's lock on unchanged; every departure waits the same (no wire change).
+  - *Known visible behaviour, changed:* the pointer no longer shows on the black (the first item of the list above);
+    new: with the 5 s wait, a connection that drops and stays away longer than 5 s shows the desktop to the room until
+    it is back (the 30 s choice keeps the old cover); the key or click that lights the screen after the last device left
+    still reaches the app under it, as the one that locks does.
+  - *Noah's trial (run 6; it replaces the list above, shortest first).* What it does, in plain words: while the iPhone or
+    iPad uses the Mac, every screen of the Mac is black and the Mac's pointer is gone, while the iPad still shows its
+    own; a key or click on the Mac while the iPad is connected locks it; when the iPad leaves, the screens come back 5
+    seconds later, or at once with a key or click. Set up: Darken this Mac's screen on, Only while a device is away from
+    home off, Hide the pointer too on, Stay dark after the last device leaves 5 seconds, Lock this Mac when the last
+    device leaves off.
+    1. *The pointer:* connect the iPad (black); move the Mac's mouse: no pointer on the black; on the iPad, the pointer
+       over text and a link: still shown, an I-beam and a hand; ⌃⌘Q: the lock screen with its pointer; unlock: lit.
+    2. *The wait:* close Sill on the iPad: back in about 5 s, the hint saying so; connect, close again and press a key on
+       the Mac within those seconds: lit at once, not locked.
+    3. *A crash:* connect (black, no pointer), then from the iPad's Terminal on the Mac `killall -9 Sill`: lit, and the
+       pointer back.
+    4. *The switches:* Settings › Devices in front, keys passing; connect; click Hide the pointer too under the black:
+       the pointer shows; again: hidden; click Darken this Mac's screen: lit; again: black.
+    5. *Sill quits:* `osascript -e 'quit app "Sill"'` from the iPad: lit with the pointer.
+    6. *What stays hidden:* ⌘Space, F3, the volume keys: nothing over the black.
+    7. *A key or click while connected:* locks; Touch ID: lit about 2 s later, while the iPad stays.
+    8. *A display:* plugged in and out while dark: black within a moment, no pointer on it.
+    9. *Sleep and another user:* sleep from the iPad, wake at the Mac: the lock screen with its pointer; unlock: lit;
+       another user and back: lit.
+    10. *From away with the lock:* Only while away on, #402's lock on; the iPhone through Tailscale: black; close Sill:
+        the black holds about 30 s, then the lock screen; again, a key in those 30 s: locks at once.

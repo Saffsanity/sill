@@ -210,7 +210,7 @@ def case_pass(out):
     c = client(h, "pass", 6, 1.0)
     h.at(4.0); write(f, "key")
     c.join(); h.at(8); h.stop()
-    verdict(bool(h.find("keys and clicks on this Mac reach its apps.")), "the start line says keys pass")
+    verdict(bool(h.find("; keys and clicks on this Mac reach its apps;")), "the start line says keys pass")
     verdict(bool(h.find(HINT_PASS, after=3.9)) and not h.find(LOCK_DRY), "a key only shows the ⌃⌘Q hint, no lock")
 
 
