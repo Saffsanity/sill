@@ -22,12 +22,17 @@ import StreamProtocol
 ///   unlocked one) stays in the rule, checked, for a macOS that moves its lock screen.
 /// - **Up before the panel lights** (rule 5): `sessions` returns `raise` at the connect of a session that counts, and the
 ///   coordinator calls it before it declares the connect's user activity (DisplayWake), in the same main-actor turn.
-/// - **The session's end** (rule 6): when the last session that counts leaves, the windows stay up `grace` (30 s, the
-///   lock's wait, PrivacyPolicy.grace), then lift, unless a session that counts comes back meanwhile (one line each). If
-///   that departure also started the lock's wait (no session at all left, Lock this Mac when the last device leaves on:
-///   `lockFollows`), the dark holds at its end while the lock is under way (`lockHolds`: PrivacyPolicy's wait or
-///   confirmation pending), so the room never sees the desktop between the dark and the lock screen; never longer than
-///   `grace` + `lockConfirm` + `holdSlack` after the departure (R0: the screen never stays dark).
+/// - **The session's end** (rule 6): when the last session that counts leaves, the windows stay up `wait` (Settings'
+///   Stay dark after the last device leaves: 5 s by default, or 30 s, HostConfig.darkenWait; Noah, 2026-11-24), then
+///   lift, unless a session that counts comes back meanwhile (one line each). If that departure also started the lock's
+///   wait (no session at all left, Lock this Mac when the last device leaves on: `lockFollows`), the dark holds at its
+///   end while the lock is under way (`lockHolds`: PrivacyPolicy's wait or confirmation pending), so the room never sees
+///   the desktop between the dark and the lock screen; never longer than `lockGrace` (the lock's 30 s) + `lockConfirm` +
+///   `holdSlack` after the departure (R0: the screen never stays dark). With no lock to follow (`lightsAtKey`), the
+///   wait's hint says when the screen comes back, and a key or click on this Mac lights it at once and locks nothing:
+///   the lock at a key is for while a device is connected. With a lock to follow, a key or click locks, as before.
+///   Whether a device left on purpose cannot be told without a change to the wire (a device's own Disconnect and its
+///   liveness check both close the connection cleanly, and the second reconnects), so every departure waits the same.
 /// - **Someone at the Mac** (rule 7, `local`): while the windows are up and the Mac reads unlocked, a key or a click Sill
 ///   did not post (`ownEvent`: it carries neither `eventTag` nor Sill's own process as its source) asks `lock` with the
 ///   switch "A key or click on this Mac locks it" on (at most once per `lockConfirm`), and shows the hint; with it off,
@@ -49,20 +54,30 @@ import StreamProtocol
 ///   long as it was stopped, and a killed one lost it within 16 ms: only an end of the process lifts a hung Sill's.
 /// - **Screens** (rule 13, `screens`): every screen (DesktopDisplays.role) of some size; never Sill's stage or Desktop
 ///   display, nor macOS's stand-in for a Mac with no screen.
+/// - **The pointer** (rule 15, `shouldHidePointer`; Noah, 2026-11-24: "The cursor is still shown when darkened", the
+///   plan's open decision 14 decided): hidden while the black windows are up and the Mac reads unlocked, with Hide the
+///   pointer too on (HostConfig.darkenHidesPointer); shown for the lock screen and another user's session, and again
+///   before the black comes down, whichever way it ends. macOS has one pointer and hides it on every screen at once, so
+///   the rule goes by what the person at the Mac needs: no pointer while every screen they can see is black (a screen
+///   just plugged in is about to be, and Sill's own displays are seen by nobody at the Mac), and the pointer whenever
+///   they are to use the Mac (every screen lit, the lock screen, another user). A device's own pointer is drawn from
+///   where the Mac's is and the shape macOS reports (kinds 26 and 14), neither of which the hide touches.
 /// - **Only Sill.app itself darkens** (rule 14, `darkensForReal`: the lock's rule, PrivacyPolicy.locksForReal). The
 ///   CLI, the bare SillMenuBar binary and every test host decide the same and act on nothing: their glue says what it
 ///   would do (the "(dry run)" lines), draws nothing, watches no input, locks nothing and never quits for the watchdog.
 /// - **Settings › Devices** (`scope(on:onlyAway:)`): Darken this Mac's screen, and under it Only while a device is away
-///   from home (on by default, remembered while the first is off) and A key or click on this Mac locks it (on).
+///   from home (on by default, remembered while the first is off), A key or click on this Mac locks it (on), Hide the
+///   pointer too (on) and Stay dark after the last device leaves (5 seconds, or 30).
 ///
 /// Pure (Foundation, StreamProtocol's DesktopDisplays and SafeText, HostConfig's scope, PrivacyPolicy's constants,
 /// readings and rule of who acts), checked with them as one module (Tests/checks/darken).
 package enum DarkenPolicy {
     // MARK: The constants
 
-    /// The wait after the last session that darkens leaves (rule 6): the lock's, so a departure that starts both ends both
-    /// together, and a test host's SILL_TEST_PRIVACY_GRACE shortens both.
-    package static let grace: Double = PrivacyPolicy.grace
+    /// The lock's wait (rule 6): the dark held for a lock its departure started lasts at most this + `lockConfirm` +
+    /// `holdSlack` after that departure. The dark's own wait is Settings' choice (HostConfig.darkenWait: 5 s, or 30 s, the
+    /// same as this); a test host's SILL_TEST_PRIVACY_GRACE shortens both.
+    package static let lockGrace: Double = PrivacyPolicy.grace
     /// How long a lock asked at a key on this Mac has to show in SessionLock's reading (the lock's own).
     package static let lockConfirm: Double = PrivacyPolicy.lockConfirm
     /// Rule 8: a device's input posted at the locked screen this long before an unlock makes the unlock the device's.
@@ -204,14 +219,21 @@ package enum DarkenPolicy {
 
     // MARK: Outputs
 
-    /// The hint's second line: a key locks this Mac, or the way to use it here (⌃⌘Q).
-    package enum Hint: Equatable, Sendable { case lock, pass }
+    /// What the hint says: a key locks this Mac, or the way to use it here (⌃⌘Q); or, in the wait after the last device
+    /// left with no lock to follow, that the screen comes back within these seconds and a key or click brings it back now.
+    package enum Hint: Equatable, Sendable {
+        case lock, pass
+        case left(Int)
+    }
 
     enum Action: Equatable, Sendable {
         /// The black windows up on every screen to cover (`screens`), with the hint; at a connect, before anything else.
         case raise
         /// The black windows down.
         case lift
+        /// Rule 15: this Mac's pointer hidden (true), only once the black is up; or shown again (false), before it comes
+        /// down, at the lock screen and at another user's session.
+        case pointer(hidden: Bool)
         /// The hint's two lines on each dark screen until `until` (the glue fades them then).
         case hint(Hint, until: Double)
         /// Lock this Mac now (ScreenLocker; a test host only says it would).
@@ -233,8 +255,13 @@ package enum DarkenPolicy {
         /// Lock this Mac when the last device leaves (HostConfig.lockAfterSession): whether a departure starts the lock's
         /// wait too.
         private(set) var lockAfterSession: Bool
-        /// The wait (`DarkenPolicy.grace`, or a test host's SILL_TEST_PRIVACY_GRACE, the lock's too).
-        let grace: Double
+        /// The wait after the last session that darkens leaves (rule 6): Settings' choice (HostConfig.darkenWait, 5 or
+        /// 30 s), or a test host's SILL_TEST_PRIVACY_GRACE.
+        private(set) var wait: Double
+        /// Hide the pointer too (HostConfig.darkenHidesPointer; rule 15).
+        private(set) var hidesPointer: Bool
+        /// The lock's wait (`DarkenPolicy.lockGrace`, or a test host's SILL_TEST_PRIVACY_GRACE): the hold's bound.
+        let lockGrace: Double
         /// Rule 4 (`staysUnderLockScreen`, or the check's choice).
         let underLockScreen: Bool
 
@@ -248,6 +275,8 @@ package enum DarkenPolicy {
 
         /// The black windows are up (the last `raise` or `lift` said).
         private(set) var up = false
+        /// The pointer is hidden (the last `pointer` said).
+        private(set) var pointerHidden = false
         /// When the last session that darkens left, while its wait runs (rule 6).
         private(set) var waitingSince: Double?
         /// That departure left no session at all with the lock's switch on: the lock's wait started with it.
@@ -269,12 +298,15 @@ package enum DarkenPolicy {
         private(set) var deviceInputAt: Double?
         private(set) var deviceName: String?
 
-        init(scope: HostConfig.Darken, keysLock: Bool, lockAfterSession: Bool, grace: Double = DarkenPolicy.grace,
-             underLockScreen: Bool = DarkenPolicy.staysUnderLockScreen) {
+        init(scope: HostConfig.Darken, keysLock: Bool, lockAfterSession: Bool,
+             wait: Double = HostConfig.standard.darkenWait.seconds, hidesPointer: Bool = HostConfig.standard.darkenHidesPointer,
+             lockGrace: Double = DarkenPolicy.lockGrace, underLockScreen: Bool = DarkenPolicy.staysUnderLockScreen) {
             self.scope = scope
             self.keysLock = keysLock
             self.lockAfterSession = lockAfterSession
-            self.grace = grace
+            self.wait = wait
+            self.hidesPointer = hidesPointer
+            self.lockGrace = lockGrace
             self.underLockScreen = underLockScreen
         }
 
@@ -289,10 +321,19 @@ package enum DarkenPolicy {
         }
         /// Rule 4: the black windows up now.
         var shouldBeUp: Bool { wantsDark && (underLockScreen || mac == .unlocked) }
+        /// Rule 15: the pointer hidden now: the black up on a Mac that reads unlocked (the lock screen and another user's
+        /// session have theirs), with Hide the pointer too on.
+        var shouldHidePointer: Bool { up && hidesPointer && mac == .unlocked }
+        /// Rule 6: the wait after the last session that darkens left runs with no lock to follow it and no lock asked at
+        /// a key being confirmed: a key or click lights the screens at once, and the hint says when they come back.
+        var lightsAtKey: Bool { waitingSince != nil && !lockFollows && askedAt == nil }
         /// Something here waits on the clock: the glue ticks (`DarkenPolicy.tick`), and Sill.app holds App Nap off.
         var pending: Bool { waitingSince != nil || holdingSince != nil || askedAt != nil }
         /// The hint's wording now.
-        var hint: Hint { keysLock && !keysPass ? .lock : .pass }
+        var hint: Hint {
+            if lightsAtKey { return .left(max(1, Int(wait.rounded(.up)))) }
+            return keysLock && !keysPass ? .lock : .pass
+        }
 
         // MARK: Events
 
@@ -305,15 +346,21 @@ package enum DarkenPolicy {
             var out: [Action] = []
             if counting > 0 {
                 if waitingSince != nil || holdingSince != nil {
+                    let left = lightsAtKey
                     waitingSince = nil
                     holdingSince = nil
                     lockFollows = false
-                    out.append(.line(Words.cameBack(grace)))
+                    out.append(.line(Words.cameBack))
+                    // The wait's hint, still showing, says the device is back.
+                    if up, left, let until = hintUntil, until > now { out.append(.hint(hint, until: until)) }
                 }
             } else if countingBefore > 0, darkBefore {
                 waitingSince = now
                 lockFollows = lockAfterSession && sessions == 0
-                out.append(.line(Words.lastLeft(grace)))
+                out.append(.line(Words.lastLeft(wait, keyLights: lightsAtKey)))
+                // With no lock to follow, the person at the Mac is told when the screen comes back, and that a key or
+                // click brings it back now.
+                if up, lightsAtKey { out += showHint(at: now) }
             } else if sessions > 0 {
                 // A session that does not darken joined while the wait runs: the lock's wait ended with it.
                 lockFollows = false
@@ -323,14 +370,19 @@ package enum DarkenPolicy {
             return out + settle(at: now)
         }
 
-        /// The switches changed (Settings › Devices, at once).
-        mutating func switched(scope: HostConfig.Darken, keysLock: Bool, lockAfterSession: Bool, at now: Double) -> [Action] {
+        /// The switches changed (Settings › Devices, at once). `wait` and `hidesPointer`: Stay dark after the last device
+        /// leaves (a wait under way ends by the new one) and Hide the pointer too, nil keeping them; neither is a switch of
+        /// darkening (rule 9's).
+        mutating func switched(scope: HostConfig.Darken, keysLock: Bool, lockAfterSession: Bool, wait: Double? = nil,
+                               hidesPointer: Bool? = nil, at now: Double) -> [Action] {
             let scopeChanged = scope != self.scope
             let darkening = scopeChanged || keysLock != self.keysLock
             let hintBefore = hint
             self.lockAfterSession = lockAfterSession
             if !lockAfterSession { lockFollows = false }
-            guard darkening else { return [] }
+            if let wait { self.wait = wait }
+            if let hidesPointer { self.hidesPointer = hidesPointer }
+            guard darkening else { return pointer() }
             self.scope = scope
             self.keysLock = keysLock
             takenBack = false
@@ -396,6 +448,12 @@ package enum DarkenPolicy {
         /// A person's input on this Mac (the observer: its kind, and whether Sill posted it).
         mutating func local(_ kind: Local, tagged: Bool, at now: Double) -> [Action] {
             guard !tagged, !quitting, up, mac == .unlocked else { return [] }
+            // Rule 6: the last device that darkens has left and no lock follows: a key or click lights the screens at
+            // once, and locks nothing (keys locking or passing alike).
+            if kind != .move, lightsAtKey {
+                waitingSince = nil
+                return [.line(Words.litByKey)] + settle(at: now)
+            }
             if kind != .move, keysLock, !keysPass, lastAsk.map({ now - $0 >= lockConfirm }) ?? true {
                 lastAsk = now
                 askedAt = now
@@ -430,12 +488,15 @@ package enum DarkenPolicy {
                     out.append(.look)
                 }
             }
-            if let since = waitingSince, now - since >= grace {
+            if let since = waitingSince, now - since >= wait {
                 waitingSince = nil
-                if lockFollows, lockHolds { holdingSince = since }
+                if lockFollows, lockHolds {
+                    holdingSince = since
+                    out.append(.line(Words.holding))
+                }
                 lockFollows = false
             }
-            if let since = holdingSince, !lockHolds || now - since >= grace + lockConfirm + DarkenPolicy.holdSlack {
+            if let since = holdingSince, !lockHolds || now - since >= lockGrace + lockConfirm + DarkenPolicy.holdSlack {
                 holdingSince = nil
             }
             if up, !shouldBeUp { out.append(.line(Words.lit)) }
@@ -452,19 +513,28 @@ package enum DarkenPolicy {
             guard up else { return [] }
             up = false
             hintUntil = nil
-            return [.lift, .line(Words.quitting)]
+            return pointer() + [.lift, .line(Words.quitting)]
         }
 
         // MARK: Helpers
 
-        /// The windows follow `shouldBeUp`: up with the dark's line and the hint, or down.
+        /// The windows follow `shouldBeUp`: up with the dark's line and the hint, then the pointer hidden; or the pointer
+        /// shown, then down. Up or down as they were, the pointer follows the reading and its switch.
         private mutating func settle(at now: Double) -> [Action] {
             let want = shouldBeUp
-            guard want != up else { return [] }
+            guard want != up else { return pointer() }
             up = want
-            if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) }
+            if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) + pointer() }
             hintUntil = nil
-            return [.lift]
+            return pointer() + [.lift]
+        }
+
+        /// Rule 15: the pointer follows `shouldHidePointer`.
+        private mutating func pointer() -> [Action] {
+            let want = shouldHidePointer
+            guard want != pointerHidden else { return [] }
+            pointerHidden = want
+            return [.pointer(hidden: want)]
         }
 
         private mutating func showHint(at now: Double) -> [Action] {
@@ -565,18 +635,25 @@ package enum DarkenPolicy {
     package enum Words {
         // Settings › Devices (the section before Lock this Mac when the last device leaves)
         package static let toggle = "Darken this Mac’s screen"
-        /// The two switches under it, shown while it is on.
+        /// The rows under it, shown while it is on.
         package static let awayToggle = "Only while a device is away from home"
         package static let keysToggle = "A key or click on this Mac locks it"
+        package static let pointerToggle = "Hide the pointer too"
+        package static let waitPicker = "Stay dark after the last device leaves"
+        /// The picker's choices: "5 seconds", "30 seconds".
+        package static func waitChoice(_ wait: HostConfig.DarkenWait) -> String { PrivacyPolicy.Words.seconds(wait.seconds) }
         package static let footnoteOff = "For a Mac you use from afar: its displays stay black while you use it, so people near it see nothing."
-        package static func footnoteOn(onlyAway: Bool, keysLock: Bool, grace: Double = DarkenPolicy.grace) -> String {
+        /// `lock`: Lock this Mac when the last device leaves is on (the black then holds for its lock).
+        package static func footnoteOn(onlyAway: Bool, keysLock: Bool, wait: Double = HostConfig.standard.darkenWait.seconds,
+                                       lock: Bool = false) -> String {
             (onlyAway
                 ? "This Mac’s displays turn black while an iPhone or iPad uses it from away from home (through a VPN or over the internet), so people near it see nothing."
                 : "This Mac’s displays turn black while an iPhone or iPad is connected, so people near it see nothing.")
-                + " They come back \(PrivacyPolicy.Words.seconds(grace)) after the last one leaves."
+                + " They come back \(PrivacyPolicy.Words.seconds(wait)) after the last one leaves, "
+                + (lock ? "or, when this Mac locks then, once its lock screen shows." : "or at once with a key or click on this Mac.")
                 + (keysLock
-                    ? " A key or click on this Mac locks it; unlock it here with your password or Touch ID and its displays stay lit until every device has left."
-                    : " Keys and clicks on this Mac still reach its apps, unseen. To use it here, press Control-Command-Q, then unlock it.")
+                    ? " While a device is connected, a key or click on this Mac locks it; unlock it here with your password or Touch ID and its displays stay lit until every device has left."
+                    : " While a device is connected, keys and clicks on this Mac still reach its apps, unseen. To use it here, press Control-Command-Q, then unlock it.")
         }
         /// Under the switches while keys lock and Sill lacks Accessibility (a click is still noticed without it).
         package static let accessibilityWarning = "Sill needs Accessibility to notice a key pressed on this Mac; a click still locks it. Allow it in Settings › Permissions."
@@ -584,9 +661,12 @@ package enum DarkenPolicy {
         // Sill.log
         /// The start line while the switch is on. `dry`: not Sill.app itself (`darkensForReal`), which only says what it
         /// would do.
-        package static func startLine(_ scope: HostConfig.Darken, keysLock: Bool, dry: Bool) -> String {
+        package static func startLine(_ scope: HostConfig.Darken, keysLock: Bool, wait: Double = HostConfig.standard.darkenWait.seconds,
+                                      hidesPointer: Bool = HostConfig.standard.darkenHidesPointer, dry: Bool) -> String {
             "Privacy: Darken this Mac’s screen is on: \(scope == .away ? "while a device away from home is connected" : "while a device is connected")"
-                + (keysLock ? "; a key or click on this Mac locks it." : "; keys and clicks on this Mac reach its apps.")
+                + " and for \(PrivacyPolicy.Words.number(wait)) s after the last one leaves"
+                + (keysLock ? "; a key or click on this Mac locks it" : "; keys and clicks on this Mac reach its apps")
+                + (hidesPointer ? "; the pointer is hidden on the black." : "; the pointer stays visible on the black.")
                 + (dry ? " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do." : "")
         }
         /// Sill.app itself, as its screen darkens with keys locking, without Accessibility (AXIsProcessTrusted false).
@@ -595,12 +675,16 @@ package enum DarkenPolicy {
             let who = scope == .away ? "a device away from home is connected" : "a device is connected"
             return "Privacy: this Mac’s screen is dark while \(who) (\(displays(screens)))."
         }
-        package static func lastLeft(_ grace: Double) -> String {
-            "Privacy: the last device left; this Mac’s screen stays dark for \(PrivacyPolicy.Words.number(grace)) s in case it comes back."
+        /// `keyLights`: no lock follows the departure, so a key or click lights the screen at once (`lightsAtKey`).
+        package static func lastLeft(_ wait: Double, keyLights: Bool) -> String {
+            "Privacy: the last device left; this Mac’s screen stays dark for \(PrivacyPolicy.Words.number(wait)) s in case it comes back"
+                + (keyLights ? ", or until a key or click on it." : ", and then while a lock is under way.")
         }
-        package static func cameBack(_ grace: Double) -> String {
-            "Privacy: a device came back within \(PrivacyPolicy.Words.number(grace)) s; this Mac’s screen stays dark."
-        }
+        package static let cameBack = "Privacy: a device came back; this Mac’s screen stays dark."
+        /// The wait is over while the lock its departure started is under way: the dark holds for it.
+        package static let holding = "Privacy: this Mac’s screen stays dark until the lock under way shows."
+        /// A key or click in the wait with no lock to follow.
+        package static let litByKey = "Privacy: someone pressed a key or clicked on this Mac after the last device left; its screen is lit again, and nothing locks."
         package static let lit = "Privacy: this Mac’s screen is lit again."
         package static let switchedOff = "Privacy: Darken this Mac’s screen is off; this Mac’s screen is lit again."
         package static let noneCounts = "Privacy: Darken this Mac’s screen changed, and no device it darkens for is connected; this Mac’s screen is lit again."
@@ -624,9 +708,31 @@ package enum DarkenPolicy {
 
         // The hint on each dark screen (two lines). A click as well as a key: a secure text field (a password) and
         // Terminal's Secure Keyboard Entry withhold keys from every observer, never a click.
-        package static let hintFirst = "This Mac is in use from another device."
+        package static func hintFirst(_ hint: Hint) -> String {
+            switch hint {
+            case .lock, .pass: return "This Mac is in use from another device."
+            case .left(let s): return "This Mac’s screen comes back within \(PrivacyPolicy.Words.seconds(Double(s)))."
+            }
+        }
         package static func hintSecond(_ hint: Hint) -> String {
-            hint == .lock ? "Press any key or click to lock it." : "To use it here, press Control-Command-Q, then unlock it."
+            switch hint {
+            case .lock: return "Press any key or click to lock it."
+            case .pass: return "To use it here, press Control-Command-Q, then unlock it."
+            case .left: return "Press any key or click to bring it back now."
+            }
+        }
+
+        // Rule 15: the pointer, as Sill.app hides and shows it (PointerHider), once each time.
+        package static let pointerHidden = "Privacy: this Mac’s pointer is hidden while its screen is dark."
+        package static let pointerShown = "Privacy: this Mac’s pointer shows again."
+        /// Once per run: the private calls are missing (PointerCalls), so the pointer stays visible; darkening goes on.
+        package static let pointerUnavailable = "Privacy: this Mac’s pointer stays visible on the black: this macOS has no CGSSetConnectionProperty for Sill to hide it with."
+        /// Once per run: macOS refused the property or the hide.
+        package static func pointerRefused(_ code: Int) -> String {
+            "Privacy: this Mac’s pointer stays visible on the black: macOS didn’t let Sill hide it (error \(code))."
+        }
+        package static func pointerShowFailed(_ code: Int) -> String {
+            "Privacy: couldn’t show this Mac’s pointer again (error \(code)); it comes back when Sill quits."
         }
 
         // The dry run (PrivacyScreen's DryCurtain) of everything but Sill.app itself: the CLI, the bare binary, a test host
@@ -635,8 +741,14 @@ package enum DarkenPolicy {
         }
         package static let dryLift = "Privacy (dry run): would light this Mac’s screen again; nothing was drawn."
         package static func dryHint(_ hint: Hint) -> String {
-            "Privacy (dry run): would show “\(hintFirst) \(hintSecond(hint))”; nothing is drawn."
+            "Privacy (dry run): would show “\(hintFirst(hint)) \(hintSecond(hint))”; nothing is drawn."
         }
+        /// `found`: the private calls PointerHider would make are found by name here (looked up, never called).
+        package static func dryPointerHide(found: Bool) -> String {
+            found ? "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found); it stays visible."
+                  : "Privacy (dry run): would leave this Mac’s pointer visible: this macOS has no CGSSetConnectionProperty."
+        }
+        package static let dryPointerShow = "Privacy (dry run): would show this Mac’s pointer again; it was never hidden."
         /// The watchdog's dry run (PrivacyWatchdog on everything but Sill.app itself): it says, and the host goes on.
         package static let dryWatchdog = "Privacy (dry run): Sill’s main thread hasn’t answered for \(PrivacyPolicy.Words.number(DarkenPolicy.hangLimit)) s while this Mac’s screen was dark; would quit Sill and open it again; nothing quits."
 

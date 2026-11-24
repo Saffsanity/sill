@@ -18,7 +18,8 @@ import StreamProtocol
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, offConsoleView, lockAfterSession,
 ///                                              lockSleepsDisplay, lockOnlyAfterAway,
-///                                              darkenScreen=off|away|any, darkenKeysLock (the bare
+///                                              darkenScreen=off|away|any, darkenKeysLock,
+///                                              darkenHidesPointer, darkenWait=5|30 (the bare
 ///                                              binary only ever says what it would darken),
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
@@ -380,6 +381,9 @@ enum DebugHooks {
         case "darkenScreen":
             if let scope = HostConfig.Darken(rawValue: value) { config.darkenScreen = scope } else { print("SillSetAfter: darkenScreen=off, away or any") }
         case "darkenKeysLock": config.darkenKeysLock = flag
+        case "darkenHidesPointer": config.darkenHidesPointer = flag
+        case "darkenWait":
+            if let wait = Int(value).flatMap(HostConfig.DarkenWait.init(rawValue:)) { config.darkenWait = wait } else { print("SillSetAfter: darkenWait=5 or 30") }
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -419,6 +423,8 @@ enum DebugHooks {
                                    darkenScreen: .constant(sample.darkenScreen),
                                    darkenOnlyAway: .constant(sample.darkenOnlyAway),
                                    darkenKeysLock: .constant(sample.darkenKeysLock),
+                                   darkenHidesPointer: .constant(sample.darkenHidesPointer),
+                                   darkenWait: .constant(sample.darkenWait),
                                    requirePairingProblem: nil, privacyLock: sample.privacyLock,
                                    accessibility: sample.accessibility,
                                    actions: DevicesPane.Actions(), now: previewNow)
@@ -439,7 +445,7 @@ enum DebugHooks {
         }
         // What a person at a dark Mac sees on each display (DarkenPolicy's hint, PrivacyCurtain.swift's view at a
         // 1512×982 pt screen's size), drawn offscreen like every preview here: never a window.
-        for (hintName, hint) in [("lock", DarkenPolicy.Hint.lock), ("pass", DarkenPolicy.Hint.pass)] {
+        for (hintName, hint) in [("lock", DarkenPolicy.Hint.lock), ("pass", DarkenPolicy.Hint.pass), ("left", DarkenPolicy.Hint.left(5))] {
             let view = CurtainView.preview(size: NSSize(width: 1512, height: 982), hint: hint)
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 view.cacheDisplay(in: view.bounds, to: rep)
@@ -1042,19 +1048,27 @@ extension DebugHooks {
         var darkenScreen = false
         var darkenOnlyAway = true
         var darkenKeysLock = true
+        var darkenHidesPointer = true
+        var darkenWait = HostConfig.DarkenWait.short
         var accessibility = true
     }
 
-    /// pane-devices-{darken,darkenany,darkenpass,darkennoaccessibility}: Darken this Mac's screen on
-    /// (docs/privacy-mode-plan.md, part 2) as it is (only while a device is away from home, a key or click locking the
-    /// Mac); whenever a device is connected; keys and clicks passing; without Accessibility (its warning).
+    /// pane-devices-{darken,darkenany,darkenpass,darkennoaccessibility,darkenlong,darkenlock}: Darken this Mac's screen
+    /// on (docs/privacy-mode-plan.md, part 2) as it is (only while a device is away from home, a key or click locking the
+    /// Mac, the pointer hidden, dark 5 seconds after the last device leaves); whenever a device is connected; keys and
+    /// clicks passing; without Accessibility (its warning); dark 30 seconds after, the pointer shown; and with Lock this
+    /// Mac when the last device leaves on below it (the footnote's lock).
     static func darkenSamples() -> [DevicesPaneSample] {
         let status = RemoteStatus(homeDoor: .pairingRequired)
+        var lockOn = PrivacyLockStatus()
+        lockOn.on = true
         return [
             DevicesPaneSample(name: "darken", status: status, darkenScreen: true),
             DevicesPaneSample(name: "darkenany", status: status, darkenScreen: true, darkenOnlyAway: false),
             DevicesPaneSample(name: "darkenpass", status: status, darkenScreen: true, darkenKeysLock: false),
             DevicesPaneSample(name: "darkennoaccessibility", status: status, darkenScreen: true, accessibility: false),
+            DevicesPaneSample(name: "darkenlong", status: status, darkenScreen: true, darkenHidesPointer: false, darkenWait: .long),
+            DevicesPaneSample(name: "darkenlock", status: status, lockAfterSession: true, privacyLock: lockOn, darkenScreen: true),
         ]
     }
 

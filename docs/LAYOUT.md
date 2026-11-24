@@ -424,7 +424,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   message to the rule (`deviceActive`), and `parameterSetsSent` its stream
   changes.
   Darken this Mac's screen (docs/privacy-mode-plan.md, part 2): `DarkenPolicy` (which sessions darken, the
-  dark and its raise before the wake, the wait and the hold for the lock, under
+  dark and its raise before the wake, the wait (Settings' 5 or 30 s) and the hold for
+  the lock, a key after the last device left lighting it, the pointer hidden while
+  dark (rule 15), under
   the lock screen, a key on the dark Mac, taken back, the switches, the
   watchdog's decisions, the screens, who darkens: only Sill.app itself, the
   lock's rule; what the probe G0 decided: the black windows' level and
@@ -436,7 +438,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   run's `DryCurtain` and a test host's `FileInput` everywhere but in Sill.app
   itself), `PrivacyCurtain.swift` (Sill.app's seams: `WindowCurtain`, the
   black windows at level 1501; `CurtainView`, their black and the hint, drawn
-  offscreen for the previews; `MonitorInput`, NSEvent's monitors, kind and
+  offscreen for the previews; `PointerHider`, the pointer hidden over the black
+  with CGDisplayHideCursor once Sill's connection may set it from the background,
+  and `PointerCalls`, the two private calls that allow it, looked up by name;
+  `MonitorInput`, NSEvent's monitors, kind and
   ownership only; `DisplayChanges`) and `PrivacyWatchdog` (a hung Sill.app
   ends itself after 10 s without a beat while dark and opens again once in 10
   minutes; elsewhere a dry run). InputInjector's event source carries
@@ -444,8 +449,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session[=away][,nosleep]`
-  (with `--synthetic` only: a dry run).
+  on its own stdout), `--print-cable`, `--no-clipboard`, `--lock-after-session[=away][,nosleep]`
+  and `--darken=away|any` with `--darken-keys=lock|pass`, `--darken-wait=5|30` and
+  `--darken-pointer=hide|show` (with `--synthetic` only: a dry run).
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -461,8 +467,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
   (Settings › Devices: Require pairing, Show the pairing window to screen
-  sharing, Darken this Mac's screen with its two switches and Accessibility's
-  warning, Lock this Mac when the last device leaves with its two switches, the
+  sharing, Darken this Mac's screen with its two switches, Accessibility's
+  warning, Hide the pointer too and Stay dark after the last device leaves, Lock
+  this Mac when the last device leaves with its two switches, the
   paired devices, Remove and rename), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code; the window a device's ask opens, and the cable notice),
@@ -682,9 +689,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and runs nothing; S5 is Sill's own level, for a step re-run with
   `--candidate S5`. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST
   ONLY) runs darkening's dry run on synthetic test hosts on loopback, the
-  watchdog's among its cases, and in `switch` Sill.app's own code for the
+  watchdog's, the pointer's, Settings' two waits' and a key after the last
+  device left among its cases, and in `switch` Sill.app's own code for the
   switches and its Quit in the bare SillMenuBar binary as one (`-SillSetAfter`,
-  `-SillQuitAfter`; the three keys it saves in the bare binary's defaults are
+  `-SillQuitAfter`; the five keys it saves in the bare binary's defaults are
   read and removed). `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to

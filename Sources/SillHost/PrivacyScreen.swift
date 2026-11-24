@@ -5,9 +5,10 @@ import StreamProtocol
 
 // Privacy mode, part 2 (docs/privacy-mode-plan.md; DarkenPolicy): this Mac's screens dark while a device uses it, the
 // main actor's side. The two places where the Mac itself is touched are seams: in Sill.app itself (DarkenPolicy
-// .darkensForReal, the lock's rule) its black windows (WindowCurtain) and its watch on this Mac's own keys, clicks and
-// pointer (MonitorInput), both in PrivacyCurtain.swift, made as the probe G0 of 2026-11-23 measured; on every other host
-// (the CLI, the bare SillMenuBar binary, a test host) a dry run that only says what it would do.
+// .darkensForReal, the lock's rule) its black windows with the pointer hidden over them (WindowCurtain, PointerHider) and
+// its watch on this Mac's own keys, clicks and pointer (MonitorInput), all in PrivacyCurtain.swift, made as the probe G0
+// of 2026-11-23 measured; on every other host (the CLI, the bare SillMenuBar binary, a test host) a dry run that only
+// says what it would do.
 
 /// The seam where this Mac's screens are actually darkened: DarkenPolicy's `raise`, `lift` and `hint`. Sill.app's is
 /// WindowCurtain: one black window per screen at DarkenPolicy.windowLevel, ordered in by `raise` synchronously, before
@@ -24,6 +25,9 @@ protocol Curtain: AnyObject {
     func hint(_ hint: DarkenPolicy.Hint, for seconds: Double)
     /// The displays changed while up: these are the screens to cover now.
     func resync(_ screens: [UInt32])
+    /// Rule 15: this Mac's pointer hidden (only once the black is up) or shown again (before it comes down, and for the
+    /// lock screen or another user's session). Sill.app's is PointerHider's, through WindowCurtain.
+    func pointer(hidden: Bool)
 }
 
 /// The seam where this Mac's own keys, clicks and pointer are observed, only while it is dark (DarkenPolicy rule 7):
@@ -64,6 +68,9 @@ final class PrivacyScreen {
     private let hooks: DarkenPolicy.TestHooks
     /// TEST ONLY: a test host's screens to cover (SILL_TEST_PRIVACY_DISPLAYS), else this Mac's online displays.
     private let testScreens: Int?
+    /// TEST ONLY: a test host's wait (SILL_TEST_PRIVACY_GRACE), which replaces Settings' Stay dark after the last device
+    /// leaves as it replaces the lock's wait.
+    private let testWait: Double?
     /// The lines `start` prints: a test host's hooks, the watchdog's reopening, then the switch when it is on.
     let startLines: [String]
     private var ticking: Task<Void, Never>?
@@ -97,9 +104,15 @@ final class PrivacyScreen {
             lines.append(DarkenPolicy.Words.reopened)
         }
         let scope = config.darkenScreen
+        testWait = lockHooks.grace
+        let wait = lockHooks.grace ?? config.darkenWait.seconds
         state = DarkenPolicy.State(scope: scope, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession,
-                                   grace: lockHooks.grace ?? DarkenPolicy.grace)
-        if scope != .off { lines.append(DarkenPolicy.Words.startLine(scope, keysLock: config.darkenKeysLock, dry: !real)) }
+                                   wait: wait, hidesPointer: config.darkenHidesPointer,
+                                   lockGrace: lockHooks.grace ?? DarkenPolicy.lockGrace)
+        if scope != .off {
+            lines.append(DarkenPolicy.Words.startLine(scope, keysLock: config.darkenKeysLock, wait: wait,
+                                                      hidesPointer: config.darkenHidesPointer, dry: !real))
+        }
         startLines = lines
         self.status = status
         self.gate = gate
@@ -123,7 +136,8 @@ final class PrivacyScreen {
     func switched(_ config: HostConfig) {
         let now = now()
         if config.darkenScreen != .off { run(state.screens(screenIDs().count, at: now)) }
-        run(state.switched(scope: config.darkenScreen, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession, at: now))
+        run(state.switched(scope: config.darkenScreen, keysLock: config.darkenKeysLock, lockAfterSession: config.lockAfterSession,
+                           wait: testWait ?? config.darkenWait.seconds, hidesPointer: config.darkenHidesPointer, at: now))
         followDisplays()
     }
 
@@ -171,6 +185,8 @@ final class PrivacyScreen {
             case .lift:
                 curtain.lift()
                 watch(false)
+            case .pointer(let hidden):
+                curtain.pointer(hidden: hidden)
             case .hint(let hint, let until):
                 curtain.hint(hint, for: max(0, until - now()))
             case .lock:
@@ -312,6 +328,13 @@ final class DryCurtain: Curtain {
 
     /// A test host's displays never change (SILL_TEST_PRIVACY_DISPLAYS).
     func resync(_ screens: [UInt32]) {}
+
+    /// Says what Sill.app would do with the pointer, and whether the private calls it would make are found by name here
+    /// (looked up, never called: PointerCalls); counts `priv.pointer`. The pointer itself is never touched.
+    func pointer(hidden: Bool) {
+        Stats.shared.bump("priv.pointer")
+        say(hidden ? DarkenPolicy.Words.dryPointerHide(found: PointerCalls.found != nil) : DarkenPolicy.Words.dryPointerShow)
+    }
 
     private func say(_ line: String) {
         guard stamped else { print(line); return }

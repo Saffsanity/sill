@@ -56,6 +56,7 @@ final class HostSettings {
         static let lockSleepsDisplay = "lockSleepsDisplay"
         static let lockOnlyAfterAway = "lockOnlyAfterAway"
         static let darkenScreen = "darkenScreen", darkenOnlyAway = "darkenOnlyAway", darkenKeysLock = "darkenKeysLock"
+        static let darkenWait = "darkenWait", darkenHidesPointer = "darkenHidesPointer"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -176,6 +177,10 @@ final class HostSettings {
             Key.darkenScreen: base.darkenScreen != .off,
             Key.darkenOnlyAway: true,
             Key.darkenKeysLock: base.darkenKeysLock,
+            // Under it too: dark 5 s after the last device leaves (or 30), the pointer hidden on the black (Noah,
+            // 2026-11-24). Seconds, as saved: a value that is neither reads as 5.
+            Key.darkenWait: base.darkenWait.rawValue,
+            Key.darkenHidesPointer: base.darkenHidesPointer,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -202,7 +207,9 @@ final class HostSettings {
                             lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
                             darkenScreen: DarkenPolicy.scope(on: defaults.bool(forKey: Key.darkenScreen),
                                                              onlyAway: defaults.bool(forKey: Key.darkenOnlyAway)),
-                            darkenKeysLock: defaults.bool(forKey: Key.darkenKeysLock)).validated()
+                            darkenKeysLock: defaults.bool(forKey: Key.darkenKeysLock),
+                            darkenWait: HostConfig.DarkenWait(rawValue: defaults.integer(forKey: Key.darkenWait)) ?? base.darkenWait,
+                            darkenHidesPointer: defaults.bool(forKey: Key.darkenHidesPointer)).validated()
         darkenOnlyAway = defaults.bool(forKey: Key.darkenOnlyAway)
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
@@ -240,6 +247,8 @@ final class HostSettings {
             if config.darkenScreen != .off, darkenOnlyAway != (config.darkenScreen == .away) { darkenOnlyAway = config.darkenScreen == .away }
         }
         if config.darkenKeysLock != old.darkenKeysLock { defaults.set(config.darkenKeysLock, forKey: Key.darkenKeysLock) }
+        if config.darkenWait != old.darkenWait { defaults.set(config.darkenWait.rawValue, forKey: Key.darkenWait) }
+        if config.darkenHidesPointer != old.darkenHidesPointer { defaults.set(config.darkenHidesPointer, forKey: Key.darkenHidesPointer) }
     }
 
     // MARK: Remote devices seen (display only)

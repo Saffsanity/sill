@@ -22,10 +22,19 @@ and is killed at the end. One verdict per rule:
   switch    Sill.app's own code for the switches and its Quit, in the bare SillMenuBar binary as a synthetic test host
             (not Sill.app, so the dry run; -requirePairing NO, -virtualDisplay 0, a TLS test client at home): Darken
             this Mac's screen turned on, off (lit at once), on, to only away with the device at home and keys passing
-            (lit at once), on again (the ⌃⌘Q hint), then Sill's own Quit while dark (lit, then its line); HostSettings
-            saves the three keys in the bare binary's defaults domain (SillMenuBar), which the case reads and removes
+            (lit at once), on again (the ⌃⌘Q hint), the wait to 30 s and the pointer shown while dark (it would show
+            it), then Sill's own Quit while dark (lit, then its line); HostSettings saves the five keys in the bare
+            binary's defaults domain (SillMenuBar), which the case reads and removes
+  pointer   rule 15 (run 6): the dry run would hide the pointer once the black is up (and finds the two private calls
+            by name, never calling them), would show it for the lock screen, before the black lifts at the Mac's own
+            unlock and at SIGTERM; with --darken-pointer=show it never touches it, and the start line says so
+  waits     Settings' wait (run 6), no SILL_TEST_PRIVACY_GRACE: 5 s by default and 30 s with --darken-wait=30, in the
+            departure's line, the wait's hint and the start line, and lit that long after the last device left
+  keyleft   a key 1 s after the last device left: lit at once, nothing locks; a device back after it: dark again at
+            once; a device back inside the next wait: dark goes on; with --lock-after-session a key in the wait locks
+            at once, as before, and lights nothing
 
-    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|switch|all]
+    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|switch|pointer|waits|keyleft|all]
 
 Needs .build/release/SillHost (and .build/release/SillMenuBar for switch). Exits 1 when a verdict fails."""
 import os, re, signal, subprocess, sys, threading, time
@@ -34,7 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOST = os.path.join(ROOT, ".build/release/SillHost")
 APP = os.path.join(ROOT, ".build/release/SillMenuBar")
-APP_KEYS = ("darkenScreen", "darkenOnlyAway", "darkenKeysLock")
+APP_KEYS = ("darkenScreen", "darkenOnlyAway", "darkenKeysLock", "darkenWait", "darkenHidesPointer")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
             "SILL_TEST_LOCK_IGNORE_MAC": "1", "SILL_TEST_PRIVACY_DISPLAYS": "1"}
@@ -45,6 +54,10 @@ HINT_PASS = "Privacy (dry run): would show “This Mac is in use from another de
 DRY_CURTAIN = ("Privacy (dry run): would darken", "Privacy (dry run): would light", "Privacy (dry run): would show")
 DRY_START = " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do."
 LOCK_DRY = "Privacy (dry run): would lock this Mac now; nothing is locked."
+POINTER_HIDE = "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found); it stays visible."
+POINTER_ANY_HIDE = "Privacy (dry run): would hide this Mac’s pointer"
+POINTER_SHOW = "Privacy (dry run): would show this Mac’s pointer again; it was never hidden."
+LIT_KEY = "Privacy: someone pressed a key or clicked on this Mac after the last device left; its screen is lit again, and nothing locks."
 WATCHDOG_DRY = ("Privacy (dry run): Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; would quit Sill and open "
                 "it again; nothing quits.")
 
@@ -137,7 +150,8 @@ def case_home(out):
     h = Host(out, "home", {}, ["--darken=away"])
     c = client(h, "home", 3, 1.0)
     c.join(); h.at(5); h.stop()
-    start = h.find("Privacy: Darken this Mac’s screen is on: while a device away from home is connected; a key or click on this Mac locks it.")
+    start = h.find("Privacy: Darken this Mac’s screen is on: while a device away from home is connected and for 5 s after the last one leaves; "
+                   "a key or click on this Mac locks it; the pointer is hidden on the black.")
     verdict(bool(start), "the start line says the switch")
     verdict(len(start) == 1 and start[0][2].endswith(DRY_START), "and that it is a dry run here (only Sill.app itself darkens a Mac's screen)")
     dark = [x for p in DRY_CURTAIN for x in h.find(p)]
@@ -151,8 +165,8 @@ def case_wait(out):
     c1.join()
     c2 = client(h, "wait-2", 2, 4.5)
     c2.join(); h.at(11); h.stop()
-    left = h.find("Privacy: the last device left; this Mac’s screen stays dark for 3 s in case it comes back.")
-    back = h.find("Privacy: a device came back within 3 s; this Mac’s screen stays dark.")
+    left = h.find("Privacy: the last device left; this Mac’s screen stays dark for 3 s in case it comes back, or until a key or click on it.")
+    back = h.find("Privacy: a device came back; this Mac’s screen stays dark.")
     lit = h.find("Privacy: this Mac’s screen is lit again.")
     verdict(len(h.find(DARK)) == 1, f"darkened once, the return kept it dark: {len(h.find(DARK))} raises")
     verdict(len(left) == 2 and len(back) == 1, f"the wait's line at each departure ({len(left)}), the return's once ({len(back)})")
@@ -255,7 +269,7 @@ def case_away(out):
         # session after it comes back within the wait.
         dark = h.find(DARK)
         line = h.find("Privacy: this Mac’s screen is dark while a device away from home is connected (1 display).")
-        back = h.find("Privacy: a device came back within 30 s; this Mac’s screen stays dark.")
+        back = h.find("Privacy: a device came back; this Mac’s screen stays dark.")
         if away:
             verdict(len(dark) == 1 and bool(line) and bool(back),
                     f"a paired device at the remote door from a relay on this Mac (away) darkens it: {len(dark)} raise, its session back within the wait")
@@ -309,7 +323,8 @@ def case_switch(out):
     before = app_defaults()
     if before:
         verdict(False, f"the bare binary's defaults already hold {before} (another run's?): left alone, case not run"); return
-    steps = "2 darkenScreen=any; 8 darkenScreen=off; 10 darkenScreen=any; 13 darkenScreen=away,darkenKeysLock=0; 16 darkenScreen=any"
+    steps = ("2 darkenScreen=any; 8 darkenScreen=off; 10 darkenScreen=any; 13 darkenScreen=away,darkenKeysLock=0; 16 darkenScreen=any; "
+             "17.5 darkenWait=30,darkenHidesPointer=0")
     try:
         h = Host(out, "switch", {}, ["-requirePairing", "NO", "-virtualDisplay", "0", "-SillLogFile", os.path.join(out, "switch.sill.log"),
                                      "-SillSetAfter", steps, "-SillQuitAfter", "19"], binary=APP, port_line=r"test clients connect to port (\d+)")
@@ -324,7 +339,7 @@ def case_switch(out):
     left = app_defaults()
     if h is None: return
     set_lines = h.find("SillSetAfter ")
-    verdict(len(set_lines) == 5, f"the bare binary took the five changes (not Sill.app, which ignores them): {len(set_lines)}")
+    verdict(len(set_lines) == 6, f"the bare binary took the six changes (not Sill.app, which ignores them): {len(set_lines)}")
     dark = h.find(DARK)
     verdict(len(dark) == 3 and dark[0][0] >= 4.0, f"dark at the connect, and again at each switch back on: {[round(t, 2) for t, _, _ in dark]}")
     off_t, off_i, _ = h.first("Privacy: Darken this Mac’s screen is off; this Mac’s screen is lit again.")
@@ -341,13 +356,104 @@ def case_switch(out):
     verdict(quit_t is not None and quit_t >= 19.0 and quit_lit_i is not None and quit_lit_i < quit_i,
             f"Sill's own Quit while dark: lit first, then its line ({quit_t})")
     verdict(len(h.find(LIGHT)) == 3, f"lit three times in all: {[round(t, 2) for t, _, _ in h.find(LIGHT)]}")
-    verdict(saved == {"darkenScreen": "1", "darkenOnlyAway": "0", "darkenKeysLock": "0"},
-            f"HostSettings saved the switches as Settings would (on; whenever, so only away off; keys passing): {saved}")
+    shows = h.find(POINTER_SHOW, after=17.0)
+    verdict(bool(shows) and shows[0][0] < 19.0 and not h.find(POINTER_ANY_HIDE, after=17.0),
+            f"Hide the pointer too off while dark: it would show the pointer at once, and hides it no more ({[round(t, 2) for t, _, _ in shows]})")
+    verdict(saved == {"darkenScreen": "1", "darkenOnlyAway": "0", "darkenKeysLock": "0", "darkenWait": "30", "darkenHidesPointer": "0"},
+            f"HostSettings saved the switches as Settings would (on; whenever, so only away off; keys passing; 30 s; the pointer shown): {saved}")
     verdict(not left, f"and the case removed them from the bare binary's defaults: {left}")
 
 
+def case_pointer(out):
+    print("== pointer: hidden after the black, shown for the lock screen, before the lift and at SIGTERM; never with it off", flush=True)
+    lock = os.path.join(out, "pointer.lock"); write(lock, "0")
+    h = Host(out, "pointer", {"SILL_TEST_LOCKED_FILE": lock}, ["--darken=any"])
+    c = client(h, "pointer", 12, 1.0)
+    h.at(3.5); write(lock, "1")
+    h.at(6.0); write(lock, "0")
+    c.join(); h.at(15); h.stop()
+    _, dark_i, _ = h.first(DARK)
+    hides = h.find(POINTER_ANY_HIDE)
+    verdict(dark_i is not None and len(hides) == 1 and hides[0][1] > dark_i,
+            f"the pointer hidden once, after the black is up: {[round(t, 2) for t, _, _ in hides]}")
+    verdict(len(hides) == 1 and hides[0][2].startswith(POINTER_HIDE),
+            f"the two private calls found by name on this Mac, never called: {hides[0][2] if hides else None!r}")
+    shows = h.find(POINTER_SHOW)
+    lit = h.find(LIGHT)
+    verdict(len(shows) == 1 and 3.4 <= shows[0][0] < 6.0, f"shown for the lock screen, the black staying under it: {[round(t, 2) for t, _, _ in shows]}")
+    verdict(len(lit) == 1 and lit[0][0] >= 6.0 and bool(shows) and shows[0][1] < lit[0][1],
+            "lit at the Mac's own unlock, the pointer shown before it and not hidden again")
+    q = Host(out, "pointer-quit", {}, ["--darken=any"])
+    cq = client(q, "pointer-quit", 10, 1.0)
+    q.at(3.5); q.stop()
+    cq.join()
+    _, qshow, _ = q.first(POINTER_SHOW)
+    _, qlit, _ = q.first(LIGHT)
+    _, qquit, _ = q.first("Privacy: Sill is quitting; this Mac’s screen is lit again.")
+    verdict(None not in (qshow, qlit, qquit) and qshow < qlit < qquit, "SIGTERM while dark: the pointer shown, then lit, then the quit's line")
+    v = Host(out, "pointer-off", {}, ["--darken=any", "--darken-pointer=show"])
+    cv = client(v, "pointer-off", 3, 1.0)
+    cv.join(); v.at(11); v.stop()
+    verdict(bool(v.find(DARK)) and bool(v.find(LIGHT)) and not v.find(POINTER_ANY_HIDE) and not v.find(POINTER_SHOW),
+            "--darken-pointer=show: dark and lit, the pointer never touched")
+    verdict(bool(v.find("; the pointer stays visible on the black.")), "and the start line says so")
+
+
+def case_waits(out):
+    print("== waits: Settings' wait, 5 s by default and 30 s with --darken-wait=30 (no SILL_TEST_PRIVACY_GRACE)", flush=True)
+    for wait, args in ((5, []), (30, ["--darken-wait=30"])):
+        label = f"waits-{wait}"
+        h = Host(out, label, {}, ["--darken=any", *args])
+        c = client(h, label, 2, 1.0)
+        c.join(); h.at(1.0 + 2 + wait + 3); h.stop()
+        left = h.find(f"Privacy: the last device left; this Mac’s screen stays dark for {wait} s in case it comes back, or until a key or click on it.")
+        hint = h.find(f"Privacy (dry run): would show “This Mac’s screen comes back within {wait} seconds. Press any key or click to bring it back now.”")
+        lit = h.find("Privacy: this Mac’s screen is lit again.")
+        start = h.find(f"while a device is connected and for {wait} s after the last one leaves;")
+        verdict(len(start) == 1, f"{wait} s: the start line says the wait")
+        verdict(len(left) == 1 and len(hint) == 1 and hint[0][0] >= left[0][0], f"{wait} s: the departure's line, then the wait's hint, say it")
+        gap = round(lit[0][0] - left[0][0], 2) if lit and left else None
+        verdict(len(lit) == 1 and gap is not None and wait - 0.1 <= gap <= wait + 1.0, f"lit {wait} s after the last device left: {gap} s")
+
+
+def case_keyleft(out):
+    print("== keyleft: a key after the last device left lights the screen at once and locks nothing; a device back", flush=True)
+    f = os.path.join(out, "keyleft.input")
+    h = Host(out, "keyleft", {"SILL_TEST_PRIVACY_INPUT": f}, ["--darken=any"])
+    c1 = client(h, "keyleft-1", 2, 1.0)
+    c1.join()
+    h.at(4.0); write(f, "key")
+    c2 = client(h, "keyleft-2", 2, 6.0)
+    c2.join()
+    c3 = client(h, "keyleft-3", 2, 9.5)
+    c3.join(); h.at(18.5); h.stop()
+    left = h.find("Privacy: the last device left;")
+    lit_key = h.find(LIT_KEY)
+    verdict(len(lit_key) == 1 and bool(left) and 0 < lit_key[0][0] - left[0][0] < 2.0,
+            f"a key 1 s after the last device left: lit at once ({[round(t - left[0][0], 2) for t, _, _ in lit_key] if left else None} s after)")
+    verdict(not h.find(LOCK_DRY) and not h.find("Privacy: locking this Mac"), "and nothing locks, then or after")
+    darks = h.find(DARK)
+    verdict(len(darks) == 2 and darks[1][0] >= 6.0, f"a device back after the key: dark again at once ({[round(t, 2) for t, _, _ in darks]})")
+    back = h.find("Privacy: a device came back; this Mac’s screen stays dark.")
+    verdict(len(back) == 1 and back[0][0] >= 9.5, f"a device back inside the next wait: dark goes on ({[round(t, 2) for t, _, _ in back]})")
+    lifts = h.find(LIGHT)
+    verdict(len(lifts) == 2 and lifts[0][0] < 5.0 and lifts[1][0] > 14.0, f"lit twice: at the key, and 5 s after the last device left ({[round(t, 2) for t, _, _ in lifts]})")
+    f2 = os.path.join(out, "keyleft-lock.input")
+    g = Host(out, "keyleft-lock", {"SILL_TEST_PRIVACY_INPUT": f2, "SILL_TEST_PRIVACY_GRACE": "6"}, ["--darken=any", "--lock-after-session"])
+    c4 = client(g, "keyleft-lock", 2, 1.0)
+    c4.join()
+    g.at(4.0); write(f2, "key")
+    g.at(14); g.stop()
+    gleft = g.find("Privacy: the last device left;")
+    locking = g.find("Privacy: locking this Mac: someone pressed a key or clicked on it.")
+    verdict(bool(gleft) and len(locking) == 1 and 0 < locking[0][0] - gleft[0][0] < 2.0 and not g.find(LIT_KEY),
+            "with --lock-after-session a key in the wait locks at once, as before, and lights nothing")
+    verdict(bool(gleft) and "and then while a lock is under way" in gleft[0][2], "the departure's line says a lock may follow")
+
+
 CASES = {"order": case_order, "home": case_home, "away": case_away, "wait": case_wait, "keys": case_keys, "pass": case_pass,
-         "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog, "switch": case_switch}
+         "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog, "switch": case_switch,
+         "pointer": case_pointer, "waits": case_waits, "keyleft": case_keyleft}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: raise SystemExit(__doc__)

@@ -6,12 +6,15 @@ switches (Lock this Mac when the last device leaves, Only after a device away fr
 a session's route, as the cases of both rules together see them (the review of PR #400, follow-up 2). The privacy
 check has its own mutants of that rule; these prove this check runs it beside darkening, switches and routes included.
 
+Run 6 (2026-11-24) added those of rule 15, the pointer hidden while the black is up on an unlocked Mac, and of rule 6 as
+Noah asked: Settings' wait (5 s by default, or 30), its hint, a key or click after the last device left lighting the
+screen with no lock to follow, the hold's bound still the lock's own wait.
+
 Left out as equivalent (each a second guard behind one that already holds): the `!quitting` guards of `sessions`,
 `switched`, `reading`, `local`, `called` and `tick` (a quit has cleared the wait, the hold and the lock asked and taken
 the windows down, so nothing after it can raise, lift or lock); `screens`' guard that only a change across zero acts
 (any other change settles to the same); `tick`'s `lockFollows = false` at a wait's end (read only at a wait's end, and
-set again at the next one's start); `lockHolds` dropped from the hold's start (`if lockFollows, lockHolds`: a hold
-started while the lock holds nothing ends in the same tick, at the hold's own end test); `levelFits`' first two
+set again at the next one's start; `lightsAtKey` reads it only while a wait runs); `levelFits`' first two
 clauses (above everything G0 saw hidden, above the screen saver's level: the assistive level, 1500, is above both, so
 the third clause decides for them; they name what G0 measured)."""
 import os, sys
@@ -29,9 +32,11 @@ M = [
      '"Privacy (test host): would darken \\(displays(screens)); nothing is drawn."'),
     ("the start line hides the dry run", F, '+ (dry ? " A dry run here', '+ (false ? " A dry run here'),
     ("the start line's scopes swapped", F, 'scope == .away ? "while a device away from home is connected"', 'scope == .any ? "while a device away from home is connected"'),
-    ("the start line's keys swapped", F, '(keysLock ? "; a key or click on this Mac locks it."', '(!keysLock ? "; a key or click on this Mac locks it."'),
+    ("the start line's keys swapped", F, '(keysLock ? "; a key or click on this Mac locks it"', '(!keysLock ? "; a key or click on this Mac locks it"'),
+    ("the start line's pointer swapped", F, '(hidesPointer ? "; the pointer is hidden on the black."', '(!hidesPointer ? "; the pointer is hidden on the black."'),
+    ("the start line's wait always 5 s", F, '" and for \\(PrivacyPolicy.Words.number(wait)) s after the last one leaves"', '" and for 5 s after the last one leaves"'),
     # The constants.
-    ("the dark's wait is not the lock's", F, "package static let grace: Double = PrivacyPolicy.grace", "package static let grace: Double = 20"),
+    ("the hold's bound not the lock's wait", F, "package static let lockGrace: Double = PrivacyPolicy.grace", "package static let lockGrace: Double = 20"),
     ("the device's window 5 s", F, "package static let remoteUnlockWindow: Double = 10", "package static let remoteUnlockWindow: Double = 5"),
     ("the hint 5 s", F, "package static let hintFor: Double = 10", "package static let hintFor: Double = 5"),
     ("no tag", F, "package static let eventTag: Int64 = 0x5349_4C4C_5052_5631", "package static let eventTag: Int64 = 0"),
@@ -86,26 +91,32 @@ M = [
      "var shouldBeUp: Bool { wantsDark && (underLockScreen || mac != .screenLocked) }"),
     ("the fallback lifts without its line", F, "                if up, !underLockScreen { out.append(.line(Words.lockScreenShows)) }\n", ""),
     # Rules 3 and 5: up before anything, with its line and the hint.
-    ("the line before the raise", F, "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) }",
-     "if want { return [.line(Words.dark(scope, screens: screens)), .raise] + showHint(at: now) }"),
-    ("no hint as it darkens", F, "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) }",
-     "if want { return [.raise, .line(Words.dark(scope, screens: screens))] }"),
+    ("the line before the raise", F, "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) + pointer() }",
+     "if want { return [.line(Words.dark(scope, screens: screens)), .raise] + showHint(at: now) + pointer() }"),
+    ("no hint as it darkens", F, "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) + pointer() }",
+     "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + pointer() }"),
     # Rule 6: the wait.
     ("a wait while taken back", F, "            } else if countingBefore > 0, darkBefore {", "            } else if countingBefore > 0 {"),
     ("a lock follows with a session left", F, "lockFollows = lockAfterSession && sessions == 0", "lockFollows = lockAfterSession"),
-    ("the wait's line says 30 s whatever the wait", F, "out.append(.line(Words.lastLeft(grace)))", "out.append(.line(Words.lastLeft(DarkenPolicy.grace)))"),
-    ("a return says nothing", F, "                    out.append(.line(Words.cameBack(grace)))\n", ""),
+    ("the wait's line says 30 s whatever the wait", F, "Words.lastLeft(wait, keyLights: lightsAtKey)", "Words.lastLeft(30, keyLights: lightsAtKey)"),
+    ("the wait's line says a key lights it whatever follows", F, "Words.lastLeft(wait, keyLights: lightsAtKey)", "Words.lastLeft(wait, keyLights: true)"),
+    ("a return says nothing", F, "                    out.append(.line(Words.cameBack))\n", ""),
     ("a return keeps the hold", F, "                    waitingSince = nil\n                    holdingSince = nil\n                    lockFollows = false\n                    out.append(.line(Words.cameBack",
      "                    waitingSince = nil\n                    lockFollows = false\n                    out.append(.line(Words.cameBack"),
     ("a session at home joining leaves the lock following", F,
      "                // A session that does not darken joined while the wait runs: the lock's wait ended with it.\n                lockFollows = false\n",
      "                // A session that does not darken joined while the wait runs: the lock's wait ended with it.\n"),
-    ("the wait ends after its time", F, "if let since = waitingSince, now - since >= grace {", "if let since = waitingSince, now - since > grace {"),
-    ("the wait ends a second early", F, "if let since = waitingSince, now - since >= grace {", "if let since = waitingSince, now - since >= grace - 1 {"),
-    ("the hold for any lock", F, "                if lockFollows, lockHolds { holdingSince = since }", "                if lockHolds { holdingSince = since }"),
+    ("the wait ends after its time", F, "if let since = waitingSince, now - since >= wait {", "if let since = waitingSince, now - since > wait {"),
+    ("the wait ends a second early", F, "if let since = waitingSince, now - since >= wait {", "if let since = waitingSince, now - since >= wait - 1 {"),
+    ("the dark waits the lock's wait whatever Settings say", F, "if let since = waitingSince, now - since >= wait {", "if let since = waitingSince, now - since >= lockGrace {"),
+    ("the hold for any lock", F, "                if lockFollows, lockHolds {\n", "                if lockHolds {\n"),
+    ("the hold for no lock under way (equivalent until run 6's line: it ended in the same tick)", F,
+     "                if lockFollows, lockHolds {\n", "                if lockFollows {\n"),
+    ("the hold says nothing", F, "                    out.append(.line(Words.holding))\n", ""),
     ("the hold outlasts the lock", F, "if let since = holdingSince, !lockHolds || now - since >=", "if let since = holdingSince, now - since >="),
-    ("the hold has no bound", F, "!lockHolds || now - since >= grace + lockConfirm + DarkenPolicy.holdSlack {", "!lockHolds {"),
-    ("the hold's bound 10 s later", F, "now - since >= grace + lockConfirm + DarkenPolicy.holdSlack {", "now - since >= grace + lockConfirm + 10 {"),
+    ("the hold has no bound", F, "!lockHolds || now - since >= lockGrace + lockConfirm + DarkenPolicy.holdSlack {", "!lockHolds {"),
+    ("the hold's bound 10 s later", F, "now - since >= lockGrace + lockConfirm + DarkenPolicy.holdSlack {", "now - since >= lockGrace + lockConfirm + 10 {"),
+    ("the hold's bound from the dark's wait", F, "now - since >= lockGrace + lockConfirm + DarkenPolicy.holdSlack {", "now - since >= wait + lockConfirm + DarkenPolicy.holdSlack {"),
     ("the wait's end lifts without its line", F, "            if up, !shouldBeUp { out.append(.line(Words.lit)) }\n            return out + settle(at: now)",
      "            return out + settle(at: now)"),
     # Rule 7: someone at the Mac.
@@ -150,7 +161,8 @@ M = [
     # Rule 9: the switches.
     ("a switch keeps taken back", F, "            takenBack = false\n            keysPass = false\n            guard !quitting", "            keysPass = false\n            guard !quitting"),
     ("a switch keeps keys passing", F, "            takenBack = false\n            keysPass = false\n            guard !quitting", "            takenBack = false\n            guard !quitting"),
-    ("the lock's switch alone clears taken back", F, "            guard darkening else { return [] }\n", ""),
+    ("the lock's switch alone clears taken back", F, "            guard darkening else { return pointer() }\n", ""),
+    ("the pointer's switch alone does nothing", F, "            guard darkening else { return pointer() }\n", "            guard darkening else { return [] }\n"),
     ("a change of scope keeps the wait", F, "            if scopeChanged {\n", "            if false {\n"),
     ("off says the scope's line", F, "out.append(.line(scope == .off ? Words.switchedOff : Words.noneCounts))", "out.append(.line(scope != .off ? Words.switchedOff : Words.noneCounts))"),
     ("a new wording waits for the next hint", F, "            if up, hint != hintBefore, !out.contains(.raise) { out += showHint(at: now) }\n", ""),
@@ -163,7 +175,9 @@ M = [
     # Rule 13's count, and rule 11, a quit.
     ("no screen lifts without its line", F, "            if screens == 0, up { out.append(.line(Words.noScreen)) }\n", ""),
     ("a quit says so with nothing dark", F, "            guard up else { return [] }\n            up = false", "            up = false"),
-    ("a quit's line before the lift", F, "return [.lift, .line(Words.quitting)]", "return [.line(Words.quitting), .lift]"),
+    ("a quit's line before the lift", F, "[.lift, .line(Words.quitting)]", "[.line(Words.quitting), .lift]"),
+    ("a quit leaves the pointer hidden", F, "return pointer() + [.lift, .line(Words.quitting)]", "return [.lift, .line(Words.quitting)]"),
+    ("a quit shows the pointer after the lift", F, "return pointer() + [.lift, .line(Words.quitting)]", "return [.lift] + pointer() + [.line(Words.quitting)]"),
     ("a quit that goes on", F, "            quitting = true\n            waitingSince = nil\n", "            waitingSince = nil\n"),
     # Rule 12: a hung Sill.
     ("the watchdog while not dark", F, "dark && now - lastBeat >= hangLimit", "now - lastBeat >= hangLimit"),
@@ -193,12 +207,59 @@ M = [
      'package static func displays(_ n: Int) -> String { "\\(n) display\\(n > 1 ? "s" : "")" }'),
     ("a device's name not cleaned", F, "let n = SafeText.label(name ?? \"\")", "let n = name ?? \"\""),
     ("no name, an empty one", F, 'return "Privacy: unlocked from \\(n.isEmpty ? "a device" : n);', 'return "Privacy: unlocked from \\(n);'),
-    ("the hint's lines swapped", F, 'hint == .lock ? "Press any key or click to lock it." : "To use it here', 'hint == .pass ? "Press any key or click to lock it." : "To use it here'),
+    ("the hint's lines swapped", F, ['case .lock: return "Press any key or click to lock it."', 'case .pass: return "To use it here,'],
+     ['case .pass: return "Press any key or click to lock it."', 'case .lock: return "To use it here,']),
+    ("the wait's hint says the device is still there", F, 'case .left(let s): return "This Mac’s screen comes back within',
+     'case .left: return "This Mac is in use from another device."\n            case .left(let s): return "This Mac’s screen comes back within'),
+    ("the wait's hint says a key locks", F, 'case .left: return "Press any key or click to bring it back now."', 'case .left: return "Press any key or click to lock it."'),
     ("the hint says nothing of a click", F, '"Press any key or click to lock it."', '"Press any key to lock it."'),
     ("the footnote's scopes swapped", F, "            (onlyAway\n                ? \"This Mac", "            (!onlyAway\n                ? \"This Mac"),
     ("the footnote's keys swapped", F, "                + (keysLock\n", "                + (!keysLock\n"),
-    ("the footnote's wait always 30 s", F, '" They come back \\(PrivacyPolicy.Words.seconds(grace)) after the last one leaves."',
-     '" They come back 30 seconds after the last one leaves."'),
+    ("the footnote's wait always 5 s", F, '" They come back \\(PrivacyPolicy.Words.seconds(wait)) after the last one leaves, "',
+     '" They come back 5 seconds after the last one leaves, "'),
+    ("the footnote's lock swapped", F, '(lock ? "or, when this Mac locks then', '(!lock ? "or, when this Mac locks then'),
+    # Rule 15, the pointer (run 6; Noah, 2026-11-24: "The cursor is still shown when darkened").
+    ("the pointer hidden with the black down", F, "var shouldHidePointer: Bool { up && hidesPointer && mac == .unlocked }",
+     "var shouldHidePointer: Bool { hidesPointer && mac == .unlocked }"),
+    ("the pointer hidden at the lock screen", F, "var shouldHidePointer: Bool { up && hidesPointer && mac == .unlocked }",
+     "var shouldHidePointer: Bool { up && hidesPointer }"),
+    ("the pointer hidden off console", F, "var shouldHidePointer: Bool { up && hidesPointer && mac == .unlocked }",
+     "var shouldHidePointer: Bool { up && hidesPointer && mac != .screenLocked }"),
+    ("the pointer hidden whatever its switch", F, "var shouldHidePointer: Bool { up && hidesPointer && mac == .unlocked }",
+     "var shouldHidePointer: Bool { up && mac == .unlocked }"),
+    ("the pointer told again and again", F, "            pointerHidden = want\n            return [.pointer(hidden: want)]",
+     "            return [.pointer(hidden: want)]"),
+    ("the pointer hidden before the black is up", F,
+     "if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) + pointer() }",
+     "if want { let p = pointer(); return p + [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) }"),
+    ("the pointer shown after the black comes down", F, "            return pointer() + [.lift]\n", "            return [.lift] + pointer()\n"),
+    ("the pointer left hidden as the black comes down", F, "            return pointer() + [.lift]\n", "            return [.lift]\n"),
+    ("the pointer never follows the reading", F, "            guard want != up else { return pointer() }\n", "            guard want != up else { return [] }\n"),
+    ("the pointer's switch never kept", F, "            if let hidesPointer { self.hidesPointer = hidesPointer }\n", ""),
+    ("the pointer shown by default", F, "hidesPointer: Bool = HostConfig.standard.darkenHidesPointer,\n             lockGrace",
+     "hidesPointer: Bool = false,\n             lockGrace"),
+    # Rule 6 as Noah asked on 2026-11-24 (run 6): Settings' wait, and a key or click after the last device left.
+    ("the dark waits 30 s by default", F, "wait: Double = HostConfig.standard.darkenWait.seconds, hidesPointer",
+     "wait: Double = HostConfig.DarkenWait.long.seconds, hidesPointer"),
+    ("the wait's choice never kept", F, "            if let wait { self.wait = wait }\n", ""),
+    ("a key in the wait locks (the rule before run 6)", F, "            if kind != .move, lightsAtKey {\n", "            if false {\n"),
+    ("a move in the wait lights it", F, "            if kind != .move, lightsAtKey {\n", "            if lightsAtKey {\n"),
+    ("a key lights it with a lock to follow", F, "var lightsAtKey: Bool { waitingSince != nil && !lockFollows && askedAt == nil }",
+     "var lightsAtKey: Bool { waitingSince != nil && askedAt == nil }"),
+    ("a key lights it while a lock is confirmed", F, "var lightsAtKey: Bool { waitingSince != nil && !lockFollows && askedAt == nil }",
+     "var lightsAtKey: Bool { waitingSince != nil && !lockFollows }"),
+    ("a key lights it during the hold", F, "var lightsAtKey: Bool { waitingSince != nil && !lockFollows && askedAt == nil }",
+     "var lightsAtKey: Bool { (waitingSince != nil || holdingSince != nil) && !lockFollows && askedAt == nil }"),
+    ("the key's light says nothing", F, "                return [.line(Words.litByKey)] + settle(at: now)", "                return settle(at: now)"),
+    ("the key leaves the wait running", F, "                waitingSince = nil\n                return [.line(Words.litByKey)]", "                return [.line(Words.litByKey)]"),
+    ("no hint at the departure", F, "                if up, lightsAtKey { out += showHint(at: now) }\n", ""),
+    ("the departure's hint with a lock to follow", F, "                if up, lightsAtKey { out += showHint(at: now) }\n",
+     "                if up { out += showHint(at: now) }\n"),
+    ("the wait's hint left showing at a return", F,
+     "                    if up, left, let until = hintUntil, until > now { out.append(.hint(hint, until: until)) }\n", ""),
+    ("a return rewords any hint", F, "if up, left, let until = hintUntil, until > now {", "if up, let until = hintUntil, until > now {"),
+    ("the wait's hint never", F, "            if lightsAtKey { return .left(max(1, Int(wait.rounded(.up)))) }\n", ""),
+    ("the wait's hint says the lock's wait", F, "if lightsAtKey { return .left(max(1, Int(wait.rounded(.up)))) }", "if lightsAtKey { return .left(30) }"),
     # Part 1's switches and a session's route, beside the dark (the review of PR #400, follow-up 2).
     ("the lock waits with its switch off", P, "guard on, !onlyAway || awaySeen else {", "guard !onlyAway || awaySeen else {"),
     ("the lock's only away ignored at the departure", P, "guard on, !onlyAway || awaySeen else {", "guard on else {"),

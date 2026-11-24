@@ -96,7 +96,8 @@ do {
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false,
                           lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false,
-                          darkenScreen: .off, darkenKeysLock: true)
+                          darkenScreen: .off, darkenKeysLock: true,
+                          darkenWait: .short, darkenHidesPointer: true)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -118,7 +119,8 @@ do {
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true,
                           lockAfterSession: false, lockSleepsDisplay: true, lockOnlyAfterAway: false,
-                          darkenScreen: .off, darkenKeysLock: true)
+                          darkenScreen: .off, darkenKeysLock: true,
+                          darkenWait: .short, darkenHidesPointer: true)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -140,7 +142,8 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: true, lockOnlyAfterAway: false, darkenScreen: .off, darkenKeysLock: true)
+                          lockSleepsDisplay: true, lockOnlyAfterAway: false, darkenScreen: .off, darkenKeysLock: true,
+                          darkenWait: .short, darkenHidesPointer: true)
     check(made.lockAfterSession && !made.offConsoleView, "a HostConfig made with it on has it on, and the off-console view as given")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
@@ -179,7 +182,8 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: true,
-                          lockSleepsDisplay: false, lockOnlyAfterAway: true, darkenScreen: .off, darkenKeysLock: true)
+                          lockSleepsDisplay: false, lockOnlyAfterAway: true, darkenScreen: .off, darkenKeysLock: true,
+                          darkenWait: .short, darkenHidesPointer: true)
     check(!made.lockSleepsDisplay && made.lockOnlyAfterAway && made.lockAfterSession, "a HostConfig made with them has them as given")
     let change = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                     directWireless: true, sendAudio: true)
@@ -219,7 +223,8 @@ do {
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
                           requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: false,
-                          lockSleepsDisplay: true, lockOnlyAfterAway: false, darkenScreen: .any, darkenKeysLock: false)
+                          lockSleepsDisplay: true, lockOnlyAfterAway: false, darkenScreen: .any, darkenKeysLock: false,
+                          darkenWait: .short, darkenHidesPointer: true)
     check(made.darkenScreen == .any && !made.darkenKeysLock && !made.lockAfterSession, "a HostConfig made with them has them, and the lock as given")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true, sendAudio: true)
@@ -233,6 +238,49 @@ do {
     others.darkenScreen = .off
     others.darkenKeysLock = true
     check(others == standard, "they move no other knob")
+}
+
+// Under it (run 6 of PR #400, Noah, 2026-11-24): Stay dark after the last device leaves, 5 s or 30 s, and Hide the
+// pointer too, the Mac's alone like it: 5 s and the pointer hidden in `standard` and `app`, the two waits' seconds,
+// each named in the log's line both ways, kept by `validated`, set by a HostConfig made with them, never moved by a
+// device's change at home or away, and moving no other knob.
+do {
+    check(standard.darkenWait == .short && HostConfig.app.darkenWait == .short, "standard and app: dark 5 s after the last device leaves")
+    check(standard.darkenHidesPointer && HostConfig.app.darkenHidesPointer, "standard and app: the pointer hidden on the dark screen")
+    eq(HostConfig.DarkenWait.allCases.map(\.rawValue), [5, 30], "the two waits, in seconds (the CLI's --darken-wait=5|30, the saved value)")
+    eq(HostConfig.DarkenWait.allCases.map(\.seconds), [5.0, 30.0], "and as the rule's seconds")
+    var long = standard
+    long.darkenWait = .long
+    eq(standard.changes(to: long), "dark after the last device leaves 5 → 30 s", "changes: the wait")
+    eq(long.changes(to: standard), "dark after the last device leaves 30 → 5 s", "changes: and back")
+    var shown = standard
+    shown.darkenHidesPointer = false
+    eq(standard.changes(to: shown), "the pointer on the dark screen hidden → shown", "changes: the pointer's switch")
+    eq(shown.changes(to: standard), "the pointer on the dark screen shown → hidden", "changes: and back")
+    check(long.validated().darkenWait == .long && !shown.validated().darkenHidesPointer && standard.validated().darkenHidesPointer,
+          "validated keeps both either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, lockAfterSession: false,
+                          lockSleepsDisplay: true, lockOnlyAfterAway: false, darkenScreen: .away, darkenKeysLock: true,
+                          darkenWait: .long, darkenHidesPointer: false)
+    check(made.darkenWait == .long && !made.darkenHidesPointer && made.darkenKeysLock, "a HostConfig made with them has them as given")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(long.applying(all).darkenWait == .long && long.applyingAway(all).darkenWait == .long
+          && standard.applying(all).darkenWait == .short && standard.applyingAway(all).darkenWait == .short,
+          "a device's change never moves the wait, at home or away")
+    check(!shown.applying(all).darkenHidesPointer && !shown.applyingAway(all).darkenHidesPointer
+          && standard.applying(all).darkenHidesPointer && standard.applyingAway(all).darkenHidesPointer,
+          "nor the pointer's switch")
+    var both = long
+    both.darkenHidesPointer = false
+    eq(standard.changes(to: both), "dark after the last device leaves 5 → 30 s, the pointer on the dark screen hidden → shown",
+       "changes: both in one line")
+    var back = both
+    back.darkenWait = .short
+    back.darkenHidesPointer = true
+    check(back == standard, "they move no other knob")
 }
 
 // Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual

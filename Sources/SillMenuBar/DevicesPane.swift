@@ -5,7 +5,7 @@ import StreamProtocol
 
 /// Settings › Devices, live: Require pairing, which the model keeps in the identity store beside
 /// the trust list (never in UserDefaults), the pairing window's switch for screen sharing (in
-/// UserDefaults, HostSettings), Darken this Mac's screen with its two switches and Accessibility's
+/// UserDefaults, HostSettings), Darken this Mac's screen with its rows and Accessibility's
 /// warning (the model's permissions), Lock this Mac when the last device leaves with its warning from
 /// the host's status, and the paired devices from the host's status (pushed, so nothing polls), with
 /// the model's actions. Opening the pane looks again at whether this Mac has a display to type its
@@ -25,6 +25,8 @@ struct LiveDevicesPane: View {
                     darkenScreen: $settings.darkenScreenOn,
                     darkenOnlyAway: $settings.darkenOnlyAway,
                     darkenKeysLock: $settings.config.darkenKeysLock,
+                    darkenHidesPointer: $settings.config.darkenHidesPointer,
+                    darkenWait: $settings.config.darkenWait,
                     requirePairingProblem: model.requirePairingProblem,
                     privacyLock: model.coordinator?.status.snapshot.privacyLock ?? PrivacyLockStatus(),
                     accessibility: model.permissions.accessibility,
@@ -62,12 +64,15 @@ struct DevicesPane: View {
     @Binding var lockAfterSession: Bool
     @Binding var lockSleepsDisplay: Bool
     @Binding var lockOnlyAfterAway: Bool
-    /// Darken this Mac's screen (HostConfig.darkenScreen; docs/privacy-mode-plan.md, part 2), and the two switches shown
-    /// under it while it is on: Only while a device is away from home (HostSettings.darkenOnlyAway, which the scope is
-    /// made from: DarkenPolicy.scope) and A key or click on this Mac locks it (HostConfig.darkenKeysLock).
+    /// Darken this Mac's screen (HostConfig.darkenScreen; docs/privacy-mode-plan.md, part 2), and the rows shown under it
+    /// while it is on: Only while a device is away from home (HostSettings.darkenOnlyAway, which the scope is made from:
+    /// DarkenPolicy.scope), A key or click on this Mac locks it (HostConfig.darkenKeysLock), Hide the pointer too
+    /// (HostConfig.darkenHidesPointer) and Stay dark after the last device leaves (HostConfig.darkenWait, 5 or 30 seconds).
     @Binding var darkenScreen: Bool
     @Binding var darkenOnlyAway: Bool
     @Binding var darkenKeysLock: Bool
+    @Binding var darkenHidesPointer: Bool
+    @Binding var darkenWait: HostConfig.DarkenWait
     /// The last Require pairing change the identity store did not keep.
     var requirePairingProblem: AppModel.RequirePairingProblem?
     /// The lock's state as the host runs it: its warning (no display to type the password at, or the last lock
@@ -129,7 +134,8 @@ struct DevicesPane: View {
                 Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
             }
             // Darken this Mac's screen (docs/privacy-mode-plan.md, part 2; #133, #323): at once, no restart; the Mac's
-            // alone. While it is on, its two switches (the plan's open decisions 2 and 3) and Accessibility's warning.
+            // alone. While it is on, its two switches (the plan's open decisions 2 and 3) and Accessibility's warning, the
+            // pointer's switch (open decision 14) and the wait after the last device leaves (Noah, 2026-11-24).
             Section {
                 Toggle(DarkenPolicy.Words.toggle, isOn: $darkenScreen)
                 if darkenScreen {
@@ -138,9 +144,16 @@ struct DevicesPane: View {
                     if darkenKeysLock, !accessibility {
                         Warning(DarkenPolicy.Words.accessibilityWarning)
                     }
+                    Toggle(DarkenPolicy.Words.pointerToggle, isOn: $darkenHidesPointer)
+                    Picker(DarkenPolicy.Words.waitPicker, selection: $darkenWait) {
+                        ForEach(HostConfig.DarkenWait.allCases, id: \.self) { wait in
+                            Text(DarkenPolicy.Words.waitChoice(wait)).tag(wait)
+                        }
+                    }
                 }
             } footer: {
-                Footnote(darkenScreen ? DarkenPolicy.Words.footnoteOn(onlyAway: darkenOnlyAway, keysLock: darkenKeysLock)
+                Footnote(darkenScreen ? DarkenPolicy.Words.footnoteOn(onlyAway: darkenOnlyAway, keysLock: darkenKeysLock,
+                                                                      wait: darkenWait.seconds, lock: lockAfterSession)
                                       : DarkenPolicy.Words.footnoteOff)
             }
             // Lock this Mac when the last device leaves (docs/privacy-mode-plan.md, part 1; #283, #275): at once, no

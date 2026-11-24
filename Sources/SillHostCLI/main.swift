@@ -77,7 +77,7 @@ if let lockFlag = CommandLine.arguments.first(where: { $0 == "--lock-after-sessi
 
 // `SillHost --darken=away|any [--darken-keys=lock|pass]`, with --synthetic only: Darken this Mac's screen for this run, as a
 // test host's dry run (docs/privacy-mode-plan.md, part 2): while a device away from home (away) or any device (any) is
-// connected, and 30 s after, the host says it would darken this Mac's displays, and draws nothing; a key or click on the
+// connected, and 5 s after, the host says it would darken this Mac's displays, and draws nothing; a key or click on the
 // Mac (SILL_TEST_PRIVACY_INPUT on a test host) would lock it, or with --darken-keys=pass only show the hint. SillHost has
 // no window to darken a screen with; without --synthetic this run ignores both with one line each. Without them the
 // output is what it always was.
@@ -98,6 +98,28 @@ if let raw = CommandLine.arguments.first(where: { $0.hasPrefix("--darken-keys") 
         config.darkenKeysLock = raw == "--darken-keys=lock"
     } else {
         print("\(raw) ignored: --darken-keys=lock (a key on the dark Mac locks it) or --darken-keys=pass (it reaches the app).")
+    }
+}
+// `--darken-wait=5|30` (Stay dark after the last device leaves: 5 s by default) and `--darken-pointer=hide|show` (Hide the
+// pointer too: hidden by default), with --synthetic only, as the two above: the dry run says it would hide the pointer
+// (never touching it) and waits that long after the last device leaves.
+if let raw = CommandLine.arguments.first(where: { $0.hasPrefix("--darken-wait") }) {
+    let value = raw.hasPrefix("--darken-wait=") ? Int(raw.dropFirst("--darken-wait=".count)) : nil
+    if !synthetic {
+        print("\(raw) ignored: SillHost takes it only with --synthetic, where it darkens nothing and says what it would do.")
+    } else if let wait = value.flatMap(HostConfig.DarkenWait.init(rawValue:)) {
+        config.darkenWait = wait
+    } else {
+        print("\(raw) ignored: --darken-wait=5 or --darken-wait=30 (seconds the screen stays dark after the last device leaves).")
+    }
+}
+if let raw = CommandLine.arguments.first(where: { $0.hasPrefix("--darken-pointer") }) {
+    if !synthetic {
+        print("\(raw) ignored: SillHost takes it only with --synthetic, where it darkens nothing and says what it would do.")
+    } else if raw == "--darken-pointer=hide" || raw == "--darken-pointer=show" {
+        config.darkenHidesPointer = raw == "--darken-pointer=hide"
+    } else {
+        print("\(raw) ignored: --darken-pointer=hide (the pointer hidden on the dark screen) or --darken-pointer=show.")
     }
 }
 
