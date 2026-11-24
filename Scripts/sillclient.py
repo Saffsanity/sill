@@ -14,8 +14,12 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      1/0/true/false/on/off
   --room=WxH         every viewport this client sends (--fps=, --fps-after=, --room-after=) carries a room of
                      W×H device points (Viewport.room, phase 2b: the picture's room with Sill's controls hidden,
-                     which sizes the Mac's Virtual Desktop)
-  --room-after=WxH@T a viewport with this room T seconds in (the --fps= rate, else 60): a turn, a fold
+                     which tells the Mac a turn from a tap on Full Screen)
+  --room-after=WxH@T a viewport with this room T seconds in (the --fps= rate, else 60), its panel as before
+  --panel=WxH        the panel every viewport carries (its width and height: the space the picture has, which the
+                     Mac fits a window and its Virtual Desktop to), 1117x642 when left out
+  --view-after=PANEL[,ROOM]@T  from T seconds in the panel PANEL (WxH), and the room ROOM when given: one viewport
+                     carrying them, as a device's when Full Screen goes on or off (the panel alone) or it turns (both)
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --raw9=JSON@T      send this literal kind 9 payload (a viewport) T seconds in (split on the last @);
                      a host refuses one outside 1 to 16384 points a side or 0.25 to 4 for its scale,
@@ -192,13 +196,13 @@ AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale
 # The Desktop's stops (DesktopDisplays), from the last window list: a number, or none for a list without it.
 LIST_KEYS = {"desktopDisplay", "desktopDisplays", "desktopVirtual"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS | VD_KEYS
-TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "room-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
+TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "room-after", "view-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
          "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "room")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "room", "panel")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -237,6 +241,11 @@ def room_size(text, flag):
     m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)", text)
     if not m: raise ValueError(f"{flag}: WxH in points, got {text!r}")
     return (float(m.group(1)), float(m.group(2)))
+
+def view_sizes(text):
+    """--view-after's PANEL[,ROOM]: the panel, and the room or None."""
+    p, comma, r = text.partition(",")
+    return (room_size(p, "--view-after"), room_size(r, "--view-after") if comma else None)
 
 def pairs(body, keys, flag):
     out = {}
@@ -544,6 +553,7 @@ try:
                 parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
                           else number(text, "--fps-after") if name == "fps-after"
                           else room_size(text, "--room-after") if name == "room-after"
+                          else view_sizes(text) if name == "view-after"
                           else fractions(text, f"--{name}") if name in ("move", "tap")
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
@@ -572,6 +582,7 @@ try:
     host = valued("host", "127.0.0.1")
     dump_dir = valued("dump")
     room = room_size(valued("room"), "--room") if valued("room") is not None else None
+    panel = room_size(valued("panel"), "--panel") if valued("panel") is not None else (1117.0, 642.0)
     if dump_dir is not None: os.makedirs(dump_dir, exist_ok=True)
     device = unescape(valued("device")) if valued("device") is not None else None
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
@@ -753,7 +764,7 @@ def pointer_input(action, x, y):
 def key_input(hid, down):
     return msg(8, json.dumps({"key": {"down": down, "hidUsage": hid, "modifiers": 0}}).encode())
 def viewport(fps, room_wh=None):
-    v = {"width": 1117, "height": 642, "scale": None, "fps": fps}
+    v = {"width": panel[0], "height": panel[1], "scale": None, "fps": fps}
     r = room_wh or room
     if r is not None: v["room"] = {"width": r[0], "height": r[1]}
     return msg(9, json.dumps(v).encode())
@@ -822,7 +833,7 @@ aud_formats = 0; aud_orphans = 0
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
-    global token
+    global token, panel, room
     _, _, name, text, parsed = e
     at = f"{now - t0:.3f}s"
     if name == "set":
@@ -838,6 +849,11 @@ def fire(e, now):
         s.sendall(viewport(parsed)); print(f"  sent viewport fps={parsed} at {at}")
     elif name == "room-after":
         s.sendall(viewport(fps_now or 60, parsed)); print(f"  sent viewport fps={fps_now or 60} room={parsed[0]:g}x{parsed[1]:g} at {at}")
+    elif name == "view-after":
+        panel = parsed[0]
+        if parsed[1] is not None: room = parsed[1]
+        s.sendall(viewport(fps_now or 60)); print(f"  sent viewport fps={fps_now or 60} panel={panel[0]:g}x{panel[1]:g}"
+                                                  + (f" room={room[0]:g}x{room[1]:g}" if room else "") + f" at {at}")
     elif name == "stop-ping":
         global pinging; pinging = False; print(f"  stopped pinging at {at}")
     elif name == "stop-read":
