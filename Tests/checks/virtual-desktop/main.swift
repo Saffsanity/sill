@@ -368,44 +368,44 @@ check(VDS.Cause.room(turned: true).settle == 1 && VDS.Cause.room(turned: false).
 
 // The follow over time: at once for a tap, 1 s steady for a turn, never within 1 s of the make or the last follow's end,
 // never during a follow, a space back at the size it has or is going to nothing, the newest size winning.
-let turn = VDS.Cause.room(turned: true), hide = VDS.Cause.controls(hidden: true), show = VDS.Cause.controls(hidden: false)
+let turnCause = VDS.Cause.room(turned: true), hideCause = VDS.Cause.controls(hidden: true), showCause = VDS.Cause.controls(hidden: false)
 check(VDS.Follow.spacing == 1, "1 s from the make or a follow's end")
 var follow = VDS.Follow(made: mini, at: 0)
 check(follow.due(now: 0) == .nothing && follow.taken == mini && follow.lastChange == 0 && follow.going == nil, "made: nothing due")
-follow.saw(mini, cause: turn, at: 0.5)
+follow.saw(mini, cause: turnCause, at: 0.5)
 check(follow.due(now: 0.6) == .nothing, "the space it was made for: nothing")
-follow.saw(miniUp, cause: turn, at: 4)
+follow.saw(miniUp, cause: turnCause, at: 4)
 check(follow.due(now: 4.5) == .wait(until: 5), "turned at 4: 1 s steady (\(follow.due(now: 4.5)))")
-follow.saw(miniUp, cause: hide, at: 4.6)
-check(follow.due(now: 4.7) == .wait(until: 5) && follow.cause == turn, "the same space again: the settle and the cause from its first viewport")
-check(follow.due(now: 5) == .follow(miniUp, turn), "steady 1 s: followed")
+follow.saw(miniUp, cause: hideCause, at: 4.6)
+check(follow.due(now: 4.7) == .wait(until: 5) && follow.cause == turnCause, "the same space again: the settle and the cause from its first viewport")
+check(follow.due(now: 5) == .follow(miniUp, turnCause), "steady 1 s: followed")
 follow.started(miniUp)
 check(follow.going == miniUp && follow.due(now: 5.1) == .nothing, "under way: nothing more is due")
-follow.saw(mini, cause: show, at: 5.2)                // back while the turn is under way
+follow.saw(mini, cause: showCause, at: 5.2)                // back while the turn is under way
 check(follow.pending == mini && follow.due(now: 5.3) == .nothing, "a space back at the size it has, during a follow: pending, not due yet")
 follow.took(miniUp, at: 5.6)
 check(follow.taken == miniUp && follow.going == nil && follow.lastChange == 5.6 && follow.due(now: 5.7) == .wait(until: 6.6),
       "the follow ended: the one back waits 1 s from its end (\(follow.due(now: 5.7)))")
-check(follow.due(now: 6.6) == .follow(mini, show), "…then followed back: the device's last word stands")
+check(follow.due(now: 6.6) == .follow(mini, showCause), "…then followed back: the device's last word stands")
 follow.took(mini, at: 7)
-follow.saw(miniUp, cause: hide, at: 9)
-check(follow.due(now: 9) == .follow(miniUp, hide), "a tap 2 s after the last follow: at once")
-follow.saw(mini, cause: show, at: 9.1)
+follow.saw(miniUp, cause: hideCause, at: 9)
+check(follow.due(now: 9) == .follow(miniUp, hideCause), "a tap 2 s after the last follow: at once")
+follow.saw(mini, cause: showCause, at: 9.1)
 check(follow.due(now: 9.2) == .nothing && follow.pending == nil, "back to the size taken before it was taken: nothing changes")
 var fresh = VDS.Follow(made: mini, at: 100)
-fresh.saw(miniUp, cause: hide, at: 100.2)
-check(fresh.due(now: 100.3) == .wait(until: 101) && fresh.due(now: 101) == .follow(miniUp, hide), "a tap within 1 s of the make: 1 s from it")
+fresh.saw(miniUp, cause: hideCause, at: 100.2)
+check(fresh.due(now: 100.3) == .wait(until: 101) && fresh.due(now: 101) == .follow(miniUp, hideCause), "a tap within 1 s of the make: 1 s from it")
 var newest = VDS.Follow(made: mini, at: 0)
-newest.saw(miniUp, cause: turn, at: 10)
-newest.saw(size(1000, 800), cause: turn, at: 10.5)
-check(newest.due(now: 11) == .wait(until: 11.5) && newest.due(now: 11.5) == .follow(size(1000, 800), turn), "the newest size wins, after its own settle")
+newest.saw(miniUp, cause: turnCause, at: 10)
+newest.saw(size(1000, 800), cause: turnCause, at: 10.5)
+check(newest.due(now: 11) == .wait(until: 11.5) && newest.due(now: 11.5) == .follow(size(1000, 800), turnCause), "the newest size wins, after its own settle")
 var closeBy = VDS.Follow(made: mini, at: 0)                  // Full Screen on, then a turn while it is followed
-closeBy.saw(size(1218, 800), cause: hide, at: 10)
-check(closeBy.due(now: 10) == .follow(size(1218, 800), hide), "Full Screen on: at once")
+closeBy.saw(size(1218, 800), cause: hideCause, at: 10)
+check(closeBy.due(now: 10) == .follow(size(1218, 800), hideCause), "Full Screen on: at once")
 closeBy.started(size(1218, 800))
-closeBy.saw(miniUp, cause: turn, at: 10.2)
+closeBy.saw(miniUp, cause: turnCause, at: 10.2)
 closeBy.took(size(1218, 800), at: 10.5)
-check(closeBy.pending == miniUp && closeBy.due(now: 11) == .wait(until: 11.5) && closeBy.due(now: 11.5) == .follow(miniUp, turn),
+check(closeBy.pending == miniUp && closeBy.due(now: 11) == .wait(until: 11.5) && closeBy.due(now: 11.5) == .follow(miniUp, turnCause),
       "two changes close together: the turn after the first follow's end, 1 s steady and 1 s after it")
 var takeover = VDS.Follow(made: mini, at: 0)
 takeover.saw(size(1494, 800), cause: .device, at: 5)
@@ -612,11 +612,11 @@ for run in 0..<2_000 {
 func line(_ why: VDS.Cause, _ step: VDS.FollowStep, _ outcome: IP.Action? = nil, device: String = "iPad mini", to: VDS.Size = miniUp) -> String? {
     VDS.followLine(device: device, why: why, from: mini, to: to, step: step, outcome: outcome, hz: 60, backing: bk(4096, 4096))
 }
-check(line(turn, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
+check(line(turnCause, .inPlace, .done(ms: 650)) == "Virtual Desktop: iPad mini turned; followed in place in 650 ms: 800×1218 pt @2× at 60 Hz.",
       "in place: \(line(turn, .inPlace, .done(ms: 650)) ?? "nil")")
-check(line(hide, .inPlace, .done(ms: 320), to: size(1218, 800)) == "Virtual Desktop: iPad mini hid its controls; followed in place in 320 ms: 1218×800 pt @2× at 60 Hz.",
+check(line(hideCause, .inPlace, .done(ms: 320), to: size(1218, 800)) == "Virtual Desktop: iPad mini hid its controls; followed in place in 320 ms: 1218×800 pt @2× at 60 Hz.",
       "Full Screen on: \(line(hide, .inPlace, .done(ms: 320), to: size(1218, 800)) ?? "nil")")
-check(line(show, .inPlace, .done(ms: 330), to: size(1446, 800)) == "Virtual Desktop: iPad mini showed its controls; followed in place in 330 ms: 1446×800 pt @2× at 60 Hz.",
+check(line(showCause, .inPlace, .done(ms: 330), to: size(1446, 800)) == "Virtual Desktop: iPad mini showed its controls; followed in place in 330 ms: 1446×800 pt @2× at 60 Hz.",
       "Full Screen off: \(line(show, .inPlace, .done(ms: 330), to: size(1446, 800)) ?? "nil")")
 for why in [VDS.Cause.room(turned: false), .controls(hidden: nil), .unknown] {
     check(line(why, .inPlace, .done(ms: 300), to: size(1000, 800)) == "Virtual Desktop: iPad mini's picture changed size; followed in place in 300 ms: 1000×800 pt @2× at 60 Hz.",
@@ -626,21 +626,21 @@ check(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) == "
       "another device: \(line(.device, .inPlace, .done(ms: 300), device: "iPhone", to: iphone) ?? "nil")")
 check(line(.shown, .inPlace, .done(ms: 640)) == "Virtual Desktop: iPad mini shows it again; followed in place in 640 ms: 800×1218 pt @2× at 60 Hz.",
       "shown again: \(line(.shown, .inPlace, .done(ms: 640)) ?? "nil")")
-check(line(turn, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
+check(line(turnCause, .inPlace, .fellBack(.switchRefused(1001), ms: 980))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001); back at 1218×800 pt @2× in 980 ms; the next one is made at 800×1218 pt.",
       "fallen back: \(line(turn, .inPlace, .fellBack(.switchRefused(1001), ms: 980)) ?? "nil")")
-check(line(turn, .inPlace, .remove(.switchRefused(1001)))
+check(line(turnCause, .inPlace, .remove(.switchRefused(1001)))
       == "Virtual Desktop: iPad mini turned; not followed in place: macOS refused the switch to its 2x mode (complete 1001), and it did not come back to 1218×800 pt @2×; removed it: the next one is made at 800×1218 pt.",
       "removed: \(line(turn, .inPlace, .remove(.switchRefused(1001))) ?? "nil")")
 check(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800))
       == "Virtual Desktop: iPad shows it now; 2200×800 pt @2× is beyond the backing it was made with (4096×4096 px); the next one is made at 2200×800 pt.",
       "beyond: \(line(.device, .beyondBacking, device: "iPad", to: size(2200, 800)) ?? "nil")")
-check(line(turn, .nextMake) == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the next make, as before")
+check(line(turnCause, .nextMake) == "Virtual Desktop: iPad mini turned; the next one is made at 800×1218 pt.", "the next make, as before")
 check(line(.room(turned: false), .remake, device: "iPad", to: size(1000, 800)) == "Virtual Desktop: iPad's picture changed size; made again at 1000×800 pt.",
       "a space that is no turn, remade")
-check(VDS.followLine("Headless display", device: "iPhone", why: turn, from: mini, to: miniUp, step: .inPlace, outcome: .done(ms: 700))
+check(VDS.followLine("Headless display", device: "iPhone", why: turnCause, from: mini, to: miniUp, step: .inPlace, outcome: .done(ms: 700))
       == "Headless display: iPhone turned; followed in place in 700 ms: 800×1218 pt @2×.", "the headless display's, no rate known")
-check(line(turn, .nothing) == nil && line(turn, .later) == nil && line(turn, .inPlace) == nil && line(turn, .inPlace, .wait) == nil,
+check(line(turnCause, .nothing) == nil && line(turnCause, .later) == nil && line(turnCause, .inPlace) == nil && line(turnCause, .inPlace, .wait) == nil,
       "nothing done, or not yet: no line")
 for (f, w) in [(IP.Failure.refused, "applySettings: answered NO"), (.late, "the display did not change in time"),
                (.elsewhere(size(1000, 700)), "the display went to 1000×700 instead"), (.elsewhere(nil), "the display went to no mode instead"),
