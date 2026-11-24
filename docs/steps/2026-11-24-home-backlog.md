@@ -81,8 +81,13 @@ random steps and on the model's links, and the harness's away gates ran again.
   3. Fold: the newest session from a key replaces the older one, which is told goodbye; the window used last streams.
   4. On the device: one stream for the whole app (the scenes share one StreamClient, or a window not in front lets go
      of its connection). Device-side only; needs the reporter's answer.
-- **Copies or shared bytes.** `broadcast` serialises a frame once and hands the same `Data` to every connection; whether
-  Network.framework keeps one buffer or a copy per connection is what the harness's five connections measure: MEASURED.
+- **Copies or shared bytes.** `broadcast` serialises a frame once and hands the same `Data` to every connection, but the
+  reporter's own numbers say each connection's queue held bytes of its own: the four stalled connections had 12,168.6 MB
+  waiting between them, the fifth was further behind still, and Activity Monitor showed 17.64 GB, the sum, not the
+  largest queue (about 3.5 GB) that shared buffers would have left. Where the copy is made is not known (likely
+  Network.framework's Swift `send(content: Data?)`, which turns each `Data` into a dispatch data of its own); NWConnection
+  offers no other way to hand it bytes, so sharing one buffer is not a small change. With this branch each queue stays at
+  a few megabytes, so the copies cost little. The harness's five connections against one on main measure it: MEASURED.
 
 ## Verified
 
