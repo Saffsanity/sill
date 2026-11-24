@@ -92,12 +92,14 @@ package struct HostStatusSnapshot: Equatable {
         /// Captured from the virtual display (the window was staged there).
         package var onVirtualDisplay: Bool
         package var softwareEncoder: Bool
+        /// The Desktop, on Sill's own display for a Mac with no working screen (`sillDisplay`).
+        package var onSillDisplay: Bool
 
         package init(kind: Kind, title: String, width: Int, height: Int, fps: Int, mbps: Int,
-                     onVirtualDisplay: Bool, softwareEncoder: Bool) {
+                     onVirtualDisplay: Bool, softwareEncoder: Bool, onSillDisplay: Bool = false) {
             self.kind = kind; self.title = title; self.width = width; self.height = height
             self.fps = fps; self.mbps = mbps; self.onVirtualDisplay = onVirtualDisplay
-            self.softwareEncoder = softwareEncoder
+            self.softwareEncoder = softwareEncoder; self.onSillDisplay = onSillDisplay
         }
     }
 
@@ -124,6 +126,14 @@ package struct HostStatusSnapshot: Equatable {
     /// Why the last pick streamed the real window instead of the virtual display; cleared by the
     /// next successful stage.
     package var lastStageFailure: String?
+    /// Sill's own display for a Mac with no working screen, while it exists (PR #200: made when a device shows the
+    /// Desktop, then kept with devices or none until a real screen has worked 2 s, its switch is turned off, the session
+    /// goes off console or Sill quits): its size as it came up, its rate, and whose screen it is sized to. The card's
+    /// source row and Settings › Virtual Display say so. Nil while there is none.
+    package var sillDisplay: SillDisplay?
+    /// The guard for #380 holds (DisplayMakeGuard): Sill stopped while making a display two runs in a row, and makes none
+    /// by itself until the person chooses Try Again in Settings › Virtual Display.
+    package var displayMakeHeld = false
     /// --synthetic: the Desktop is a test pattern and the host is not advertised.
     package var synthetic = false
     /// Remote access, on a host with an identity (Sill.app, SillHost --remote); nil otherwise.
@@ -147,6 +157,20 @@ package struct HostStatusSnapshot: Equatable {
     /// Lock this Mac when the last device leaves (PrivacyLock; docs/privacy-mode-plan.md, part 1): Settings › Devices'
     /// warning under the switch, and whether a wait runs, for Sill.app's App Nap hold.
     package var privacyLock = PrivacyLockStatus()
+
+    /// Sill's own display for a Mac with no working screen, as the card and Settings show it.
+    package struct SillDisplay: Equatable {
+        package var widthPt: Int
+        package var heightPt: Int
+        package var scale: Int
+        package var hz: Int
+        /// The device it was sized to ("iPad mini"); nil when none had said its size (VirtualDesktopSize.fallback).
+        package var device: String?
+
+        package init(widthPt: Int, heightPt: Int, scale: Int, hz: Int, device: String? = nil) {
+            self.widthPt = widthPt; self.heightPt = heightPt; self.scale = scale; self.hz = hz; self.device = device
+        }
+    }
 
     /// The Mac's sound as the menu's card and Settings show it.
     package struct Audio: Equatable {

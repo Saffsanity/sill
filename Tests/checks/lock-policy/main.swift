@@ -338,6 +338,15 @@ for rd in readings { for paired in [false, true] {
     let want = rd == .unlocked || (rd == .screenLocked && paired)
     check(P.takesInput(rd, paired: paired) == want, "takesInput(\(rd), paired: \(paired)) is \(want)")
 } }
+// The one display Sill makes while locked (PR #200, #298, written down 2026-11-18): Sill's own Desktop display for a Mac
+// with no working screen, at a locked screen too; never off console, the off-console view included. The stage's (a
+// picked window's, `virtualDisplay`) stays off while locked.
+check(P.makesDesktopDisplay(.unlocked) && P.makesDesktopDisplay(.screenLocked) && !P.makesDesktopDisplay(.offConsole),
+      "Sill's Desktop display: unlocked and at a locked screen, never off console")
+check(!screen.virtualDisplay && P.makesDesktopDisplay(.screenLocked),
+      "at a locked screen: no stage display, Sill's Desktop display the written exception")
+check(!P.allowed(.offConsole, offConsoleView: true).virtualDisplay && !P.makesDesktopDisplay(.offConsole),
+      "the off-console view: neither display")
 
 // MARK: - The server's gate
 
@@ -548,6 +557,14 @@ check(P.line(P.Change(from: .screenLocked, to: .offConsole)) == "Locked: another
 check(P.line(P.Change(from: .offConsole, to: .unlocked)) == P.unlockedLine
       && P.unlockedLine == "Unlocked: this Mac's screen is unlocked; devices see its windows again.", "the unlock's line")
 check(P.menuNote == "The Mac is locked.", "the menus' note")
+// The displays as a lock or an unlock finds them (#298: a Mac with no active display turns its password away).
+check(P.displaysLine(online: 2, active: 0, asleep: 2, sills: 0, standIn: 0) == "Displays: 2 online, 0 active, 2 asleep, 0 Sill's, 0 macOS's stand-in.",
+      "the displays' line: a closed lid, its two monitors asleep")
+check(P.displaysLine(online: 1, active: 1, asleep: 0, sills: 1, standIn: 0) == "Displays: 1 online, 1 active, 0 asleep, 1 Sill's, 0 macOS's stand-in.",
+      "the displays' line: Sill's own display alone")
+check(P.displaysLine(online: 0, active: 0, asleep: 0, sills: 0, standIn: 0) == "Displays: 0 online, 0 active, 0 asleep, 0 Sill's, 0 macOS's stand-in.",
+      "the displays' line: none")
+check(P.displaysLine(online: 1, active: 1, asleep: 0, sills: 0, standIn: 1).hasSuffix("1 macOS's stand-in."), "the displays' line: macOS's stand-in counted")
 let words: [(P.Refusal, String, String)] = [
     (.pick, "Locked: refused a window pick; devices see none of this Mac until it is unlocked.",
      "Locked: refused 3 window picks; devices see none of this Mac until it is unlocked."),

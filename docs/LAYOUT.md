@@ -271,7 +271,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   geometry, prepare/release, emergency restore; a native tab switch's new tab
   taken as the staged window with the group's way home, `adoptTab`, #366, and
   the app's own windows on the display no strangers while the staged tab is
-  hidden), `HostShutdown` (signal
+  hidden), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
+  PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
+  SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
+  size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
   default path: a device's keys let go and a sized window goes back, then the
@@ -426,8 +431,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session[=away][,nosleep]`
-  (with `--synthetic` only: a dry run).
+  on its own stdout), `--print-cable`, `--no-clipboard`, `--no-headless-display` and
+  `--lock-after-session[=away][,nosleep]` (with `--synthetic` only: a dry run).
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`

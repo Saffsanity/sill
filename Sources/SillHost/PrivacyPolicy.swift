@@ -89,8 +89,9 @@ package enum PrivacyPolicy {
     /// Rule 10 (issue #298): whether a lock screen on these displays could take a password typed from a device. A
     /// screen (DesktopDisplays.role: the Mac's own, a monitor, Sidecar, AirPlay, another app's virtual display), never
     /// Sill's stage display or Desktop display, nor macOS's stand-in for a Mac with no screen, whose login window
-    /// rejects the right password typed from a device (#298). #200's display for a Mac with no screen adds itself here
-    /// when it lands (docs/privacy-mode-plan.md, rule 10).
+    /// rejects the right password typed from a device (#298). #200's display for a Mac with no screen (PR #395, a
+    /// `.sillDesktop`) does not count here as merged: whether a Mac whose only display is Sill's should lock is a
+    /// question for Noah in PR #395 (docs/privacy-mode-plan.md's rule 10 foresaw that it would).
     static func typesAt(_ roles: [DesktopDisplays.Role]) -> Bool { roles.contains(.screen) }
 
     // MARK: Outputs

@@ -146,9 +146,12 @@ final class AppModel {
                 settings.config.requirePairing = launchRequirePairing(remote)
                 // The window lists carry this Sill's version, when it has one (the bare binary's
                 // "dev" does not parse): later devices can tell which Mac to update.
+                // Sill.app keeps the guard for #380 (DisplayMakeGuard: Application Support and its defaults); the bare
+                // binary, a test host, only under SILL_TEST_MAKE_GUARD.
                 let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote,
                                               homePairing: true, testHooks: !Self.bundled,
-                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil)
+                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil,
+                                              displayGuard: Self.bundled)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
                 // One path from the controls to the host, synchronous: the host's target equals
