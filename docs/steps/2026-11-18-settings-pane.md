@@ -192,3 +192,18 @@
     exception the Duo upright (flat-portrait, -long): the footnote's two lines, above. Main's floating panel has no
     case at the same width (340 or 360 pt, the phone's its row's; the pane's columns are 343, 350, 361, 423.5, 536
     and 600 pt), so each line is compared with the branch before 2026-11-23.
+- **Verified (2026-11-24, on this Mac and GitHub; nothing on a device).** On 9c921cf0, whose iOSClient, Tests and Scripts
+  are d02c139b's but for one comment: `settings-pane` 431 checks (708,590 layouts on the grid; the system's edge effect
+  off at every real size, both directions, and over the grid) and 47 of 47 mutants (M49 to M53 new) here; GitHub's CI
+  (Build and check, run 45393056881) passed on it: `swift build -c release`, `run-all.sh` all passed (`settings-pane`
+  431, `tour` 740,388), the iOS app with CI's xcodebuild line (BUILD SUCCEEDED, the one warning main's, at
+  StreamClient.swift:4587). The local `run-all.sh` and builds stopped at the 25 GB floor (24 GB free). Photos
+  (`Scripts/harness-photos.sh`, the agents' Duo on iOS 27.1 and iPad on iOS 27.0) of d02c139b against feda62ff,
+  61 cases (2026-11-24 16:58-17:12), and of 15a947a9 (the three placements), 42 Duo cases (17:37-17:46; its iPad
+  half stopped at the floor): the numbers above; in `~/Downloads/sill-handoff/next/settings-pane/run-blur/`
+  (`photos/`, `photos2/`, the sideways iPad photos turned upright in `upright/`).
+- **Not tested here** (2026-11-24): a 13-inch iPad (the blur came from the harness's drawing, and the system's effect
+  is off anyway); the edges while rows scroll on a device (with the system's effect off, rows passing under the home
+  indicator in the Duo's laptop and book poses fade by the pane's 12 pt only); the rest as on 2026-11-23. Main moved
+  59 commits past 5d062a3c on 2026-11-24 (HostSettingsPanel.swift among them); GitHub reports the pull request
+  mergeable with no conflict; the merged result is not built or photographed here.
