@@ -21,6 +21,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// ignored until then, since there is nothing on screen to aim at.
     var videoSize: CGSize = .zero
     var send: (InputEvent) -> Void = { _ in }
+    var sendPen: ((PenBatch) -> Void)? = nil
     /// Who decides when this view holds the keyboard, told when it joins or leaves a window and when it
     /// becomes or resigns first responder (only the proxy's current view counts).
     weak var keyboardProxy: InputOverlayProxy?
@@ -103,6 +104,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// Ahlquist's finding, issue #81; reported again in #322). Sent as a move with the Mac's button still
     /// down, it drew a line from the stroke's end back to where it began.
     private var pencilTouching = false
+    private var lastPencilAt: CFTimeInterval = 0
+    private var smoothedPencilPos: (x: Double, y: Double)?
+    private var lastPencilPressure: Double = 0
+    private var pencilFilter = PenFilter()
+    private var hoverFilter = PenFilter(minCutoff: 1.8, beta: 18.0)
     /// Whether the session's Mac repeats a key held down (`StreamClient.hostKeyRepeat`, the window list's
     /// `keyRepeat`): a hardware keyboard's characters go to it as keys only then (KeyTyping), as a Mac that
     /// repeats none would type each once. Asked as each key goes down.
@@ -713,14 +719,46 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// draws it. Only a Pencil reports a height or a tilt (a trackpad or mouse pointer reads 0 for
     /// both), which is how the two are told apart here.
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
+        guard !pencilTouching else { return }
         switch gesture.state {
         case .began, .changed:
+            let wasHoveringPencil = hoverIsPencil
             if gesture.state == .began { hoverIsPencil = false }
             if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
-            guard !pencilTouching else { return }   // stale: the Pencil's tip is on the glass
-            let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
+            let loc = gesture.location(in: self)
+            if hoverIsPencil, let sendPen {
+                guard CACurrentMediaTime() - lastPencilAt > 0.035 else { return }
+                guard let raw = normalized(loc, clamped: true) else { return }
+                if gesture.state == .began || !wasHoveringPencil { hoverFilter.reset() }
+                let p = hoverFilter.apply(rawX: raw.x, rawY: raw.y)
+                smoothedPencilPos = p
+                let sample = PenSample(phase: PenPhase.hover,
+                                       x: p.x,
+                                       y: p.y,
+                                       pressure: 0,
+                                       altitude: Double(gesture.altitudeAngle),
+                                       azimuth: Double(gesture.azimuthAngle(in: self)),
+                                       t: CACurrentMediaTime())
+                sendPen(PenBatch(target: PenTarget.source, samples: [sample]))
+                setOwnPointer(CGPoint(x: p.x, y: p.y), .pencil)
+                return
+            }
+            if !hoverIsPencil {
+                hoverFilter.reset()
+                smoothedPencilPos = nil
+            }
+            let at = sendPointer(.move, at: loc, clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
+            if hoverIsPencil, let sendPen {
+                let loc = gesture.location(in: self)
+                let p = normalized(loc, clamped: true) ?? smoothedPencilPos ?? (x: 0.5, y: 0.5)
+                sendPen(PenBatch(target: PenTarget.source,
+                                 samples: [PenSample(phase: PenPhase.leave, x: p.x, y: p.y, t: CACurrentMediaTime())]))
+                setOwnPointer(nil, .none)
+            }
+            hoverFilter.reset()
+            smoothedPencilPos = nil
             hoverIsPencil = false
         }
     }
@@ -735,6 +773,34 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// Finger touches stay with the gesture recognizers above (tap, long-press, pan).
     private static func pointerTouch(in touches: Set<UITouch>) -> UITouch? {
         touches.first { $0.type == .pencil || $0.type == .indirectPointer }
+    }
+
+    private func penSample(phase: Int, for touch: UITouch, clamped: Bool, resetFilter: Bool = false) -> PenSample? {
+        let point = touch.preciseLocation(in: self)
+        guard let raw = normalized(point, clamped: clamped) else { return nil }
+        if resetFilter { pencilFilter.reset() }
+        let p = pencilFilter.apply(rawX: raw.x, rawY: raw.y, timestamp: touch.timestamp)
+        smoothedPencilPos = p
+        let pressure: Double
+        if phase == PenPhase.down || phase == PenPhase.drag {
+            let prev = phase == PenPhase.down ? 0 : lastPencilPressure
+            let isEstimated = touch.estimatedPropertiesExpectingUpdates.contains(.force)
+            pressure = Pen.mapPressure(force: Double(touch.force),
+                                       maxForce: Double(touch.maximumPossibleForce),
+                                       previous: prev,
+                                       isEstimated: isEstimated)
+            lastPencilPressure = pressure
+        } else {
+            pressure = 0
+            lastPencilPressure = 0
+        }
+        return PenSample(phase: phase,
+                         x: p.x,
+                         y: p.y,
+                         pressure: pressure,
+                         altitude: Double(touch.altitudeAngle),
+                         azimuth: Double(touch.azimuthAngle(in: self)),
+                         t: touch.timestamp)
     }
 
     /// This device's own pointer after a pointer touch at `at`: the Pencil's position, from
@@ -752,7 +818,24 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
-        if touch.type == .pencil { pencilTouching = true }
+        if touch.type == .pencil, let sendPen {
+            let coalesced = event?.coalescedTouches(for: touch) ?? [touch]
+            var samples: [PenSample] = []
+            for (idx, t) in coalesced.enumerated() {
+                let phase = idx == 0 ? PenPhase.down : PenPhase.drag
+                if let s = penSample(phase: phase, for: t, clamped: idx > 0, resetFilter: idx == 0) {
+                    samples.append(s)
+                }
+            }
+            guard let last = samples.last else { return }
+            pencilTouching = true
+            lastPencilAt = CACurrentMediaTime()
+            lastPencilPressure = last.pressure
+            forgetTyped()
+            sendPen(PenBatch(target: PenTarget.source, samples: samples))
+            setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil)
+            return
+        }
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
         ownPointer(at, for: touch)
@@ -766,6 +849,16 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesMoved(touches, with: event); return
         }
+        if touch.type == .pencil, let sendPen {
+            let coalesced = event?.coalescedTouches(for: touch) ?? [touch]
+            let samples = coalesced.compactMap { penSample(phase: PenPhase.drag, for: $0, clamped: true) }
+            guard let last = samples.last else { return }
+            pencilTouching = true
+            lastPencilAt = CACurrentMediaTime()
+            sendPen(PenBatch(target: PenTarget.source, samples: samples))
+            setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil)
+            return
+        }
         // A move while the button is down is a drag on the host's side.
         if let at = sendPointer(.move, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
     }
@@ -774,7 +867,26 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesEnded(touches, with: event); return
         }
-        if touch.type == .pencil { pencilTouching = false }
+        if touch.type == .pencil, let sendPen {
+            pencilTouching = false
+            lastPencilAt = CACurrentMediaTime()
+            lastPencilPressure = 0
+            let coalesced = event?.coalescedTouches(for: touch) ?? []
+            var samples = coalesced.dropLast().compactMap { penSample(phase: PenPhase.drag, for: $0, clamped: true) }
+            if let up = penSample(phase: PenPhase.up, for: touch, clamped: true) {
+                samples.append(up)
+            } else {
+                let p = normalized(touch.preciseLocation(in: self), clamped: true) ?? smoothedPencilPos ?? (x: 0.5, y: 0.5)
+                samples.append(PenSample(phase: PenPhase.up, x: p.x, y: p.y, t: touch.timestamp))
+            }
+            pencilFilter.reset()
+            smoothedPencilPos = nil
+            if let last = samples.last {
+                sendPen(PenBatch(target: PenTarget.source, samples: samples))
+                setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil)
+            }
+            return
+        }
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
     }
@@ -783,7 +895,18 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesCancelled(touches, with: event); return
         }
-        if touch.type == .pencil { pencilTouching = false }
+        if touch.type == .pencil, let sendPen {
+            pencilTouching = false
+            lastPencilAt = CACurrentMediaTime()
+            lastPencilPressure = 0
+            let p = normalized(touch.preciseLocation(in: self), clamped: true) ?? smoothedPencilPos ?? (x: 0.5, y: 0.5)
+            pencilFilter.reset()
+            smoothedPencilPos = nil
+            sendPen(PenBatch(target: PenTarget.source,
+                             samples: [PenSample(phase: PenPhase.leave, x: p.x, y: p.y, t: touch.timestamp)]))
+            setOwnPointer(nil, .none)
+            return
+        }
         // Never leave the button stuck down.
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
@@ -2099,6 +2222,7 @@ final class KeyboardFrameMonitor: ObservableObject {
 struct InputOverlay: UIViewRepresentable {
     let videoSize: CGSize
     let send: (InputEvent) -> Void
+    var sendPen: ((PenBatch) -> Void)? = nil
     /// `StreamClient.setOwnPointer`; see `InputOverlayView.setOwnPointer`.
     let setOwnPointer: (CGPoint?, PointerPresence.Origin) -> Void
     let proxy: InputOverlayProxy
@@ -2127,6 +2251,7 @@ struct InputOverlay: UIViewRepresentable {
     func updateUIView(_ uiView: InputOverlayView, context: Context) {
         uiView.videoSize = videoSize
         uiView.send = send
+        uiView.sendPen = sendPen
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture

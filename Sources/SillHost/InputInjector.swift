@@ -42,6 +42,7 @@ final class InputInjector {
     private var lastMoveArrival: CFTimeInterval = 0   // jitter probe, see apply()
     private var left = ButtonState()
     private var right = ButtonState()
+    let pen = PenInjector()
 
     /// The Mac's pointer (docs/pointer-visibility-plan.md §4.5): told just before each post of a
     /// pointer or scroll event, never after. The network queue reads the pointer while this posts,
@@ -49,13 +50,17 @@ final class InputInjector {
     /// Sill's own move for the Mac's; that matters most for a held click, posted a second or more
     /// after it was read, when the arrival's settle is long over. Keys and text note nothing: they
     /// do not move the pointer.
-    var watch: PointerWatch?
+    var watch: PointerWatch? {
+        didSet { pen.watch = watch }
+    }
     /// A synthetic host (the plan's Q10): every event that would be posted is counted (`in.dry`,
     /// one per post: a pointer or scroll event one, a typed character or a Return two) and none
     /// reaches the Mac, since the test pattern is not the screen; the per-type counters stay at
     /// zero and no Accessibility reminder prints. With the TEST ONLY scripted pointer a pointer
     /// event moves that pointer to its position instead (PointerWatch.sillMoved(to:)).
-    var dryRun = false
+    var dryRun = false {
+        didSet { pen.dryRun = dryRun }
+    }
     /// TEST ONLY (SILL_TEST_INPUT_LOG=1, a synthetic host, which posts nothing: `testInputLog`): each
     /// event a dry run would post is printed, a keyboard event with the flags it was made with ("Test
     /// input: key 49 up (none)"), a pointer or scroll event with those the last keyboard event would
@@ -66,7 +71,9 @@ final class InputInjector {
     /// at 756,474"), so a test reads which way a device's scroll went (positive dy moves the content
     /// down) and where it lands. A held key's repeat says so ("Test input: key 123 repeat (option)"),
     /// and its start says when the repeats come ("Test input: key 123 repeats after 0.50 s, every 0.033 s").
-    var testLog = false
+    var testLog = false {
+        didSet { pen.testLog = testLog }
+    }
     /// The flags of the last keyboard event posted (a dry run's: that would have been), which the HID
     /// state table holds by KeyStrokes' inference: the check after a key's up reads the table against
     /// it, and the TEST ONLY log gives it to each pointer event.
@@ -246,6 +253,10 @@ final class InputInjector {
         watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
         lastPointerLocation = location
         if post(event) { Stats.shared.bump("in.pointer") }
+    }
+
+    var isDragging: Bool {
+        left.isDown || right.isDown || pen.isPenDown
     }
 
     /// Whether this input is the up of a key or a button the Mac has down, which still goes when the
@@ -555,6 +566,7 @@ final class InputInjector {
                                                 rightOwner: right.isDown ? right.owner : nil) {
             pointer(action, at: pointerNow())
         }
+        pen.release(device: device)
     }
 
     /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
@@ -564,6 +576,7 @@ final class InputInjector {
         stopRepeating()
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
         if right.isDown { pointer(.rightUp, at: pointerNow()) }
+        pen.releaseAll()
     }
 
     /// Shift, control, option and command: the modifiers that change a click or a scroll.
