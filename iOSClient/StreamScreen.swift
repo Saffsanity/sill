@@ -343,7 +343,7 @@ struct StreamScreen: View {
         // The panel open over the keyboard, as in a session: it took the keyboard down, and closing
         // it puts it back (`-SillSettings 1 -SillKeyboard 1`).
         _keyboardBeforeSettings = State(initialValue: settingsOpen && keyboardShown)
-        // And it holds the Larger Picture it opened with, as `setSettings` does.
+        // And it holds the Larger Picture it opened with, as `openSettings` does.
         _largerPictureHeld = State(initialValue: settingsOpen
             ? PhonePortraitLayout.largerPicture(switchOn: UserDefaults.standard.bool(forKey: StreamClient.largerPictureKey),
                                                 streaming: .init(client.active))
@@ -393,9 +393,11 @@ struct StreamScreen: View {
                 Group {
                     layouts(duo, size: geo.size, posture: posture, largerKeyboard: largerKeyboard, hidden: hidden, room: room)
                 }
-                // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
+                // Under the pairing overlay, the tour and Settings nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
-                .allowsHitTesting(!overlayShown && tour == nil)
+                .allowsHitTesting(!overlayShown && tour == nil && !settingsOpen)
+                // Under Settings, which covers all of it, nothing for VoiceOver either (the pane is modal too).
+                .modifier(HiddenUnderSettings(hidden: settingsOpen))
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. Full screen
                 // has no trackpad, so none of its arrow either.
@@ -437,6 +439,19 @@ struct StreamScreen: View {
                                alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
                         .position(x: panel.midX, y: panel.midY)
                         .transition(.opacity)
+                }
+                // Settings (docs/settings-pane-plan.md): a whole-screen pane over everything above, a sibling after
+                // the layouts so it takes every touch over the stream's UIKit input view, as the pairing overlay
+                // does. The layouts stay as they are under it (no viewport changes, the picture keeps decoding).
+                // The tour and the pairing overlay close it before they come (its zIndex keeps it over them while
+                // it slides away). Its bottom inset, the home indicator's, is the window's (`deviceInsets`): this
+                // reader ignores the bottom edge and so reports none there (the review of #393: Disconnect sat
+                // 16 pt from the edge, in the home indicator's 34).
+                if settingsOpen {
+                    HostSettingsPanel(client: client, close: { closeSettings(.done) }, pairThisDevice: openPairingOverlay,
+                                      takeTour: takeTour, fullScreen: fullScreenRow, bottomInset: insets.bottom)
+                        .transition(settingsTransition)
+                        .zIndex(1)
                 }
                 // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
                 // outside link puts the tour aside until the overlay has closed.
@@ -517,10 +532,10 @@ struct StreamScreen: View {
             // A gesture cut short by a scene change never ends: put the transient UI away.
             if phase != .active { scaleOpen = false; windowMenu = nil }
         }
-        // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put the Settings
-        // panel away. (Opening the panel closes them, the drawer and the keyboard.)
-        .onChange(of: scaleOpen) { _, open in if open { setSettings(false) } }
-        .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
+        // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put Settings away (both are
+        // under the pane while it shows). (Opening Settings closes them, the drawer and the keyboard.)
+        .onChange(of: scaleOpen) { _, open in if open { closeSettings(.bar) } }
+        .onChange(of: windowMenu) { _, menu in if menu != nil { closeSettings(.bar) } }
         // Full screen takes the whole screen; otherwise the bottom alone, under the home indicator, as before.
         .ignoresSafeArea(edges: chromeHidden ? .all : .bottom)
         .onAppear {
@@ -741,7 +756,7 @@ struct StreamScreen: View {
             after(time) {
                 print("keyboard: toggled at \(Self.points(CGFloat(time))) s, as the Keyboard button does (it was "
                       + (keyboardShown ? "up" : "down") + ")")
-                setSettings(false, restoreKeyboard: false)
+                closeSettings(.bar)
                 overlay.toggleKeyboard()
             }
         }
@@ -873,11 +888,11 @@ struct StreamScreen: View {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
         if defaults.bool(forKey: "SillSettings") {
-            after(1.5) { print("harness: the Settings panel opened"); setSettings(true) }
+            after(1.5) { print("harness: the Settings panel opened"); openSettings() }
             // `-SillSettingsCloseAt <s>`: closed again s seconds in, as Done does (the clipboard's chip
             // waiting under it, then showing: docs/clipboard-plan.md).
             let closeAt = defaults.double(forKey: "SillSettingsCloseAt")
-            if closeAt > 1.5 { after(closeAt) { print("harness: the Settings panel closed"); setSettings(false) } }
+            if closeAt > 1.5 { after(closeAt) { print("harness: the Settings panel closed"); closeSettings(.harness) } }
         }
         if defaults.bool(forKey: "SillScaleOpen") {
             after(1.5) {
@@ -1047,7 +1062,7 @@ struct StreamScreen: View {
     }
 
     private func putAwayForOverlay() {
-        setSettings(false, restoreKeyboard: false)
+        closeSettings(.overlay)
         withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
         windowMenu = nil
         scaleOpen = false
@@ -1060,34 +1075,57 @@ struct StreamScreen: View {
         PhonePortraitLayout.largerPicture(switchOn: largerPicture, streaming: .init(client.active))
     }
 
-    /// Opens or closes the Settings panel. Opening puts the drawer, the traffic lights and the Aa
-    /// ruler away and takes the keyboard down: with the overlay not first responder no hardware
-    /// key reaches the Mac, and Esc (or ⌘.) reaches the panel's Done instead. Closing (Done, a tap
-    /// outside, the Settings button, Esc, the VoiceOver escape gesture) puts the keyboard back if
-    /// the panel took it down; the Apps and Keyboard buttons close it with `restoreKeyboard: false`
-    /// because they decide about the keyboard themselves. While it is open the arrangement keeps the
-    /// Larger Picture it opened with (`largerPictureHeld`); a change of the switch, or of what
-    /// streams, applies as it closes.
+    /// Opens Settings, the whole-screen pane (docs/settings-pane-plan.md): the drawer, the traffic lights and
+    /// the Aa ruler go, and the keyboard goes down: with the overlay not first responder no hardware key
+    /// reaches the Mac, and Esc (or ⌘.) reaches the pane's Done instead. It comes up from the bottom edge (a
+    /// fade under Reduce Motion). While it is open the arrangement under it keeps the Larger Picture it opened
+    /// with (`largerPictureHeld`): a change of the switch, or of what streams, applies as it closes, so the
+    /// layouts under the pane never change, and no viewport goes to the Mac, while it shows.
+    private func openSettings() {
+        guard !settingsOpen else { return }
+        withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+        windowMenu = nil
+        scaleOpen = false
+        keyboardBeforeSettings = keyboardShown
+        overlay.setKeyboard(shown: false)
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: SettingsPane.openSeconds, bounce: 0)) {
+            settingsOpen = true
+            largerPictureHeld = largerPictureNow
+        }
+    }
+
+    /// Closes Settings for `why` (SettingsPane.Close): back to the stream screen (Done, Esc, ⌘., the VoiceOver
+    /// escape gesture, the harness), the keyboard comes back if the pane took it down and VoiceOver reads the
+    /// screen afresh once the pane has gone; otherwise what comes next decides about the keyboard (the pairing
+    /// overlay, the tour, full screen, a bar's control). It goes down to the bottom edge.
+    private func closeSettings(_ why: SettingsPane.Close) {
+        guard settingsOpen else { return }
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .easeInOut(duration: SettingsPane.closeSeconds)) {
+            settingsOpen = false
+            largerPictureHeld = nil
+        } completion: {
+            if why.backToStream, !settingsOpen { AccessibilityNotification.ScreenChanged().post() }
+        }
+        if why.backToStream, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
+        keyboardBeforeSettings = false
+    }
+
+    /// The bars' way to Settings (TopBar, PortraitStreamScreen): open, or close; `restoreKeyboard` false from
+    /// the Apps and Keyboard buttons, which decide about the keyboard themselves (a bar's control), true from
+    /// the Settings button (the person's own close; under the pane, as are they).
     private func setSettings(_ open: Bool, restoreKeyboard: Bool = true) {
-        guard open != settingsOpen else { return }
-        if open {
-            withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
-            windowMenu = nil
-            scaleOpen = false
-            keyboardBeforeSettings = keyboardShown
-            overlay.setKeyboard(shown: false)
-        }
-        let motion: Animation = open && !reduceMotion ? .spring(duration: 0.25, bounce: 0.15) : .easeOut(duration: 0.18)
-        withAnimation(motion) {
-            settingsOpen = open
-            // Larger Picture keeps the arrangement the panel opened with while it is open, so the
-            // panel never moves under the finger: a change of the switch, or of what streams,
-            // applies as the panel goes.
-            largerPictureHeld = open ? largerPictureNow : nil
-        }
-        if !open {
-            if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
-            keyboardBeforeSettings = false
+        if open { openSettings() } else { closeSettings(restoreKeyboard ? .done : .bar) }
+    }
+
+    /// `then`, once Settings, closed for `why`, has gone, when what follows waits for it (SettingsPane.Close's
+    /// `waitsForClose`: the tour, full screen), and only if the session is still the one it closed in.
+    private func afterSettings(_ why: SettingsPane.Close, _ then: @escaping @MainActor () -> Void) {
+        guard why.waitsForClose else { then(); return }
+        let mark = client.connectedAt
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(SettingsPane.closeSeconds))
+            guard sameSession(mark) else { return }         // the session ended meanwhile
+            then()
         }
     }
 
@@ -1100,7 +1138,7 @@ struct StreamScreen: View {
         #if DEBUG
         if settingsOpen { print("menus: the pull-down opened over the Settings panel, which closes; the keyboard " + (keyboardAfterMenus ? "comes back when the pull-down goes" : "was down before it")) }
         #endif
-        setSettings(false, restoreKeyboard: false)
+        closeSettings(.bar)
         windowMenu = nil
         withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
         menusOpen = true
@@ -1268,17 +1306,12 @@ struct StreamScreen: View {
         shakeToUndoTurnedOff = off
     }
 
-    /// Settings › Full Screen: the panel closes (the keyboard it took down stays down, and comes back with the
-    /// controls if it was up before the panel), then the interface hides.
+    /// Settings › Full Screen: the pane closes (the keyboard it took down stays down, and comes back with the
+    /// controls if it was up before the pane), then, once it has gone, the interface hides.
     private func hideFromSettings() {
         let keyboard = keyboardBeforeSettings
-        setSettings(false, restoreKeyboard: false)
-        let mark = client.connectedAt
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(0.2))       // the panel's close
-            guard sameSession(mark) else { return }
-            hideChrome(by: "Settings › Full Screen", keyboardWasUp: keyboard)
-        }
+        closeSettings(.fullScreen)
+        afterSettings(.fullScreen) { hideChrome(by: "Settings › Full Screen", keyboardWasUp: keyboard) }
     }
 
     /// The hint: on, then faded after `hintSeconds` (DEBUG `-SillFullScreenHint hold` keeps it).
@@ -1461,7 +1494,8 @@ struct StreamScreen: View {
     }
 
     /// What the tour's words depend on now (TourFeatures): the Menus button on screen (its target
-    /// reported), this device's Three-Finger Gestures with a Mac that takes them, the Mac's Virtual
+    /// reported), this device's Three-Finger Gestures with a Mac that takes them, its Hold, Then Drag
+    /// (TouchHold, PR #292), the Mac's Virtual
     /// Display setting as the Settings panel shows it, the clipboard the Mac's window list shares, this
     /// device's Paste on ‹Mac› Right Away, a Mac with sound (Send Audio, on or off), and
     /// `offersLarger`, the Settings panel's Larger Picture switch offered here (`body`). The window
@@ -1470,6 +1504,7 @@ struct StreamScreen: View {
     private func tourFeatures(offersLarger: Bool) -> TourFeatures {
         TourFeatures(menus: tourTargets[.menus] != nil,
                      gestures: StreamClient.gesturesOn && (client.hostGestures ?? 0) >= TrackpadGesture.generation,
+                     holdThenDrag: StreamClient.holdThenDragOn,
                      virtualDisplay: client.settings.displayed?.virtualDisplay == true,
                      clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
                      pasteRightAway: StreamClient.pasteRightAwayOn,
@@ -1482,7 +1517,7 @@ struct StreamScreen: View {
     /// clipboard, paste right away, sound, no Larger Picture".
     static func tourRowsLine(_ run: TourRun, _ copy: TourCopy, _ f: TourFeatures) -> String {
         func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
-        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
+        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.holdThenDrag, "hold then drag"), has(f.virtualDisplay, "Virtual Display"),
                     has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
                     has(f.largerPicture, "Larger Picture")]
         return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
@@ -1525,7 +1560,7 @@ struct StreamScreen: View {
                 try? await Task.sleep(for: .seconds(s))
                 guard sameSession(mark) else { return }
                 tourLog("a stand-in for Settings, then Take the Tour")
-                setSettings(true)
+                openSettings()
                 try? await Task.sleep(for: .seconds(1))
                 guard sameSession(mark) else { return }
                 takeTour()
@@ -1671,16 +1706,14 @@ struct StreamScreen: View {
         if onScreen { AccessibilityNotification.ScreenChanged().post() }
     }
 
-    /// Settings › Take the Tour: the panel closes without putting the keyboard back (the tour does,
-    /// at its end, if it was up before the panel opened), then every step of the layout on screen.
+    /// Settings › Take the Tour: the pane closes without putting the keyboard back (the tour does,
+    /// at its end, if it was up before the pane opened), then, once it has gone, every step of the
+    /// layout on screen.
     private func takeTour() {
         let keyboard = keyboardBeforeSettings
-        setSettings(false, restoreKeyboard: false)
+        closeSettings(.tour)
         tourLog("Take the Tour")
-        let mark = client.connectedAt
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(0.18))      // the panel's close
-            guard sameSession(mark) else { return }         // the session ended meanwhile
+        afterSettings(.tour) {
             startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver), keyboardAfter: keyboard)
         }
     }
@@ -1721,14 +1754,9 @@ struct StreamScreen: View {
         #endif
     }
 
-    /// Grows from the Settings button's corner, the way a popover would; a plain fade under Reduce
-    /// Motion. `anchor` is the panel's top-trailing corner as a point of the view the transition is
-    /// attached to. In landscape that view is the content area, whose corner is within a few
-    /// points of the panel's; in portrait it is the whole screen, where `.topTrailing` would make
-    /// the panel slide down over the window bar (PortraitStreamScreen passes its own).
-    private func settingsTransition(anchor: UnitPoint = .topTrailing) -> AnyTransition {
-        reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
-    }
+    /// Settings comes up from the bottom edge and goes back down, as a whole-screen page does
+    /// (SettingsPane.openSeconds, closeSeconds); a plain fade under Reduce Motion.
+    private var settingsTransition: AnyTransition { reduceMotion ? .opacity : .move(edge: .bottom) }
 
     /// `hidden`: full screen (docs/full-screen-plan.md): no bar, and the stream panel at `room` with no
     /// margin, corner or rim, its letterbox black; the panel is the same view either way (its input view stays
@@ -1754,7 +1782,7 @@ struct StreamScreen: View {
                        menusOpened: menusOpened, menusClosed: menusClosed)
                     .transition(chromeTransition)
             }
-            contentArea(bar: bar, screen: screen, hidden: hidden, room: room, preview: preview)
+            contentArea(screen: screen, hidden: hidden, room: room, preview: preview)
         }
     }
 
@@ -1769,37 +1797,34 @@ struct StreamScreen: View {
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              menusOpened: menusOpened, menusClosed: menusClosed,
-                             settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { if !preview { panelSize = $0 } },
-                             pairThisDevice: openPairingOverlay,
                              linkLine: streamLine,
                              linkLineLines: streamLineLines,
-                             takeTour: takeTour,
                              largerKeyboard: largerKeyboard,
                              zoom: zoom,
                              hidden: hidden, room: room, preview: preview,
                              chromeTransition: chromeTransition,
-                             fullScreen: fullScreenRow,
                              showChrome: { showChrome(by: "an assistive technology") })
     }
 
     /// The stream panel's shape: rounded inside its margin, square while full screen.
     private func streamShape(_ hidden: Bool) -> RoundedRectangle { RoundedRectangle(cornerRadius: hidden ? 0 : 12, style: .continuous) }
 
-    /// Under the bar: the stream panel, the drawer and the Settings panel. In the swipe in's preview, nothing at
+    /// Under the bar: the stream panel and the drawer (Settings covers the whole screen: StreamScreen's `body`).
+    /// In the swipe in's preview, nothing at
     /// all: it is the picture's place (RevealCut.landscape), so no pane, rim, margin or black can come in with
     /// the bar, by construction (Noah, 2026-11-12: "no bezel gets rendered above or below the controls until
     /// they are fully summoned").
     @ViewBuilder
-    private func contentArea(bar: BarMetrics, screen: CGSize, hidden: Bool, room: CGRect, preview: Bool) -> some View {
+    private func contentArea(screen: CGSize, hidden: Bool, room: CGRect, preview: Bool) -> some View {
         if preview {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            liveContentArea(bar: bar, screen: screen, hidden: hidden, room: room)
+            liveContentArea(screen: screen, hidden: hidden, room: room)
         }
     }
 
-    private func liveContentArea(bar: BarMetrics, screen: CGSize, hidden: Bool, room: CGRect) -> some View {
+    private func liveContentArea(screen: CGSize, hidden: Bool, room: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
 
@@ -1856,25 +1881,6 @@ struct StreamScreen: View {
                     .transition(.opacity)
             }
 
-            // The drawer's mirror on the trailing edge, its right side lined up with the Settings
-            // button's. No dim: the stream stays as it is, so a change can be watched taking effect.
-            // A tap on it closes the panel and never clicks the Mac; the bar above stays live.
-            if settingsOpen {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { setSettings(false) }
-                    .accessibilityHidden(true)
-
-                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay,
-                                  takeTour: takeTour, fullScreen: fullScreenRow)
-                    .frame(width: bar.settingsWidth)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 8)
-                    .padding(.bottom, 14)
-                    .padding(.trailing, bar.padding)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .transition(settingsTransition())
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1927,6 +1933,24 @@ struct LinkLineView: View {
         .frame(maxWidth: .infinity, alignment: .top)
         .allowsHitTesting(false)
         .animation(.easeOut(duration: 0.2), value: text)
+    }
+}
+
+// MARK: - Under Settings
+
+/// The stream screen's layouts while Settings covers them (docs/settings-pane-plan.md): hidden from VoiceOver and
+/// the other assistive technologies, and otherwise as if the modifier were not there (iOS 18's `isEnabled:`, as
+/// PortraitStreamScreen's `accessibilityHidden(while:)`: a plain `accessibilityHidden(false)` would show what the
+/// layouts hide themselves). The same views either way, so nothing under the pane is built anew. Before iOS 18
+/// the pane's modal trait alone keeps VoiceOver in it, as it kept it in the panel.
+private struct HiddenUnderSettings: ViewModifier {
+    let hidden: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.accessibilityHidden(true, isEnabled: hidden)
+        } else {
+            content
+        }
     }
 }
 
@@ -1998,20 +2022,18 @@ struct BarMetrics {
     let thumbPad: CGFloat
     let thumbFade: Double
     let showsTextSize: Bool
-    /// The Settings panel hanging under this bar.
-    let settingsWidth: CGFloat
 
     static let regular = BarMetrics(height: 86, padding: 22, gap: 12,
                                     buttonWidth: 66, buttonHeight: 66, buttonSpacing: 4,
                                     thumbWidth: 104, thumbHeight: 66, thumbRadius: 10,
                                     thumbSpacing: 16, thumbPad: 10, thumbFade: 0.86,
-                                    showsTextSize: true, settingsWidth: 360)
+                                    showsTextSize: true)
 
     static let compact = BarMetrics(height: 78, padding: 14, gap: 12,
                                     buttonWidth: 64, buttonHeight: 58, buttonSpacing: 3,
                                     thumbWidth: 92, thumbHeight: 58, thumbRadius: 9,
                                     thumbSpacing: 14, thumbPad: 10, thumbFade: 0.88,
-                                    showsTextSize: true, settingsWidth: 340)
+                                    showsTextSize: true)
 }
 
 private struct TopBar: View {

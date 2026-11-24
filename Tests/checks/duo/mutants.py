@@ -64,7 +64,6 @@ MUTANTS = {
     "M30 the gap rounded up": ("/ (count - 1)).rounded(.down)", "/ (count - 1)).rounded(.up)"),
     "M31 the strip onto the fold": ("let strip = max(0, band.minX - g - stripStart)", "let strip = max(0, band.maxX - g - stripStart)"),
     "M32 the strip from the bar's edge": ("let stripStart = padding + button + g          // after Apps", "let stripStart = padding"),
-    "M33 the panel onto the fold": ("let panel = min(panelWidth, max(0, width - padding - band.maxX))", "let panel = panelWidth"),
     "M34 clears always": ("clears: start(button, g) >= band.maxX)", "clears: true)"),
     "M35 a fold at the bar's end taken": ("band.minX > padding, band.maxX < width - padding else { return unchanged }",
                                           "band.maxX < width - padding else { return unchanged }"),

@@ -1,0 +1,8 @@
+# Hold, Then Drag (#178, PR #292; docs/steps/2026-11-19-ready-292.md) on the agents' iPad (iPad Pro 13-inch (M5), iOS
+# 27.0, upright: a sideways screen is drawn a quarter turn round): the Settings panel at its switch, at its default (on
+# since Noah's 2026-11-20, no argument); the tour's picture card at the default (the drag in the hold's row, the
+# Pencil's row under it) and with the switch off (main's).
+#   Scripts/harness-photos.sh Scripts/harness-photos/hold-then-drag-ipad.cases --device ipad --baseline origin/main
+ipad-holddrag-on        -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScroll holddrag
+ipad-tour-holddrag-on   -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillTourState fresh -SillTour touch --wait=6
+ipad-tour-holddrag-off  -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillTourState fresh -SillTour touch -Sill.holdThenDrag 0 --wait=6
