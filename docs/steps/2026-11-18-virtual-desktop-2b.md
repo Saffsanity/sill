@@ -897,3 +897,13 @@ every live run a synthetic test host on 127.0.0.1 with the software encoder, its
   whose keyframe decoder (`Scripts/lock-check/build.sh`) compiles (this run changes nothing of the lock's); Sill for Mac's
   previews (no build of SillMenuBar; its sources are unchanged since run 4's 353 previews); the release build of the head
   here (CI built it on fab40170 and 73f09137).
+- The disk came back to 29 GB free near 02:00, and the fourth hold ran (slot B, 02:32–02:54) on the head, aa968534:
+  `swift build -c release` 72 s, no warning but CaptureProbe's known one; `SillHost --internet` exits 2,
+  `--print-reachability` 0, `--virtual-desktop=999x999@2` exits 2 naming the sizes it takes; main d9b3e995's CLI built
+  from a `git archive` snapshot (46 s). The live gates on the head's own CLI: `desktop-check` 84 of 84; `headless-check`
+  66 of 66; `lock-check` poll 42 of 42, start 4 of 4, paired 6 of 6, view 26 of 26; `privacy-check` 48 of 48; #396's
+  sound gate 17 of 17 and #399's smoke 6 of 6 (SILL_TEST_LOCK_IGNORE_MAC=1 for both, as for H2). H2 against that main
+  CLI, run one right after the other: idle identical (8 and 3), a test client identical (15 and 11), `--virtual-display`
+  with a test client identical (18 and 11), started locked #395's one "Displays:" line (11 and 10). Sill for Mac's
+  previews from the bare SillMenuBar: 353 files, each byte for byte the same as run 4's (no word or view of Sill for Mac
+  changed). The iOS app was left to GitHub's CI, which built it on every head of this run.
