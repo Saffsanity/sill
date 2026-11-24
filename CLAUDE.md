@@ -45,6 +45,7 @@ Rules found in the steps that hold for all work (each where it is written):
 
 Every file and folder, what it holds and what checks it: docs/LAYOUT.md (this section until
 2026-11-18). The code: `Sources/StreamProtocol/` (the wire, shared by both sides),
+`Sources/SillAudio/` (the sound's encoder, decoder, packetizer and playout, linked by both sides),
 `Sources/SillHost/` (the host, `SillHostCore`), `Sources/SillMenuBar/` (Sill.app),
 `Sources/SillHostCLI/` (the CLI, `SillHost`) and `iOSClient/` (Sill for iPhone and iPad; a new file
 needs its four pbxproj entries by hand). Where the rest is written:

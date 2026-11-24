@@ -1,4 +1,4 @@
-// H3 (docs/audio-plan.md §7.2, §11): iOSClient/AudioPlayout.swift on its own, on a simulated clock. A Mac
+// H3 (docs/audio-plan.md §7.2, §11): Sources/SillAudio/AudioPlayout.swift on its own, on a simulated clock. A Mac
 // makes the sound's packets (stamps on its own wall clock, which can drift and step; pauses that start a
 // new segment; packets it skips; a new epoch) and the picture's frames; a link carries them (steady,
 // keyframe bursts, a stall, away from home, a move's two connections); the device's decoder and player
@@ -11,7 +11,7 @@
 // played or discarded. The scenarios check the rest: a steady link loses nothing as late after its first
 // 2 s whatever the output latency and the IO buffer, the error falls at 1.9 ms a second or better, jumps,
 // steps, the cover's start and bounds, the picture's lag, fades and a frame gained or lost.
-//   swiftc -O iOSClient/AudioPlayout.swift Tests/checks/audio-playout/main.swift -o .build/checks/audio-playout/check
+//   swiftc -O Sources/SillAudio/AudioPlayout.swift Tests/checks/audio-playout/main.swift -o .build/checks/audio-playout/check
 import Foundation
 
 var failures = 0, passes = 0

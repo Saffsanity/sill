@@ -4,7 +4,7 @@ import StreamProtocol
 
 // The encoder-free sound harness's host (docs/audio-plan.md §11, H5–H8, H12; Scripts/audio/run.sh says
 // how the harness runs): the real StreamServer.swift and the sound's host files (AudioPipeline,
-// AudioPacketizer, AudioEncoder, SyntheticAudio, TestTone), built by build.sh from the working tree,
+// AudioSourceRule, SyntheticAudio, TestTone, with SillAudio's), built by build.sh from the working tree,
 // fed FAKE frames of chosen sizes by a timer, and the real test tone through the real pipeline and send
 // path. Nothing here touches VideoToolbox, ScreenCaptureKit, CoreMedia or AVFoundation, and build.sh
 // refuses a binary that links any of them: no picture is encoded, no sound captured, nothing played.
