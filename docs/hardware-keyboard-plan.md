@@ -90,7 +90,9 @@ The Mac already takes both kinds of scroll: phased gestures with momentum, and b
 only; `Tests/checks/hardware-keyboard`). A state machine the stream screen's `InputOverlayProxy` owns
 (it outlives a rotation; a new session makes a new one). It knows:
 - `attached`: a hardware keyboard is attached (`GCKeyboard.coalesced`, and
-  `GCKeyboardDidConnect` and `DidDisconnect`; DEBUG `-SillHardwareKeyboard 1|0` overrides it);
+  `GCKeyboardDidConnect` and `DidDisconnect`; on a Mac running the iPad app, always, as
+  GameController there may report none before the first key, #129 and PR #263; DEBUG
+  `-SillHardwareKeyboard 1|0` overrides it);
 - `takers`: what is open that takes the keyboard for itself or must keep keys from the Mac: the
   Settings panel, the pairing overlay (Pair This iPad… or an outside link), the tour, the Apps
   drawer (its search field), the Menus pull-down. The Add a Mac card is the connect screen's, where
