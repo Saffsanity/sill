@@ -171,6 +171,9 @@ window list, no thumbnails, no display lookup), so a test host with a client con
 macOS for no screen recording: every ScreenCaptureKit call counts against the responsible app's
 grant (Claude's, for a host an agent runs), and macOS reminds the person once a month and after
 every rebuilt binary; set it on every headless host whose test needs no real window.
+A `--synthetic` host's Apps list reads this Mac's own disk alone (of the home folder, ~/Applications
+alone), never its other volumes (#370), so it never makes macOS ask the app that runs it whether it
+may read a removable volume or the Downloads folder.
 `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
@@ -541,6 +544,11 @@ ja-JP, ru-RU…), not from its `AppleKeyboards` preference. A test host's Deskto
 `-SillIdiom pad` draws a screen taller than wide and narrower than 600 pt as
 an iPad does (the compact halves) rather than as a phone, so an iPhone
 simulator photographs it (`phone` the other way round; the normal app too).
+`-Sill.arrowKeys 1` turns an iPhone's Arrow Keys on for one run (in the normal app
+too; #287, PhoneKeyRow): the phone's key row upright adds ← ↓ ↑ → after shift and
+scrolls sideways, `-SillKeyScroll end` starting it scrolled to the arrows, and
+`-SillSettings 1 -SillSettingsScroll keys` shows the Settings panel at its Keys
+group (an iPhone's; `-SillIdiom pad` has none).
 `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: once, the
 portrait key row taps cmd, esc, shift and ctrl through its caps' action, then
 the trackpad checks that a touch at its centre lands on it, strokes, taps with
