@@ -181,10 +181,17 @@ for _ in 0..<20_000 {
     } else {
         phoneBent += 1
         let short = min(s.widthPt, s.heightPt), long = max(s.widthPt, s.heightPt)
-        // Each side within half a point of its exact growth: the shape within that rounding.
+        // Each side within half a point of its exact growth: the shape within that rounding. A shape past 4096 : 400
+        // (10.24 : 1, no iPhone's) grown to 400 would pass 4096: the ceiling wins, both sides shrunk again by one factor
+        // (two roundings), its shorter side then under 400.
         let r = Double(px.width) / Double(px.height)
         let rel = abs(Double(s.widthPt) / Double(s.heightPt) / r - 1)
-        if short < 400 || long < 800 || (short > 400 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-5 {
+        let ceiling = long == 4096 && Double(max(px.width, px.height)) / Double(min(px.width, px.height)) > 4096.0 / 400
+        if ceiling {
+            if short > 400 || rel > 1 / Double(s.widthPt) + 1 / Double(s.heightPt) + 1e-5 {
+                phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), held to 4096 wrong (\(rel))")
+            }
+        } else if short < 400 || long < 800 || (short > 400 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-5 {
             phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), grown wrong (\(rel))")
         }
     }
