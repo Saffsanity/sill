@@ -181,11 +181,12 @@ final class HostClipboard {
             subscribe(connection, who: who)
             // Locked: written nowhere and sent to nobody (LockPolicy); the subscription stays.
             guard !paused else { return false }
-            board.write(text)
+            let secret = ClipboardPolicy.isSecret(payload)
+            board.write(text, secret: secret)
             Stats.shared.bump("clip.recv")
             let others = ClipboardPolicy.forward(to: order, from: id).compactMap { subscribers[$0]?.connection }
-            if testLog { print("Test clipboard: \(text.utf8.count) bytes from \(who) set on the pasteboard, sent to \(others.count) other device\(others.count == 1 ? "" : "s").") }
-            send(payload: ClipboardPolicy.payload(text: text), to: others)
+            if testLog { print("Test clipboard: \(text.utf8.count) bytes from \(who) set on the pasteboard\(secret ? " as a secret" : ""), sent to \(others.count) other device\(others.count == 1 ? "" : "s").") }
+            send(payload: ClipboardPolicy.payload(text: text, secret: secret), to: others)
         case .stop:
             guard let gone = subscribers.removeValue(forKey: id) else { return true }
             order.removeAll { $0 == id }
@@ -277,6 +278,8 @@ final class HostClipboard {
         private var ownChangeCount: Int?
         private var firstLook: (count: Int, at: Double)?
         private var lastAccess: ClipboardPolicy.MacAccess?
+        /// On `queue`: the timers that clear a device's secrets, kept until each fires.
+        private var secretTimers: [DispatchSourceTimer] = []
 
         /// What a look found: macOS's answer, and a change of the pasteboard with ClipboardPolicy's
         /// decision (nil when the count did not move, the pasteboard was still empty, or nothing was read).
@@ -354,19 +357,51 @@ final class HostClipboard {
         /// write's end and before it in 4 of 25 pastes on loopback, where with the main actor free it
         /// came 50 to 66 ms after. The cost: the write (about a millisecond) and a look the queue is in
         /// the middle of. Nothing on this queue ever waits for the main actor, so it cannot deadlock.
-        func write(_ text: String) {
+        ///
+        /// A secret (docs/clipboard-plan.md, "Secrets and Type on ‹Mac›") also carries
+        /// ClipboardPolicy.secretWriteMarkers, so the
+        /// Mac's clipboard managers keep it out of their history, and leaves the clipboard after
+        /// `secretLifetime`, only while the clipboard still holds this write (its change count): a copy
+        /// made since is never cleared. Cleared, it counts as this host's own change, never sent.
+        func write(_ text: String, secret: Bool = false) {
             queue.sync {
                 let prepared = self.board.prepareForNewContents(with: .currentHostOnly)
                 let item = NSPasteboardItem()
                 item.setString(text, forType: .string)
                 item.setString(self.launchID, forType: NSPasteboard.PasteboardType(ClipboardPolicy.ownType))
+                if secret {
+                    for marker in ClipboardPolicy.secretWriteMarkers { item.setString("", forType: NSPasteboard.PasteboardType(marker)) }
+                }
                 self.board.writeObjects([item])
                 // The count after it: read back while macOS allows reads, as the looks do; else the one
                 // the write began with, which the write itself does not move.
                 let count = self.lastAccess.map(ClipboardPolicy.hostLooks) == false ? prepared : self.board.changeCount
                 self.ownChangeCount = count
                 self.seen = count
+                if secret {
+                    // A timer with a 1 s leeway: `asyncAfter`'s default let the clear come 5 to 10 s late
+                    // in a background host (measured on loopback, 2026-11-19: 96 to 101 s for 90).
+                    let timer = DispatchSource.makeTimerSource(queue: self.queue)
+                    timer.schedule(deadline: .now() + ClipboardPolicy.secretLifetime, leeway: .seconds(1))
+                    timer.setEventHandler { [weak timer] in
+                        timer?.cancel()
+                        self.secretTimers.removeAll { $0 === timer }
+                        self.clearSecret(written: count)
+                    }
+                    self.secretTimers.append(timer)
+                    timer.resume()
+                }
             }
+        }
+
+        /// A device's secret's time is up: cleared while the clipboard still holds it (the change count
+        /// its write left, and macOS lets Sill read the count), else left alone. Never logs a word of it.
+        private func clearSecret(written: Int) {
+            guard ClipboardPolicy.hostLooks(access()), board.changeCount == written, ownChangeCount == written else { return }
+            let cleared = board.clearContents()
+            ownChangeCount = cleared
+            seen = cleared
+            Stats.shared.bump("clip.secretCleared")
         }
     }
 

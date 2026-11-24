@@ -103,7 +103,12 @@ Sill has layouts of its own.
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill pastes what you copied on your device where your Mac's cursor is (with
   Paste on … Right Away off, it only goes to your Mac's clipboard, where you
-  press ⌘V). Sill never reads your device's clipboard by itself.
+  press ⌘V). Sill never reads your device's clipboard by itself. A password your
+  password manager copies on your Mac leaves your device's clipboard after 90
+  seconds, and with Pasted Text Is Secret on (the default), what you paste on
+  your Mac stays out of its clipboard history and leaves its clipboard after 90
+  seconds. Type on your Mac, beside Paste, types what you copied instead, for a
+  field that refuses a paste.
 - **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
   Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
   your iPhone or iPad, turns it off and on. Sill for Mac captures the sound of
