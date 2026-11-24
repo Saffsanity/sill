@@ -541,5 +541,16 @@ do {
     check("10,000 random scrolls (\(events) later events): at the pointer, UIKit's own total, each reading sent as it came", bad == 0)
 }
 
+// MARK: - Running the iPad app on a Mac (ProcessInfo.processInfo.isiOSAppOnMac, #129)
+
+check("isAttached: on a Mac (isiOSAppOnMac), attached even before GameController reports a keyboard",
+      P.isAttached(coalesced: false, isiOSAppOnMac: true, override: nil))
+check("isAttached: on an iPad or iPhone, follows GameController's coalesced keyboard",
+      !P.isAttached(coalesced: false, isiOSAppOnMac: false, override: nil)
+        && P.isAttached(coalesced: true, isiOSAppOnMac: false, override: nil))
+check("isAttached: DEBUG -SillHardwareKeyboard override wins on both iPad and Mac",
+      !P.isAttached(coalesced: true, isiOSAppOnMac: true, override: false)
+        && P.isAttached(coalesced: false, isiOSAppOnMac: false, override: true))
+
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)
