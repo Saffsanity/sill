@@ -73,7 +73,11 @@ panel's rows, the same views in one place (`HostSettingsPanel`), unchanged in me
   beside them scrolls them as a drag on them does; a tap there does nothing. Their edges fade over 12 pt
   where rows go out of sight under the header, Disconnect or the fold (the panel cut them sharply, which at the
   laptop pose's fold left a sliver of a line); the fade runs the scroll view's width, which holds nothing
-  beside the column, so it reads as before. The scroll indicator is the scroll view's, so it sits at the
+  beside the column, so it reads as before, and it is their only edge: iOS 26's own scroll edge effect is
+  off every edge of them (`SettingsPane.Layout.systemEdgeEffectHidden`; left on, it blurred all but the last
+  rows of the 13-inch iPad's sideways harness photos, 2026-11-24). Full Screen's footnote breaks "them back."
+  onto a second line in a 600 pt column (every iPad, the Duo, an iPhone on its side): its words need a little
+  more than the 572 pt the column leaves them. The scroll indicator is the scroll view's, so it sits at the
   scroll view's trailing edge: the screen's in one column (on an iPad on its side 388 pt beyond the rows of a
   13-inch), the page's around the fold (beside the band on the book pose's leading page), as in iOS's own
   Settings, whose lists run the screen's width while their rows keep a readable one. It flashes as the pane

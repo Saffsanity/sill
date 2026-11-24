@@ -103,10 +103,9 @@
   to the fold's band, the laptop pose's page the screen's width, out to the screen's edges through the safe
   area beside the stream screen (an iPhone on its side: 44 to 62 pt by its sensor housing and as much on the
   other side; the Duo's cover: its camera's 84), and the header, the rows and Disconnect keep to their column
-  inside it (HostSettingsPanel's `inColumn`; the rows that scroll by their scroll view's content margins, so the
-  scroll view lays them out at the column's width as it did when it was the column's: padded inside it instead,
-  Full Screen's footnote, which fitted its line with a point to spare, broke "them back." onto a second line in
-  the first photos, b3a9029b). The pane is laid out in the safe area as before; each scroll view
+  inside it (HostSettingsPanel's `inColumn`; the rows that scroll by their scroll view's content margins,
+  b3a9029b, set aside on 2026-11-23 and brought back on 2026-11-24: below). The pane is laid out in the safe
+  area as before; each scroll view
   reaches past it with `ignoresSafeArea(edges: .horizontal)`, as far as the pane's own reader says the safe
   area goes (`geo.safeAreaInsets`, in the same layout, so a turn moves both at once), and its rows are placed
   from its reached edge. The pure rule says both (`Layout.macScroll`, `deviceScroll`, `page(_:)`, the column
@@ -148,3 +147,48 @@
   pull request's list), the strips by an iPhone's sensor housing on a device, the scroll indicator's place
   (stills are taken after its flash), the 13-inch iPad's blur on a device, and the content margins (b3a9029b,
   reverted).
+- **2026-11-24: the blur, and Full Screen's footnote.** The photos of 0fe6f77a showed two things Noah had not seen,
+  and his rule holds a merge on a known visible defect until he has been asked, so this run took both up.
+  - *The blur is iOS 26's own scroll edge effect, and the harness's turned drawing alone brings it on.* The pane's
+    own edge, `ScrollEdgeFade`, is an opacity mask and cannot blur; the blur covered exactly the scroll view (the
+    header and Disconnect, outside it, sharp), deepest at its top. In one build (d02c139b), the 13-inch iPad on its
+    side with the system's effect off is sharp, and with DEBUG `-SillSettingsSystemEdge 1` (left on, as before) it
+    is 0fe6f77a's blur: 4,046,079 pixels differ between the two; in the column the largest step between
+    neighbouring pixels falls from 190 to 201 (white text) and 136 to 145 (footnotes) to 2 to 9 from the first row
+    down to about 640 pt, 28 to 44 at 670 to 790 and 60 to 92 at 816 to 944. What brings it on, all with the effect
+    left on: the same column at 1376x1000, whose turned drawing still spans the upright simulator from its top
+    edge to its bottom, blurs too; at 1320x1032, 28 pt clear of both, it does not (11 pixels one level apart with
+    and without it); turned the other way (right to left) nothing (identical); the mini's sideways screen, drawn
+    inside the simulator, nothing (identical), which is why the 13-inch and not the mini; upright, 1,791 pixels one
+    level apart. On the Duo's own windows, where the pane's scroll views do meet a window's strips, it drew nothing
+    at rest: beside the inner display's status bar strip (identical), the cover's camera strip (1,675 pixels one
+    level apart), over the home indicator under the book pose's pages (identical) and the laptop pose's lower page
+    (6,353 pixels at most two levels apart). So the effect misplaces its blur only on a scroll view that a quarter
+    turn lays along the simulator's own top and bottom edges: the harness draws the 13-inch iPad's sideways screen
+    so because the agents' iPad simulator stands upright; a device's window turns with its screen. The pane turns
+    the system's effect off anyway, on every edge of its scroll views and every screen
+    (`SettingsPane.Layout.systemEdgeEffectHidden`, HostSettingsPanel's `SystemEdgeEffect`, iOS 26 and later), so
+    its own 12 pt fade is their only edge and no geometry can bring the blur back; the check holds it at every real
+    size and over the grid, mutants M49 to M53. The `-system-edge` photo cases keep the comparison.
+  - *Full Screen's footnote needs a little more than 572 pt.* The content margins came back (33ec9e7e), and with
+    them the book pose, its right to left and the upright iPhone are feda62ff's pixel for pixel or within two levels
+    (0fe6f77a's padding left them up to 146,016 pixels off at sub-pixel edges). But on the Duo's inner display
+    upright the footnote still put "them back." on a second line. 15a947a9 placed the rows from a whole pixel
+    instead, and its photos compared three placements in one build (DEBUG `-SillSettingsColumnGrid`): the column's
+    own 34.5 pt, a whole pixel (34.33) and a whole point (34) all break it the same way. So the placement is not why:
+    a 600 pt column leaves the words 572 pt and they need a little more. On feda62ff only that one layout gave them
+    more (its scroll view was the column's own width at a half-pixel place; its cards' edges straddle pixels 103 and
+    1903, where Disconnect's card is crisp from 104 to 1903); its laptop pose, the same column, broke the footnote as
+    now, and so did every 600 pt column of the iPads. 15a947a9 is reverted (287927b4): rounding down put the rows'
+    cards a pixel left of Disconnect's. The head's iOSClient, Tests and Scripts are d02c139b's but for one comment.
+  - *Every line where it broke at the same column width* (run-blur/tools `lines.py`, `compare.py`: a line is the same
+    where its ink starts and ends within a pixel of the other's from its column's edge, as tall within a pixel, its ink
+    within 4 %): against feda62ff's same case, every line of the Duo's cases unchanged by design (flat-portrait-end,
+    laptop, -end, -ax3, book, -end, -rtl, the cover's four, phone-upright's three, phone-se-zoom-side); against
+    feda62ff's 600 pt columns, every line of the one-column cases at 600 pt (the 13-inch iPad either way round, at
+    its end, at the largest text and right to left, the mini either way round, half of Split View; the Duo open flat
+    sideways; an iPhone 15 Pro, an SE and a 13 mini on their side), 9 to 37 lines a case, but lines cut by a scroll
+    view's fade (Slide Over against its own case, 30 and 32 lines); the one
+    exception the Duo upright (flat-portrait, -long): the footnote's two lines, above. Main's floating panel has no
+    case at the same width (340 or 360 pt, the phone's its row's; the pane's columns are 343, 350, 361, 423.5, 536
+    and 600 pt), so each line is compared with the branch before 2026-11-23.

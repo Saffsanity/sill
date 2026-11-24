@@ -339,8 +339,11 @@ struct HostSettingsPanel: View {
                                      @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         // The column as the scroll view's content margins at its sides, not as padding round the rows: the scroll
-        // view lays the rows out at the column's width and places them, as it did when it was the column's width
-        // (with padding inside the scroll view, a footnote line that fitted with a point to spare broke a word early).
+        // view lays the rows out at the column's width and places them, pixel for pixel as when it was the column's
+        // width wherever the column falls on whole points (the book pose, an upright iPhone, the cover); padded,
+        // they were drawn a fraction of a pixel off there. Full Screen's footnote breaks "them back." onto a second
+        // line at 600 pt either way: its words need a little more than the 572 pt the column leaves them
+        // (docs/steps/2026-11-18-settings-pane.md, 2026-11-24).
         let margins = EdgeInsets(top: 0, leading: max(0, column.minX - scroll.minX), bottom: bottom,
                                  trailing: max(0, scroll.maxX - column.maxX))
         return ScrollViewReader { reader in
