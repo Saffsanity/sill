@@ -780,8 +780,10 @@ turn back now comes 1 s after the first follow's end. A host of its own for rule
 its controls showing (1446 × 800), Full Screen on and off followed in place at once (1218 × 800, back), a turn with the
 controls showing after 1 s (its upper half's 1089 × 800, one step), Full Screen on upright (800 × 1218: 1x, then the
 switch), Full Screen off and a turn 0.3 s later (each in place, in order, no make), then the iPhone 15 Pro upright with
-Full Screen after the iPad (800 × 1614, inside the backing) and its controls back (1283 × 800). A space beyond the backing
-is 2200 × 800 now. Each Virtual Desktop verdict that finds nothing prints what the host said in its window.
+Full Screen after the iPad (800 × 1614, inside the backing) and its controls back (1283 × 800), and the iPhone back on it
+within its grace after Full Screen went on while away (nothing while away; its space then, after 1 s steady: "iPhone
+shows it again", fab40170). A space beyond the backing is 2200 × 800 now. Each Virtual Desktop verdict that finds nothing
+prints what the host said in its window.
 
 **The gate where this branch meets #400 (the darkening).** In a local build of both (`test-070-all`), two of the gate's
 verdicts failed every time, on a quiet Mac too: "the iPad gone, the iPhone that comes takes it over in place" and "a room
@@ -843,3 +845,36 @@ macOS offers its own displays is about 1024 × 640 points. The question is in th
 - **The iPhone upright after the iPad**: with the iPad on the Virtual Desktop, disconnect it, then connect the iPhone held
   upright with Full Screen on, within 30 s: "iPhone shows it now; followed in place in … ms: 800×1614 pt @2× at 120 Hz."
   (at 60 if macOS keeps the rate it had). A failure: "beyond the backing", or bars at its sides.
+
+**Verified in the fifth part** (2026-11-24; nothing made a display, posted input, locked, slept or switched anything;
+every live run a synthetic test host on 127.0.0.1 with the software encoder, its Virtual Desktop only said to be made):
+- `virtual-desktop-2a` with main d9b3e995 (61adbfcf), light, in the heavy lock (hold 1, 17:37–17:52): `swift build -c
+  release` 92 s (CaptureProbe's known warning only), `SillHost --internet` exits 2, `--print-reachability` 0;
+  `stage-release`'s 25 of 25 mutants caught (it reads StreamCoordinator.swift's wiring, which #405 changed); then
+  `Tests/checks/run-all.sh`, all passed. Its local iOS build stopped at the disk's floor (24 GB free); GitHub's CI on
+  61adbfcf (run 45388088370) built the iOS app and passed every step, and on this branch's merge bc905244 (run
+  45388164100) too; both pull requests read mergeable.
+- Hold 2 (17:52–17:58) on ad38e4dd, the first build of rules A and B: `swift build -c release` 68 s, no new warning;
+  `sill-displays` 59 checks, `virtual-display-api` 316, `away-quality`, `viewport-bounds` 100 and `full-screen` passed;
+  `virtual-desktop` did not compile (a top-level `turn` declared twice: a486ffb3, then 3fe92422 for five messages, then
+  CI's run of 3fe92422 found two cases of its own wrong: 272567ab). `Scripts/desktop-check/live.py` 82 of 82 on its first
+  run: the old hosts as before (the turn in place in 672 ms, back in 325 ms; the refused switch's fall back; the iPhone
+  taking it over in 340 ms at 1496×800; 2200×800 beyond the 4096 px backing); the new host 13: made at 1446×800 for the
+  iPad mini's 1117×618 pane; Full Screen on followed in 332 ms, its line 0.4 s after the viewport, off in 328 ms; the turn
+  with the controls showing after 1 s in 331 ms at 1089×800, one step; Full Screen on upright in 656 ms, 1x then the
+  switch; Full Screen off and a turn 0.3 s later: 332 ms, then the turn 1.4 s later in 330 ms, no make; the iPhone upright
+  after the iPad in 663 ms at 800×1614 (inside the backing); its controls back in 323 ms at 1283×800.
+- Hold 3 (slot B, 19:56–23:16; the Mac slept 20:41–22:27 on a 1 % battery, and the mutants with it), on a `git archive`
+  snapshot of 272567ab: `virtual-desktop` 109,709 checks and 250 of 250 mutants caught (rule A, the cause, the follow's
+  timing, the backing, the lines); `sill-displays` 59 checks and 51 of 51 (5 new: the space read as the room, the make
+  sized by the room, made with its own pixels alone, followed while it does not show, a tap told from a turn by this
+  viewport alone); then `Tests/checks/run-all.sh`, all 79 passed (821 s). `virtual-display-api` and `away-quality` were
+  not run with their mutants: neither their rules nor their files' patterns changed (every pattern of every check found
+  exactly once in the files this run changed, a text check, nothing compiled: vd-main's `patterns3.py` against bc905244;
+  its flags were replacement strings of this run's own mutants and short strings of home-records and version-label,
+  which mutate HostIdentity, SavedMacs and VersionLabel alone).
+- GitHub's CI on fab40170 (run 45414428634): every step of Build and check passed (the release build; run-all, all
+  passed: virtual-desktop 109,781, sill-displays 59, protocol, repo-rules 11 of 11; the iOS app, BUILD SUCCEEDED; the
+  CLI's paths); #408 read MERGEABLE and CLEAN. On 272567ab (run 45407341666) `protocol` failed once by chance ("generate:
+  digits uniform (chi² 28.5 < 27.9, 9 df, p 0.001)": the pairing code's random digits, a one-in-a-thousand test of a file
+  this branch does not touch); it passed on the next head.
