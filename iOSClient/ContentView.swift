@@ -256,6 +256,13 @@ struct ContentView: View {
 ///   iPad group, 0.2 to 3 s, 0.5 s unless changed) held at 0.3 s for one run, in the normal app too (the
 ///   stepper's changes are saved for the next run; this one keeps 0.3). The console says
 ///   "thumbnails: hold 0.3 s" when a bar's thumbnails first read it and at each change.
+/// * `-Sill.holdThenDrag 0` — not a harness argument either: this device's Hold, Then Drag (the Settings
+///   panel's This iPad group, TouchHold, PR #292) off for one run, in the normal app too: the hold on the
+///   picture right-clicks at once, as before, and the tour's picture card says only the right click.
+///   On unless turned off (Noah, 2026-11-20): a finger held on the picture and then moved drags with the
+///   left button, one lifted where it was pressed right-clicks at the lift, and the tour's picture card
+///   says so; `-Sill.holdThenDrag 1` turns it on for one run where it was turned off.
+///   `-SillSettingsScroll holddrag` starts the panel at its switch and footnote.
 /// * `-Sill.shareClipboard 0` — not a harness argument either: this device's Share Clipboard (the
 ///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
 ///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no

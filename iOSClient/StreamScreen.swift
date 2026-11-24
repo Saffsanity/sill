@@ -1461,7 +1461,8 @@ struct StreamScreen: View {
     }
 
     /// What the tour's words depend on now (TourFeatures): the Menus button on screen (its target
-    /// reported), this device's Three-Finger Gestures with a Mac that takes them, the Mac's Virtual
+    /// reported), this device's Three-Finger Gestures with a Mac that takes them, its Hold, Then Drag
+    /// (TouchHold, PR #292), the Mac's Virtual
     /// Display setting as the Settings panel shows it, the clipboard the Mac's window list shares, this
     /// device's Paste on ‹Mac› Right Away, a Mac with sound (Send Audio, on or off), and
     /// `offersLarger`, the Settings panel's Larger Picture switch offered here (`body`). The window
@@ -1470,6 +1471,7 @@ struct StreamScreen: View {
     private func tourFeatures(offersLarger: Bool) -> TourFeatures {
         TourFeatures(menus: tourTargets[.menus] != nil,
                      gestures: StreamClient.gesturesOn && (client.hostGestures ?? 0) >= TrackpadGesture.generation,
+                     holdThenDrag: StreamClient.holdThenDragOn,
                      virtualDisplay: client.settings.displayed?.virtualDisplay == true,
                      clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
                      pasteRightAway: StreamClient.pasteRightAwayOn,
@@ -1482,7 +1484,7 @@ struct StreamScreen: View {
     /// clipboard, paste right away, sound, no Larger Picture".
     static func tourRowsLine(_ run: TourRun, _ copy: TourCopy, _ f: TourFeatures) -> String {
         func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
-        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
+        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.holdThenDrag, "hold then drag"), has(f.virtualDisplay, "Virtual Display"),
                     has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
                     has(f.largerPicture, "Larger Picture")]
         return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
