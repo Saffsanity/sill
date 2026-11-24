@@ -6,15 +6,11 @@
 # `-system-edge`: iOS 26's own scroll edge effect left on (`-SillSettingsSystemEdge 1`), which the pane turns off on every
 # edge since 2026-11-24, on the Duo's own displays: beside the inner display's status bar strip, the cover's camera strip,
 # over the home indicator under the laptop and book poses' pages; the same as without it where it draws nothing.
-# `-grid-exact`, `-grid-points`: the rows' column in its scroll view at its own place (34.5 pt, as on 2026-11-23) or on whole
-# points, instead of the display's pixels (`-SillSettingsColumnGrid`), for what each does to the rows' text.
 #   Scripts/harness-photos.sh Scripts/harness-photos/settings-pane-duo.cases --baseline origin/main
 # Open flat, upright (the default pose): the inner display, and an iPhone's 393x852 upright.
 flat-portrait              -SillLayout 669x951 -SillHinge flat -SillSettings 1
 flat-portrait-end          -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsEnd 1
 flat-portrait-system-edge  -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsSystemEdge 1
-flat-portrait-grid-exact   -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsColumnGrid exact
-flat-portrait-grid-points  -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsColumnGrid points
 flat-portrait-long         -SillLayout 669x951 -SillHinge flat -SillSettings 1 -SillSettingsCase linkbehind -SillPiPSupported 1 -SillClipboardNote sent
 flat-portrait-stream       -SillLayout 669x951 -SillHinge flat
 phone-upright              -SillLayout 393x852 -SillSafeArea 59,0,34,0 -SillSettings 1
@@ -25,7 +21,6 @@ phone-upright-stream       -SillLayout 393x852 -SillSafeArea 59,0,34,0
 laptop                     -SillLayout 669x951 -SillHinge half -SillSettings 1 --pose=laptop
 laptop-end                 -SillLayout 669x951 -SillHinge half -SillSettings 1 -SillSettingsEnd 1 --pose=laptop
 laptop-end-system-edge     -SillLayout 669x951 -SillHinge half -SillSettings 1 -SillSettingsEnd 1 -SillSettingsSystemEdge 1 --pose=laptop
-laptop-grid-exact          -SillLayout 669x951 -SillHinge half -SillSettings 1 -SillSettingsColumnGrid exact --pose=laptop
 laptop-ax3                 -SillLayout 669x951 -SillHinge half -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL --pose=laptop
 laptop-area                -SillLayout 669x951 -SillHinge half -SillSettings 1 -SillSettingsScrollArea 1 --pose=laptop
 laptop-stream              -SillLayout 669x951 -SillHinge half --pose=laptop

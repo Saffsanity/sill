@@ -116,8 +116,6 @@ struct HostSettingsPanel: View {
     @Environment(\.duoFold) private var duoFold
     /// Right to left (Arabic, Hebrew): the Mac's part is still on the leading side, and a fold's pages swap.
     @Environment(\.layoutDirection) private var layoutDirection
-    /// Pixels a point, for the rows' column inside its scroll view (`part`).
-    @Environment(\.displayScale) private var displayScale
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
@@ -131,19 +129,6 @@ struct HostSettingsPanel: View {
         #else
         return false
         #endif
-    }
-    /// The grid the rows' column keeps to inside its scroll view: the display's pixels (`displayScale`). DEBUG
-    /// `-SillSettingsColumnGrid points` keeps it to whole points instead, `exact` to none (the column's own place, as
-    /// on 2026-11-23), for photos of what each does to the rows' text.
-    private static func columnGrid(_ displayScale: CGFloat) -> CGFloat {
-        #if DEBUG
-        switch UserDefaults.standard.string(forKey: "SillSettingsColumnGrid") {
-        case "points"?: return 1
-        case "exact"?: return 0
-        default: break
-        }
-        #endif
-        return displayScale
     }
     /// DEBUG `-SillSettingsScroll gestures`: the rows start scrolled to the This iPad group, so a
     /// photo of a short screen shows its switches and rows, which the footnote under them pushes out
@@ -353,12 +338,11 @@ struct HostSettingsPanel: View {
     private func part<Content: View>(bottom: CGFloat, column: CGRect, scroll: CGRect, systemEdges: SettingsPane.Edges,
                                      @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
-        // The column as the scroll view's content margins at its sides, its leading one on the display's pixel grid
-        // (SettingsPane.Layout.contentMargins): the scroll view lays the rows out the column's whole width from a whole
-        // pixel, as when it was the column's own width (half a pixel off it, a footnote that needs all of its 572 pt
-        // broke its last two words onto a second line).
-        let side = SettingsPane.Layout.contentMargins(column: column, in: scroll, scale: Self.columnGrid(displayScale))
-        let margins = EdgeInsets(top: 0, leading: side.leading, bottom: bottom, trailing: side.trailing)
+        // The column as the scroll view's content margins at its sides, not as padding round the rows: the scroll
+        // view lays the rows out at the column's width and places them, as it did when it was the column's width
+        // (with padding inside the scroll view, a footnote line that fitted with a point to spare broke a word early).
+        let margins = EdgeInsets(top: 0, leading: max(0, column.minX - scroll.minX), bottom: bottom,
+                                 trailing: max(0, scroll.maxX - column.maxX))
         return ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) { rows }

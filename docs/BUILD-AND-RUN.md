@@ -356,9 +356,7 @@ views outlined in orange: where a drag scrolls the rows, the whole screen in one
 to its edges, each page around the fold; none where the rows fit), `-SillSettingsSystemEdge 1`
 (Settings' scroll views keep iOS 26's own scroll edge effect, which the pane turns off on every
 edge: on the 13-inch iPad's sideways screen, drawn a quarter turn round, it blurs all but the
-last rows; for photos of what it does, never a device's look), `-SillSettingsColumnGrid points|exact`
-(Settings' rows placed in their scroll view from a whole point, or at the column's own place, instead of
-from a whole pixel: half a pixel off on a 3x screen, Full Screen's footnote breaks a line early), `-SillSettingsScroll gestures` (the pane scrolled to its
+last rows; for photos of what it does, never a device's look), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,

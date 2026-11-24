@@ -99,14 +99,6 @@ MUTANTS = {
         "var systemEdgeEffectHidden: SettingsPane.Edges { arrangement == .oneColumn ? .all : [] }"),
     "M53 every edge without the sides": ("static let all: Edges = [.top, .leading, .bottom, .trailing]",
                                          "static let all: Edges = [.top, .bottom]"),
-    # The rows' column in its scroll view from a whole pixel (2026-11-24: half a pixel off the grid, Full Screen's footnote
-    # broke a line early): off the grid, a pixel past the column's place, or the trailing margin the column's own, must fail.
-    "M54 the rows' column in its scroll view off the pixel grid": (
-        "let leading = scale > 0 ? (abs(pixels - pixels.rounded()) < 0.001 ? pixels.rounded() : pixels.rounded(.down)) / scale : exact",
-        "let leading = exact"),
-    "M55 the rows' column rounded up, past its place": ("pixels.rounded(.down)) / scale", "pixels.rounded(.up)) / scale"),
-    "M56 the trailing margin from the column's own place": ("return (leading, max(0, scroll.width - leading - column.width))",
-                                                            "return (leading, max(0, scroll.maxX - column.maxX))"),
     # Closing.
     "M27 the overlay puts the keyboard back":("var backToStream: Bool { self == .done || self == .harness }",
                                                "var backToStream: Bool { self == .done || self == .harness || self == .overlay }"),

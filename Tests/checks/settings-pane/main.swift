@@ -39,26 +39,6 @@ typealias Edges = SettingsPane.Edges
 let fourEdges: Edges = [.top, .leading, .bottom, .trailing]
 check("a scroll view's four edges, each its own: top, leading, bottom, trailing",
       [Edges.top, .leading, .bottom, .trailing].map(\.rawValue) == [1, 2, 4, 8] && Edges.all == fourEdges)
-/// The rows' column in its scroll view (`contentMargins`) at `scale` pixels a point: from a whole pixel, at most a pixel
-/// short of the column's own place (never past it), and the column's whole width between the two margins.
-func marginsHold(_ column: CGRect, _ scroll: CGRect, scale: CGFloat) -> Bool {
-    let (lead, trail) = Layout.contentMargins(column: column, in: scroll, scale: scale)
-    let exact = column.minX - scroll.minX, px = lead * scale
-    return abs(px - px.rounded()) < 1e-6 && exact - lead > -1e-9 && exact - lead < 1 / scale - 1e-9
-        && near(lead + column.width + trail, scroll.width, 1e-6)
-}
-let upright3 = Layout.contentMargins(column: rect(34.5, 0, 600, 951), in: rect(0, 0, 669, 951), scale: 3)
-let upright2 = Layout.contentMargins(column: rect(34.5, 0, 600, 951), in: rect(0, 0, 669, 951), scale: 2)
-let uprightExact = Layout.contentMargins(column: rect(34.5, 0, 600, 951), in: rect(0, 0, 669, 951), scale: 0)
-check("the Duo open flat upright (669 pt, the column at 34.5): its rows from 103 px at 3x (34.33 pt, 34.67 beyond), from 69 px at 2x "
-        + "(34.5, 34.5 beyond); with no grid at 34.5 (2026-11-24: half a pixel off the grid, Full Screen's footnote broke a line early)",
-      near(upright3.leading, 103.0 / 3, 1e-9) && near(upright3.trailing, 669 - 103.0 / 3 - 600, 1e-9)
-        && upright2.leading == 34.5 && upright2.trailing == 34.5 && uprightExact.leading == 34.5 && uprightExact.trailing == 34.5)
-check("the column on the grid already stays: an iPhone 15 Pro on its side, 126 pt into its scroll view (59 of it the island's strip)",
-      [CGFloat(2), 3].allSatisfy { s in
-          let m = Layout.contentMargins(column: rect(67, 0, 600, 393), in: rect(-59, 0, 852, 393), scale: s)
-          return m.leading == 126 && m.trailing == 126
-      })
 
 // MARK: - The real sizes
 //
@@ -184,8 +164,6 @@ for c in cases {
         check("\(c.name)\(dir): the bottom inset kept, \(c.bottom)", l.bottom == c.bottom)
         check("\(c.name)\(dir): iOS's own scroll edge effect off all four edges of both scroll views",
               l.systemEdgeEffectHidden == fourEdges)
-        check("\(c.name)\(dir): each part's rows in their scroll view from a whole pixel at 2x and 3x, the column's width between the margins",
-              [CGFloat(2), 3].allSatisfy { s in marginsHold(l.mac, l.macScroll, scale: s) && marginsHold(l.device, l.deviceScroll, scale: s) })
         // Disconnect clear of the home indicator (its room, 16 pt at least), or 12 pt over the laptop pose's fold.
         let foot: CGFloat = c.arrangement == .twoPages ? 12 : max(16, c.bottom)
         check("\(c.name)\(dir): \(String(format: "%g", Double(foot))) pt under Disconnect, "
@@ -296,9 +274,7 @@ let scrolls = Rule("each scroll view across its page, out to the screen's edges 
                    + "the laptop pose the screen's width above the band and below it; laid out on its page, the stream screen's part of it")
 let systemEdge = Rule("iOS's own scroll edge effect off all four edges of both scroll views, in every arrangement, on every screen, "
                       + "either way round and right to left (the pane's own fade their only edge; 2026-11-24)")
-let onGrid = Rule("each part's rows in their scroll view from a whole pixel at 2x and 3x, at most a pixel short of the column's place, the "
-                  + "column's whole width between the margins (2026-11-24)")
-let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule, scrolls, systemEdge, onGrid]
+let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule, scrolls, systemEdge]
 
 
 var gridLayouts = 0
@@ -345,8 +321,6 @@ for w in stride(from: 200, through: 1400, by: 1) {
                 footRule.expect(l.arrangement == .twoPages ? l.footBottom == 12 : l.footBottom == max(16, bottom) && l.footBottom >= bottom,
                                 at + ", \(l.footBottom) under Disconnect")
                 systemEdge.expect(l.systemEdgeEffectHidden == fourEdges, at + ", the system's edge effect hidden at \(l.systemEdgeEffectHidden.rawValue)")
-                onGrid.expect([CGFloat(2), 3].allSatisfy { s in marginsHold(l.mac, l.macScroll, scale: s) && marginsHold(l.device, l.deviceScroll, scale: s) },
-                              at + ", the margins at 3x \(Layout.contentMargins(column: l.mac, in: l.macScroll, scale: 3))")
                 // The scroll views, in the leading-edge space (the mirror rule below holds them right to left): each
                 // holds its column, spans its page and goes on into the safe area beside the screen where the page
                 // meets its edge; laid out on the page, the part of it in the stream screen.
