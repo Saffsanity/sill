@@ -1,0 +1,33 @@
+# Settings as a whole-screen pane (docs/settings-pane-plan.md) on the agents' iPad (iPad Pro 13-inch (M5), iOS
+# 27.0, upright: a sideways screen is drawn a quarter turn round): either way round, an iPad mini's either way
+# round (Noah's own, on its side), half of a Split View, a Slide Over's width (one column on each since
+# 2026-11-23, its scroll view the whole screen), scrolled to the end, large type, right to left; and the stream
+# screen without it, which must be main's pixel for pixel. `-area`: the scroll view outlined (where a drag scrolls).
+#   Scripts/harness-photos.sh Scripts/harness-photos/settings-pane-ipad.cases --device ipad --baseline origin/main
+ipad-upright               -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-upright-end           -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1
+ipad-upright-stream        -SillLayout 1032x1376 -SillSafeArea 24,0,20,0
+ipad-side                  -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-side-end              -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1
+ipad-side-ax3              -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXL
+ipad-side-rtl              -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
+ipad-side-stream           -SillLayout 1376x1032 -SillSafeArea 24,0,20,0
+ipad-mini-upright          -SillLayout 744x1133 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-mini-side             -SillLayout 1133x744 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-mini-side-area        -SillLayout 1133x744 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsScrollArea 1
+ipad-split-half            -SillLayout 683x1032 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-slide-over            -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-slide-over-end        -SillLayout 375x1000 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1
+# iOS 26's own scroll edge effect left on (`-SillSettingsSystemEdge 1`), which the pane turns off on every edge since
+# 2026-11-24, for what it does where: the 13-inch iPad's sideways screen, which fills the upright simulator turned a
+# quarter round (scrolled to the end too); the same column at 1376x1000 (still from the simulator's top edge to its
+# bottom) and at 1320x1032 (28 pt clear of both); turned the other way (right to left); the mini's sideways screen
+# (inside the simulator); upright. `ipad-side-1320` without it, for the pair.
+ipad-side-system-edge      -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsSystemEdge 1
+ipad-side-end-system-edge  -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsEnd 1 -SillSettingsSystemEdge 1
+ipad-side-rtl-system-edge  -SillLayout 1376x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES -SillSettingsSystemEdge 1
+ipad-side-1000-system-edge -SillLayout 1376x1000 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsSystemEdge 1
+ipad-side-1320             -SillLayout 1320x1032 -SillSafeArea 24,0,20,0 -SillSettings 1
+ipad-side-1320-system-edge -SillLayout 1320x1032 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsSystemEdge 1
+ipad-mini-side-system-edge -SillLayout 1133x744 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsSystemEdge 1
+ipad-upright-system-edge   -SillLayout 1032x1376 -SillSafeArea 24,0,20,0 -SillSettings 1 -SillSettingsSystemEdge 1

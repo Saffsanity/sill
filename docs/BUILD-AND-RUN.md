@@ -80,6 +80,7 @@ Scripts/menu-check/run.sh               # the menus' reader and mirror against S
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
+RIG_ONLY=hold Tests/touchrig/run.sh hold   # the picture's touch and hold alone with Hold, Then Drag on, as on a fresh install (#292; Noah, 2026-11-20): a right click at the lift, or a drag once it moves; RIG_HOLD=off (any run) turns it off: a right click at the hold, as before, and compare.py judges the picture's holds that move only between logs that agree on it
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
@@ -312,7 +313,7 @@ closed|half|flat` (the hinge and a 40 pt fold across the middle of the longer
 side; without it the harness knows no hinge, even on the Duo's simulator),
 `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
-`-SillSettings 1` (the Settings panel open), `-SillMacMenu
+`-SillSettings 1` (Settings open: the whole-screen pane), `-SillMacMenu
 code|blender|long|stale|noaccess|none|slow|timeout|refuse` (the mock Mac's
 menus; `code` by default, VS Code's ten), `-SillMenusOpen 1` (the Menus
 pull-down opens after launch) or `-SillMenusOpen 'File/Open Recent'` (opens
@@ -370,8 +371,13 @@ reason the device does not know; the mock never browses) and remote access's `re
 pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
-remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
+remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
+parts scrolled to their ends), `-SillSettingsScrollArea 1` (each of Settings' scroll
+views outlined in orange: where a drag scrolls the rows, the whole screen in one column out
+to its edges, each page around the fold; none where the rows fit), `-SillSettingsSystemEdge 1`
+(Settings' scroll views keep iOS 26's own scroll edge effect, which the pane turns off on every
+edge: on the 13-inch iPad's sideways screen, drawn a quarter turn round, it blurs all but the
+last rows; for photos of what it does, never a device's look), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
@@ -387,7 +393,11 @@ switch at those seconds), `-Sill.pictureInPicture 1` (its Picture in Picture on 
 the panel at it; live, `-SillPiPStartAt <s>` starts it as iOS does as Sill leaves, `-SillPiPPauseAt
 <s>[,<s>…]` the window's pause and play, `-SillPiPLockAt <s>` the device's lock, `-SillPiPSession
 active|inactive` the audio session held or not; `xcrun simctl launch UDID com.apple.Preferences` sends
-Sill away, the console's `pip:` lines say what happened), `-SillVoiceOver 1` (that group as with VoiceOver on:
+Sill away, the console's `pip:` lines say what happened), `-Sill.holdThenDrag 0` (its Hold, Then Drag off for one
+run, PR #292, in the normal app too: the hold on the picture right-clicks at once, as before, and the tour's
+picture card says only that; on, the default since Noah's 2026-11-20, a finger held on the picture and then
+moved drags with the left button, one lifted where it was pressed right-clicks at the lift, and the card says
+so; `-Sill.holdThenDrag 1` on for one run; `-SillSettingsScroll holddrag` the panel at its switch), `-SillVoiceOver 1` (that group as with VoiceOver on:
 its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
 iPad…'s overlay; `-SillOverlayLine asking|shown|openonmac|locked|noanswer` the
 line its ask's answer sets; under `-SillLive 1` it opens over the live session
