@@ -33,8 +33,9 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
-/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; on an iPhone, Keys (Arrow Keys,
+/// `PhoneKeyRow.arrowKeysKey`, #287); then Take the Tour, and last this app's version, "Sill 0.6.2 (1400)"
+/// (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -75,6 +76,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This iPhone's Arrow Keys (#287; PhoneKeyRow.arrowKeysKey): off unless turned on, read by the key row
+    /// (the four arrows after shift, in a row that scrolls), never sent; offered on an iPhone alone.
+    @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
@@ -124,6 +128,7 @@ struct HostSettingsPanel: View {
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
+    /// `keys`, to the Keys group's title, over Arrow Keys and its footnote (#287; an iPhone's alone).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     private static var startsAt: String? {
         #if DEBUG
@@ -137,6 +142,7 @@ struct HostSettingsPanel: View {
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
         case "fullscreen"?: return fullScreenRowID
+        case "keys"?: return keysGroupID
         default: return nil
         }
         #else
@@ -144,6 +150,7 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let keysGroupID = "keys"
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
@@ -800,6 +807,31 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        keys
+    }
+
+    /// Keys, this device's key row: on an iPhone, Arrow Keys (#287, PhoneKeyRow), off unless turned on, with
+    /// what it does under it (PhoneKeyRow.Copy); nothing on an iPad, whose key row has the arrows. Its own
+    /// group under This iPhone, after the gestures and before Take the Tour, where the key row's other
+    /// switches are to join it. For every Mac: the row is this device's own, and the Mac sees only its keys.
+    @ViewBuilder private var keys: some View {
+        if PhoneKeyRow.offered(phoneArrangement: DuoLayout.phoneArrangement) {
+            Text(PhoneKeyRow.Copy.group)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+                .id(Self.keysGroupID)
+            Rows {
+                Toggle(isOn: $arrowKeys) {
+                    Text(PhoneKeyRow.Copy.title).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: PhoneKeyRow.Copy.footnote)
+        }
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every
