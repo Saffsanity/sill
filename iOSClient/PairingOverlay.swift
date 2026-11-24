@@ -82,8 +82,8 @@ struct PairingOverlay: View {
         }
         // The Mac's answer to that ask, spoken: VoiceOver's focus is on the title, and a line that
         // says no code is showing, or why, must be heard.
-        .onChange(of: client.overlayAskLine) { _, line in
-            if let line, line != DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac) { AccessibilityNotification.Announcement(line).post() }
+        .onChange(of: client.overlayAskIsPending ? nil : client.overlayAskLine) { _, line in
+            if let line { AccessibilityNotification.Announcement(line).post() }
         }
         .task(id: client.pairing) {
             // Paired: says so, then fades after a second; the stream never stopped.
