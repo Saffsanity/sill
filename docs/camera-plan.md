@@ -39,7 +39,7 @@ device's camera turns on only while an app on the Mac is using Sill Camera, and 
 stream while it is on. So you can join the call that runs on your Mac from the iPad in another room, or from
 anywhere over your own VPN: you watch the call's window on the iPad, as Sill streams it, and the far end sees you.
 
-Once, on the Mac: Settings › Devices › **Use iPhone and iPad cameras**. Sill installs its camera, Sill Camera, and
+Once, on the Mac: Settings › Streaming › **Use iPhone and iPad cameras** (§0). Sill installs its camera, Sill Camera, and
 macOS asks an administrator of the Mac to allow it in System Settings. Sill must be in the Applications folder.
 
 Not this: a recording, a photo, a preview window on the Mac, the camera running in the background, the
@@ -406,7 +406,7 @@ drawn once per state.
 |---|---|---|---|---|
 | Share Camera | the device's Settings panel, This iPad (This iPhone), after Share Clipboard | `Sill.shareCamera` (#193's) | off | per device, never sent; shown while the Mac says `camera` |
 | Camera (Front, Back) | under Share Camera while it is on | `Sill.cameraPosition` | `front` | sent as `position` |
-| Use iPhone and iPad cameras | Sill.app, Settings › Devices, a Camera section | `deviceCamera` (`me.saffer.sill.mac`) | off | the Mac's alone; installs Sill Camera when turned on; applies at once |
+| Use iPhone and iPad cameras | Sill.app, Settings › Streaming, "Camera and Microphone (beta)" (§0; Devices in the first draft) | `deviceCamera` (`me.saffer.sill.mac`) | off | the Mac's alone; installs Sill Camera when turned on; applies at once |
 | Remove Sill Camera… | the same section | none | | deactivates the extension (macOS may ask for an administrator) |
 
 DEBUG only: `-SillCameraCase off|idle|inuse|another|notready|unpaired|denied|paused|thermal|nocamera`,
@@ -841,7 +841,18 @@ app as CI builds it; docs/steps/2026-11-18-camera.md has the numbers.
   check), and verified in a heavy hold of its own; then main 5d062a3c (#389, #418), one conflict (the Settings panel's
   row IDs, both kept), verified by CI; no step of this plan changed.
 
-Not yet: step 8 (Sill.app: `CameraExtensionState`, `CameraExtensionManager`, `CameraSink` with the fit into the app's
-size, the "Camera and Microphone (beta)" section with "Use iPhone and iPad cameras", the card's line, the previews;
-then H6 and H11); Sill Camera running anywhere (it needs the portal steps of §15 step 10 and Noah's Mac: N1); Share
-Camera on a device in the hand; steps 9 and 10.
+- The fifth run (2026-11-24; its notes in docs/steps/2026-11-18-camera.md): main 644f03b8 and then 22ab5a3e (#393, the
+  whole-screen Settings pane; Share Camera's rows in its device part) merged in; step 8, Sill.app's side:
+  `CameraExtensionState` (`CameraExtensionPolicy`, checked by the new `camera-app` with `CameraSinkPolicy`, which lives
+  in `CameraFeed` beside Sill Camera's rules), `CameraExtensionManager` (OSSystemExtensionRequest only from Sill.app in
+  /Applications with Sill Camera inside and the install entitlement; a dry run in the bare binary), `CameraSink`
+  (CoreMediaIO's C API; nothing of it while the switch is off; a dry run in the bare binary), the "Camera and Microphone
+  (beta)" section in Settings › Streaming with "Use iPhone and iPad cameras" (off), the card's camera line, previews of
+  every state (G3); §19's states and their ways out; the gates H6, H11 and H12 (Sill.app's receiver without the test
+  hook). Sill.app now always has a receiver, so its lists say `camera` 0 or 1 and the device's words follow (the known
+  defect of "Update Sill on ‹Mac›" gone). make-app.sh's release camera build no longer stops at its first camera line
+  (plutil's dotted keys), and adds the camera words and entitlement (V2).
+
+Not yet: Sill Camera running anywhere and Sill.app's real request, sink and approval (Noah's first try, N1 and N2, with
+the profile that has the System Extension capability); Share Camera on a device in the hand; the harness photos of the
+device's rows inside #393's pane (G1 again); steps 9 and 10.
