@@ -471,14 +471,16 @@ used)"; #323: "as a toggle".
     seconds later, or at once with a key or click. Set up: Darken this Mac's screen on, Only while a device is away from
     home off, Hide the pointer too on, Stay dark after the last device leaves 5 seconds, Lock this Mac when the last
     device leaves off.
-    1. *The pointer:* connect the iPad (black); move the Mac's mouse: no pointer on the black; on the iPad, the pointer
-       over text and a link: still shown, an I-beam and a hand; ⌃⌘Q: the lock screen with its pointer; unlock: lit.
+    1. *The pointer:* connect the iPad (black); move the Mac's own mouse without clicking: no pointer on the black,
+       while the iPad shows the Mac's pointer moving, an I-beam over text and a hand over a link (kinds 26 and 14, as
+       before); ⌃⌘Q: the lock screen with its pointer; unlock: lit.
     2. *The wait:* close Sill on the iPad: back in about 5 s, the hint saying so; connect, close again and press a key on
        the Mac within those seconds: lit at once, not locked.
     3. *A crash:* connect (black, no pointer), then from the iPad's Terminal on the Mac `killall -9 Sill`: lit, and the
        pointer back.
-    4. *The switches:* Settings › Devices in front, keys passing; connect; click Hide the pointer too under the black:
-       the pointer shows; again: hidden; click Darken this Mac's screen: lit; again: black.
+    4. *The switches:* Settings › Devices in front, keys passing and Hide the pointer too off (to aim); connect; click
+       Hide the pointer too under the black: the pointer goes; again without moving: back; click Darken this Mac's
+       screen: lit; both back on.
     5. *Sill quits:* `osascript -e 'quit app "Sill"'` from the iPad: lit with the pointer.
     6. *What stays hidden:* ⌘Space, F3, the volume keys: nothing over the black.
     7. *A key or click while connected:* locks; Touch ID: lit about 2 s later, while the iPad stays.
