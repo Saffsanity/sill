@@ -941,7 +941,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   beside it (`ignoresSafeArea`), the header, the rows and Disconnect in their
   column inside it (`inColumn`; the rows that scroll by their scroll view's
   content margins), so a drag anywhere scrolls; DEBUG
-  `-SillSettingsScrollArea 1` outlines them; a feature's group
+  `-SillSettingsScrollArea 1` outlines them; their edges the pane's own
+  12 pt fade (`ScrollEdgeFade`), iOS 26's scroll edge effect kept off them
+  (`SystemEdgeEffect`; DEBUG `-SillSettingsSystemEdge 1` leaves it on); a feature's group
   goes into the part whose it is), `SettingsPane` (where the pane's two parts
   go: one column on every screen without a fold to keep to, an iPad's and an
   iPhone's either way round (Noah, 2026-11-23), a column on each page of the
@@ -949,7 +951,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   page out to the screen's edges (`macScroll`, `deviceScroll`, `page(_:)`: the
   whole screen in one column, the side strips of the safe area included), nothing
   on the fold, right to left mirrored, the room under Disconnect, the home
-  indicator's (`footBottom`); and `Close`, what each way of closing it
+  indicator's (`footBottom`), iOS's own scroll edge effect off every edge of
+  each scroll view (`systemEdgeEffectHidden`, `Edges`); and `Close`, what each way of closing it
   brings; pure, `Tests/checks/settings-pane`; pbxproj A5E1/F5E1), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,

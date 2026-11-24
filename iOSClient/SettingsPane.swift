@@ -27,6 +27,16 @@ enum SettingsPane {
     /// Under Disconnect at the foot of the laptop pose's upper page, over the fold.
     static let foldGap: CGFloat = 12
 
+    /// A scroll view's edges, from its leading one (the pure layout's names for SwiftUI's `Edge.Set`).
+    struct Edges: OptionSet, Equatable {
+        let rawValue: Int
+        static let top = Edges(rawValue: 1)
+        static let leading = Edges(rawValue: 2)
+        static let bottom = Edges(rawValue: 4)
+        static let trailing = Edges(rawValue: 8)
+        static let all: Edges = [.top, .leading, .bottom, .trailing]
+    }
+
     /// Where the pane's parts go on a stream screen of `size` (the screen less its top and side safe areas,
     /// down to its bottom edge: the layouts' own space, in which the fold is given). One column on every screen
     /// without a fold to keep to, an iPad's and an iPhone's either way round (Noah, 2026-11-23: "Settings should
@@ -165,6 +175,15 @@ enum SettingsPane {
         var headerWords: CGFloat? {
             arrangement == .twoColumns ? max(0, mac.width - 2 * Self.headerInset) : nil
         }
+
+        /// The edges of each part's scroll view where iOS's own scroll edge effect (iOS 26 and later: a blur that
+        /// deepens toward an edge it judges something lies over) stays off: all four, in every arrangement and on
+        /// every screen. The pane has edges of its own (HostSettingsPanel's `ScrollEdgeFade`, 12 pt at each scroll
+        /// view's top and bottom) and nothing of the system's (a bar, a toolbar) lies over its scroll views. Left
+        /// on, the system's effect blurred all but the last rows of a 13-inch iPad's sideways screen in the
+        /// harness (2026-11-24), whose drawing, turned a quarter round to fill the upright simulator, put the
+        /// simulator's own top and bottom edges along the scroll view's sides.
+        var systemEdgeEffectHidden: SettingsPane.Edges { .all }
 
         /// The DEBUG console's line: "one column 600 pt wide at 67, its scroll view -59–793 (734×393, 21 pt kept at
         /// the bottom)" (an iPhone 15 Pro on its side: the scroll view out to the screen's edges, 59 pt beyond the

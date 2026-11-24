@@ -235,6 +235,10 @@ struct ContentView: View {
 /// * `-SillSettingsScrollArea 1` — with `-SillSettings 1`: each of Settings' scroll views outlined in
 ///   orange, so a still photo shows where a drag scrolls the rows (the whole screen in one column, out to
 ///   its edges; each page around the fold); none where the rows fit without scrolling.
+/// * `-SillSettingsSystemEdge 1` — with `-SillSettings 1`: Settings' scroll views keep iOS's own scroll
+///   edge effect (iOS 26 and later), which the pane otherwise turns off on every edge
+///   (`SettingsPane.Layout.systemEdgeEffectHidden`), so a photo shows what it does: on the 13-inch iPad's
+///   sideways screen, drawn a quarter turn round (below), a blur over all but the last rows.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -579,7 +583,12 @@ struct ContentView: View {
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
-/// (`sips -r 270 shot.png`). Touches follow the rotation. One that fits neither way (the Duo's
+/// (`sips -r 270 shot.png`). Touches follow the rotation. Turned so that it fills the simulator (the
+/// 13-inch iPad's own 1376×1032 on it), a scroll view as wide as the fake screen lies along the
+/// simulator's top and bottom edges, and iOS 26's scroll edge effect blurred Settings' from its top down
+/// over nearly its whole height (2026-11-24, docs/steps/2026-11-18-settings-pane.md): the harness's
+/// alone, not the mini's 1133×744 turned, nor right to left (turned the other way). Settings turns the
+/// system's effect off on its scroll views (`-SillSettingsSystemEdge 1` keeps it). One that fits neither way (the Duo's
 /// 710×1000 on an iPhone) is drawn scaled down to fit, upright or turned, whichever is larger
 /// (`Fit`); only the drawing shrinks, the stream screen still lays out at the fake size, and the
 /// console says so ("harness: 710x1000 drawn at 0.62"). A fake screen that reaches into the

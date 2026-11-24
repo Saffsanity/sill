@@ -33,6 +33,12 @@ check("16 pt margins, a book page's column of 300 at least, 600 at most, pages o
       SettingsPane.margin == 16 && SettingsPane.minColumn == 300 && SettingsPane.maxColumn == 600 && SettingsPane.minPage == 200)
 check("under Disconnect: 16 pt at a screen's foot with no home indicator, 12 over the laptop pose's fold",
       SettingsPane.footGap == 16 && SettingsPane.foldGap == 12)
+// iOS's own scroll edge effect off every edge of the pane's scroll views (2026-11-24: left on, it blurred all but
+// the last rows of the 13-inch iPad's sideways harness photos); the pane's own 12 pt fade is their only edge.
+typealias Edges = SettingsPane.Edges
+let fourEdges: Edges = [.top, .leading, .bottom, .trailing]
+check("a scroll view's four edges, each its own: top, leading, bottom, trailing",
+      [Edges.top, .leading, .bottom, .trailing].map(\.rawValue) == [1, 2, 4, 8] && Edges.all == fourEdges)
 
 // MARK: - The real sizes
 //
@@ -156,6 +162,8 @@ for c in cases {
               same(l.onScreen(l.page(l.macScroll)), rtl ? mirror(wantMacPage, c.size.width) : wantMacPage)
                 && same(l.onScreen(l.page(l.deviceScroll)), rtl ? mirror(wantDevicePage, c.size.width) : wantDevicePage))
         check("\(c.name)\(dir): the bottom inset kept, \(c.bottom)", l.bottom == c.bottom)
+        check("\(c.name)\(dir): iOS's own scroll edge effect off all four edges of both scroll views",
+              l.systemEdgeEffectHidden == fourEdges)
         // Disconnect clear of the home indicator (its room, 16 pt at least), or 12 pt over the laptop pose's fold.
         let foot: CGFloat = c.arrangement == .twoPages ? 12 : max(16, c.bottom)
         check("\(c.name)\(dir): \(String(format: "%g", Double(foot))) pt under Disconnect, "
@@ -264,7 +272,9 @@ let footRule = Rule("Disconnect clear of the home indicator: at the screen's foo
 let scrolls = Rule("each scroll view across its page, out to the screen's edges through the safe area beside it, its column inside it: in one "
                    + "column one scroll view, the whole screen; in the book pose each page from the screen's edge to the band, never on it; in "
                    + "the laptop pose the screen's width above the band and below it; laid out on its page, the stream screen's part of it")
-let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule, scrolls]
+let systemEdge = Rule("iOS's own scroll edge effect off all four edges of both scroll views, in every arrangement, on every screen, "
+                      + "either way round and right to left (the pane's own fade their only edge; 2026-11-24)")
+let rules = [inside, widest, decided, offFold, leadingMac, foldsOnly, single, headerRule, mirrored, footRule, scrolls, systemEdge]
 
 
 var gridLayouts = 0
@@ -310,6 +320,7 @@ for w in stride(from: 200, through: 1400, by: 1) {
                                  && (l.arrangement != .twoPages || fold.horizontalBand != nil), at)
                 footRule.expect(l.arrangement == .twoPages ? l.footBottom == 12 : l.footBottom == max(16, bottom) && l.footBottom >= bottom,
                                 at + ", \(l.footBottom) under Disconnect")
+                systemEdge.expect(l.systemEdgeEffectHidden == fourEdges, at + ", the system's edge effect hidden at \(l.systemEdgeEffectHidden.rawValue)")
                 // The scroll views, in the leading-edge space (the mirror rule below holds them right to left): each
                 // holds its column, spans its page and goes on into the safe area beside the screen where the page
                 // meets its edge; laid out on the page, the part of it in the stream screen.

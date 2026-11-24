@@ -251,11 +251,12 @@ struct HostSettingsPanel: View {
     /// column inside it (`inColumn`, and the scroll view's content margins).
     @ViewBuilder private func arranged(_ l: SettingsPane.Layout) -> some View {
         let macPage = l.page(l.macScroll), devicePage = l.page(l.deviceScroll)
+        let edges = l.systemEdgeEffectHidden
         switch l.arrangement {
         case .oneColumn:
             VStack(spacing: 0) {
                 header(words: nil).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
-                withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage) {
+                withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
                     macPart
                     devicePart
                 }
@@ -267,9 +268,11 @@ struct HostSettingsPanel: View {
             VStack(spacing: 0) {
                 header(words: l.headerWords).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
                 HStack(alignment: .top, spacing: devicePage.minX - macPage.maxX) {
-                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage) { macPart }
-                        .frame(width: macPage.width)
-                    part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll) { devicePart }
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
+                        macPart
+                    }
+                    .frame(width: macPage.width)
+                    part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll, systemEdges: edges) { devicePart }
                         .frame(width: devicePage.width)
                 }
             }
@@ -279,11 +282,13 @@ struct HostSettingsPanel: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     header(words: nil).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
-                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage) { macPart }
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
+                        macPart
+                    }
                 }
                 .frame(width: macPage.width, height: macPage.height)
                 .paneAt(x: macPage.minX, y: macPage.minY, in: l.size)
-                part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll) { devicePart }
+                part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll, systemEdges: edges) { devicePart }
                     .frame(width: devicePage.width, height: devicePage.height)
                     .paneAt(x: devicePage.minX, y: devicePage.minY, in: l.size)
             }
@@ -297,6 +302,7 @@ struct HostSettingsPanel: View {
     /// The rows and Disconnect in `column`, on the part's `page`; the rows' scroll view, where they scroll, is
     /// `scroll` (`part`).
     private func withDisconnect<Content: View>(footBottom: CGFloat, column: CGRect, scroll: CGRect, page: CGRect,
+                                               systemEdges: SettingsPane.Edges,
                                                @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         let x = column.minX - page.minX
@@ -310,7 +316,7 @@ struct HostSettingsPanel: View {
                 Spacer(minLength: footBottom)
             }
             VStack(spacing: 0) {
-                part(bottom: 0, column: column, scroll: scroll) { rows }
+                part(bottom: 0, column: column, scroll: scroll, systemEdges: systemEdges) { rows }
                 foot.inColumn(x: x, width: column.width).padding(.bottom, footBottom)
             }
         }
@@ -323,11 +329,13 @@ struct HostSettingsPanel: View {
     /// to scroll instead of anywhere on the screen"). The pane lays the scroll view out on its page and
     /// `ignoresSafeArea` takes it on to the screen's edge wherever the page meets one: inside, no safe area is
     /// left, so the column's place is measured from `scroll`'s leading edge, as the scroll view's content margins.
-    /// Its indicator is at its trailing edge, as in a system list whose rows keep a readable width. `bottom`: the room kept under the rows where the scroll view
-    /// reaches the screen's bottom edge (the home indicator's), so they scroll under it and their last line rests
-    /// above it. Its edges fade (`ScrollEdgeFade`), so a row cut by the header, Disconnect or the fold reads as
-    /// scrolled away; the rows begin under the top's fade.
-    private func part<Content: View>(bottom: CGFloat, column: CGRect, scroll: CGRect,
+    /// Its indicator is at its trailing edge, as in a system list whose rows keep a readable width. `bottom`: the
+    /// room kept under the rows where the scroll view reaches the screen's bottom edge (the home indicator's), so
+    /// they scroll under it and their last line rests above it. Its edges fade (`ScrollEdgeFade`), so a row cut by
+    /// the header, Disconnect or the fold reads as scrolled away; the rows begin under the top's fade. iOS's own
+    /// scroll edge effect stays off it at `systemEdges` (SettingsPane.Layout's `systemEdgeEffectHidden`: every
+    /// edge), so the fade is the only one it has (`SystemEdgeEffect`).
+    private func part<Content: View>(bottom: CGFloat, column: CGRect, scroll: CGRect, systemEdges: SettingsPane.Edges,
                                      @ViewBuilder _ content: () -> Content) -> some View {
         let rows = content()
         // The column as the scroll view's content margins at its sides, not as padding round the rows: the scroll
@@ -344,6 +352,7 @@ struct HostSettingsPanel: View {
             .scrollBounceBehavior(.basedOnSize)
             .modifier(StartAnchor(atEnd: Self.startsAtEnd))
             .contentMargins([.leading, .bottom, .trailing], margins, for: .scrollContent)
+            .modifier(SystemEdgeEffect(hidden: systemEdges))
             .modifier(ScrollEdgeFade())
             .modifier(ScrollAreaOutline())
             .ignoresSafeArea(edges: .horizontal)
@@ -1499,6 +1508,42 @@ private struct ScrollEdgeFade: ViewModifier {
                 LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
                     .frame(height: Self.height)
             }
+        }
+    }
+}
+
+/// iOS's own scroll edge effect (iOS 26 and later: a blur that deepens toward an edge the system judges something
+/// lies over) kept off a part's scroll view at `hidden` (SettingsPane.Layout's `systemEdgeEffectHidden`: every edge,
+/// on every screen), so `ScrollEdgeFade` is its only edge. Nothing of the system's lies over these scroll views; the
+/// pane's header and Disconnect sit beside them, not over them. Left on, the system's effect blurred all but the last
+/// rows of the 13-inch iPad's sideways harness photos (2026-11-24): turned a quarter round to fill the upright
+/// simulator, the scroll view lay along the simulator's own top and bottom edges, and the effect took its whole
+/// height for the top's (docs/steps/2026-11-18-settings-pane.md). DEBUG `-SillSettingsSystemEdge 1` leaves it on,
+/// as before, for photos of what it does. Before iOS 26 there is no such effect.
+private struct SystemEdgeEffect: ViewModifier {
+    let hidden: SettingsPane.Edges
+    private static var keptForPhotos: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "SillSettingsSystemEdge")
+        #else
+        return false
+        #endif
+    }
+    private var edges: Edge.Set {
+        var set: Edge.Set = []
+        if hidden.contains(.top) { set.insert(.top) }
+        if hidden.contains(.leading) { set.insert(.leading) }
+        if hidden.contains(.bottom) { set.insert(.bottom) }
+        if hidden.contains(.trailing) { set.insert(.trailing) }
+        return set
+    }
+    @ViewBuilder func body(content: Content) -> some View {
+        if Self.keptForPhotos || hidden.isEmpty {
+            content
+        } else if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectHidden(true, for: edges)
+        } else {
+            content
         }
     }
 }

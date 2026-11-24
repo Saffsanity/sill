@@ -84,8 +84,23 @@ MUTANTS = {
     "M33 the laptop page's Disconnect as at the screen's foot": ("arrangement == .twoPages ? SettingsPane.foldGap : max(bottom, SettingsPane.footGap)",
                                                                  "max(bottom, SettingsPane.footGap)"),
     "M34 Disconnect at the very foot without a home indicator": ("static let footGap: CGFloat = 16", "static let footGap: CGFloat = 0"),
+    # iOS's own scroll edge effect off every edge of both scroll views, on every screen (2026-11-24: left on, it blurred
+    # all but the last rows of the 13-inch iPad's sideways harness photos): left on, or off only where the photo showed
+    # it, must fail the check.
+    "M49 the system's edge effect left on": ("var systemEdgeEffectHidden: SettingsPane.Edges { .all }",
+                                             "var systemEdgeEffectHidden: SettingsPane.Edges { [] }"),
+    "M50 the system's edge effect off at the top alone": ("var systemEdgeEffectHidden: SettingsPane.Edges { .all }",
+                                                          "var systemEdgeEffectHidden: SettingsPane.Edges { .top }"),
+    "M51 the system's edge effect off on screens held sideways alone": (
+        "var systemEdgeEffectHidden: SettingsPane.Edges { .all }",
+        "var systemEdgeEffectHidden: SettingsPane.Edges { size.width > size.height ? .all : [] }"),
+    "M52 the system's edge effect off in one column alone, not around the fold": (
+        "var systemEdgeEffectHidden: SettingsPane.Edges { .all }",
+        "var systemEdgeEffectHidden: SettingsPane.Edges { arrangement == .oneColumn ? .all : [] }"),
+    "M53 every edge without the sides": ("static let all: Edges = [.top, .leading, .bottom, .trailing]",
+                                         "static let all: Edges = [.top, .bottom]"),
     # Closing.
-    "M27 the overlay puts the keyboard back": ("var backToStream: Bool { self == .done || self == .harness }",
+    "M27 the overlay puts the keyboard back":("var backToStream: Bool { self == .done || self == .harness }",
                                                "var backToStream: Bool { self == .done || self == .harness || self == .overlay }"),
     "M28 the harness's close keeps it down": ("var backToStream: Bool { self == .done || self == .harness }", "var backToStream: Bool { self == .done }"),
     "M29 the tour under the closing pane": ("var waitsForClose: Bool { self == .tour || self == .fullScreen }", "var waitsForClose: Bool { self == .fullScreen }"),

@@ -353,7 +353,10 @@ remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (Settings'
 parts scrolled to their ends), `-SillSettingsScrollArea 1` (each of Settings' scroll
 views outlined in orange: where a drag scrolls the rows, the whole screen in one column out
-to its edges, each page around the fold; none where the rows fit), `-SillSettingsScroll gestures` (the pane scrolled to its
+to its edges, each page around the fold; none where the rows fit), `-SillSettingsSystemEdge 1`
+(Settings' scroll views keep iOS 26's own scroll edge effect, which the pane turns off on every
+edge: on the 13-inch iPad's sideways screen, drawn a quarter turn round, it blurs all but the
+last rows; for photos of what it does, never a device's look), `-SillSettingsScroll gestures` (the pane scrolled to its
 This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
 to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
