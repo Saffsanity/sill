@@ -1,0 +1,27 @@
+**Real-time handwriting input bar with multi-line sync and caret tracking (2026-11-16, branch `feat-scribble-input-bar` from main).**
+
+- **Context & Motivation.**
+  - Direct touch and Apple Pencil input into streamed Mac applications can be imprecise when typing or editing text, especially when virtual keyboards cover the text field or when writing directly on remote desktop fields.
+  - When messages were sent or input fields cleared on the Mac, remote text fields and client state frequently drifted out of sync without bi-directional caret awareness.
+- **Protocol Extension (`Sources/StreamProtocol/Switcher.swift`).**
+  - Added additive optional metadata fields to `WindowList`:
+    - `textInputFocused: Bool?`: Indicates whether the Mac's currently active element is an editable text field/area.
+    - `textInputFocusID: UInt64?`: Monotonic ID per focused text field session, allowing dismissed pads to remain closed until another field gains focus.
+    - `textInputAnchorY: Double?`: Normalized vertical center (0.0 .. 1.0) of the focused field, enabling the iPad to dock the floating bar clear of the input area.
+    - `textInputValue: String?`: Synchronized text value or selection.
+    - `textInputIsSelection: Bool?`: Indicates whether `textInputValue` is a highlighted selection rather than the full field.
+    - `textInputRevision: UInt64?`: Monotonic revision counter bumped on each text or selection change.
+- **Mac Host Caret & Focus Tracking (`Sources/SillHost/CursorShapeWatcher.swift`, `StreamCoordinator.swift`).**
+  - Accessibility queries run off the main thread on a dedicated serial queue (`sill.axfocus`) with 40 ms messaging timeouts to detect focused editable text elements (`kAXTextFieldRole`, `kAXTextAreaRole`, `kAXComboBoxRole`, `AXSearchField`).
+  - Broadcasts updated focus information when text fields gain or lose focus and notes device typing interactions.
+- **Real-Time Differential Sync Engine (`iOSClient/ScribbleBar.swift`).**
+  - `ScribbleSyncEngine` calculates the longest common prefix between Mac and iPad text state, emitting minimal backspaces and UTF-8 additions rather than clumsy whole-field replacements.
+  - Handles Enter-to-send, Cmd+Enter multi-line newline insertion, and Mac-side field clears without desynchronization.
+- **Floating Handwriting Pad UI (`iOSClient/ScribbleBar.swift`, `StreamScreen.swift`).**
+  - Multiline expandable input box supporting native Apple Pencil Scribble (`UIScribbleInteraction`) and software/hardware keyboard fallback.
+  - Edge snapping and dragging supporting 4 docking positions (`.bottom`, `.top`, `.left`, `.right`), auto-docking opposite the Mac caret.
+  - Quick actions: Send, Clear, Copy, Keyboard toggle, and Dismiss.
+- **Verified.**
+  - `swift build -c release`: clean compile of `StreamProtocol`, `SillHost`, and targets.
+  - `Tests/checks/repo-rules/run.sh`: 10 of 10 rules hold.
+  - All 74 check suites in `Tests/checks/run-all.sh` pass.

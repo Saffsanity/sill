@@ -942,6 +942,18 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// True when the Mac's currently focused UI element is an editable text input field.
+    @Published var textInputFocused = false
+    /// Monotonic focus token incremented when Mac focus switches to a new editable field.
+    @Published var textInputFocusID: UInt64 = 0
+    /// Normalized vertical center (0.0 top .. 1.0 bottom) of the focused Mac input inside the stream.
+    @Published var textInputAnchorY: Double? = nil
+    /// Synchronized text from the Mac's focused input field or selected text segment.
+    @Published var textInputValue: String? = nil
+    /// True when `textInputValue` represents a highlighted text selection on the Mac.
+    @Published var textInputIsSelection = false
+    /// Monotonic revision bumped whenever Mac's `textInputValue` or selection state changes.
+    @Published var textInputRevision: UInt64 = 0
     /// Whether this session's Mac repeats a key held down (`WindowList.keyRepeat`, KeyRepeat on the host):
     /// 1 from a Mac with key repeat, nil from one before it. The stream's input view sends a hardware
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
@@ -3776,6 +3788,12 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        textInputFocused = false
+        textInputFocusID = 0
+        textInputAnchorY = nil
+        textInputValue = nil
+        textInputIsSelection = false
+        textInputRevision = 0
         hostKeyRepeat = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
@@ -4499,6 +4517,18 @@ final class StreamClient: ObservableObject {
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
                 self.desktopStopsChanged(list)
+                let focused = (list.textInputFocused == true) && (why == nil)
+                let focusID = list.textInputFocusID ?? 0
+                let anchorY = focused ? list.textInputAnchorY : nil
+                let syncedVal = focused ? list.textInputValue : nil
+                let isSel = focused && (list.textInputIsSelection == true)
+                let rev = focused ? (list.textInputRevision ?? 0) : 0
+                if self.textInputFocused != focused { self.textInputFocused = focused }
+                if self.textInputFocusID != focusID { self.textInputFocusID = focusID }
+                if self.textInputAnchorY != anchorY { self.textInputAnchorY = anchorY }
+                if self.textInputValue != syncedVal { self.textInputValue = syncedVal }
+                if self.textInputIsSelection != isSel { self.textInputIsSelection = isSel }
+                if self.textInputRevision != rev { self.textInputRevision = rev }
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }

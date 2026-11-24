@@ -201,6 +201,14 @@ struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
     @State private var keyboardShown = false
+    @State private var scribbleShown = false
+    /// Automatic Pencil Scribble activation when Mac focuses an editable text field.
+    @AppStorage("Sill.autoActivateScribble") private var autoActivateScribble = true
+    @State private var scribbleAutoOpened = false
+    @State private var dismissedFocusID: UInt64? = nil
+    @State private var scribbleManualDockEdge: ScribbleDockEdge? = nil
+    @State private var scribbleHasDraft = false
+    @State private var scribbleTextFocused = false
     /// Modifiers held down by the portrait key row until the next key, character or click uses
     /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
     @State private var latched: KeyModifiers = []
@@ -606,9 +614,31 @@ struct StreamScreen: View {
         .onChange(of: pictureReady, initial: true) { _, ready in if ready { pictureCame() } }
         // The bar's own controls used, by a tap or by VoiceOver, Switch Control, Voice Control or
         // Full Keyboard Access (none of which makes a touch): something happening, for its rule.
-        .onChange(of: drawerOpen) { _, _ in client.noteAction() }
-        .onChange(of: settingsOpen) { _, _ in client.noteAction() }
-        .onChange(of: keyboardShown) { _, _ in client.noteAction() }
+        .onChange(of: drawerOpen) { _, open in
+            client.noteAction()
+            if open && scribbleShown && !scribbleHasDraft && !scribbleTextFocused {
+                dismissScribble()
+            }
+        }
+        .onChange(of: settingsOpen) { _, open in
+            client.noteAction()
+            if open && scribbleShown && !scribbleHasDraft && !scribbleTextFocused {
+                dismissScribble()
+            }
+        }
+        .onChange(of: keyboardShown) { _, shown in
+            client.noteAction()
+            if shown && scribbleAutoOpened && !scribbleHasDraft && !scribbleTextFocused {
+                scribbleAutoOpened = false
+                withAnimation(.easeOut(duration: 0.16)) { scribbleShown = false }
+            }
+        }
+        .onChange(of: client.textInputFocusID) { _, _ in
+            syncScribbleWithMacFocus(focusIDChanged: true)
+        }
+        .onChange(of: client.textInputFocused) { _, _ in
+            syncScribbleWithMacFocus(focusIDChanged: false)
+        }
         .onChange(of: scaleOpen) { _, _ in client.noteAction() }
         .onChange(of: textScale) { _, _ in client.noteAction() }
         .onChange(of: tourCard, initial: true) { _, card in tourCardChanged(card) }
@@ -1034,6 +1064,65 @@ struct StreamScreen: View {
         if drawerOpen { takers.insert(.drawer) }
         if menusOpen { takers.insert(.menus) }
         return takers
+    }
+
+    private var scribbleDockEdge: ScribbleDockEdge {
+        if let manual = scribbleManualDockEdge { return manual }
+        if let anchorY = client.textInputAnchorY { return anchorY >= 0.52 ? .top : .bottom }
+        return .bottom
+    }
+
+    private var scribbleDockBinding: Binding<ScribbleDockEdge> {
+        Binding(
+            get: { scribbleDockEdge },
+            set: { scribbleManualDockEdge = $0 }
+        )
+    }
+
+    private func syncScribbleWithMacFocus(focusIDChanged: Bool) {
+        if client.textInputFocused {
+            if focusIDChanged {
+                scribbleManualDockEdge = nil
+            }
+            guard autoActivateScribble,
+                  !drawerOpen, !settingsOpen, !overlayShown, tour == nil else { return }
+            if !scribbleShown && client.textInputFocusID != dismissedFocusID {
+                if keyboardShown { overlay.setKeyboard(shown: false) }
+                scribbleAutoOpened = true
+                withAnimation(.easeOut(duration: 0.18)) { scribbleShown = true }
+            }
+        } else {
+            dismissedFocusID = nil
+            // Only auto-dismiss if user hasn't focused the text box and there's no pending draft
+            if scribbleAutoOpened && !scribbleHasDraft && !scribbleTextFocused {
+                scribbleAutoOpened = false
+                withAnimation(.easeOut(duration: 0.16)) { scribbleShown = false }
+            }
+        }
+    }
+
+    private func toggleScribbleManually() {
+        setSettings(false, restoreKeyboard: false)
+        withAnimation(.easeOut(duration: 0.16)) {
+            if scribbleShown {
+                dismissedFocusID = client.textInputFocused ? client.textInputFocusID : nil
+                scribbleAutoOpened = false
+                scribbleTextFocused = false
+                scribbleShown = false
+            } else {
+                dismissedFocusID = nil
+                scribbleAutoOpened = false
+                if keyboardShown { overlay.setKeyboard(shown: false) }
+                scribbleShown = true
+            }
+        }
+    }
+
+    private func dismissScribble() {
+        dismissedFocusID = client.textInputFocused ? client.textInputFocusID : nil
+        scribbleAutoOpened = false
+        scribbleTextFocused = false
+        withAnimation(.easeOut(duration: 0.16)) { scribbleShown = false }
     }
 
     /// Pair This iPad…: the panel and the keyboard are put away first, so no key reaches the Mac
@@ -1770,7 +1859,7 @@ struct StreamScreen: View {
         return VStack(spacing: 0) {
             if !hidden {
                 TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
-                       keyboardShown: $keyboardShown,
+                       keyboardShown: $keyboardShown, scribbleShown: scribbleShown,
                        textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                        settingsOpen: settingsOpen,
                        // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
@@ -1778,6 +1867,7 @@ struct StreamScreen: View {
                        menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
                                                     gap: bar.gap, thumbWidth: bar.thumbWidth),
                        toggleKeyboard: { overlay.toggleKeyboard() },
+                       toggleScribble: { toggleScribbleManually() },
                        setSettings: { setSettings($0, restoreKeyboard: $1) },
                        menusOpened: menusOpened, menusClosed: menusClosed)
                     .transition(chromeTransition)
@@ -1850,6 +1940,27 @@ struct StreamScreen: View {
             // A locked Mac: its cover over the picture (LockedMac), under the link's line.
             .overlay { LockedMacShade(client: client) }
             .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
+            .overlay(alignment: scribbleDockEdge.alignment) {
+                if scribbleShown {
+                    ScribbleBar(
+                        isShown: $scribbleShown,
+                        autoActivate: $autoActivateScribble,
+                        hasDraft: $scribbleHasDraft,
+                        isTextFocused: $scribbleTextFocused,
+                        dockEdge: scribbleDockBinding,
+                        macFocused: client.textInputFocused,
+                        macFocusID: client.textInputFocusID,
+                        macSyncedText: client.textInputValue,
+                        macTextIsSelection: client.textInputIsSelection,
+                        macTextRevision: client.textInputRevision,
+                        panelSize: panelSize,
+                        onDismiss: dismissScribble,
+                        sendInput: { client.sendInput($0) }
+                    )
+                    .transition(.move(edge: scribbleDockEdge.transitionEdge).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.30, dampingFraction: 0.84), value: scribbleDockEdge)
             // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
             .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName,
                                             show: { showChrome(by: "an assistive technology") }) }
@@ -2044,6 +2155,7 @@ private struct TopBar: View {
     var stripWidth: CGFloat? = nil
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
+    var scribbleShown: Bool = false
     @Binding var textScale: Double?
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
@@ -2051,6 +2163,7 @@ private struct TopBar: View {
     /// Whether the bar holds the Menus button and still a whole thumbnail (`MacMenuButton.fits`).
     let menusFit: Bool
     let toggleKeyboard: () -> Void
+    var toggleScribble: (() -> Void)? = nil
     /// Opens or closes the Settings panel; the second argument says whether closing puts the
     /// keyboard back (see `StreamScreen.setSettings`).
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
@@ -2104,6 +2217,14 @@ private struct TopBar: View {
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
+
+            if let toggleScribble, UIDevice.current.userInterfaceIdiom == .pad {
+                button(open: scribbleShown, symbol: "pencil.and.scribble", label: "Scribble",
+                       accessibilityLabel: scribbleShown ? "Hide handwriting pad" : "Show handwriting pad",
+                       action: { setSettings(false, false); toggleScribble() })
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+            }
 
             // The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
             // (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams.
