@@ -357,7 +357,8 @@ do {
     _ = q.arrive(count: 2, capacity: 2, at: 4)
     q.clear()
     check(q.pendingSince == nil && !q.freed(count: 0, capacity: 2, at: 4.01), "cleared")
-    check(S.Slots().arrive(count: 0, capacity: 0, at: 0) == .enqueue, "a queue that says no capacity yet: one goes in")
+    var fresh = S.Slots()
+    check(fresh.arrive(count: 0, capacity: 0, at: 0) == .enqueue, "a queue that says no capacity yet: one goes in")
 }
 
 // MARK: - Random lives: the request
