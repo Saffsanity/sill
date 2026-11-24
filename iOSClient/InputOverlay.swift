@@ -241,8 +241,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     // MARK: - Coordinates
 
-    /// Where the layer actually draws the video inside this view.
-    private var videoRect: CGRect { HEVCDisplayView.videoRect(in: bounds, videoSize: videoSize) }
+    /// Where the layer actually draws the video inside this view (PictureFit: one for one where the picture is this
+    /// pane's own pixels less a hairline, as the stream view's frame is then).
+    private var videoRect: CGRect { HEVCDisplayView.videoRect(in: bounds, videoSize: videoSize, screenScale: screenScale) }
+
+    /// This view's screen's pixels a point.
+    private var screenScale: CGFloat? { window?.screen.scale ?? traitCollection.displayScale }
 
     /// A point in this view as a fraction of the video frame. Points in the letterbox are clamped to
     /// the video's edge when `clamped` (moves and drags should keep working past the edge) and
@@ -1437,7 +1441,7 @@ extension InputOverlayView {
 
     /// The top middle of the picture, where the composition shows.
     private var compositionAnchor: CGRect {
-        let rect = HEVCDisplayView.videoRect(in: bounds, videoSize: videoSize)
+        let rect = videoRect
         let area = rect.width > 0 ? rect : bounds
         return CGRect(x: area.midX, y: area.minY + 16, width: 0, height: 0)
     }

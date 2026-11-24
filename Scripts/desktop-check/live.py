@@ -24,7 +24,10 @@ made at the space with the controls showing (an iPad mini's 1117×618 pane: 1446
 in place at once (1218×800 and back), a turn with the controls showing after 1 s (its upright pane, 1089×800), Full
 Screen on upright (800×1218: 1x, then the switch), two changes close together ending at the right size with no make,
 the iPhone held upright with Full Screen after the iPad (800×1614 pt, past run 4's 3072 px backing: in place now), and
-the iPhone back on it within its grace after a change while away (its space then, 1 s steady).
+the iPhone back on it within its grace after a change while away (its space then, 1 s steady). An iPhone that says its
+screen (Noah, 2026-11-24): pixel for pixel upright and on its side, with Full Screen and its controls, the 16:10 pane
+over its controls grown to 800×499; and on a host whose said display refuses a short side (short-1x), the make and a
+follow falling back to the size that works.
 Each host is killed at the end; nothing is posted, warped or captured.
 
     Scripts/desktop-check/live.py OUT
@@ -501,6 +504,87 @@ def the_space(out):
             f"VD space: back on it within its grace: its space then (800×1614), after 1 s steady: {again or said(h, 27.9, 33)}")
     verdict(not h.all(r"beyond the backing", 0, 1e9), f"VD space: nothing beyond the backing: {said(h)}")
     verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1, f"VD space: made once, never again: {vd_lines(h)}")
+    the_iphone(out)
+
+
+PRO15 = "--screen=1179x2556@3:phone"   # an iPhone 15 Pro's screen: 393×852 points at 3x
+
+
+def the_iphone(out):
+    """An iPhone, pixel for pixel (Noah, 2026-11-24: "middle one for iPhones, and leaving iPads as they are"): an iPhone 15
+    Pro that says its screen (Viewport.screen) gets its picture's space counted in its own pixels, made as a 2x desktop of
+    that many pixels, upright and on its side, with Full Screen and with its controls; the 16:10 pane over an upright
+    iPhone's controls grown to 800×499 (default 1); then a host whose said display refuses a short side (short-1x, as macOS
+    might): the make falls back to the size that works at once, one line, and a follow in place too."""
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3"}
+    h = Host(out, "vd-phone", env, args=["--virtual-desktop"])
+    try:
+        # P, an iPhone 15 Pro held upright with Full Screen (393×793, 1179×2379 px): onto it at 3 (589×1189); on its side
+        # with Full Screen at 6 (734×393: 1101×589 after 1 s, a turn: 1x then the switch); its controls back at 9.5 (718×299:
+        # 1077×448 at once, one step); upright with its controls at 12 (377×235: grown to 800×499 after 1 s, one step: both
+        # are wide); Full Screen on upright at 15 (589×1189 at once: a turn of the display); gone at 18.
+        p, rp = client(h, out, "vdphone-p", 18, ["desktop", "--fps=120", "--panel=393x793", "--room=393x793", PRO15, "--device=iPhone",
+                                                 "--next-display@1", "--next-display@3", "--view-after=734x393,734x393@6",
+                                                 "--view-after=718x299@9.5", "--view-after=377x235,393x793@12", "--view-after=393x793@15"], 1)
+        p.join()
+        h.at(21)
+    finally:
+        h.stop()
+    def took(l, size, own):
+        m = re.search(r"followed in place in (\d+) ms: " + re.escape(size) + r" pt @2× at 120 Hz" + (", pixel for pixel" if own else "") + r"\.$", l)
+        return int(m.group(1)) if m else None
+    made = vd_lines(h, 3, 6)
+    verdict(len(made) == 1 and "589×1189 pt @2× at 120 Hz" in made[0][2] and "(its picture: 393×793 pt, 1179×2379 px; pixel for pixel)" in made[0][2],
+            f"VD iPhone: upright with Full Screen, made pixel for pixel (393×793 pt, 1179×2379 px → 589×1189 @2×): {made or said(h, 3, 6)}")
+    on = [x for x in streams(h, 3, 6) if x[1] == "Virtual Desktop"]
+    verdict(bool(on) and on[-1][2] == "589×1189", f"VD iPhone: the Desktop on it at that size: {on}")
+    side = h.all(r"^Virtual Desktop: iPhone turned; ", 6.5, 9.5)
+    verdict(len(side) == 1 and 6.9 <= side[0][0] <= 8.6 and took(side[0][1], "1101×589", True) is not None,
+            f"VD iPhone: on its side with Full Screen after 1 s, in place, pixel for pixel (734×393 → 1101×589): {side or said(h, 6.5, 9.5)}")
+    controls = h.all(r"^Virtual Desktop: iPhone showed its controls; ", 9.5, 12)
+    verdict(len(controls) == 1 and controls[0][0] <= 10.6 and took(controls[0][1], "1077×448", True) is not None,
+            f"VD iPhone: its controls on its side at once, pixel for pixel (718×299 → 1077×448): {controls or said(h, 9.5, 12)}")
+    pane = h.all(r"^Virtual Desktop: iPhone turned; ", 12, 15)
+    verdict(len(pane) == 1 and took(pane[0][1], "800×499", False) is not None,
+            f"VD iPhone: upright with its controls, the 16:10 pane grown to 800×499 (default 1), not pixel for pixel: {pane or said(h, 12, 15)}")
+    back = h.all(r"^Virtual Desktop: iPhone hid its controls; ", 15, 18)
+    verdict(len(back) == 1 and back[0][0] <= 16.4 and took(back[0][1], "589×1189", True) is not None,
+            f"VD iPhone: Full Screen upright again at once, pixel for pixel (589×1189): {back or said(h, 15, 18)}")
+    last = [x for x in streams(h, 15, 18.5) if x[1] == "Virtual Desktop"]
+    verdict(bool(last) and last[-1][2] == "589×1189", f"VD iPhone: …the Desktop on it at that size: {last}")
+    verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1 and not h.all(r"macOS did not keep|beyond the backing", 0, 1e9),
+            f"VD iPhone: made once, every change in place, nothing refused: {said(h)}")
+    the_iphone_refused(out)
+
+
+def the_iphone_refused(out):
+    """macOS refusing an iPhone's short side (SILL_TEST_VD_STEPS=short-1x: a side under 744 points comes up at 1x, as the
+    stage's 754×784 once did; probe P3 says whether macOS does): the make falls back to the size that works at once, and a
+    follow in place to another such size falls back, then follows the size that works; never without a desktop."""
+    env = {"SILL_TEST_DISPLAYS": VD_STOPS, "SILL_TEST_VIRTUAL_DESKTOP": "1", "SILL_TEST_VD_GRACE": "3", "SILL_TEST_VD_STEPS": "short-1x"}
+    h = Host(out, "vd-phone-1x", env, args=["--virtual-desktop"])
+    try:
+        # Q, the iPhone upright with Full Screen: onto it at 3 (589×1189 asked, came up 800×1615 @1×: made again at 800×1614);
+        # on its side with Full Screen at 6 (1101×589 asked in place: lands at 1x elsewhere, back; then 1494×800); gone at 12.
+        q, rq = client(h, out, "vdphone1x-q", 12, ["desktop", "--fps=120", "--panel=393x793", "--room=393x793", PRO15, "--device=iPhone",
+                                                    "--next-display@1", "--next-display@3", "--view-after=734x393,734x393@6"], 1)
+        q.join()
+        h.at(15)
+    finally:
+        h.stop()
+    refused = h.all(r"^Virtual Desktop: macOS did not keep 589×1189 pt @2× \(it came up at 800×1615 pt @1×\); made it at 800×1614 pt @2×, the size that works", 3, 6)
+    made = vd_lines(h, 3, 6)
+    verdict(len(refused) == 1 and len(made) == 1 and "800×1614 pt @2× at 120 Hz" in made[0][2]
+            and "at least 800 pt a side: macOS did not keep it pixel for pixel" in made[0][2] and made[0][0] >= refused[0][0],
+            f"VD iPhone refused: the make falls back to the size that works at once, one line: {said(h, 3, 6)}")
+    on = [x for x in streams(h, 3, 6) if x[1] == "Virtual Desktop"]
+    verdict(bool(on) and on[-1][2] == "800×1614", f"VD iPhone refused: the Desktop on it at the size that works: {on}")
+    back = h.all(r"^Virtual Desktop: iPhone turned; not followed in place: the display went to 1495×800 @1× instead; back at 800×1614 pt @2×", 6.5, 9)
+    then = h.all(r"^Virtual Desktop: macOS did not keep 1101×589 pt @2× in place \(it went to 1495×800 pt @1× instead\); following at 1494×800 pt @2×", 6.5, 9)
+    follow = h.all(r"^Virtual Desktop: iPhone turned; followed in place in \d+ ms: 1494×800 pt @2× at 120 Hz\.$", 7, 11)
+    verdict(len(back) == 1 and len(then) == 1 and len(follow) == 1 and follow[0][0] - then[0][0] >= 0.9,
+            f"VD iPhone refused: in place, back, then the size that works 1 s later: {said(h, 6.5, 11)}")
+    verdict(len([x for x in vd_lines(h) if x[1] == "made"]) == 1, f"VD iPhone refused: made once (the refused one said, never streamed): {vd_lines(h)}")
 
 
 if __name__ == "__main__":

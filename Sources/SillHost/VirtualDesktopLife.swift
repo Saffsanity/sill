@@ -248,16 +248,18 @@ struct VirtualDesktopLife: Equatable {
     /// pt).": the mode it came up at (`came`, its points and scale as CoreGraphics reads them, and its rate), the one asked
     /// for too when it differs, its ID, how long the make took, and the device it is for (`device`: nil for none known,
     /// VirtualDesktopSize.fallback) with the space its picture has (`space`, rule A: its panel, in its points; nil for a size
-    /// the person chose). `id` nil: a test host's, said and never made (SILL_TEST_VIRTUAL_DESKTOP).
+    /// the person chose) and, for an iPhone, its pixels and whether the desktop is pixel for pixel (`pixels`,
+    /// VirtualDesktopSize.pixelWords: "(its picture: 393×793 pt, 1179×2379 px; pixel for pixel)"). `id` nil: a test host's,
+    /// said and never made (SILL_TEST_VIRTUAL_DESKTOP).
     static func madeLine(came: VirtualDesktopSize.Size, asked: VirtualDesktopSize.Size, hz: Int, id: UInt32?, ms: Int,
-                         device: String?, space: CGSize? = nil) -> String {
+                         device: String?, space: CGSize? = nil, pixels: String? = nil) -> String {
         let mode = "\(came.widthPt)×\(came.heightPt) pt @\(came.scale)× at \(hz) Hz"
         let askedWords = came == asked ? "" : " (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)×)"
         let f = VirtualDesktopSize.fallback
         // Whole points (a host takes no side outside 1…16384, ViewportBounds; a side that is no number prints none).
         let picture = space.flatMap { s -> String? in
             guard s.width.isFinite, s.height.isFinite, abs(s.width) < 1e6, abs(s.height) < 1e6 else { return nil }
-            return " (its picture: \(Int(s.width.rounded()))×\(Int(s.height.rounded())) pt)"
+            return " (its picture: \(Int(s.width.rounded()))×\(Int(s.height.rounded())) pt" + (pixels.map { ", \($0)" } ?? "") + ")"
         } ?? ""
         let whose = device.map { "for \($0)\(picture)" } ?? "at \(f.widthPt)×\(f.heightPt): no device's screen known yet"
         guard let id else { return "Virtual Desktop \(mode)\(askedWords): said, never made (TEST ONLY, \(testVariable)), \(whose)." }

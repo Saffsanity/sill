@@ -90,6 +90,126 @@ package enum VirtualDesktopSize {
         s.width.isFinite && s.height.isFinite && s.width > 0 && s.height > 0
     }
 
+    // MARK: An iPhone: pixel for pixel (Noah, 2026-11-24)
+    //
+    // Shown three choices for an iPhone (the 800-point floor, about half size; its own points, life size, where macOS
+    // barely fits; in between, one Mac pixel on one iPhone pixel, about two thirds size and the sharpest), Noah's
+    // decision, whole: "middle one for iPhones, and leaving iPads as they are." So an iPhone's Virtual Desktop is its
+    // picture's space (rule A) counted in the iPhone's own pixels and made as a 2x desktop of that many pixels: an iPhone
+    // 15 Pro upright with Full Screen, 393 × 793 points at 3x, 1179 × 2379 pixels, is 589 × 1189 points at 2x, 1178 × 2378
+    // pixels, drawn one for one with the spare pixel of each odd side a hairline at the picture's right and bottom edge
+    // (the device's PictureFit). An iPad keeps `device(space:)`, as it was. The device says which it is and its pixels in
+    // its viewport (`Viewport.screen`); one that says nothing (every build before 2026-11-25) keeps `device(space:)` too.
+    //
+    // One bend, where a layout gives a desktop macOS cannot use (default 1 for Noah to confirm): no side of it is under
+    // `phoneShort` (400 points) and one side is at least `phoneLong` (800), both sides grown evenly from the space's shape,
+    // the picture then scaled to fit. An iPhone 15 Pro upright with its controls showing (its 16:10 pane, 377 × 235 points,
+    // 565 × 352 at 2x) becomes 800 × 499; every other layout of it is pixel for pixel (on its side with the controls 1077 ×
+    // 448, with Full Screen 1101 × 589 and upright 589 × 1189).
+
+    /// The screen a device's picture is on, as a host takes it from its viewport (`Viewport.screen`, within
+    /// ViewportBounds.screen): its pixels held upright, the pixels a point its picture is drawn at, and whether it is an
+    /// iPhone's (the iPhone Duo's both screens).
+    package struct Screen: Equatable {
+        package var pixelWidth: Int
+        package var pixelHeight: Int
+        package var scale: Double
+        package var phone: Bool
+
+        package init(pixelWidth: Int, pixelHeight: Int, scale: Double, phone: Bool) {
+            self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.scale = scale; self.phone = phone
+        }
+    }
+
+    /// The least shorter side of an iPhone's Virtual Desktop, in points: 370 under the menu bar (30 points on Sill's
+    /// displays, P1), the least a Mac window with its title bar, toolbar and a few rows of content takes; and below every
+    /// current iPhone's own pixel-for-pixel desktop in a layout of its own but one (an iPhone 15 Pro's shortest, on its side
+    /// with its controls showing, is 448; an iPhone 12 to 14's 444, a Pro Max's about 489), clear of them so none is
+    /// scaled by a hair. Only the 16:10 pane over an upright iPhone's controls (352), an iPhone SE's and a mini's are less.
+    static let phoneShort = 400
+    /// The least longer side: macOS kept no display of Sill's at 2x with both sides under 800 points (the stage's 754 ×
+    /// 784 came up at 800 × 832 at 1x, five times; VirtualDisplaySize) and every one with a side of 800 or more at 2x.
+    static let phoneLong = 800
+
+    /// The space `space` (points) counted in the pixels of a screen that draws `scale` pixels a point, each side whole (a
+    /// side within a thousandth of a pixel of a whole number is that number: 377.333… points at 3x is 1132).
+    static func pixels(space: CGSize, scale: Double) -> (width: Int, height: Int)? {
+        guard usable(space), scale.isFinite, scale > 0 else { return nil }
+        let w = (Double(space.width) * scale + 0.001).rounded(.down), h = (Double(space.height) * scale + 0.001).rounded(.down)
+        guard w >= 2, h >= 2, w <= 1e6, h <= 1e6 else { return nil }
+        return (Int(w), Int(h))
+    }
+
+    /// An iPhone's Virtual Desktop for its picture's space `space` on a screen of `scale` pixels a point: that many
+    /// pixels at 2x, half as many points each way (an odd side's spare pixel left over); grown evenly from the space's
+    /// own shape where a side would be under `phoneShort` or both under `phoneLong`; no side over `maxSide`. Nil for a
+    /// space with no two positive sides.
+    static func phone(space: CGSize, scale: Double) -> Size? {
+        guard let px = pixels(space: space, scale: scale) else { return nil }
+        let exact = (w: Double(px.width) / 2, h: Double(px.height) / 2)
+        var w = exact.w.rounded(.down), h = exact.h.rounded(.down)
+        if min(w, h) < Double(phoneShort) || max(w, h) < Double(phoneLong) {
+            let grow = max(Double(phoneShort) / min(exact.w, exact.h), Double(phoneLong) / max(exact.w, exact.h))
+            w = (exact.w * grow).rounded(); h = (exact.h * grow).rounded()
+        }
+        if max(w, h) > Double(maxSide) {
+            let fit = Double(maxSide) / max(w, h)
+            w = (w * fit).rounded(); h = (h * fit).rounded()
+        }
+        return Size(widthPt: Int(max(w, 1)), heightPt: Int(max(h, 1)), scale: Self.scale)
+    }
+
+    /// Whether `size` is the space's own pixels at 2x (what `phone` gives unbent): one Mac pixel on one device pixel.
+    static func pixelForPixel(_ size: Size, space: CGSize, scale: Double) -> Bool {
+        guard size.scale == Self.scale, let px = pixels(space: space, scale: scale) else { return false }
+        return size.widthPt == px.width / 2 && size.heightPt == px.height / 2
+    }
+
+    /// The Virtual Desktop for a device whose picture has `space` (rule A) on `screen`: an iPhone's pixel for pixel
+    /// (`phone`), unless macOS did not keep that size this run (`refused`, its ids: the size that works then, as for an
+    /// iPad); an iPad's, and a device's that says nothing of its screen, `device(space:)` as before.
+    static func device(space: CGSize?, screen: Screen?, refused: Set<String> = []) -> Size? {
+        if let space, let screen, screen.phone, let s = phone(space: space, scale: screen.scale), !refused.contains(id(s)) {
+            return s
+        }
+        return device(space: space)
+    }
+
+    /// The words a made or followed iPhone desktop's line adds about its pixels: "1179×2379 px; pixel for pixel", or
+    /// "1131×705 px; scaled to fit: an iPhone's desktop is at least 800×400 pt"; nil for an iPad's and an older device's.
+    static func pixelWords(_ size: Size, space: CGSize?, screen: Screen?) -> String? {
+        guard let space, let screen, screen.phone, let px = pixels(space: space, scale: screen.scale) else { return nil }
+        let p = "\(px.width)×\(px.height) px"
+        if pixelForPixel(size, space: space, scale: screen.scale) { return p + "; pixel for pixel" }
+        if size == device(space: space) { return p + "; at least 800 pt a side: macOS did not keep it pixel for pixel" }
+        return p + "; scaled to fit: an iPhone's desktop is at least \(phoneLong)×\(phoneShort) pt"
+    }
+
+    /// What a make does once the display came up at `came` for the size asked, `asked`, whose size that works is `works`
+    /// (`device(space:)`, the 800-point floor macOS has always kept at 2x): kept when it came up as asked, or when the size
+    /// asked was that one already (an iPad's, as before: its line says what came); else made again at `works` (an iPhone's
+    /// size macOS did not keep: at 1x, or another size), one line, and that size not asked again this run.
+    enum AfterMake: Equatable { case kept, again(Size) }
+
+    static func afterMake(asked: Size, came: Size, works: Size?) -> AfterMake {
+        guard came != asked, let works, works != asked else { return .kept }
+        return .again(works)
+    }
+
+    /// The line when macOS did not keep an iPhone's pixel-for-pixel size, the one line of that fall back: "Virtual Desktop:
+    /// macOS did not keep 589×1189 pt @2× (it came up at 800×1615 pt @1×); made it at 800×1614 pt @2×, the size that works,
+    /// the picture scaled." At a make that threw or never came up "(it would not make it)"; in place "… in place (it went to
+    /// … instead); following at …".
+    static func refusedLine(asked: Size, came: Size?, works: Size, inPlace: Bool) -> String {
+        let a = "\(asked.widthPt)×\(asked.heightPt) pt @\(asked.scale)×"
+        let mode = came.map { "\($0.widthPt)×\($0.heightPt) pt @\($0.scale)×" }
+        let what = inPlace ? " in place" + (mode.map { " (it went to \($0) instead)" } ?? "")
+                           : (mode.map { " (it came up at \($0))" } ?? " (it would not make it)")
+        let then = inPlace ? "following at" : "made it at"
+        return "Virtual Desktop: macOS did not keep \(a)\(what); \(then) \(works.widthPt)×\(works.heightPt) pt @\(works.scale)×, "
+            + "the size that works, the picture scaled."
+    }
+
     /// The display's refresh rate: the device's viewport rate (nil before it has sent one: 60), held to 24 and to the
     /// Mac's Frame Rate limit (`limit`, HostConfig.maxFPS).
     static func rate(viewportFPS: Int?, limit: Int) -> Int {
@@ -610,9 +730,10 @@ package enum VirtualDesktopSize {
     /// (no way in place), made again (phase 3); nil when nothing is done. `display` names whose (the headless display's:
     /// "Headless display"); `device` the device it is for now; `why` its words: "turned", "hid its controls", "showed its
     /// controls", "'s picture changed size" (a fold, a resized window, a device that cannot tell), "shows it now",
-    /// "shows it again".
+    /// "shows it again"; an iPhone's desktop followed to its own pixels ends ", pixel for pixel." (`pixelForPixel`).
     static func followLine(_ display: String = "Virtual Desktop", device: String, why: Cause, from: Size, to: Size,
-                           step: FollowStep, outcome: InPlace.Action? = nil, hz: Int? = nil, backing: Backing? = nil) -> String? {
+                           step: FollowStep, outcome: InPlace.Action? = nil, hz: Int? = nil, backing: Backing? = nil,
+                           pixelForPixel: Bool = false) -> String? {
         let what: String
         switch why {
         case .room(turned: true): what = "\(device) turned"
@@ -629,7 +750,8 @@ package enum VirtualDesktopSize {
         case .inPlace:
             switch outcome {
             case .done(let ms)?:
-                return "\(display): \(what); followed in place in \(ms) ms: \(size) @\(to.scale)×" + (hz.map { " at \($0) Hz" } ?? "") + "."
+                return "\(display): \(what); followed in place in \(ms) ms: \(size) @\(to.scale)×" + (hz.map { " at \($0) Hz" } ?? "")
+                    + (pixelForPixel ? ", pixel for pixel." : ".")
             case .fellBack(let f, let ms)?:
                 return "\(display): \(what); not followed in place: \(InPlace.failureWords(f)); back at \(from.widthPt)×\(from.heightPt) pt "
                     + "@\(from.scale)× in \(ms) ms; \(next)"
@@ -652,19 +774,23 @@ package enum VirtualDesktopSize {
     /// TEST ONLY: what SILL_TEST_VD_STEPS makes a test host's display do instead of what the probes measured:
     /// `switchRefused`, every CoreGraphics switch answers complete 1001 and changes nothing (as P2b's steps 0 and f);
     /// `stuck`, once a switch was refused no `applySettings:` lands any more (the way back late: the display goes);
-    /// `late`, no `applySettings:` lands at all (the display never changes: it falls back where it is).
+    /// `late`, no `applySettings:` lands at all (the display never changes: it falls back where it is); `shortOneX`, a size
+    /// whose shorter side is under `TestDisplay.leastKept` points comes up at 1x, grown evenly until that side is 800 (as
+    /// macOS did with the stage's 754 × 784: 800 × 832 at 1x), made or followed in place: an iPhone's pixel-for-pixel
+    /// desktop as macOS might refuse it (probe P3 says whether it does).
     struct TestKnobs: Equatable {
         var switchRefused = false
         var stuck = false
         var late = false
-        init(switchRefused: Bool = false, stuck: Bool = false, late: Bool = false) {
-            self.switchRefused = switchRefused; self.stuck = stuck; self.late = late
+        var shortOneX = false
+        init(switchRefused: Bool = false, stuck: Bool = false, late: Bool = false, shortOneX: Bool = false) {
+            self.switchRefused = switchRefused; self.stuck = stuck; self.late = late; self.shortOneX = shortOneX
         }
     }
 
     static let testStepsVariable = "SILL_TEST_VD_STEPS"
 
-    /// TEST ONLY: SILL_TEST_VD_STEPS (`switch-refused`, `stuck`, `late`, separated by commas) on a test host whose
+    /// TEST ONLY: SILL_TEST_VD_STEPS (`switch-refused`, `stuck`, `late`, `short-1x`, separated by commas) on a test host whose
     /// Virtual Desktop is only said (`on`: SILL_TEST_VIRTUAL_DESKTOP took): its knobs and the line it prints at start; a
     /// word it does not know, or the variable without the hook, is a line and no knob.
     static func testSteps(environment: [String: String], on: Bool) -> (knobs: TestKnobs, line: String?) {
@@ -678,11 +804,12 @@ package enum VirtualDesktopSize {
             case "switch-refused": k.switchRefused = true
             case "stuck": k.stuck = true
             case "late": k.late = true
+            case "short-1x": k.shortOneX = true
             default: unknown.append(word)
             }
         }
         guard unknown.isEmpty else {
-            return (TestKnobs(), "\(testStepsVariable)=\(raw) ignored: it takes switch-refused, stuck and late, separated by commas.")
+            return (TestKnobs(), "\(testStepsVariable)=\(raw) ignored: it takes switch-refused, stuck, late and short-1x, separated by commas.")
         }
         return (k, "Test Virtual Desktop: its said display's steps: \(raw) (\(testStepsVariable)), not as the probes measured them.")
     }
@@ -710,7 +837,19 @@ package enum VirtualDesktopSize {
             self.made = made
             self.backing = backing
             self.knobs = knobs
-            now = made
+            now = Self.kept(made, knobs: knobs)
+        }
+
+        /// The least shorter side macOS has kept a display of Sill's at 2x (P1: an iPad mini's 1133 × 744).
+        static let leastKept = 744
+
+        /// What a size asked for comes up at: itself, or under `shortOneX` a size with its shorter side under `leastKept`
+        /// at 1x, grown evenly until that side is 800.
+        static func kept(_ size: Size, knobs: TestKnobs) -> Size {
+            let short = min(size.widthPt, size.heightPt)
+            guard knobs.shortOneX, short < leastKept, short > 0 else { return size }
+            let grow = 800.0 / Double(short)
+            return Size(widthPt: Int((Double(size.widthPt) * grow).rounded()), heightPt: Int((Double(size.heightPt) * grow).rounded()), scale: 1)
         }
 
         static func == (a: TestDisplay, b: TestDisplay) -> Bool {
@@ -738,7 +877,9 @@ package enum VirtualDesktopSize {
         mutating func apply(_ size: Size, at t: Double) -> Bool {
             _ = read(at: t)
             guard !knobs.late, !(knobs.stuck && refused), VirtualDesktopSize.fits(size, backing) else { return true }
-            if (size.widthPt >= size.heightPt) == (made.widthPt >= made.heightPt) {
+            if Self.kept(size, knobs: knobs) != size {
+                pending = (Self.kept(size, knobs: knobs), t + Self.lands, nil)
+            } else if (size.widthPt >= size.heightPt) == (made.widthPt >= made.heightPt) {
                 pending = (size, t + Self.lands, nil)
             } else {
                 pending = (Size(widthPt: size.widthPt * size.scale, heightPt: size.heightPt * size.scale, scale: 1), t + Self.lands, size)

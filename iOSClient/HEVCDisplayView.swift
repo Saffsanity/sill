@@ -80,17 +80,16 @@ final class HEVCDisplayView: UIView {
     private var hudSubscriptions = Set<AnyCancellable>()
     #endif
 
-    /// Where `resizeAspect` actually draws a `videoSize` frame inside `bounds`: the same letterboxed
-    /// rect the layer uses, which is what maps a touch to a fraction of the frame.
+    /// Where a `videoSize` frame is drawn inside `bounds` on a screen of `screenScale` pixels a point (PictureFit): the
+    /// letterboxed rect `resizeAspect` draws, or one for one at the top-left where the picture is the pane's own pixels
+    /// less a hairline (an iPhone's pixel-for-pixel Virtual Desktop); what maps a touch to a fraction of the frame.
     /// Returns `.zero` while the video size is unknown, so callers can tell "no video" from "top left".
-    static func videoRect(in bounds: CGRect, videoSize: CGSize) -> CGRect {
-        guard videoSize.width > 0, videoSize.height > 0, bounds.width > 0, bounds.height > 0 else { return .zero }
-        let scale = min(bounds.width / videoSize.width, bounds.height / videoSize.height)
-        let size = CGSize(width: videoSize.width * scale, height: videoSize.height * scale)
-        return CGRect(x: bounds.minX + (bounds.width - size.width) / 2,
-                      y: bounds.minY + (bounds.height - size.height) / 2,
-                      width: size.width, height: size.height)
+    static func videoRect(in bounds: CGRect, videoSize: CGSize, screenScale: CGFloat?) -> CGRect {
+        PictureFit.rect(in: bounds, videoSize: videoSize, screenScale: screenScale)
     }
+
+    /// This view's screen's pixels a point (the pointer sprite's and the readout's `videoRect`).
+    private var screenScale: CGFloat? { window?.screen.scale ?? traitCollection.displayScale }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -141,7 +140,7 @@ final class HEVCDisplayView: UIView {
         if let debugFrame {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            debugFrame.frame = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+            debugFrame.frame = Self.videoRect(in: bounds, videoSize: pointerVideoSize, screenScale: screenScale)
             CATransaction.commit()
         }
         if let hud {
@@ -245,7 +244,7 @@ final class HEVCDisplayView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize, screenScale: screenScale)
         guard let p = pointer, rect.width > 0, rect.height > 0 else {
             cursorLayer.isHidden = true
             return
@@ -586,18 +585,31 @@ final class StreamZoomModel: ObservableObject {
 
 /// The stream's view as the picture's zoom shows it: scaled about the pane's middle and moved
 /// (`.scaleEffect(scale).offset(offset)`, which `StreamZoom`'s mapping is the inverse of), inside the
-/// pane's clip; the pointer sprite at its own size (`StreamView.zoom`).
+/// pane's clip; the pointer sprite at its own size (`StreamView.zoom`). The view fills the pane, but for a
+/// picture that is the pane's own pixels less a hairline (PictureFit: an iPhone's pixel-for-pixel Virtual
+/// Desktop): then it is the picture's own size at the pane's top-left, so the layer draws it one for one,
+/// never scaled by a hair; the zoom still scales the whole pane about its middle.
 struct ZoomedStreamView: View {
     let client: StreamClient
     @ObservedObject var zoom: StreamZoomModel
+    /// The streamed frame's pixel size (StreamClient.videoSize, which the stream screen reads).
+    var videoSize: CGSize = .zero
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        StreamView(client: client, zoom: zoom.zoom)
-            .onGeometryChange(for: CGSize.self, of: { $0.size }) { zoom.paneResized(to: $0) }
-            .scaleEffect(zoom.zoom.scale)
-            .offset(zoom.zoom.offset)
-            // Drawn past the pane when zoomed, and a clip does not clip hit testing: never a touch's target
-            // (sideways the bar comes before the picture, and its buttons' touches must stay theirs).
-            .allowsHitTesting(false)
+        GeometryReader { pane in
+            let bounds = CGRect(origin: .zero, size: pane.size)
+            let fit = PictureFit.oneToOne(in: bounds, videoSize: videoSize, screenScale: displayScale)
+                ? PictureFit.rect(in: bounds, videoSize: videoSize, screenScale: displayScale).size : pane.size
+            StreamView(client: client, zoom: zoom.zoom)
+                .frame(width: fit.width, height: fit.height)
+                .frame(width: pane.size.width, height: pane.size.height, alignment: .topLeading)
+        }
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { zoom.paneResized(to: $0) }
+        .scaleEffect(zoom.zoom.scale)
+        .offset(zoom.zoom.offset)
+        // Drawn past the pane when zoomed, and a clip does not clip hit testing: never a touch's target
+        // (sideways the bar comes before the picture, and its buttons' touches must stay theirs).
+        .allowsHitTesting(false)
     }
 }

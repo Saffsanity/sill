@@ -124,8 +124,19 @@ check(coordinator.contains("refreshHz: Double(hz),\n                            
 check(coordinator.contains("private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.width, height: v.height) }"),
       "the space is a viewport's panel")
 let sized = coordinator.components(separatedBy: "VirtualDesktopSize.device(space: ").dropFirst().map { String($0.prefix(30)) }
-check(sized.count == 5 && sized.allSatisfy { $0.hasPrefix("vp.map(Self.space))") || $0.hasPrefix("Self.space(v))") },
+check(sized.count == 3 && sized.allSatisfy { $0.hasPrefix("vp.map(Self.space))") || $0.hasPrefix("Self.space(v)") },
       "every size the coordinator asks of a device is its space, never its room (\(sized))")
+// An iPhone (Noah, 2026-11-24): its Virtual Desktop pixel for pixel, from the screen its viewport names; a size macOS did
+// not keep this run asked as the size that works, at a make (made again at once) and in place (followed next).
+check(coordinator.contains("VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: phoneRefused)"),
+      "Match the device reads the device's screen and the sizes macOS did not keep")
+check(occurrences("deviceSize(v)", coordinator) == 3 && coordinator.contains("return (vp.flatMap(deviceSize) ?? VirtualDesktopSize.fallback, hz)"),
+      "every size the Virtual Desktop takes from a device goes through it (the make, the follow, another device, shown again)")
+check(coordinator.contains("        let came = VirtualDesktopSize.Size(widthPt: Int(b.width), heightPt: Int(b.height), scale: newDisplay.currentScale)\n"
+                           + "        if await notKeptAtMake(asked, came: came, works: works) { return }\n"),
+      "a make that came up elsewhere than an iPhone's size asked is made again at the size that works")
+check(occurrences("phoneSizeNotKept(size, failure: failure, why: why, at: now)", coordinator) == 2,
+      "a follow in place to an iPhone's size that did not land follows the size that works next")
 check(occurrences("VirtualDesktopSize.cause(roomBefore: before?.room", coordinator) == 1,
       "the room tells a turn from a tap, from the device's viewport before and this one")
 check(coordinator.contains("guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,"),

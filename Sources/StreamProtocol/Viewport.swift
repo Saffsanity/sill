@@ -29,11 +29,35 @@ public struct Viewport: Codable, Hashable {
     /// refuses a viewport whose room is out of bounds whole, as it refuses a side (`ViewportBounds.refusal`), and a device
     /// from 2b holds it to them (`held`).
     public var room: ViewportRoom?
+    /// The screen the picture is on (`ViewportScreen`, 2026-11-25): its pixels, its pixels a point and whether it is an
+    /// iPhone's, so a Mac sizes the Virtual Desktop pixel for pixel on an iPhone (Noah, 2026-11-24: "middle one for
+    /// iPhones, and leaving iPads as they are"). Nil from every device before it: the Mac sizes such a device as before
+    /// (the 800-point floor). An older host skips the key; a host never refuses a viewport for it (`ViewportBounds.screen`
+    /// takes one within its bounds, else none), and a device holds it (`held`).
+    public var screen: ViewportScreen?
 
     public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil,
-                room: ViewportRoom? = nil) {
+                room: ViewportRoom? = nil, screen: ViewportScreen? = nil) {
         self.width = width; self.height = height; self.scale = scale; self.localCursor = localCursor; self.fps = fps
         self.room = room
+        self.screen = screen
+    }
+}
+
+/// The screen a device's picture is on (2026-11-25), in every viewport of a device from then on: its own pixels, held
+/// upright (UIScreen's `nativeBounds`: an iPhone 15 Pro's 1179 × 2556, an iPad Pro 13-inch's 2064 × 2752), the pixels a
+/// point Sill draws the picture at (UIScreen's `scale`: 3 on an iPhone 15 Pro, 2 on an iPad), and whether it is an
+/// iPhone's (UIDevice's idiom: the iPhone Duo's both screens; false on an iPad). The iPhone Duo's window moves between
+/// its two screens as it folds, so the viewport it sends then names the screen it is on now. The Mac reads it for the
+/// Virtual Desktop alone: an iPhone's is made pixel for pixel, its picture's space counted in those pixels.
+public struct ViewportScreen: Codable, Hashable {
+    public var pixelWidth: Int
+    public var pixelHeight: Int
+    public var scale: Double
+    public var phone: Bool?
+
+    public init(pixelWidth: Int, pixelHeight: Int, scale: Double, phone: Bool?) {
+        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.scale = scale; self.phone = phone
     }
 }
 
@@ -92,8 +116,8 @@ public enum ViewportBounds {
     /// What a device sends for `v`: each side held to `sides` and a scale to `scales`, so no host
     /// refuses it; a scale that is not a positive number becomes none, the Mac window left alone; the
     /// room's sides held to `sides` too, and a room with a side that is not a positive number none (the
-    /// host takes the panel). Nil, nothing to send, while a side is not a positive number (a panel not
-    /// measured yet).
+    /// host takes the panel); a screen outside `screen`'s bounds none. Nil, nothing to send, while a side
+    /// is not a positive number (a panel not measured yet).
     public static func held(_ v: Viewport) -> Viewport? {
         guard v.width.isFinite, v.height.isFinite, v.width > 0, v.height > 0 else { return nil }
         var held = v
@@ -105,7 +129,23 @@ public enum ViewportBounds {
             return ViewportRoom(width: min(max(r.width, sides.lowerBound), sides.upperBound),
                                 height: min(max(r.height, sides.lowerBound), sides.upperBound))
         }
+        held.screen = v.screen.flatMap { ViewportBounds.screen($0) }
         return held
+    }
+
+    /// A screen's pixels a side a host takes (`screen`): an iPad Pro 13-inch's longer side is 2752.
+    public static let screenPixels: ClosedRange<Int> = 1...32768
+    /// Its pixels a point: Apple's screens draw at 1, 2 or 3.
+    public static let screenScales: ClosedRange<Double> = 1...4
+
+    /// The screen `s` as a host takes it: each side within `screenPixels` and its scale within `screenScales`, else none
+    /// (the host sizes that device as one that sends none). Never a reason to refuse the viewport: a device that sent a
+    /// screen this host's bounds do not hold (a screen larger than any Apple makes now) is served as before.
+    public static func screen(_ s: ViewportScreen) -> ViewportScreen? {
+        // A NaN or an infinity is in no range.
+        guard screenPixels.contains(s.pixelWidth), screenPixels.contains(s.pixelHeight),
+              screenScales.contains(s.scale) else { return nil }
+        return s
     }
 
     /// A number for a log line as `Int(x)` prints it, toward zero ("1512" for 1512.7), without its

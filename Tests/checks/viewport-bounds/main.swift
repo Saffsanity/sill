@@ -261,6 +261,48 @@ check(roomWords == 0, "each of a room's sides out of range named as the room's, 
 check(roomHeldRefused == 0 && roomHeldWrong == 0,
       "a device's room sent when its sides are positive numbers, as it is within the bounds, always taken (\(roomHeldRefused), \(roomHeldWrong))")
 
+// MARK: - The screen (2026-11-25: an iPhone's Virtual Desktop pixel for pixel, Noah 2026-11-24)
+
+// A device says which screen its picture is on: its pixels held upright, its pixels a point, whether it is an iPhone's.
+// A host takes one within bounds and ignores any other (the device then sized as one that says nothing); it never
+// refuses the viewport for it, so a later device with a screen past this host's bounds is still served.
+func screened(_ pw: Int, _ ph: Int, _ sc: Double, _ phone: Bool? = true) -> Viewport {
+    Viewport(width: 393, height: 793, scale: nil, fps: 120, room: ViewportRoom(width: 393, height: 793),
+             screen: ViewportScreen(pixelWidth: pw, pixelHeight: ph, scale: sc, phone: phone))
+}
+let pro15 = ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 3, phone: true)
+check(B.screen(pro15) == pro15 && B.screen(ViewportScreen(pixelWidth: 2064, pixelHeight: 2752, scale: 2, phone: false)) != nil,
+      "an iPhone 15 Pro's screen (1179×2556 at 3x) and an iPad Pro 13-inch's (2064×2752 at 2x): taken")
+check(B.screen(ViewportScreen(pixelWidth: 1, pixelHeight: 32768, scale: 1, phone: nil)) != nil
+      && B.screen(ViewportScreen(pixelWidth: 32768, pixelHeight: 1, scale: 4, phone: true)) != nil, "at its bounds: taken")
+check([ViewportScreen(pixelWidth: 0, pixelHeight: 2556, scale: 3, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 32769, scale: 3, phone: true),
+       ViewportScreen(pixelWidth: -1179, pixelHeight: 2556, scale: 3, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 0.5, phone: true),
+       ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 4.5, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: .nan, phone: true),
+       ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: .infinity, phone: true)].allSatisfy { B.screen($0) == nil },
+      "a side of 0, past 32768 or negative, a scale under 1, over 4, NaN or infinite: none")
+check(B.refusal(screened(0, 2556, 3)) == nil && B.refusal(screened(1179, 2556, .nan)) == nil && B.refusal(screened(99999, 99999, 9)) == nil,
+      "a viewport is never refused for its screen")
+check(B.held(screened(1179, 2556, 3))?.screen == pro15, "a device sends a screen within bounds as it is")
+check(B.held(screened(1179, 2556, .nan)).map { $0.screen == nil && $0.width == 393 } == true
+      && B.held(screened(40000, 2556, 3)).map { $0.screen == nil && $0.room != nil } == true,
+      "…and none beyond them, the panel and the room still sent")
+check(B.held(vp(1376, 950, nil))?.screen == nil, "no screen, none")
+var screenWrong = 0
+for _ in 0..<100_000 {
+    let pick = [0, 1, 2, 1179, 2556, 32767, 32768, 32769, -5, 70000]
+    let w = next() % 3 == 0 ? pick[Int(next() % UInt64(pick.count))] : Int(next() % 40000) - 100
+    let h = next() % 3 == 0 ? pick[Int(next() % UInt64(pick.count))] : Int(next() % 40000) - 100
+    let scales = [0.0, 0.99, 1, 2, 2.88, 3, 4, 4.01, .nan, .infinity, -2]
+    let sc = next() % 2 == 0 ? scales[Int(next() % UInt64(scales.count))] : Double(next() % 600) / 100
+    let one = ViewportScreen(pixelWidth: w, pixelHeight: h, scale: sc, phone: next() % 2 == 0)
+    let within = (1...32768).contains(w) && (1...32768).contains(h) && sc.isFinite && sc >= 1 && sc <= 4
+    if (B.screen(one) != nil) != within { screenWrong += 1 }
+    let v = screened(w, h, sc, one.phone)
+    if B.refusal(v) != nil { screenWrong += 1 }
+    if (B.held(v)?.screen != nil) != within { screenWrong += 1 }
+}
+check(screenWrong == 0, "100,000 random screens: taken exactly within bounds, never a refusal, held to them (\(screenWrong) not)")
+
 // MARK: - A device's late-sound count (ClientStats.lateSince)
 
 // The host adds each stats report's `audioLate` to the count its next stats line prints (StreamServer).

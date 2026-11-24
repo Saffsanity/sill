@@ -21,6 +21,8 @@ extension StreamClient {
     func sendViewport(_ v: Viewport) {
         guard var v = ViewportBounds.held(v) else { return }
         if v.localCursor == nil { v.localCursor = localCursorState.wanted }
+        // The screen the picture is on (2026-11-25): a Mac makes an iPhone's Virtual Desktop pixel for pixel from it.
+        if v.screen == nil { v.screen = Self.screenFacts().flatMap { ViewportBounds.screen($0) } }
         // While the picture shows only in Picture in Picture (#291), a layout iOS makes for its snapshots
         // must not resize the Mac's window or restart its stream: the viewport waits for Sill's window
         // (`pictureBackInSill`), the last one sent standing meanwhile.
@@ -94,6 +96,19 @@ extension StreamClient {
         let ceiling = screenMaximumFPS()
         let rate = ProcessInfo.processInfo.isLowPowerModeEnabled ? min(60, ceiling) : ceiling
         return remote ? min(60, rate) : rate
+    }
+
+    /// The screen this device's picture is on now, for every viewport (`Viewport.screen`): its own pixels held upright
+    /// (`nativeBounds`: an iPhone 15 Pro's 1179 × 2556), the pixels a point Sill draws the picture at (`scale`: 3 there),
+    /// and whether it is an iPhone's (the idiom; the iPhone Duo's both screens, whichever its window is on as it folds).
+    /// A Mac makes an iPhone's Virtual Desktop pixel for pixel from it (Noah, 2026-11-24), the picture's space counted in
+    /// those pixels. Nil before a scene is connected.
+    static func screenFacts() -> ViewportScreen? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let screen = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?.screen else { return nil }
+        let px = screen.nativeBounds.size
+        return ViewportScreen(pixelWidth: Int(px.width.rounded()), pixelHeight: Int(px.height.rounded()), scale: Double(screen.scale),
+                              phone: UIDevice.current.userInterfaceIdiom == .phone)
     }
 
     /// This session is away from home through a VPN or over the internet, so it asks for 60 fps.

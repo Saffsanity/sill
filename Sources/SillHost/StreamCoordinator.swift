@@ -294,6 +294,9 @@ package final class StreamCoordinator {
     /// A follow in place under way (`followVirtualDesktopInPlace`): the Desktop's display follower waits for its end, which
     /// restarts the Desktop once, at the size it ends at (probe P2c: a turn is two reconfigurations, 1x then 2x).
     private var virtualDesktopResizing = false
+    /// An iPhone's pixel-for-pixel sizes macOS did not keep this run (VirtualDesktopSize.id; at a make, or in place): each
+    /// is asked as the size that works from then on (VirtualDesktopSize.device(space:screen:refused:), its line once).
+    private var phoneRefused: Set<String> = []
     /// TEST ONLY: a test host's said Virtual Desktop as Noah's probes measured a display (VirtualDesktopSize.TestDisplay),
     /// and SILL_TEST_VD_STEPS' knobs for it.
     private var testVirtualDisplay: VirtualDesktopSize.TestDisplay?
@@ -4043,8 +4046,10 @@ package final class StreamCoordinator {
     /// and rate: the device that asked for the Desktop, else the one whose viewport came last, else #200's 1920×1080 at 60),
     /// with the modes P2's way needs (none by default); waited for until it is online and ScreenCaptureKit lists it; the
     /// catalog looked at again, so its stop has its display; the windows Sill moved off it before back in their places. A
-    /// make that fails, or a display that never comes up, turns it off for this run (VirtualDesktopWords.failed). A test
-    /// host only says it makes it (SillDisplays.say), as one more of its stops.
+    /// make that fails, or a display that never comes up, turns it off for this run (VirtualDesktopWords.failed); an iPhone's
+    /// pixel-for-pixel size that macOS would not make, or did not keep, is made again at once at the size that works (the
+    /// 800-point floor), one line, and never asked again this run (`notKeptAtMake`). A test host only says it makes it
+    /// (SillDisplays.say), as one more of its stops.
     private func makeVirtualDesktop(at now: Double) async {
         virtualDesktopChanging = true
         defer { virtualDesktopChanging = false }
@@ -4057,6 +4062,10 @@ package final class StreamCoordinator {
         let follows = VirtualDesktopSize.choice(config.virtualDesktopSize) == .device
         let backing = VirtualDesktopSize.backing(made: asked, follows: follows)
         let space = follows ? vp.map(Self.space) : nil
+        // An iPhone's: made pixel for pixel, and the size that works if macOS does not keep that (Noah, 2026-11-24).
+        let screen = follows ? vp.flatMap(Self.screen) : nil
+        let works = follows ? vp.flatMap(worksSize) : nil
+        let pixels = VirtualDesktopSize.pixelWords(asked, space: space, screen: screen)
         sayVirtualDesktopWaited(.make, now: now)
         // The guard's marker from just before the private calls until the display is up or failed (#380; SillDisplays).
         displays.willMake(.desktop)
@@ -4066,8 +4075,9 @@ package final class StreamCoordinator {
             displays.say(.desktop)
             desktopLife.made(.virtualDesktop, at: now)
             testVirtualDisplay = VirtualDesktopSize.TestDisplay(made: asked, backing: backing, knobs: testVirtualDesktopKnobs)
+            if let came = testVirtualDisplay?.read(at: now), await notKeptAtMake(asked, came: came, works: works) { return }
             addTestVirtualStop(asked, hz: hz)
-            print(VirtualDesktopLife.madeLine(came: asked, asked: asked, hz: hz, id: nil, ms: 0, device: device, space: space))
+            print(VirtualDesktopLife.madeLine(came: asked, asked: asked, hz: hz, id: nil, ms: 0, device: device, space: space, pixels: pixels))
             virtualDesktopMade(asked, hz: hz, backing: backing, device: vp == nil ? nil : matched, name: device, at: now)
             return
         }
@@ -4076,6 +4086,7 @@ package final class StreamCoordinator {
             newDisplay = try displays.make(.desktop, widthPt: asked.widthPt, heightPt: asked.heightPt, scale: asked.scale, refreshHz: Double(hz),
                                            backing: (backing.wide, backing.high))
         } catch {
+            if await notKeptAtMake(asked, came: nil, works: works) { return }
             virtualDesktopFailed("\(error)")
             return
         }
@@ -4087,15 +4098,17 @@ package final class StreamCoordinator {
         guard b.width > 0 else {
             displays.remove(.desktop)
             desktopLife.removed(at: CFAbsoluteTimeGetCurrent())
+            if await notKeptAtMake(asked, came: nil, works: works) { return }
             virtualDesktopFailed("it never came up (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)× at \(hz) Hz)")
             return
         }
         let came = VirtualDesktopSize.Size(widthPt: Int(b.width), heightPt: Int(b.height), scale: newDisplay.currentScale)
+        if await notKeptAtMake(asked, came: came, works: works) { return }
         let cameHz = CGDisplayCopyDisplayMode(newDisplay.displayID).map { Int($0.refreshRate.rounded()) }.flatMap { $0 > 0 ? $0 : nil } ?? hz
         _ = await displays.waitUntilListed(newDisplay, as: .desktop, timeout: 3)
         guard headlessDisplay === newDisplay, !shuttingDown else { return }
         print(VirtualDesktopLife.madeLine(came: came, asked: asked, hz: cameHz, id: newDisplay.displayID,
-                                          ms: Int((CFAbsoluteTimeGetCurrent() - t0) * 1000), device: device, space: space))
+                                          ms: Int((CFAbsoluteTimeGetCurrent() - t0) * 1000), device: device, space: space, pixels: pixels))
         virtualDesktopMade(came, hz: cameHz, backing: VirtualDesktopSize.Backing(wide: newDisplay.backing.wide, high: newDisplay.backing.high),
                            device: vp == nil ? nil : matched, name: device, at: now)
         // Its stop gets its display: the catalog keeps it beside the real screens and looks again.
@@ -4106,10 +4119,50 @@ package final class StreamCoordinator {
         bringVirtualDesktopWindowsBack(to: b)
     }
 
+    /// An iPhone's pixel-for-pixel size macOS would not make (`came` nil) or did not keep (it came up at `came`), the size
+    /// that works being `works` (VirtualDesktopSize.afterMake): that size never asked again this run, one line, the display
+    /// that came up removed (nothing is on it yet), and the Virtual Desktop made again at once at the size that works (the
+    /// make's own rule then gives it), so the Desktop never goes without one. False, and nothing done, otherwise: an iPad's,
+    /// an older device's or a chosen size keeps what came, as before, and a make that fails at the size that works fails.
+    private func notKeptAtMake(_ asked: VirtualDesktopSize.Size, came: VirtualDesktopSize.Size?, works: VirtualDesktopSize.Size?) async -> Bool {
+        let after = came.map { VirtualDesktopSize.afterMake(asked: asked, came: $0, works: works) }
+            ?? works.flatMap { $0 != asked ? .again($0) : nil }
+        guard case .again(let size)? = after, !phoneRefused.contains(VirtualDesktopSize.id(asked)) else { return false }
+        phoneRefused.insert(VirtualDesktopSize.id(asked))
+        print(VirtualDesktopSize.refusedLine(asked: asked, came: came, works: size, inPlace: false))
+        if displays.exists(.desktop) {
+            displays.remove(.desktop)
+            desktopLife.removed(at: CFAbsoluteTimeGetCurrent())
+        }
+        testVirtualDisplay = nil
+        await makeVirtualDesktop(at: CFAbsoluteTimeGetCurrent())
+        return true
+    }
+
+    /// The size that works for viewport `v`'s space when macOS does not keep an iPhone's pixel-for-pixel one: the 800-point
+    /// floor (VirtualDesktopSize.device(space:)), which macOS has always kept at 2x.
+    private func worksSize(_ v: Viewport) -> VirtualDesktopSize.Size? {
+        VirtualDesktopSize.device(space: Self.space(v))
+    }
+
     /// The space a device's picture has now (VirtualDesktopSize's rule A, Noah 2026-11-24): its viewport's panel, the
     /// rectangle the stage fits a window to (VirtualStage.windowSize), never its room (Full Screen's, whether the controls
     /// show or not), which only tells a turn from a tap (VirtualDesktopSize.cause).
     private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.width, height: v.height) }
+
+    /// The screen a device's picture is on, as its viewport says (Viewport.screen, within ViewportBounds.screen): an
+    /// iPhone's has its Virtual Desktop made pixel for pixel (Noah, 2026-11-24); nil from a device that says nothing
+    /// (every build before 2026-11-25), sized as before.
+    private static func screen(_ v: Viewport) -> VirtualDesktopSize.Screen? {
+        guard let s = v.screen.flatMap({ ViewportBounds.screen($0) }) else { return nil }
+        return VirtualDesktopSize.Screen(pixelWidth: s.pixelWidth, pixelHeight: s.pixelHeight, scale: s.scale, phone: s.phone == true)
+    }
+
+    /// The Virtual Desktop Match the device gives viewport `v`: an iPhone's pixel for pixel (but a size macOS did not keep
+    /// this run), an iPad's and an older device's at least 800 points a side (VirtualDesktopSize.device(space:screen:refused:)).
+    private func deviceSize(_ v: Viewport) -> VirtualDesktopSize.Size? {
+        VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: phoneRefused)
+    }
 
     /// The size and rate the Virtual Desktop has when it is made now, by the person's choice (`t`'s virtualDesktopSize and
     /// virtualDesktopHz; Sill.app's Settings › Displays, the CLI's --virtual-desktop=…): This device's (the space its picture
@@ -4119,7 +4172,7 @@ package final class StreamCoordinator {
         let hz = VirtualDesktopSize.rate(choice: t.virtualDesktopHz, viewportFPS: vp?.fps, limit: t.maxFPS)
         switch VirtualDesktopSize.choice(t.virtualDesktopSize) ?? .device {
         case .device:
-            return (VirtualDesktopSize.device(space: vp.map(Self.space)) ?? VirtualDesktopSize.fallback, hz)
+            return (vp.flatMap(deviceSize) ?? VirtualDesktopSize.fallback, hz)
         case .fixed(let size):
             return (size, hz)
         case .main:
@@ -4326,7 +4379,7 @@ package final class StreamCoordinator {
         // Only This device follows a device (a size the person chose, or the main display's, stays as chosen).
         guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,
               var follow = desktopFollow, virtualDesktopNow?.device == id, desktopLife.role == .virtualDesktop,
-              let size = VirtualDesktopSize.device(space: Self.space(v)) else { return }
+              let size = deviceSize(v) else { return }
         let cause = VirtualDesktopSize.cause(roomBefore: before?.room.map { CGSize(width: $0.width, height: $0.height) },
                                              room: v.room.map { CGSize(width: $0.width, height: $0.height) },
                                              panelBefore: before.map(Self.space), panel: Self.space(v))
@@ -4355,7 +4408,7 @@ package final class StreamCoordinator {
         if id == nil, vd.device == nil, shown {
             id = VirtualDesktopSize.matched(asker: desktopAsker, newest: newestViewport, sent: Set(viewports.keys))
         }
-        if let id, id != vd.device, let v = viewports[id], let size = VirtualDesktopSize.device(space: Self.space(v)) {
+        if let id, id != vd.device, let v = viewports[id], let size = deviceSize(v) {
             vd.device = id
             vd.deviceName = deviceName(id: id)
             virtualDesktopNow = vd
@@ -4365,7 +4418,7 @@ package final class StreamCoordinator {
         }
         // The one it is for shows it again: the space it has now.
         guard shown, !wasShown, let mine = vd.device, let v = viewports[mine],
-              let size = VirtualDesktopSize.device(space: Self.space(v)) else { return }
+              let size = deviceSize(v) else { return }
         follow.saw(size, cause: .shown, at: CFAbsoluteTimeGetCurrent())
         desktopFollow = follow
     }
@@ -4454,20 +4507,22 @@ package final class StreamCoordinator {
             }
             if testVirtualDesktop { addTestVirtualStop(size, hz: cameHz) }
             if let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
-                                                        hz: cameHz, backing: backing) { print(line) }
+                                                        hz: cameHz, backing: backing, pixelForPixel: pixelForPixel(size)) { print(line) }
             desktopFollow?.took(size, at: now)
             if target.virtualDesktop { publishSettings() }
             await restartDesktopOnVirtualDesktop(size)
-        case .fellBack:
+        case .fellBack(let failure, _):
             if let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
                                                         backing: backing) { print(line) }
             desktopFollow?.took(size, at: now)
+            phoneSizeNotKept(size, failure: failure, why: why, at: now)
             // A Mac's display went through other sizes on the way: compared, and restarted only if its size is not the
             // capture's. A test host's said display never changed size.
             if !testVirtualDesktop { await restartDesktopOnVirtualDesktop(from) }
-        case .remove:
+        case .remove(let failure):
             let line = VirtualDesktopSize.followLine(device: name, why: why, from: from, to: size, step: .inPlace, outcome: outcome,
                                                      backing: backing) ?? ""
+            phoneSizeNotKept(size, failure: failure, why: why, at: now)
             _ = await takeVirtualDesktopAway(movesWindows: true) { moved, said in
                 line + (moved.moved > 0 ? " Moved \(moved.moved) of \(moved.of) windows to \(moved.to) first." : "")
                     + (said ? " (TEST ONLY: none was made.)" : "")
@@ -4475,6 +4530,27 @@ package final class StreamCoordinator {
         case .apply, .switchTo, .wait:
             break
         }
+    }
+
+    /// Whether `size` is the device it is for's own pixels (an iPhone's, VirtualDesktopSize.pixelForPixel), for the follow's line.
+    private func pixelForPixel(_ size: VirtualDesktopSize.Size) -> Bool {
+        guard let id = virtualDesktopNow?.device, let v = viewports[id], let screen = Self.screen(v), screen.phone else { return false }
+        return VirtualDesktopSize.pixelForPixel(size, space: Self.space(v), scale: screen.scale)
+    }
+
+    /// A follow in place to an iPhone's pixel-for-pixel size `size` that did not land (`failure`; macOS refusing a size
+    /// that short, as probe P3 asks): that size is never asked again this run, one line, and the size that works for the
+    /// device's space now (the 800-point floor) is its next follow, in place, after the spacing. Nothing for an iPad's, an
+    /// older device's or a chosen size (the next make takes the new size, as before).
+    private func phoneSizeNotKept(_ size: VirtualDesktopSize.Size, failure: VirtualDesktopSize.InPlace.Failure, why: VirtualDesktopSize.Cause,
+                                  at now: Double) {
+        guard let id = virtualDesktopNow?.device, let v = viewports[id], Self.screen(v)?.phone == true, let works = worksSize(v),
+              works != size, !phoneRefused.contains(VirtualDesktopSize.id(size)) else { return }
+        phoneRefused.insert(VirtualDesktopSize.id(size))
+        var came: VirtualDesktopSize.Size?
+        if case .elsewhere(let s) = failure { came = s }
+        print(VirtualDesktopSize.refusedLine(asked: size, came: came, works: works, inPlace: true))
+        desktopFollow?.saw(works, cause: why, at: now)
     }
 
     /// Drives `machine` against the Desktop's display: a Mac's (`display`: VirtualDisplay's applyModes, reading,

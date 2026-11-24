@@ -94,14 +94,24 @@ MUTANTS = [
     # Rule A (2026-11-24): its size is the device's space, the viewport's panel
     (COORD, "W36 the space read as the room", "private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.width, height: v.height) }",
      "private static func space(_ v: Viewport) -> CGSize { CGSize(width: v.room?.width ?? v.width, height: v.room?.height ?? v.height) }"),
-    (COORD, "W37 the make sized by the room", "            return (VirtualDesktopSize.device(space: vp.map(Self.space)) ?? VirtualDesktopSize.fallback, hz)",
-     "            return (VirtualDesktopSize.device(space: vp?.room.map { CGSize(width: $0.width, height: $0.height) }) ?? VirtualDesktopSize.fallback, hz)"),
+    (COORD, "W37 the make sized by the room", "        VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: phoneRefused)",
+     "        VirtualDesktopSize.device(space: v.room.map { CGSize(width: $0.width, height: $0.height) } ?? Self.space(v), screen: Self.screen(v), refused: phoneRefused)"),
     (COORD, "W38 made with its own pixels alone", "let backing = VirtualDesktopSize.backing(made: asked, follows: follows)",
      "let backing = VirtualDesktopSize.backing(made: asked, follows: false)"),
     (COORD, "W39 followed while it does not show", "guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device, virtualDesktopShown,",
      "guard VirtualDesktopSize.choice(config.virtualDesktopSize) == .device,"),
     (COORD, "W40 a tap told from a turn by this viewport alone", "VirtualDesktopSize.cause(roomBefore: before?.room",
      "VirtualDesktopSize.cause(roomBefore: v.room"),
+    # An iPhone, pixel for pixel (run 6, 2026-11-25)
+    (COORD, "W41 the device's screen never read", "        VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: phoneRefused)",
+     "        VirtualDesktopSize.device(space: Self.space(v), screen: nil, refused: phoneRefused)"),
+    (COORD, "W42 a size macOS did not keep asked again", "        VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: phoneRefused)",
+     "        VirtualDesktopSize.device(space: Self.space(v), screen: Self.screen(v), refused: [])"),
+    (COORD, "W43 the follow sized as before", "              let size = deviceSize(v) else { return }\n        let cause",
+     "              let size = VirtualDesktopSize.device(space: Self.space(v)) else { return }\n        let cause"),
+    (COORD, "W44 a make that came up elsewhere kept", "        if await notKeptAtMake(asked, came: came, works: works) { return }\n", ""),
+    (COORD, "W45 a follow that did not land left letterboxed", "            phoneSizeNotKept(size, failure: failure, why: why, at: now)\n            // A Mac's display",
+     "            // A Mac's display"),
 ]
 caught = 0
 originals = {}

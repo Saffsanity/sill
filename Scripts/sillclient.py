@@ -20,6 +20,9 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      Mac fits a window and its Virtual Desktop to), 1117x642 when left out
   --view-after=PANEL[,ROOM]@T  from T seconds in the panel PANEL (WxH), and the room ROOM when given: one viewport
                      carrying them, as a device's when Full Screen goes on or off (the panel alone) or it turns (both)
+  --screen=WxH@S[:phone]  every viewport carries the screen its picture is on (Viewport.screen, 2026-11-25): W×H
+                     pixels held upright at S pixels a point, an iPhone's with ":phone" (an iPhone 15 Pro:
+                     1179x2556@3:phone), else an iPad's; a Mac makes an iPhone's Virtual Desktop pixel for pixel
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --raw9=JSON@T      send this literal kind 9 payload (a viewport) T seconds in (split on the last @);
                      a host refuses one outside 1 to 16384 points a side or 0.25 to 4 for its scale,
@@ -202,7 +205,7 @@ INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "room", "panel")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "room", "panel", "screen")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -241,6 +244,12 @@ def room_size(text, flag):
     m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)", text)
     if not m: raise ValueError(f"{flag}: WxH in points, got {text!r}")
     return (float(m.group(1)), float(m.group(2)))
+
+def screen_of(text):
+    """--screen's WxH@S[:phone]: Viewport.screen's JSON object."""
+    m = re.fullmatch(r"(\d+)x(\d+)@(\d+(?:\.\d+)?)(:phone)?", text)
+    if not m: raise ValueError(f"--screen: WxH@S[:phone] in pixels, got {text!r}")
+    return {"pixelWidth": int(m.group(1)), "pixelHeight": int(m.group(2)), "scale": float(m.group(3)), "phone": m.group(4) is not None}
 
 def view_sizes(text):
     """--view-after's PANEL[,ROOM]: the panel, and the room or None."""
@@ -583,6 +592,7 @@ try:
     dump_dir = valued("dump")
     room = room_size(valued("room"), "--room") if valued("room") is not None else None
     panel = room_size(valued("panel"), "--panel") if valued("panel") is not None else (1117.0, 642.0)
+    screen = screen_of(valued("screen")) if valued("screen") is not None else None
     if dump_dir is not None: os.makedirs(dump_dir, exist_ok=True)
     device = unescape(valued("device")) if valued("device") is not None else None
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
@@ -767,6 +777,7 @@ def viewport(fps, room_wh=None):
     v = {"width": panel[0], "height": panel[1], "scale": None, "fps": fps}
     r = room_wh or room
     if r is not None: v["room"] = {"width": r[0], "height": r[1]}
+    if screen is not None: v["screen"] = screen
     return msg(9, json.dumps(v).encode())
 if fps_now is not None:
     s.sendall(viewport(fps_now)); print(f"  sent viewport fps={fps_now}")

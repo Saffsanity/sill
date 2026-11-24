@@ -1846,7 +1846,7 @@ struct StreamScreen: View {
 
             ZStack {
                 // Scaled and moved by the picture's zoom, inside the clip below.
-                ZoomedStreamView(client: client, zoom: zoom)
+                ZoomedStreamView(client: client, zoom: zoom, videoSize: client.videoSize)
                 // Same frame as the video, so a touch maps straight onto the streamed frame (through the
                 // zoom, StreamZoom.unzoomedPoint).
                 InputOverlay(videoSize: client.videoSize,

@@ -647,7 +647,7 @@ struct PortraitStreamScreen: View {
     private func livePicturePane(measured: Bool) -> some View {
         ZStack {
             // Scaled and moved by the picture's zoom, inside the clip below.
-            ZoomedStreamView(client: client, zoom: zoom)
+            ZoomedStreamView(client: client, zoom: zoom, videoSize: client.videoSize)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },

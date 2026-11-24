@@ -62,6 +62,10 @@ MUTANTS = [
     ("a side of 0 or less read", "HostSettings.swift", ", w > 0, h > 0 else { return nil }", " else { return nil }"),
     ("a size with two scales read", "HostSettings.swift", "guard at.count == 2, let scale", "guard at.count >= 2, let scale"),
     ("the room never kept", "Viewport.swift", "        self.room = room\n", "        self.room = nil\n"),
+    ("the screen never kept", "Viewport.swift", "        self.screen = screen\n", "        self.screen = nil\n"),
+    ("the screen's kind never kept", "Viewport.swift",
+     "        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.scale = scale; self.phone = phone\n",
+     "        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.scale = scale; self.phone = nil\n"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

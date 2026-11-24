@@ -430,6 +430,25 @@ check(Wire.decode(ViewportOf062.self, from: Wire.encode(roomy)) == ViewportOf062
       "a 0.6.2 host reads the viewport and skips the room")
 check(Wire.decode(Viewport.self, from: Data(#"{"width":1133,"height":744,"fps":60}"#.utf8)).map { $0.room == nil && $0.width == 1133 } == true,
       "a 0.6.2 device's viewport: no room")
+// 2026-11-25: kind 9's `screen` (the screen the picture is on: its pixels, its pixels a point, an iPhone's or not), so a
+// Mac makes an iPhone's Virtual Desktop pixel for pixel. Left out when nil; skipped by a 0.6.2 host and by a host of
+// this branch before it (the `…Run5` type: the viewport with its room, as 2026-11-24 read it).
+let screened = Viewport(width: 393, height: 793, scale: nil, fps: 120, room: ViewportRoom(width: 393, height: 793),
+                        screen: ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 3, phone: true))
+check(json(screened) == #"{"fps":120,"height":793,"room":{"height":793,"width":393},"screen":{"phone":true,"pixelHeight":2556,"pixelWidth":1179,"scale":3},"width":393}"#,
+      "kind 9 with the screen: \(json(screened))")
+check(Wire.decode(Viewport.self, from: Wire.encode(screened)) == screened, "…round-trips")
+check(!json(roomy).contains("screen"), "no screen, no key (every device before 2026-11-25)")
+struct ViewportRun5: Decodable, Equatable { var width: Double; var height: Double; var scale: Double?; var localCursor: Bool?; var fps: Int?; var room: ViewportRoom? }
+check(Wire.decode(ViewportOf062.self, from: Wire.encode(screened)) == ViewportOf062(width: 393, height: 793, scale: nil, localCursor: nil, fps: 120),
+      "a 0.6.2 host reads the viewport and skips the screen")
+check(Wire.decode(ViewportRun5.self, from: Wire.encode(screened))
+      == ViewportRun5(width: 393, height: 793, scale: nil, localCursor: nil, fps: 120, room: ViewportRoom(width: 393, height: 793)),
+      "a host before it reads the viewport and its room, and skips the screen")
+check(Wire.decode(Viewport.self, from: Data(#"{"width":1133,"height":744,"fps":60,"room":{"width":1133,"height":744}}"#.utf8))
+        .map { $0.screen == nil && $0.room?.width == 1133 } == true, "a device before it: no screen")
+check(Wire.decode(Viewport.self, from: Data(#"{"width":393,"height":793,"screen":{"pixelWidth":1179,"pixelHeight":2556,"scale":3}}"#.utf8))
+        .map { $0.screen?.phone == nil && $0.screen?.pixelWidth == 1179 } == true, "a screen without `phone` decodes, phone nil (an iPad's)")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil

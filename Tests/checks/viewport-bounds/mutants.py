@@ -28,6 +28,11 @@ ROOM_IF = "        if let r = v.room {\n"
 ROOM_GUARD = "            guard r.width.isFinite, r.height.isFinite, r.width > 0, r.height > 0 else { return nil }\n"
 ROOM_HELD_W = "            return ViewportRoom(width: min(max(r.width, sides.lowerBound), sides.upperBound),\n"
 ROOM_HELD = "        held.room = v.room.flatMap { r in\n"
+SCREEN_PX = "    public static let screenPixels: ClosedRange<Int> = 1...32768\n"
+SCREEN_SC = "    public static let screenScales: ClosedRange<Double> = 1...4\n"
+SCREEN_GUARD = ("        guard screenPixels.contains(s.pixelWidth), screenPixels.contains(s.pixelHeight),\n"
+                "              screenScales.contains(s.scale) else { return nil }\n")
+SCREEN_HELD = "        held.screen = v.screen.flatMap { ViewportBounds.screen($0) }\n"
 LATE_MORE = "        let more = max(0, late ?? 0)\n"
 LATE_SUM = "        return count > Int.max - more ? Int.max : count + more\n"
 MUTANTS = [
@@ -81,6 +86,13 @@ MUTANTS = [
     ("R6 an infinite room sent, held", ROOM_GUARD, "            guard r.width > 0, r.height > 0 else { return nil }\n"),
     ("R7 a room's width sent as it is", ROOM_HELD_W, "            return ViewportRoom(width: r.width,\n"),
     ("R8 no room ever sent", ROOM_HELD, "        held.room = v.room.flatMap { (r: ViewportRoom) -> ViewportRoom? in if true { return nil }\n"),
+    # The screen (2026-11-25): taken within bounds, else none; never a refusal.
+    ("SC1 a screen's pixels to 16384", SCREEN_PX, SCREEN_PX.replace("1...32768", "1...16384")),
+    ("SC2 a screen's scale from 0.5", SCREEN_SC, SCREEN_SC.replace("1...4", "0.5...4")),
+    ("SC3 a screen's height never looked at", SCREEN_GUARD, SCREEN_GUARD.replace("screenPixels.contains(s.pixelHeight), ", "")),
+    ("SC4 a screen's scale never looked at", SCREEN_GUARD, SCREEN_GUARD.replace(",\n              screenScales.contains(s.scale) else", " else")),
+    ("SC5 a screen sent as it is", SCREEN_HELD, "        held.screen = v.screen\n"),
+    ("SC6 no screen ever sent", SCREEN_HELD, "        held.screen = nil\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
