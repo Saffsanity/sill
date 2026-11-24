@@ -238,12 +238,24 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       `com.apple.developer.team-identifier` 9B2KKVM937 and `keychain-access-groups`
       `9B2KKVM937.*`, which covers the group `9B2KKVM937.me.saffer.sill.mac`. It expires
       **2044‑09‑22** (Apple issues them for 18 years).
+- [x] **Made again 2026-11-24, for Sill Camera** (docs/camera-plan.md §15): the App ID gained the
+      System Extension capability on the developer site, and the profile, made again under the
+      same name for the same certificate, grants `com.apple.developer.system-extension.install` as
+      well as the three above. Without it a Sill.app may not ask macOS to install Sill Camera, and
+      `SILL_CAMERA_EXTENSION=1 make-app.sh --release` says "this build cannot install it (no System
+      Extension capability in its signature)". UUID `1060f5c5-e71e-4a19-a64a-615998aade9e`; it
+      expires **2044‑11‑19**. This is the profile every build from then on embeds, with or without
+      Sill Camera; the profile of 2026‑09‑27 (SHA‑256 `4f9f99b0…d996ed65`) is the one in every
+      build before it.
 - Where it lives: `Packaging/embedded.provisionprofile` (git‑ignored; the copy make-app.sh embeds),
-      backed up as `~/Library/Developer/Xcode/UserData/Provisioning Profiles/18e9509f-5498-4533-ba59-293461a61a0d.provisionprofile`
-      and as the download, `~/Downloads/Sill_Developer_ID.provisionprofile`; all three byte for
-      byte the same (SHA‑256 `4f9f99b0…d996ed65`). It holds no secret (Apple's signature, the
+      backed up as `~/Library/Developer/Xcode/UserData/Provisioning Profiles/1060f5c5-e71e-4a19-a64a-615998aade9e.provisionprofile`
+      and as the download, `~/Downloads/Sill_Developer_ID_Nov_24.provisionprofile`; all three byte
+      for byte the same (SHA‑256 `27e71540…717083e7`). It holds no secret (Apple's signature, the
       public certificate, the entitlements), and the developer site downloads it again at any time.
-      `SILL_PROVISION_PROFILE` points make-app.sh at another copy.
+      `SILL_PROVISION_PROFILE` points make-app.sh at another copy. GitHub's environments `release`
+      and `nightly` hold the same file in their secret of that name since 2026‑11‑24 (Releasing
+      from GitHub Actions › Secrets and variables): after making the profile again, replace it
+      there too, or a nightly embeds the old one.
 - Check: `security cms -D -i Packaging/embedded.provisionprofile` prints its plist; a Mac profile
       names the app `Entitlements › com.apple.application-identifier` (`application-identifier` is
       the iOS key, and an app signed with it is killed at launch: docs/keychain-plan.md §9b).
