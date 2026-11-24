@@ -312,5 +312,7 @@ launchModel()
 // A Mac's VPN addresses kept when a later list from it lacks them (2026-11-11), in vpnmemory.swift.
 vpnMemory()
 
+connectionLinks()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

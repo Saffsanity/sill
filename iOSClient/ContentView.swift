@@ -54,8 +54,20 @@ struct ContentView: View {
             Self.orientFromLaunchArgument()      // -SillOrientation landscape|portrait
             #endif
         }
-        // sill://pair from the Camera, Messages or `xcrun simctl openurl`: a confirmation first.
         .onOpenURL { client.handleOpenURL($0) }
+        .alert(client.connectionLinkPrompt?.title ?? "Sill Connection Link", isPresented: Binding(
+            get: { client.connectionLinkPrompt != nil },
+            set: { if !$0 { client.connectionLinkPrompt = nil } }
+        ), presenting: client.connectionLinkPrompt) { prompt in
+            if case .switchMac(let id, _) = prompt {
+                Button("Cancel", role: .cancel) {}
+                Button("Connect") { client.connectFromLink(id) }
+            } else {
+                Button("OK", role: .cancel) {}
+            }
+        } message: { prompt in
+            Text(prompt.message)
+        }
     }
 
     #if DEBUG
@@ -1602,7 +1614,7 @@ struct ConnectScreen: View {
     }
 
     /// A saved Mac's row or tile: Connect (a Remote row) or Connect Remotely (its network row, to
-    /// try the VPN path at home), Group, Show as Tiles/List, Remove Preview Picture, and Forget.
+    /// try the VPN path at home), Copy Connection Link, Group, Show as Tiles/List, Remove Preview Picture, and Forget.
     /// Other Macs' rows have no menu.
     @ViewBuilder private func menu(for mac: FoundMac) -> some View {
         if let id = mac.macID {
@@ -1610,6 +1622,11 @@ struct ConnectScreen: View {
                 Button { client.connect(to: mac) } label: { Label("Connect", systemImage: "globe") }
             } else if mac.route == .network {
                 Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
+            }
+            if let url = ConnectionLink.url(for: id) {
+                Button { UIPasteboard.general.string = url.absoluteString } label: {
+                    Label("Copy Connection Link", systemImage: "link")
+                }
             }
             let currentGroup = ConnectionList.cleanGroup(client.macGroups[id])
             Menu {
