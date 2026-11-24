@@ -1213,6 +1213,19 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   a key: `13:down,wait:2,13:up`), `run.sh UDID point SCRIPT`;
   only a booted simulator of your own, by UDID (its README has what it showed:
   after its keys UIKit there counts a hardware keyboard for good).
+- `Tests/devicerig/` — TEST ONLY: an XCUITest rig for the Sill installed on a
+  physical iPad or iPhone (`DeviceRig.xcodeproj`: one UI testing bundle and no
+  host app, `XCUIApplication(bundleIdentifier:)`, public XCTest API only;
+  `DeviceRigUITests/DeviceRig.swift`), run from a script of steps: taps, holds
+  of a given length, a finger's drags and flicks, a pinch, the iPad's pointer,
+  typed text and keys, screenshots, `find`, the accessibility tree; `run.sh
+  build`, `run.sh UDID 'SCRIPT' [Sill's launch arguments]` (a booted simulator
+  of your own too), its shots and trees out of the result bundle through
+  `xcresulttool export attachments`. `lanrelay.py` (TEST ONLY) relays the USB
+  cable's address to a loopback synthetic host, prints what the device sends
+  (each scroll's sign and count) and drops a window's pick, a light's press
+  and an app's launch. A device asks its owner for Touch ID or Face ID before
+  XCTest may drive it (its README).
 - `Scripts/harness-photos/` — the DEBUG harness photographed on the agents' shared simulators,
   never one an agent makes for itself: `Scripts/agent-simulators.sh create` makes them once ("Sill
   agents Duo", iPhone Duo on iOS 27.1, and "Sill agents iPad", iPad Pro 13-inch (M5) on iOS 27.0,
