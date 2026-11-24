@@ -34,7 +34,11 @@ RELAY = os.path.join(ROOT, "Scripts/sillrelay.py")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 # SILL_CAMERA_FIXTURE: another fixture of the same format, such as the device's own encoder's (encoder.sh OUT.bin).
 FIXTURE = os.environ.get("SILL_CAMERA_FIXTURE") or os.path.join(ROOT, "Scripts/camera/fixture-640x360.bin")
-BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1"}
+# SILL_TEST_LOCK_IGNORE_MAC: the hosts go by the test's hooks alone (H4's lock is SILL_TEST_LOCKED_FILE), so the gate runs
+# while this Mac's own screen is locked: without it every host of a locked Mac lists no camera, and 41 verdicts fail
+# (2026-11-25, the step-8 run's second hold).
+BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
+            "SILL_TEST_LOCK_IGNORE_MAC": "1"}
 verdicts = []
 
 
