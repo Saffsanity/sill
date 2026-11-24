@@ -6,7 +6,7 @@ import StreamProtocol
 
 // Remote access on the device (docs/remote-access-plan.md §7): pairing, saved Macs, remote dials,
 // the session gate (a remote session is connected at its first window list), kinds 18, 20 and 22,
-// the reconnect order after a loss, and sill://pair links. Main thread unless a function says
+// the reconnect order after a loss, and incoming Sill links. Main thread unless a function says
 // otherwise; the stored state lives in StreamClient.swift.
 
 /// Pairing as the Add a Mac card and the overlay show it.
@@ -18,6 +18,25 @@ enum PairingPhase: Equatable {
     case failed(PairingProblem)
     /// The Mac is saved ("Paired with Mac mini."); a session follows, except from the overlay.
     case paired(String)
+}
+
+enum ConnectionLinkPrompt {
+    case error(String)
+    case switchMac(id: String, name: String)
+
+    var title: String {
+        switch self {
+        case .error: return "Can’t Open Connection Link"
+        case .switchMac(_, let name): return "Connect to \(name)?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .error(let message): return message
+        case .switchMac: return "Sill will disconnect from the Mac you’re using now."
+        }
+    }
 }
 
 /// Why a pairing did not happen, in the words of §7.8.
@@ -380,10 +399,12 @@ extension StreamClient {
         // one machine, its newer record's key may answer for this one, and a handshake completed
         // with it retires this record (RemoteDialPolicy.successors, SavedMacs.superseding).
         var successors: [String: [Data]] = [:]
-        for c in candidates {
-            let keys = RemoteDialPolicy.successors(of: mac, at: c, in: savedMacs, allowLoopback: Self.keepsLoopback)
-                .compactMap(\.fingerprintData)
-            if !keys.isEmpty { successors[c.key] = keys }
+        if why != .connectionLink {
+            for c in candidates {
+                let keys = RemoteDialPolicy.successors(of: mac, at: c, in: savedMacs, allowLoopback: Self.keepsLoopback)
+                    .compactMap(\.fingerprintData)
+                if !keys.isEmpty { successors[c.key] = keys }
+            }
         }
         let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue,
                                         successors: successors)
@@ -527,7 +548,7 @@ extension StreamClient {
             afterPairingWatch = nil
             pairing = .idle
             status = failure == .remoteOff ? words : "\(name) is saved. Tap it to connect."
-        case .tap, .connectRemotely, .launchArgument:
+        case .tap, .connectRemotely, .launchArgument, .connectionLink:
             status = words
         }
         discoveryChanged()
@@ -828,6 +849,7 @@ extension StreamClient {
     /// A tap on a saved Mac's network row menu: Connect Remotely, a remote dial at home, to test
     /// the VPN path.
     func connectRemotely(_ macID: String) {
+        pendingConnectionLinkMacID = nil
         reconnect = nil
         dialSaved(macID, why: .connectRemotely)
     }
@@ -912,18 +934,82 @@ extension StreamClient {
         return ParsedAddress(host: pick.host, port: pick.port, kind: pick.isIPv6 ? .ipv6 : (pick.isName ? .name : .ipv4)).text
     }
 
-    /// A sill://pair link from outside the app: shown for confirmation, never acted on by itself (a
-    /// poster or a message could otherwise add a look-alike "Mac" that collects keystrokes).
+    /// Links can open Sill, select a saved Mac, or show a pairing for confirmation.
     func handleOpenURL(_ url: URL) {
         guard url.scheme?.lowercased() == "sill" else { return }
+        if url.absoluteString.lowercased() == "sill://" { return }
+        if url.host?.lowercased() == "connect" {
+            openConnectionLink(url)
+            return
+        }
         switch PairLink.parse(url.absoluteString) {
         case .success(let link):
+            pendingConnectionLinkMacID = nil
             pendingLink = link
             #if DEBUG
             print("remote: a link to pair with \(link.name) is waiting for the confirmation")
             #endif
         case .failure:
             pairing = .failed(.notALink)
+        }
+    }
+
+    private var pairingBlocksConnectionLink: Bool {
+        if case .working = pairing { return true }
+        return pendingLink != nil || homeAsk != nil
+    }
+
+    private func linkedMac(_ link: ConnectionLink) -> SavedMac? {
+        switch link.target(in: savedMacs) {
+        case .success(let mac): return mac
+        case .failure(let failure):
+            connectionLinkPrompt = .error(failure.message)
+            return nil
+        }
+    }
+
+    private func openConnectionLink(_ url: URL) {
+        guard let link = ConnectionLink.parse(url) else {
+            connectionLinkPrompt = .error(ConnectionLink.Failure.malformed.message)
+            return
+        }
+        guard let mac = linkedMac(link) else { return }
+        if connected, session?.macID != mac.macID {
+            connectionLinkPrompt = .switchMac(id: mac.macID, name: displayName(mac.macID))
+        } else {
+            connectFromLink(mac.macID)
+        }
+    }
+
+    func connectFromLink(_ macID: String) {
+        guard !connected || session?.macID != macID else { return }
+        guard !pairingBlocksConnectionLink else {
+            connectionLinkPrompt = .error("Finish pairing before opening a connection link.")
+            return
+        }
+        guard linkedMac(.macID(macID)) != nil else { return }
+        if connected || connection != nil || remoteDial != nil { disconnect() }
+        reconnect = nil
+        pendingConnectionLinkMacID = macID
+        if !connected { status = "Looking for \(displayName(macID))…" }
+        continueConnectionLink()
+    }
+
+    /// Give Bonjour the same head start it gets before the Remote rows appear. A local dial pins
+    /// the saved key, even for a row matching only by its previous Bonjour name.
+    func continueConnectionLink() {
+        guard !connected, let id = pendingConnectionLinkMacID else { return }
+        pendingConnectionLinkMacID = nil
+        guard !pairingBlocksConnectionLink,
+              let mac = linkedMac(.macID(id)), let pin = mac.fingerprintData else { return }
+        if let row = macs.first(where: {
+            $0.savedID == id && $0.route != .remote && $0.door != .plain && !pinRefusedRows.contains($0.id)
+        }) {
+            dialRow(row, macID: id, trust: .saved(pin: pin), tagNamed: row.macID == id)
+        } else if localNetworkDenied || ProcessInfo.processInfo.systemUptime >= searchingSince + DiscoveryPolicy.networkFirst {
+            dialSaved(id, why: .connectionLink)
+        } else {
+            pendingConnectionLinkMacID = id
         }
     }
 

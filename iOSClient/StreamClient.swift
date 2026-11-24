@@ -197,6 +197,9 @@ final class StreamClient: ObservableObject {
     /// A sill://pair link from outside the app (Camera, Messages, simctl openurl): never acted on
     /// until the person confirms it.
     @Published var pendingLink: PairLink?
+    @Published var connectionLinkPrompt: ConnectionLinkPrompt?
+    /// A confirmed target waiting for local discovery or for Disconnect to finish.
+    var pendingConnectionLinkMacID: String?
 
     // Pairing at home (StreamClient+Home.swift). Published on main.
     /// The ask a tap on a row that pairs first made, and what the Mac answered; the home card
@@ -827,7 +830,7 @@ final class StreamClient: ObservableObject {
 
     // Sessions and reconnecting (main thread; StreamClient+Remote.swift).
     /// Why a remote dial was made: its failure copy and its retries depend on it.
-    enum DialReason: Equatable { case tap, automatic, connectRemotely, afterPairing, launchArgument }
+    enum DialReason: Equatable { case tap, automatic, connectRemotely, afterPairing, launchArgument, connectionLink }
 
     /// The current connection's facts: set when it starts, cleared when it ends.
     struct Session {
@@ -1597,6 +1600,7 @@ final class StreamClient: ObservableObject {
     func discoveryChanged() {
         recomputeMacs()
         updateDiscovery()
+        continueConnectionLink()
         reconnectIfListed()
         moveToNetworkIfListed()
         followBestPath()
@@ -1840,6 +1844,7 @@ final class StreamClient: ObservableObject {
     /// the saved Mac's addresses through the remote door. At home the row's door decides the rest
     /// (`dial`): a pinned session, the ask, a session on an open door, a plain one, or nothing.
     func connect(to mac: FoundMac) {
+        pendingConnectionLinkMacID = nil
         #if DEBUG
         if mockDiscovery {
             switch mac.route {
@@ -3544,6 +3549,7 @@ final class StreamClient: ObservableObject {
     /// meanwhile the stream screen stays, and a second tap does nothing. A Mac from before kind 44 skips
     /// the ask: its picture is the keyframe kept, 300 ms later.
     func disconnect() {
+        pendingConnectionLinkMacID = nil
         guard freshPictureWait == nil else { return }
         switch freshPictureOnLeaving() {
         case .stored:
@@ -3564,6 +3570,7 @@ final class StreamClient: ObservableObject {
         c?.cancel()
         tearDown(status: Self.lookingOnNetwork)
         updateDiscovery()
+        continueConnectionLink()
     }
 
     /// Disconnect waiting for its keyframe (`waitForFreshKeyframe`): the wait's token. Main thread.

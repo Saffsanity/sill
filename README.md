@@ -251,6 +251,24 @@ The iPhone and iPad app:
 flag, the test tools and the simulator harness, permissions and how to reset
 them, Remote Access, troubleshooting and releases.
 
+## Opening Sill from another app
+
+Open `sill://` to bring up Sill on an iPhone or iPad. To connect to a paired
+Mac, long-press its tile or row in Sill and choose **Copy Connection Link**.
+Paste the link into another app or a Shortcuts **Open URLs** action.
+
+- `sill://connect?mac=0123456789ABCDEF` selects a saved Mac by its ID. The
+  copied link has the actual ID and keeps working if the Mac's name or address
+  changes.
+- `sill://connect?address=mac.example.net:7455` selects a saved Mac by one of
+  its saved DNS names or IP addresses. The port is optional. For an IPv6
+  address with a port, use brackets, as in
+  `sill://connect?address=%5Bfd00::1%5D:7455`.
+
+Pair the Mac on each device that will use the link. Sill looks for that Mac
+nearby first and uses its saved Remote Access routes when it isn't listed
+nearby. If a different Mac is already connected, Sill asks before switching.
+
 ## Contributing
 
 Issues are welcome: bug reports, questions and ideas. For a pull request, keep
