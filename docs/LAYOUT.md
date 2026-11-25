@@ -249,6 +249,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   one that left while its input was held: the up of what it holds down, and
   the buttons a cut-off device holds as it leaves (`buttonsLetGo`); pure,
   `Tests/checks/key-strokes`),
+  `KeycodeTyping` (a device's text as the keys that type it, for the apps that
+  read only a key event's virtual key, Parallels Desktop, VMware Fusion, UTM and
+  Windows App, which got every character as the A key: a US key and shift per
+  character, a Hangul character's 2-set keys; `HangulRun`, the Hangul typed into
+  such an app kept in step with the guest's Korean input method, only the new
+  keys of a syllable the device rebuilds, a backspace waiting for what follows;
+  pure, `Tests/checks/keycode-typing`),
   `WindowSizer` (Accessibility resize for the Aa scale, returning what it did,
   `Fit`; `placement/move/restore` for the virtual display; `AXWindows`,
   WindowRestore's reads and writes through Accessibility; `perform`, a window's

@@ -175,7 +175,10 @@ may read a removable volume or the Downloads folder.
 `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
-no-device check); `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
+no-device check); `SILL_TEST_KEYCODE_TYPING=1` types a device's text as keys
+whatever app is in front, as for an app that reads only the virtual key
+(KeycodeTyping: Parallels Desktop and the like), so the input log shows those
+keys; `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
 post, "Test input: key 49 down (command)" with the flags it was made with, and
 a pointer or scroll event with those the last keyboard event would have left
 in the HID state table, a button's with where it goes ("Test input: left mouse

@@ -92,6 +92,13 @@ final class InputInjector {
             return
         }
         if !dryRun { remindAboutAccessibilityIfNeeded() }
+        // Anything but text and a pointer's move commits what a guest's Korean input method is
+        // composing (a click, a key, a scroll): the Hangul run typed into it as keys ends (HangulRun).
+        switch event {
+        case .text: break
+        case .pointer(.move, _, _): break
+        default: endHangulRun()
+        }
         switch event {
         case .pointer(let action, let x, let y):
             // Jitter probe: how evenly do pointer moves arrive? A Pencil or trackpad drag should
@@ -472,7 +479,23 @@ final class InputInjector {
         // after the held one, which stops repeating (KeyRepeat).
         post(keys.text(from: device))
         stopRepeating()
-        for character in string {
+        // An app that reads only the virtual key (Parallels Desktop and the like: KeycodeTyping) is
+        // sent each character as the key that types it; every other app as its Unicode string.
+        let byKeys = targetReadsKeyCodes()
+        if !byKeys { endHangulRun() }
+        var characters = Array(string)[...]
+        while let character = characters.first {
+            if byKeys, KeycodeTyping.isHangul(character) {
+                // The event's Hangul goes together (HangulRun.type).
+                let run = characters.prefix { KeycodeTyping.isHangul($0) }
+                hangulSettle?.cancel(); hangulSettle = nil
+                post(hangul.type(Array(run)))
+                if !dryRun { for _ in run { Stats.shared.bump("in.text") } }
+                characters = characters.dropFirst(run.count)
+                continue
+            }
+            characters = characters.dropFirst()
+            if byKeys, typeAsKeys(character) { continue }
             switch character {
             case "\n": tap(virtualKey: 36)          // Return
             case "\t": tap(virtualKey: 48)          // Tab
@@ -494,6 +517,94 @@ final class InputInjector {
                 _ = post(up)
             }
             if !dryRun { Stats.shared.bump("in.text") }
+        }
+    }
+
+    // MARK: Text as keys (KeycodeTyping)
+
+    /// TEST ONLY (SILL_TEST_KEYCODE_TYPING=1): text goes as keys whatever app is in front, so a synthetic
+    /// host's input log shows the keys an app that reads keys would be sent.
+    private let keycodeTypingForTest = ProcessInfo.processInfo.environment["SILL_TEST_KEYCODE_TYPING"] == "1"
+
+    /// The Hangul typed as keys since anything else was, and the settle of a backspace waiting in it.
+    private var hangul = HangulRun()
+    private var hangulSettle: Task<Void, Never>?
+    /// How long a backspace inside a Hangul run waits for the syllable the device types again after it:
+    /// the device sends the two together, so only a backspace nothing follows waits this long.
+    private static let hangulSettleDelay: TimeInterval = 0.25
+
+    /// Whether the app the text goes to reads only a key event's virtual key: the app in front, which
+    /// a device's click on the streamed window made it.
+    private func targetReadsKeyCodes() -> Bool {
+        keycodeTypingForTest
+            || KeycodeTyping.readsKeyCodes(bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+    }
+
+    /// One character typed into an app that reads keys, Hangul aside (`type` sends an event's together):
+    /// true when it went as keys (or waits, a backspace inside a Hangul run), false when it goes as
+    /// before (Return, Tab, a lone backspace, a character no key types).
+    private func typeAsKeys(_ character: Character) -> Bool {
+        if character == "\u{8}" {
+            guard hangul.backspace() else { return false }
+            hangulSettle?.cancel()
+            hangulSettle = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.hangulSettleDelay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.settleHangul()
+            }
+            return true
+        }
+        endHangulRun()
+        guard character != "\n", character != "\t", let strokes = KeycodeTyping.strokes(for: character) else { return false }
+        let units = Array(String(character).utf16)
+        for stroke in strokes { post(stroke, unicode: units) }
+        if !dryRun { Stats.shared.bump("in.text") }
+        return true
+    }
+
+    /// The backspaces waiting in the Hangul run, when nothing followed them.
+    private func settleHangul() {
+        hangulSettle = nil
+        post(hangul.settle())
+    }
+
+    /// The Hangul run ends, its waiting backspaces going first.
+    private func endHangulRun() {
+        guard !hangul.isEmpty else { return }
+        hangulSettle?.cancel(); hangulSettle = nil
+        post(hangul.end())
+    }
+
+    private func post(_ actions: [HangulRun.Action]) {
+        for action in actions {
+            switch action {
+            case .backspace: tap(virtualKey: 51)
+            case .stroke(let stroke): post(stroke, unicode: nil)
+            }
+        }
+    }
+
+    /// A key typed into an app that reads keys: shift's own key around it when it needs shift, as a
+    /// keyboard sends it, and its character as its Unicode string too when it has one, for the app's
+    /// own text fields. Never another modifier (as `type` says).
+    private func post(_ stroke: KeycodeTyping.Stroke, unicode: [UniChar]?) {
+        let shiftKey: CGKeyCode = 56
+        let flags: CGEventFlags = stroke.shift ? .maskShift : []
+        if stroke.shift, let down = CGEvent(keyboardEventSource: source, virtualKey: shiftKey, keyDown: true) {
+            down.type = .flagsChanged
+            down.flags = .maskShift
+            _ = post(down)
+        }
+        for isDown in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: stroke.key, keyDown: isDown) else { continue }
+            if let unicode { event.keyboardSetUnicodeString(stringLength: unicode.count, unicodeString: unicode) }
+            event.flags = flags
+            _ = post(event)
+        }
+        if stroke.shift, let up = CGEvent(keyboardEventSource: source, virtualKey: shiftKey, keyDown: false) {
+            up.type = .flagsChanged
+            up.flags = []
+            _ = post(up)
         }
     }
 
