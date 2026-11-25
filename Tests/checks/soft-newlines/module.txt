@@ -1,0 +1,5 @@
+flags: -package-name sill
+Sources/StreamProtocol/*.swift
+iOSClient/KeyChords.swift
+iOSClient/TextComposition.swift
+iOSClient/SoftNewlines.swift

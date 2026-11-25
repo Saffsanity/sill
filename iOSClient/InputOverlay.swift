@@ -44,6 +44,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// What iPadOS's text system sees: the composition in progress and what was typed since the Mac's
     /// caret last moved some other way.
     private var composition = TextComposition()
+    private var softNewlinesGate = SoftNewlines.Gate()
+    private var pendingReturnTimer: DispatchWorkItem?
+    private var scheduledReturnAt: Double?
+    private var sendingTyped = false
     /// A trim of what was typed waits for the next turn of the main queue (`typed`).
     private var trimQueued = false
     /// The composition in progress, drawn over the picture: the Mac has none of it until it is chosen.
@@ -849,24 +853,54 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         // keyboard sends them with shift held (ForwardedKeys.shiftedKeyUsages), since "\n" and "\t"
         // as text carry no shift. Not while an input method composes: what it hands over then
         // replaces its composition, and its Return is its own.
-        if !composition.isComposing, latchedModifiers.contains(.shift), text == "\n" || text == "\t",
-           let character = text.first, let usage = HIDKey.usage(for: character),
+        if !composition.isComposing, latchedModifiers.contains(.shift), SoftNewlines.isSingleNewline(text) || text == "\t",
+           let usage = SoftNewlines.isSingleNewline(text) ? UInt16(0x28) : HIDKey.usage(for: "\t"),
            ForwardedKeys.shiftedKeyUsages.contains(usage) {
             sendLatched(usage)
             return
         }
-        typed(composition.insert(text))
+        softNewlinesGate.enabled = SoftNewlines.isEnabled()
+        let now = ProcessInfo.processInfo.systemUptime
+        typedActions(softNewlinesGate.insert(text, into: &composition, at: now))
+        syncSoftNewlinesTimer()
         consumeLatch()
+    }
+
+    private func syncSoftNewlinesTimer() {
+        guard let armedAt = softNewlinesGate.pendingReturnAt else {
+            pendingReturnTimer?.cancel()
+            pendingReturnTimer = nil
+            scheduledReturnAt = nil
+            return
+        }
+        guard scheduledReturnAt != armedAt else { return }
+        pendingReturnTimer?.cancel()
+        scheduledReturnAt = armedAt
+        let remaining = max(SoftNewlines.coalesceWindow - (ProcessInfo.processInfo.systemUptime - armedAt), 0.001)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.softNewlinesGate.pendingReturnAt == armedAt else { return }
+            self.pendingReturnTimer = nil
+            self.scheduledReturnAt = nil
+            self.inputDelegate?.selectionWillChange(self)
+            self.inputDelegate?.textWillChange(self)
+            self.typedActions(self.softNewlinesGate.flushPendingAsHard(in: &self.composition))
+            self.inputDelegate?.textDidChange(self)
+            self.inputDelegate?.selectionDidChange(self)
+        }
+        pendingReturnTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
     }
 
     func deleteBackward() {
         Self.textinput("deleteBackward" + (composition.isComposing ? " in the composition" : ""))
         setOwnPointer(nil, .none)
+        softNewlinesGate.enabled = SoftNewlines.isEnabled()
         if !composition.isComposing, !latchedModifiers.isDisjoint(with: .shortcutMakers) {
             sendLatched(HIDKey.deleteBackward)
             return
         }
-        typed(composition.deleteBackward())
+        typedActions(softNewlinesGate.deleteBackward(in: &composition))
+        syncSoftNewlinesTimer()
         if !composition.retype.isEmpty {
             Self.textinput("what it selected before the last Return or Tab typed stays: \(composition.retype.debugDescription)")
         }
@@ -880,14 +914,13 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         consumeLatch()
     }
 
-    /// What the text system's edit leaves for the Mac: text, and a backspace for each character to
-    /// delete (as the keyboard's own backspace goes); the composition label follows. A Return or a Tab
-    /// among the text has made what came before it final (`TextComposition.fence`): what was typed is
-    /// kept, as are the text system's positions, and no later edit reaches back across it. A tail grown
-    /// past `TextComposition.limit` is trimmed at the next turn, outside the text system's call.
     private func typed(_ outputs: [TextComposition.Output]) {
-        for output in outputs {
-            switch output {
+        typedActions(SoftNewlines.actions(for: outputs, soft: false))
+    }
+
+    private func typedActions(_ actions: [SoftNewlines.Action]) {
+        for action in actions {
+            switch action {
             case .text(let text):
                 Self.textinput("sent \(text.debugDescription)" + (TextInputRules.carriesReturnOrTab(text)
                     ? "; what was typed up to its last Return or Tab is final: \(composition.fence) of \(composition.sent.utf16.count) units" : ""))
@@ -895,6 +928,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             case .backspaces(let count):
                 Self.textinput("sent \(count) backspace" + (count == 1 ? "" : "s"))
                 for _ in 0..<count { send(.text("\u{8}")) }
+            case .softNewline:
+                Self.textinput("sent soft newline (⇧Return)")
+                sendingTyped = true
+                KeyChord.press(0x28, with: .shift).forEach(send)
+                sendingTyped = false
             }
         }
         showComposition()
@@ -910,16 +948,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         }
     }
 
-    /// The Mac's caret is about to move some other way than typing (a click, an arrow, a shortcut, a pick,
-    /// from this view or from anywhere else: `InputOverlayProxy.caretMayHaveMoved`, called before what
-    /// moves it goes out): what an input method is still composing goes to the Mac first, as it stands,
-    /// where the caret still is (`TextComposition.forget`), as a tap in a text field keeps a composition;
-    /// then what was typed, which can no longer be revised there, is forgotten, and the text system is
-    /// told. A composition kept on the device across it was lost: the input method, told the document
-    /// changed, dropped it at the next key (Zhuyin in the simulator, 2026-10-20). A Return or a Tab this
-    /// view types is no such move: what was typed is kept, what came before it final
-    /// (`TextComposition.fence`), so dictation's "new line" said mid-utterance loses none of its words.
     func forgetTyped() {
+        guard !sendingTyped else { return }
+        if softNewlinesGate.hasPendingReturn {
+            typedActions(softNewlinesGate.flushPendingAsHard(in: &composition))
+            syncSoftNewlinesTimer()
+        }
         guard !composition.sent.isEmpty || composition.isComposing else { return }
         if let marked = composition.marked {
             Self.textinput("the composition \(marked.debugDescription) goes to the Mac first, as it stands: its caret may move")
@@ -938,11 +972,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         inputDelegate?.selectionDidChange(self)
     }
 
-    /// What an input method or dictation left composed when this view stops being the text system's
-    /// (it resigns, or leaves its window) goes to the Mac as it stands, as a text field on iPadOS keeps
-    /// it: it would otherwise stay over the picture, never sent, and every hardware key after it would
-    /// go to an input method that no longer composes it (`pressesBegan`).
     private func commitComposition(_ why: String) {
+        if softNewlinesGate.hasPendingReturn {
+            typedActions(softNewlinesGate.flushPendingAsHard(in: &composition))
+            syncSoftNewlinesTimer()
+        }
         guard let marked = composition.marked else { return }
         Self.textinput("\(why): the composition \(marked.debugDescription) goes to the Mac as it stands")
         typed(composition.unmark())
@@ -1340,10 +1374,13 @@ extension InputOverlayView {
 
     func replace(_ range: UITextRange, withText text: String) {
         guard let (range, taken) = offsets(range) else { return }
+        softNewlinesGate.enabled = SoftNewlines.isEnabled()
         Self.textinput("replace (\(range.location),\(range.length)) with \(text.debugDescription)"
                        + (composition.refusal(range, with: text, taken: taken).map { ", \($0.rawValue): nothing sent" } ?? ""))
         setOwnPointer(nil, .none)
-        typed(composition.replace(range, with: text, taken: taken))
+        let now = ProcessInfo.processInfo.systemUptime
+        typedActions(softNewlinesGate.replace(range, with: text, taken: taken, in: &composition, at: now))
+        syncSoftNewlinesTimer()
     }
 
     var selectedTextRange: UITextRange? {
@@ -1354,6 +1391,10 @@ extension InputOverlayView {
             // moved without a selection stays at the end, as the Mac's caret cannot be moved from here. A
             // range taken before a forget or a trim points at nothing now.
             guard let (asked, taken) = newValue.flatMap(offsets) else { return }
+            if softNewlinesGate.hasPendingReturn {
+                typedActions(softNewlinesGate.willSelect(in: &composition))
+                syncSoftNewlinesTimer()
+            }
             guard taken == composition.generation else {
                 Self.textinput("selectedTextRange (\(asked.location),\(asked.length)) asked for, taken before a forget: not taken")
                 return
@@ -1376,12 +1417,18 @@ extension InputOverlayView {
     func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
         Self.textinput("setMarkedText \(markedText?.debugDescription ?? "nil") (\(selectedRange.location),\(selectedRange.length))")
         setOwnPointer(nil, .none)
-        typed(composition.setMarked(markedText, selected: selectedRange))
+        softNewlinesGate.enabled = SoftNewlines.isEnabled()
+        let now = ProcessInfo.processInfo.systemUptime
+        typedActions(softNewlinesGate.setMarked(markedText, selected: selectedRange, in: &composition, at: now))
+        syncSoftNewlinesTimer()
     }
 
     func unmarkText() {
         Self.textinput("unmarkText" + (composition.isComposing ? "" : ", nothing composed"))
-        typed(composition.unmark())
+        softNewlinesGate.enabled = SoftNewlines.isEnabled()
+        let now = ProcessInfo.processInfo.systemUptime
+        typedActions(softNewlinesGate.unmark(in: &composition, at: now))
+        syncSoftNewlinesTimer()
     }
 
     var beginningOfDocument: UITextPosition { Position(0, composition.generation) }
