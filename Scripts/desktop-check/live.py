@@ -607,11 +607,12 @@ def custom_sizes(out):
     h = Host(out, "vd-custom", env, args=["--virtual-desktop=5120x2880@1:60"])
     try:
         # P, an iPad Pro 13-inch (its screen 2064×2752 at 2x) from 1 s: onto the Virtual Desktop at 3; Q, an iPhone SE (750×1334
-        # at 2x, 60 Hz) from 8 to 14, showing the same Desktop; P gone at 19.
-        p, rp = client(h, out, "vdcustom-p", 18, ["desktop", "--fps=120", "--panel=1376x1032", "--room=1376x1032", "--screen=2064x2752@2",
-                                                  "--device=iPad Pro", "--next-display@1", "--next-display@2"], 1)
-        q, rq = client(h, out, "vdcustom-q", 6, ["desktop", "--fps=60", "--panel=667x375", "--room=667x375", "--screen=750x1334@2:phone",
-                                                 "--device=iPhone SE"], 8)
+        # at 2x, 60 Hz) from 8 to 14, showing the same Desktop; P gone at 19. Each names itself in its hello first, as a device
+        # of this build does (the budget's line names the device).
+        p, rp = client(h, out, "vdcustom-p", 18, ["desktop", "--hello=0.6.3", "--fps=120", "--panel=1376x1032", "--room=1376x1032",
+                                                  "--screen=2064x2752@2", "--device=iPad Pro", "--next-display@1", "--next-display@2"], 1)
+        q, rq = client(h, out, "vdcustom-q", 6, ["desktop", "--hello=0.6.3", "--fps=60", "--panel=667x375", "--room=667x375",
+                                                 "--screen=750x1334@2:phone", "--device=iPhone SE"], 8)
         p.join(); q.join()
         h.at(20)
     finally:

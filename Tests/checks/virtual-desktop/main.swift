@@ -991,6 +991,8 @@ check(typed(nil, 1080) == "Type a width and a height in pixels." && typed(1920, 
 check(typed(639, 1080) == "Each side needs at least 640 pixels." && typed(8193, 1080) == "Each side can be at most 8192 pixels."
       && typed(1080, 639) == "Each side needs at least 640 pixels." && typed(1080, 8193) == "Each side can be at most 8192 pixels.",
       "the floor and the ceiling of each side")
+check(typed(1600, 639, true) == "Each side needs at least 640 pixels." && typed(639, 1600, true) == "Each side needs at least 640 pixels."
+      && typed(1600, 8193, true) == "Each side can be at most 8192 pixels.", "a side out of bounds said before a Retina side's evenness")
 check(typed(1921, 1080, true) == "A Retina desktop needs an even number of pixels each way."
       && typed(1920, 1081, true) == "A Retina desktop needs an even number of pixels each way." && typed(1921, 1081, false) == "1921x1081@1:0",
       "an odd Retina side, either; at 1x any count")
@@ -1000,6 +1002,13 @@ check(typed(1920, 1080, false, 23) == "The refresh rate can be 24 to 120 Hz." &&
       && typed(1920, 1080, false, nil) == "The refresh rate can be 24 to 120 Hz." && typed(1920, 1080, false, 24) == "1920x1080@1:24",
       "a rate out of 24 to 120 Hz, or not a number")
 check(typed(1920, 1080, false, 90) == "1920x1080@1:90", "90 Hz, which no picker offers: taken")
+// The list's sizes: each one a person could type too, at 120 Hz within the largest current iPad's ceiling (so an iPad Pro
+// 13-inch takes every one of them as it is), and the nine of the plan.
+for s in VS.offered {
+    check(typed(s.widthPt * s.scale, s.heightPt * s.scale, s.scale == 2, 120) == "\(VS.id(s)):120", "\(VS.id(s)) of the list: within the ceiling at 120 Hz")
+}
+check(VS.offered.map(VS.id) == ["1440x900@2", "1512x982@2", "1728x1117@2", "1920x1080@2", "1920x1200@2", "2560x1440@2", "1920x1080@1", "2560x1440@1", "3440x1440@1"],
+      "the list: the nine sizes of the plan, in its order")
 // Every typed size the entry takes is a size VirtualDesktopSize takes as saved, and the other way round within the ceiling.
 var entryWrong = 0
 for _ in 0..<20_000 {
@@ -1019,8 +1028,25 @@ for _ in 0..<20_000 {
 check(entryWrong == 0, "20,000 random entries: taken exactly when they can be a display at a rate of 24 to 120 Hz within the ceiling, as saved (\(entryWrong) not)")
 check(VB.fields("2752x2064@2").map { [$0.width, $0.height, $0.retina ? 1 : 0] } == [5504, 4128, 1] && VB.fields("device") == nil
       && VB.fields("1920x1080@1").map { [$0.width, $0.height, $0.retina ? 1 : 0] } == [1920, 1080, 0], "the entry's fields from a size in use")
-check(VB.upTo(VB.largestIPad, known: false) == "No device has connected yet: up to 5504 × 4128 at 120 Hz, the largest current iPad’s, or as many pixels a second at a lower rate."
-      && VB.upTo(iPhone15, known: true) == "Up to 5112 × 2358 at 120 Hz for iPhone 15 Pro, or as many pixels a second at a lower rate.", "what may be typed, said")
+check(VB.upTo(VB.largestIPad, known: []) == "No device has connected yet: up to 5504 × 4128 at 120 Hz, the largest current iPad’s, or as many pixels a second at a lower rate."
+      && VB.upTo(iPhone15, known: [iPhone15]) == "Up to 5112 × 2358 at 120 Hz for iPhone 15 Pro, or as many pixels a second at a lower rate.", "what may be typed, said")
+// A device as Settings names it: a device of Sill's calls itself "iPad (iPad16,6)" (its kind and model identifier), which
+// is "your iPad", whole while another of its kind is known.
+let ownPro = VB.Device(name: "iPad (iPad16,6)", pixelWidth: 2064, pixelHeight: 2752, phone: false, fps: 120)
+let ownMini = VB.Device(name: "iPad (iPad14,1)", pixelWidth: 1488, pixelHeight: 2266, phone: false, fps: 60)
+let ownPhone = VB.Device(name: "iPhone (iPhone16,1)", pixelWidth: 1179, pixelHeight: 2556, phone: true, fps: 120)
+check(VB.shownName(ownPro, among: [ownPro, ownPhone]) == "your iPad" && VB.shownName(ownPhone, among: [ownPro, ownPhone], start: true) == "Your iPhone"
+      && VB.shownName(ownPro, among: []) == "your iPad", "a device of Sill's: \"your iPad\", \"Your iPhone\" at a line's start")
+check(VB.shownName(ownPro, among: [ownPro, ownMini, ownPhone]) == "your iPad (iPad16,6)" && VB.shownName(ownMini, among: [ownPro, ownMini], start: true) == "Your iPad (iPad14,1)"
+      && VB.shownName(ownPhone, among: [ownPro, ownMini, ownPhone]) == "your iPhone", "two iPads known: each whole, so they read apart; the iPhone alone of its kind")
+check(VB.shownName(VB.largestIPad, among: [ownPro]) == "iPad Pro 13-inch" && VB.shownName(VB.largestIPad, among: [], start: true) == "iPad Pro 13-inch"
+      && VB.shownName(VB.Device(name: "(iPad16,6)", pixelWidth: 1, pixelHeight: 1, phone: false, fps: 60), among: []) == "(iPad16,6)"
+      && VB.shownName(VB.Device(name: "iPad (mine", pixelWidth: 1, pixelHeight: 1, phone: false, fps: 60), among: []) == "iPad (mine",
+      "a name with no identifier as it is: the table's, one with nothing before it, one never closed")
+check(VB.upTo(ownPro, known: [ownPro, ownPhone]) == "Up to 5504 × 4128 at 120 Hz for your iPad, or as many pixels a second at a lower rate."
+      && VB.sentence(.ceiling(ownPro), known: [ownPro, ownMini]) == "That’s more than Sill sends to your iPad (iPad16,6): up to 5504 × 4128 at 120 Hz, or as many pixels a second at a lower rate."
+      && VB.sentence(.ceiling(ownPro)) == "That’s more than Sill sends to your iPad: up to 5504 × 4128 at 120 Hz, or as many pixels a second at a lower rate.",
+      "what may be typed and the ceiling's sentence, of a device this Mac knows")
 // The CLI: no device known, so the largest current iPad's ceiling.
 check(VB.flagRefusal("2752x2064@2:120") == nil && VB.flagRefusal("device") == nil && VB.flagRefusal("1920x1080@2:60") == nil, "the CLI takes them")
 check(VB.flagRefusal("3840x2160@2:120")?.hasPrefix("That’s more than Sill sends to iPad Pro 13-inch") == true, "…refuses 7680 × 4320 at 120 Hz with the ceiling's sentence")
@@ -1041,6 +1067,10 @@ check(VB.view(width: 5504, height: 4128, hz: 120, device: miniDevice) == VB.View
 check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == "iPad Pro 13-inch: as it is, at 120 Hz."
       && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: iPhone15) == "iPhone 15 Pro: scaled to \(phoneView.width) × \(phoneView.height) at 120 Hz."
       && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: miniDevice) == "iPad mini: as it is, at 60 Hz.", "Settings' lines beside it")
+check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPro, among: [ownPro, ownPhone]) == "Your iPad: as it is, at 120 Hz."
+      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPhone, among: [ownPro, ownPhone]) == "Your iPhone: scaled to \(phoneView.width) × \(phoneView.height) at 120 Hz."
+      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: ownMini, among: [ownPro, ownMini]) == "Your iPad (iPad14,1): as it is, at 60 Hz.",
+      "…named as a device of Sill's names itself")
 var fitWrong = 0
 for _ in 0..<20_000 {
     let w = Int.random(in: 640...8192, using: &rng), h = Int.random(in: 640...8192, using: &rng), fps = [24, 30, 60, 90, 120][Int.random(in: 0...4, using: &rng)]

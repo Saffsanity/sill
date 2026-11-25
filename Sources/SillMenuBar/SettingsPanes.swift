@@ -760,13 +760,13 @@ struct VirtualDesktopSection: View {
         let ceiling = VirtualDesktopBudget.ceiling(known: known)
         switch typed {
         case .failure(.missing) where widthText.isEmpty && heightText.isEmpty:
-            return [VirtualDesktopBudget.upTo(ceiling, known: !known.isEmpty)]
+            return [VirtualDesktopBudget.upTo(ceiling, known: known)]
         case .failure(let r):
-            return [VirtualDesktopBudget.sentence(r)]
+            return [VirtualDesktopBudget.sentence(r, known: known)]
         case .success(let e):
             let w = e.size.widthPt * e.size.scale, h = e.size.heightPt * e.size.scale
-            var out = known.isEmpty ? [VirtualDesktopBudget.upTo(ceiling, known: false)]
-                                    : known.map { VirtualDesktopBudget.deviceLine(width: w, height: h, hz: e.hz, device: $0) }
+            var out = known.isEmpty ? [VirtualDesktopBudget.upTo(ceiling, known: [])]
+                                    : known.map { VirtualDesktopBudget.deviceLine(width: w, height: h, hz: e.hz, device: $0, among: known) }
             let key = VirtualDesktopSize.id(e.size) + ":\(e.hz)"
             if snapshot.virtualDesktop.encoderFor == key, let enc = snapshot.virtualDesktop.encoder,
                let note = VirtualDesktopBudget.encoderNote(width: w, height: h, hz: e.hz, encoder: enc) {

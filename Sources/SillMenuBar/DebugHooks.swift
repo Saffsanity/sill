@@ -765,9 +765,11 @@ enum DebugHooks {
         var held = HostStatusSnapshot()
         held.displayMakeHeld = true
         held.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: false, note: VirtualDesktopWords.guardHolds, shown: false)
-        let pro13 = VirtualDesktopBudget.largestIPad
-        let iPhone = VirtualDesktopBudget.Device(name: "iPhone 15 Pro", pixelWidth: 1179, pixelHeight: 2556, phone: true, fps: 120)
-        let mini = VirtualDesktopBudget.Device(name: "iPad mini", pixelWidth: 1488, pixelHeight: 2266, phone: false, fps: 60)
+        // Named as a device of Sill's names itself (its kind and model identifier, ClientStatsReporter.deviceName): an iPad Pro
+        // 13-inch, an iPhone 15 Pro, an iPad mini.
+        let pro13 = VirtualDesktopBudget.Device(name: "iPad (iPad16,6)", pixelWidth: 2064, pixelHeight: 2752, phone: false, fps: 120)
+        let iPhone = VirtualDesktopBudget.Device(name: "iPhone (iPhone16,1)", pixelWidth: 1179, pixelHeight: 2556, phone: true, fps: 120)
+        let mini = VirtualDesktopBudget.Device(name: "iPad (iPad14,1)", pixelWidth: 1488, pixelHeight: 2266, phone: false, fps: 60)
         var encoderHeld = available
         encoderHeld.virtualDesktop.encoder = VirtualDesktopBudget.Encoder(widest: 4096, fps: 38)
         encoderHeld.virtualDesktop.encoderFor = "7680x4320@1:60"
@@ -784,7 +786,7 @@ enum DebugHooks {
             ("custom-within", true, "device", 0, available, true, [pro13, iPhone], ("5504", "4128", true, "120")),
             ("custom-over", true, "device", 0, available, true, [pro13, iPhone], ("6016", "5000", false, "120")),
             ("custom-encoder", true, "7680x4320@1", 60, encoderHeld, true, [pro13], nil),
-            ("custom-scaled", true, "device", 0, available, true, [mini, iPhone], ("7680", "2160", false, "120")),
+            ("custom-scaled", true, "device", 0, available, true, [pro13, mini, iPhone], ("7680", "2160", false, "120")),
         ]
     }
 

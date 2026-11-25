@@ -83,6 +83,18 @@ package enum VirtualDesktopBudget {
         known.max { budget($0) < budget($1) } ?? largestIPad
     }
 
+    /// How Settings and a refusal name a device. A device of Sill's calls itself by its kind and its model identifier,
+    /// "iPad (iPad16,6)" (UIDevice's name, which since iOS 16 is the kind alone, ClientStatsReporter.deviceName), which the
+    /// status menu shows as "iPad": so it is "your iPad", and "your iPad (iPad16,6)" while another device of `known` is of
+    /// its kind too, so the two read apart. A name with no identifier (the table's, a test's) as it is. `start`: the name
+    /// begins a line ("Your iPad").
+    package static func shownName(_ d: Device, among known: [Device], start: Bool = false) -> String {
+        guard d.name.hasSuffix(")"), let cut = d.name.range(of: " ("), cut.lowerBound > d.name.startIndex else { return d.name }
+        let kind = String(d.name[..<cut.lowerBound])
+        let twin = known.contains { $0.name != d.name && $0.name.hasPrefix(kind + " (") }
+        return (start ? "Your " : "your ") + (twin ? d.name : kind)
+    }
+
     // MARK: What may be typed (VirtualDesktopSize.custom holds what can be a display; this, what a device takes)
 
     /// The least side, in pixels (VirtualDesktopSize.customSides).
@@ -163,8 +175,8 @@ package enum VirtualDesktopBudget {
     }
 
     /// The one plain sentence a refusal shows, beside the entry (and the CLI's refusal): the ceiling named as the device
-    /// it is and its size at 120 Hz, the longer side first ("5504 × 4128").
-    package static func sentence(_ r: Refusal) -> String {
+    /// it is (`shownName` among `known`) and its size at 120 Hz, the longer side first ("5504 × 4128").
+    package static func sentence(_ r: Refusal, known: [Device] = []) -> String {
         switch r {
         case .missing: return "Type a width and a height in pixels."
         case .small: return "Each side needs at least \(minSide) pixels."
@@ -174,18 +186,18 @@ package enum VirtualDesktopBudget {
         case .rate: return "The refresh rate can be \(rates.lowerBound) to \(rates.upperBound) Hz."
         case .ceiling(let d):
             let long = 2 * max(d.pixelWidth, d.pixelHeight), short = 2 * min(d.pixelWidth, d.pixelHeight)
-            return "That’s more than Sill sends to \(d.name): up to \(long) × \(short) at 120 Hz, or as many pixels a second at a lower rate."
+            return "That’s more than Sill sends to \(shownName(d, among: known)): up to \(long) × \(short) at 120 Hz, or as many pixels a second at a lower rate."
         }
     }
 
-    /// What may be typed, beside an empty entry (and while no device is known): "Up to 5504 × 4128 at 120 Hz for iPad Pro
-    /// 13-inch, or as many pixels a second at a lower rate." (`known`: the device is one this Mac knows), or "No device has
-    /// connected yet: up to …, the largest current iPad's, …".
-    package static func upTo(_ d: Device, known: Bool) -> String {
+    /// What may be typed, beside an empty entry (and while no device is known): "Up to 5504 × 4128 at 120 Hz for your iPad,
+    /// or as many pixels a second at a lower rate." (`d` the ceiling among `known`, the devices this Mac knows), or with
+    /// none known, "No device has connected yet: up to …, the largest current iPad's, …".
+    package static func upTo(_ d: Device, known: [Device]) -> String {
         let long = 2 * max(d.pixelWidth, d.pixelHeight), short = 2 * min(d.pixelWidth, d.pixelHeight)
         let size = "\(long) × \(short) at 120 Hz"
-        return known ? "Up to \(size) for \(d.name), or as many pixels a second at a lower rate."
-                     : "No device has connected yet: up to \(size), the largest current iPad’s, or as many pixels a second at a lower rate."
+        return !known.isEmpty ? "Up to \(size) for \(shownName(d, among: known)), or as many pixels a second at a lower rate."
+                              : "No device has connected yet: up to \(size), the largest current iPad’s, or as many pixels a second at a lower rate."
     }
 
     // MARK: What a device gets
@@ -218,12 +230,13 @@ package enum VirtualDesktopBudget {
         return (w, h)
     }
 
-    /// Settings' lines beside a typed size: each device this Mac knows, as it gets it ("iPad Pro 13-inch: as it is, at 120
-    /// Hz." or "iPhone 15 Pro: scaled to 4004 × 3002 at 120 Hz.").
-    package static func deviceLine(width: Int, height: Int, hz: Int, device: Device) -> String {
+    /// Settings' lines beside a typed size: each device this Mac knows (`known`), as it gets it ("Your iPad: as it is, at
+    /// 120 Hz." or "Your iPhone: scaled to 4008 × 3006 at 120 Hz."; `shownName`).
+    package static func deviceLine(width: Int, height: Int, hz: Int, device: Device, among known: [Device] = []) -> String {
         let v = view(width: width, height: height, hz: hz == 0 ? device.fps : hz, device: device)
-        return v.scaled ? "\(device.name): scaled to \(v.width) × \(v.height) at \(v.hz) Hz."
-                        : "\(device.name): as it is, at \(v.hz) Hz."
+        let name = shownName(device, among: known, start: true)
+        return v.scaled ? "\(name): scaled to \(v.width) × \(v.height) at \(v.hz) Hz."
+                        : "\(name): as it is, at \(v.hz) Hz."
     }
 
     // MARK: What this Mac can carry (Noah's agreed point 2: "Sill says what this Mac can carry")

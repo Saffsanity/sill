@@ -937,6 +937,7 @@ package final class StreamCoordinator {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }), $0.devices[i].name == nil else { return }
                     $0.devices[i].name = name
                 }
+                self?.publishBudgetDevices()
             }
         }
         server.onClientStats = { [weak self] connection, stats in
@@ -951,6 +952,8 @@ package final class StreamCoordinator {
                     $0.devices[i].frameAgeMs = stats.frameAgeMs
                     $0.devices[i].rttMs = stats.rttMs
                 }
+                // A name come (or changed) with the stats: Sill for Mac's list of the devices that said their screen.
+                self?.publishBudgetDevices()
                 // How long this device waits for a menu (the second's worst round trip; the median
                 // from an older device): a request whose turn comes later is not read.
                 self?.menus.clientStats(connection, rttMs: stats.rttMaxMs ?? stats.rttMs)
@@ -4206,13 +4209,27 @@ package final class StreamCoordinator {
     // MARK: The Virtual Desktop at a chosen size: each device's budget, and what this Mac's encoder carries (part B)
 
     /// The devices connected that say their screen (Viewport.screen), as the budget counts them (VirtualDesktopBudget): their
-    /// names, screens and the rates their viewports ask. Sill for Mac keeps them, so its Settings knows them.
-    private var budgetDevices: [VirtualDesktopBudget.Device] {
+    /// names, screens and the rates their viewports ask; one not named yet as "a device".
+    private var budgetDevices: [VirtualDesktopBudget.Device] { budgetDevices(named: false) }
+
+    /// `named`: only those whose names are known (a device of Sill's names itself in its hello, before its viewport; an
+    /// older one in its stats, a second on), for Sill for Mac, which keeps each device by its name so its Settings knows it.
+    private func budgetDevices(named: Bool) -> [VirtualDesktopBudget.Device] {
         viewports.compactMap { id, v -> VirtualDesktopBudget.Device? in
             guard let s = Self.screen(v) else { return nil }
-            return VirtualDesktopBudget.Device(name: deviceName(id: id), pixelWidth: s.pixelWidth, pixelHeight: s.pixelHeight,
+            let name = status.snapshot.devices.first { $0.id == id }?.name
+            if named && name == nil { return nil }
+            return VirtualDesktopBudget.Device(name: name ?? "a device", pixelWidth: s.pixelWidth, pixelHeight: s.pixelHeight,
                                                phone: s.phone, fps: v.fps ?? 60)
         }.sorted { ($0.name, $0.pixelWidth) < ($1.name, $1.pixelWidth) }
+    }
+
+    /// Sill for Mac's list of the devices connected that said their screen and their names (HostStatus), anew when it
+    /// changed: at each viewport, a device's leaving, and a name's coming.
+    private func publishBudgetDevices() {
+        let named = budgetDevices(named: true)
+        guard named != status.snapshot.virtualDesktop.devices else { return }
+        status.update { $0.virtualDesktop.devices = named }
     }
 
     /// Whether the Virtual Desktop's size is the person's choice (a size of the list or one typed), not one that follows a
@@ -4245,7 +4262,7 @@ package final class StreamCoordinator {
     /// the smallest budget now allows differs from the one streaming (a smaller device came, the last one left), so the
     /// Desktop starts again at it (`select`: the same capture, held anew).
     private func lookAtVirtualDesktopBudget() {
-        status.update { $0.virtualDesktop.devices = self.budgetDevices }
+        publishBudgetDevices()
         guard virtualDesktopChosenSize, active == .desktop, !switching, !placeholderStreams, !shuttingDown,
               desktopLife.role == .virtualDesktop || (testVirtualDesktop && displays.isSaid(.desktop)),
               desktopOnSills(desktopStreamDisplay) else { return }
