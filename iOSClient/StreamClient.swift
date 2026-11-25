@@ -431,6 +431,11 @@ final class StreamClient: ObservableObject {
     /// reconnect made it: the tour's decision and the device's auto-lock hold both carry the session
     /// before it then, and start afresh for a session the person started. Main thread.
     func sessionConnected(reconnected: Bool) {
+        // The automatic reconnect's session goes back to what the lost one showed, once the Mac lists
+        // it (`resumeSource`): where it started on the Desktop, which made a trip to the background look
+        // like starting over. A window that has closed meanwhile is the Desktop.
+        if reconnected, let watched = watchedAtLoss { resumeSource = watched }
+        watchedAtLoss = nil
         startTourSession(reconnected: reconnected)
         personSessionAt = DeviceIdlePolicy.sessionStart(previous: personSessionAt, reconnected: reconnected,
                                                         now: ProcessInfo.processInfo.systemUptime)
@@ -645,6 +650,13 @@ final class StreamClient: ObservableObject {
     /// stay in the background that Picture in Picture covered throughout is no return from the background:
     /// iOS never suspended the app, so no browser is made again (`cameForward`). Main thread.
     private(set) var appInForeground = UIApplication.shared.applicationState != .background
+    /// The time iOS grants a session going to the background (BackgroundGrace): asked for as Sill leaves
+    /// with a session, so a trip to the Home Screen, another app or another Space keeps it (the
+    /// connection, its pings and its picture going on as iOS lets the app run), where before iOS suspended
+    /// Sill at once and the Mac let the silent device go 4 s on (8 s away). Ended on the return, at the
+    /// session's end, and as iOS's time runs out: the session then ends cleanly from this side and its
+    /// reconnect waits for the return (`endSessionInBackground`), as after Picture in Picture. Main thread.
+    private var backgroundGrace = UIBackgroundTaskIdentifier.invalid
     #if DEBUG
     /// `-SillBrowserFail N`: each of the first N network browsers is reported failed with
     /// kDNSServiceErr_DefunctConnection (-65569) half a second after it starts, as iOS reports a
@@ -902,6 +914,9 @@ final class StreamClient: ObservableObject {
     /// (`endSessionInBackground`, #379), held until Sill is back (`cameForward`): it becomes `reconnect`
     /// then, its loss counted from then. Main thread.
     var reconnectAtReturn: Reconnect?
+    /// What the session that ended was showing, for its automatic reconnect's session to show again
+    /// (`sessionConnected`); nil after a tap, which starts afresh, and with no reconnect. Main thread.
+    var watchedAtLoss: StreamSource?
     /// The key the last session at home under each Bonjour name saw on an open door (`p=0`), in
     /// memory: DiscoveryPolicy.reconnectKey's `earlier`. A tap clears the reconnect and dials any
     /// key, so a tap whose dial ended before its handshake (one the reconnect's own words invite
@@ -1135,12 +1150,14 @@ final class StreamClient: ObservableObject {
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.endBackgroundGrace(why: "Sill is back")
             self?.resetLiveness()
             self?.cameForward()
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.appInBackground = true
             self?.runningChanged()
+            self?.beginBackgroundGrace()
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
@@ -1310,6 +1327,34 @@ final class StreamClient: ObservableObject {
             print("pip: Sill " + (running ? "runs as in the foreground: Picture in Picture keeps it running" : "is in the background"))
         }
         #endif
+    }
+
+    /// Sill went to the background with a session: the time iOS grants is asked for (`backgroundGrace`).
+    /// None without a session, none while Picture in Picture keeps Sill running anyway (`appInForeground`).
+    private func beginBackgroundGrace() {
+        guard connected, !appInForeground, backgroundGrace == .invalid else { return }
+        backgroundGrace = UIApplication.shared.beginBackgroundTask(withName: "Keep the Mac's session") { [weak self] in
+            // iOS's time is up: the session ends cleanly now, rather than the Mac seeing a silent device
+            // later, and its reconnect starts as Sill comes back. Called on the main thread.
+            guard let self else { return }
+            #if DEBUG
+            print("background: iOS's time is up; the session ends and reconnects when Sill is back")
+            #endif
+            if !self.appInForeground { self.endSessionInBackground() }
+            self.endBackgroundGrace(why: "iOS's time is up")
+        }
+        #if DEBUG
+        print("background: Sill left with a session; iOS gives it \(backgroundGrace == .invalid ? "no" : "its") time to keep it")
+        #endif
+    }
+
+    private func endBackgroundGrace(why: String) {
+        guard backgroundGrace != .invalid else { return }
+        #if DEBUG
+        print("background: the session's time in the background ends (\(why))")
+        #endif
+        UIApplication.shared.endBackgroundTask(backgroundGrace)
+        backgroundGrace = .invalid
     }
 
     /// The device's own input waits: the tour shows, or the picture shows only in Picture in Picture
@@ -1851,6 +1896,7 @@ final class StreamClient: ObservableObject {
         }
         #endif
         reconnect = nil      // a tap starts afresh
+        watchedAtLoss = nil
         cancelHomeAsk()      // …and so does an ask still under way
         if mac.route == .remote, let id = mac.macID {
             dialSaved(id, why: .tap)
@@ -3735,6 +3781,7 @@ final class StreamClient: ObservableObject {
     /// never delivered its window list: the connect screen never left, and its Remote rows must not
     /// vanish for another 3 s. Main thread.
     func tearDown(status: String, restartSearch: Bool = true) {
+        endBackgroundGrace(why: "the session ended")
         // Picture in Picture shows nothing of a session that has ended: it stops (PictureInPicturePolicy.stops;
         // the reconnect runs when Sill comes back, as after any stay in the background).
         pictureInPicture.end(.sessionEnded, why: "the session ended (\(status))")

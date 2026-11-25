@@ -541,6 +541,7 @@ extension StreamClient {
     /// reconnect: the network row, the Direct row, then (a saved Mac) its saved addresses (§7.4).
     func sessionEnded(error: NWError?, end: RemoteDialPolicy.End?) {
         let s = session
+        let watched = active
         let goodbye = self.goodbye
         firstListDeadline?.cancel()
         firstListDeadline = nil
@@ -591,6 +592,7 @@ extension StreamClient {
         tearDown(status: outcome.text)
         reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
                                                       afterQuit: goodbye?.reason == Goodbye.quit) : nil
+        watchedAtLoss = outcome.reconnect && watched != .none ? watched : nil
         updateDiscovery()
         if outcome.reconnect {
             scheduleReconnectRetry()
@@ -598,7 +600,8 @@ extension StreamClient {
         }
     }
 
-    /// Picture in Picture ended with Sill in the background (PictureInPicturePolicy.endsSession, #379): the
+    /// Picture in Picture ended with Sill in the background (PictureInPicturePolicy.endsSession, #379), or the
+    /// time iOS gave the session in the background ran out (StreamClient's `backgroundGrace`): the
     /// session ends now, its connection closed from this side, so the Mac stops capturing for this device at
     /// once and reads nothing as a slow link. The connect screen says what a loss says, and the automatic
     /// reconnect is held until Sill is back (`reconnectAtReturn`), then starts as for a loss seen then: as
@@ -612,8 +615,9 @@ extension StreamClient {
         let saved = s?.macID.flatMap { savedMac($0) }
         let name = saved.map { displayName($0.macID) } ?? hostName
         let outcome = GoodbyePolicy.outcome(nil, mac: name, device: Self.deviceWord, saved: saved != nil)
+        let watched = active
         #if DEBUG
-        print("pip: Picture in Picture ended with Sill in the background: the session ends; its reconnect waits for Sill's return")
+        print("background: the session ends with Sill in the background; its reconnect waits for Sill's return")
         #endif
         connection = nil        // its close, which its state handler reports, is a stale callback from here
         c.cancel()
@@ -621,6 +625,7 @@ extension StreamClient {
         tearDown(status: outcome.text)
         reconnect = nil
         reconnectAtReturn = lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed)
+        watchedAtLoss = watched != .none ? watched : nil
         updateDiscovery()
     }
 
