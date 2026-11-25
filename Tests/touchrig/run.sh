@@ -53,7 +53,7 @@ fetch() {
         git -C "$root" show "$rev:$1" > "$work/src/$(basename "$1")" 2>/dev/null || rm -f "$work/src/$(basename "$1")"
     fi
 }
-for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/PointerPresence.swift \
+for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/PointerPresence.swift iOSClient/ArrowScrub.swift \
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
          iOSClient/HardwareKeyboardPolicy.swift iOSClient/TextComposition.swift iOSClient/StreamZoom.swift \
          iOSClient/PhonePortraitLayout.swift iOSClient/FullScreenPolicy.swift iOSClient/RevealEdgePan.swift \
@@ -73,6 +73,7 @@ sed -i '' '/^import StreamProtocol$/d' *.swift
 sed -n '/^\/\/ MARK: - Keys$/,/^\/\/ MARK: - Screen$/p' PortraitStreamScreen.swift > Keys.swift
 rm PortraitStreamScreen.swift
 flags=()
+if [ -f ArrowScrub.swift ]; then flags+=(ArrowScrub.swift); fi
 # The gestures when the surfaces have them (the stroke gate and `sendGesture`), and the picture's zoom (#65).
 if grep -q "var sendGesture" TrackpadView.swift; then flags+=(-D GESTURES); fi
 if grep -q "StreamZoom" InputOverlay.swift; then flags+=(-D ZOOM); fi
