@@ -112,6 +112,8 @@ final class StreamServer {
         /// Remote clients: the smallest backlog since the keyframes it was taking were all taken,
         /// which starts at what they left behind them (the frames that queued while they were).
         var backlogFloor = 0
+        /// Home clients: frame pacing, in-flight keyframe wave and deferred recovery requests.
+        var homePacing = HomePacing()
         /// Its link (docs/remote-bundle-plan.md §6): this second's frames sent and withheld (not
         /// those before its first keyframe) and the bytes its connection took, closed by the sweep
         /// each second into the judge.
@@ -1355,9 +1357,12 @@ final class StreamServer {
 
     private func sweep() {
         let now = Date().timeIntervalSince1970
+        let uptime = ProcessInfo.processInfo.systemUptime
         let since = lastSweepAt
         lastSweepAt = now
         var waiting: [Client] = []
+        var homeWaiting = false
+        var otherHomeKeyframeInFlight = false
         for client in clients.values {
             let second = LinkJudge.Second(sent: client.sentThisSecond, withheld: client.withheldThisSecond, taken: client.takenThisSecond,
                                           waiting: client.pendingBytes, heard: client.lastHeardAt > since)
@@ -1365,7 +1370,26 @@ final class StreamServer {
             client.withheldThisSecond = 0
             client.takenThisSecond = 0
             if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
-            guard client.route.isRemote else { continue }
+            guard client.route.isRemote else {
+                if evictIfNotDraining(client, now: now) { continue }
+                if client.needsKeyframe, !client.awaitingFirstKeyframe,
+                   client.pendingBytes > 0, client.oldestUnackedFrameAt == nil {
+                    client.oldestUnackedFrameAt = now
+                }
+                if client.connection.state == .ready {
+                    if client.homePacing.keyframesInFlight > 0 {
+                        otherHomeKeyframeInFlight = true
+                    } else if client.homePacing.canAskOnSweep(
+                        needsKeyframe: client.needsKeyframe,
+                        awaitingFirstKeyframe: client.awaitingFirstKeyframe,
+                        inflightFrames: client.inflightFrames,
+                        pendingBytes: client.pendingBytes
+                    ) {
+                        homeWaiting = true
+                    }
+                }
+                continue
+            }
             let silent = now - client.lastHeardAt
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
                 print("Client silent for \(Int(silent)) s, dropping: \(client.connection.endpoint)")
@@ -1375,17 +1399,23 @@ final class StreamServer {
                 waiting.append(client)
             }
         }
-        // A client that lost a frame asks for its keyframe when a later frame comes (`paceRemote`).
-        // Once the window has gone still, none comes, and it would keep the picture from before the
-        // drop until the window next changes: the end of a scroll, the last letters typed. So the
-        // sweep asks too, on the same terms (its queue idle, the request due); the encoder then
-        // encodes the still window's last frame again (HEVCEncoder.requestKeyframe). While frames
-        // come, whichever looks first asks, once.
+        // A client that lost a frame asks for its keyframe when a later frame comes (`paceRemote`,
+        // `HomePacing`). Once the window has gone still, none comes, and it would keep the picture
+        // from before the drop until the window next changes: the end of a scroll, the last letters
+        // typed. So the sweep asks too, on the same terms (its queue idle, the request due); the
+        // encoder then encodes the still window's last frame again (HEVCEncoder.requestKeyframe).
+        // While frames come, whichever looks first asks, once.
+        var ask = false
+        if homeWaiting, homeKeyframeRequests.due(now: uptime, otherHomeKeyframeInFlight: otherHomeKeyframeInFlight) {
+            homeKeyframeRequests.recordRequest(now: uptime)
+            ask = true
+        }
         if !waiting.isEmpty, remoteKeyframeDue(now) {
             lastRemoteKeyframeRequest = now
             for client in waiting { client.keyframeWanted = false }
-            onKeyframeNeeded?()
+            ask = true
         }
+        if ask { onKeyframeNeeded?() }
     }
 
     /// When each registered client was last heard from (the header of any message, a ping included),
@@ -1637,38 +1667,78 @@ final class StreamServer {
         queue.async { [self] in
             if lockGate.withholds(message.kind, picture: picture) { withheld(message.kind, for: nil); return }
             if message.kind == .parameterSets { lastParameterSets = data }
-            if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
+            let now = Date().timeIntervalSince1970
+            let uptime = ProcessInfo.processInfo.systemUptime
+            let mayAskHome: Bool
+            if message.kind == .frame {
+                let otherHomeInFlight = clients.values.contains {
+                    !$0.route.isRemote && $0.connection.state == .ready && $0.homePacing.keyframesInFlight > 0
+                }
+                if message.isKeyframe {
+                    lastKeyframeAt = now
+                    homeKeyframeRequests.recordKeyframe(now: uptime)
+                }
+                mayAskHome = homeKeyframeRequests.due(now: uptime, otherHomeKeyframeInFlight: otherHomeInFlight)
+            } else {
+                mayAskHome = false
+            }
+            var homeAsked = false
             var wantKeyframe = false
-            defer { if wantKeyframe { onKeyframeNeeded?() } }
+            defer {
+                if homeAsked {
+                    homeKeyframeRequests.recordRequest(now: uptime)
+                    wantKeyframe = true
+                }
+                if wantKeyframe { onKeyframeNeeded?() }
+            }
             for client in clients.values where client.connection.state == .ready {
+                if message.kind == .parameterSets, !client.route.isRemote {
+                    // Every admitted home keyframe sends `lastParameterSets` right ahead of itself,
+                    // so parameter sets never raise `inflight` before `decide` or go out alone.
+                    continue
+                }
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue
                 }
                 if message.kind == .frame {
-                    // Its link only counts here (LinkJudge): what it sends and drops is as ever.
-                    if client.needsKeyframe {
-                        guard message.isKeyframe, let ps = lastParameterSets else {
-                            Stats.shared.bump("net.waitKey")
-                            if !client.awaitingFirstKeyframe { client.withheldThisSecond += 1 }
-                            continue
+                    if evictIfNotDraining(client, now: now) { continue }
+                    switch client.homePacing.decide(
+                        isKeyframe: message.isKeyframe,
+                        hasParameterSets: lastParameterSets != nil,
+                        needsKeyframe: &client.needsKeyframe,
+                        awaitingFirstKeyframe: &client.awaitingFirstKeyframe,
+                        inflight: client.inflight,
+                        inflightFrames: client.inflightFrames,
+                        pendingBytes: client.pendingBytes,
+                        mayAskKeyframe: mayAskHome
+                    ) {
+                    case .waitKey(let countWithheld, let askKeyframe):
+                        Stats.shared.bump("net.waitKey")
+                        if countWithheld {
+                            client.withheldThisSecond += 1
+                            if client.pendingBytes > 0, client.oldestUnackedFrameAt == nil {
+                                client.oldestUnackedFrameAt = now
+                            }
                         }
-                        send(ps, to: client)
-                        client.needsKeyframe = false
-                        client.awaitingFirstKeyframe = false
-                    } else if client.inflight > 2 && !message.isKeyframe {
-                        // Drop the delta. Every later delta references it, so this client now waits for
-                        // a keyframe (sending deltas anyway is what showed up as flicker on the iPad).
+                        if askKeyframe { homeAsked = true }
+                    case .drop:
                         Stats.shared.bump("net.dropped")
                         client.withheldThisSecond += 1
-                        client.needsKeyframe = true
-                        wantKeyframe = true
-                        continue
+                        if client.pendingBytes > 0, client.oldestUnackedFrameAt == nil {
+                            client.oldestUnackedFrameAt = now
+                        }
+                    case .send(let sendParameterSets):
+                        if sendParameterSets, let ps = lastParameterSets {
+                            send(ps, to: client, now: now)
+                        }
+                        Stats.shared.bump("net.sent")
+                        client.sentThisSecond += 1
+                        send(data, to: client, isFrame: true, isKeyframe: message.isKeyframe, now: now, checkEvict: false)
                     }
-                    Stats.shared.bump("net.sent")
-                    client.sentThisSecond += 1
+                    continue
                 }
-                send(data, to: client, isFrame: message.kind == .frame)
+                send(data, to: client, now: now)
             }
         }
     }
@@ -1735,6 +1805,7 @@ final class StreamServer {
 
     /// On `queue`: one sound message to one device, counted as the section above says.
     private func sendAudio(_ data: Data, to client: Client) {
+        let remote = client.route.isRemote
         client.audioUnsent += 1
         client.lastSentAt = Date().timeIntervalSince1970
         client.pendingBytes += data.count
@@ -1743,6 +1814,13 @@ final class StreamServer {
             client.audioUnsent -= 1
             client.pendingBytes -= data.count
             client.takenThisSecond += data.count
+            if !remote {
+                client.homePacing.bytesTaken(pendingBytes: client.pendingBytes)
+                if client.oldestUnackedFrameAt != nil {
+                    client.oldestUnackedFrameAt = (client.inflightFrames <= 0 && client.pendingBytes <= 0)
+                        ? nil : Date().timeIntervalSince1970
+                }
+            }
         })
         Stats.shared.bump("aud.sent")
     }
@@ -1832,6 +1910,8 @@ final class StreamServer {
     /// keyframe asked for now leads it.
     static let remoteIdleBytes = 16 * 1024
 
+    /// Spacing across home clients for recovery keyframe requests (`HomePacing.keyframeSpacing`).
+    private var homeKeyframeRequests = HomePacing.Requests()
     /// When a keyframe was last asked for on behalf of a remote client.
     private var lastRemoteKeyframeRequest: TimeInterval = 0
     /// When the last keyframe went out, of any kind (the encoder's own, or one asked for).
@@ -1862,16 +1942,22 @@ final class StreamServer {
     /// No eviction while the connect burst (catalog + first keyframe) is still draining.
     private static let graceAfterConnect: TimeInterval = 8.0
 
-    private func send(_ data: Data, to client: Client, isFrame: Bool = false, isKeyframe: Bool = false) {
-        let now = Date().timeIntervalSince1970
+    private func evictIfNotDraining(_ client: Client, now: TimeInterval) -> Bool {
         let remote = client.route.isRemote
-        if isFrame, let oldest = client.oldestUnackedFrameAt,
-           now - oldest > (remote ? Self.remoteDeadAfter : Self.deadAfter),
-           now - client.connectedAt > (remote ? Self.remoteGrace : Self.graceAfterConnect) {
-            print("Client not draining for \(Int(now - oldest)) s, dropping: \(client.connection.endpoint)")
-            client.connection.cancel()   // its state handler removes it from `clients`
-            return
+        guard let oldest = client.oldestUnackedFrameAt,
+              now - oldest > (remote ? Self.remoteDeadAfter : Self.deadAfter),
+              now - client.connectedAt > (remote ? Self.remoteGrace : Self.graceAfterConnect) else {
+            return false
         }
+        print("Client not draining for \(Int(now - oldest)) s, dropping: \(client.connection.endpoint)")
+        client.connection.cancel()   // its state handler removes it from `clients`
+        return true
+    }
+
+    private func send(_ data: Data, to client: Client, isFrame: Bool = false, isKeyframe: Bool = false,
+                      now: TimeInterval = Date().timeIntervalSince1970, checkEvict: Bool = true) {
+        let remote = client.route.isRemote
+        if isFrame, checkEvict, evictIfNotDraining(client, now: now) { return }
         client.inflight += 1
         client.lastSentAt = now
         client.pendingBytes += data.count
@@ -1883,6 +1969,8 @@ final class StreamServer {
                 client.keyframesInFlight.append((client.keyframeSeq, data.count))
                 client.keyframeBytesInFlight += data.count
             }
+        } else if isKeyframe {
+            client.homePacing.keyframeSent(bytes: data.count)
         }
         if isFrame {
             client.inflightFrames += 1
@@ -1899,15 +1987,25 @@ final class StreamServer {
                     // The last of them taken: what they left behind them.
                     if client.keyframesInFlight.isEmpty { client.backlogFloor = client.pendingBytes }
                 }
+            } else {
+                client.homePacing.bytesTaken(pendingBytes: client.pendingBytes)
+                if isKeyframe {
+                    client.homePacing.keyframeTaken(bytes: data.count, pendingBytes: client.pendingBytes)
+                }
             }
             if isFrame {
                 client.inflightFrames -= 1
                 if client.inflightFrames <= 0 {
-                    client.inflightFrames = 0; client.oldestUnackedFrameAt = nil
+                    client.inflightFrames = 0
+                    client.oldestUnackedFrameAt = (!remote && client.pendingBytes > 0 && client.needsKeyframe)
+                        ? Date().timeIntervalSince1970 : nil
                 } else {
                     // Progress: a slow but live peer on a saturated link never drains to zero.
                     client.oldestUnackedFrameAt = Date().timeIntervalSince1970
                 }
+            } else if !remote, client.oldestUnackedFrameAt != nil {
+                client.oldestUnackedFrameAt = (client.inflightFrames <= 0 && client.pendingBytes <= 0)
+                    ? nil : Date().timeIntervalSince1970
             }
         })
     }
