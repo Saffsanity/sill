@@ -1,0 +1,2 @@
+flags: -package-name sill
+Sources/SillHost/TypedText.swift

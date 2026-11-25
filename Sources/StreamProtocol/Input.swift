@@ -19,8 +19,8 @@ public enum InputEvent: Codable, Hashable {
     /// while the device's Reverse Scrolling turns its fingers' scrolls around: `ScrollDirection`).
     case scroll(x: Double, y: Double, dx: Double, dy: Double)
 
-    /// Text from the software keyboard. "\n", "\t" and "\u{8}" (backspace) are delivered as the
-    /// matching keys; everything else is typed as Unicode.
+    /// Text from the software keyboard. "\n", "\r", "\r\n", "\t" and "\u{8}" (backspace) are
+    /// delivered as the matching keys; everything else is typed as Unicode.
     case text(String)
 
     /// Scroll gesture boundaries, so the Mac sees a trackpad-like gesture (rubber-banding, and

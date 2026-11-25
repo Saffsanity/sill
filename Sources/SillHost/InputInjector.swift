@@ -473,14 +473,13 @@ final class InputInjector {
         post(keys.text(from: device))
         stopRepeating()
         for character in string {
-            switch character {
-            case "\n": tap(virtualKey: 36)          // Return
-            case "\t": tap(virtualKey: 48)          // Tab
-            case "\u{8}": tap(virtualKey: 51)       // Delete (backspace)
-            default:
+            switch TypedText.step(for: character) {
+            case .returnKey: tap(virtualKey: 36)        // Return ("\n", "\r", "\r\n")
+            case .tabKey: tap(virtualKey: 48)           // Tab
+            case .backspaceKey: tap(virtualKey: 51)     // Delete (backspace)
+            case .unicode(let units):
                 // Virtual key 0 with a Unicode string: the character arrives whatever the Mac's
                 // keyboard layout is, which is what a software keyboard on the phone means.
-                let units = Array(character.utf16)
                 guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
                       let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { continue }
                 down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
