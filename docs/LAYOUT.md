@@ -215,7 +215,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the listener built with or without peer-to-peer and replaced live when Direct
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL,
-  SILL_TEST_PEER_TO_PEER_INTERFACE and SILL_TEST_LOOPBACK), `ClientLink`
+  SILL_TEST_PEER_TO_PEER_INTERFACE and SILL_TEST_LOOPBACK), `HomePacing`
+  (a home client's frame pacing, in-flight keyframe hold and deferred recovery
+  keyframe requests; pure, `Tests/checks/home-pacing`), `ClientLink`
   (which route a client came by, from its endpoint's scope, and the menu card's
   word for it: Wired, Wi-Fi, Direct or none; pure, checked on its own with
   `swiftc -package-name sill`, which its `package` access needs),
