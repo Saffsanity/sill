@@ -127,15 +127,18 @@ struct TextComposition: Equatable {
     /// Text typed or committed: it replaces the marked text if there is any, else the selection if there
     /// is one, and goes to the Mac. Over a selection that reaches back across the fence it goes only
     /// while it leaves what is final as it is; right after such a selection's deletion, what it starts
-    /// with of what that deletion left in place (`retype`) is not typed again.
-    mutating func insert(_ text: String) -> [Output] {
+    /// with of what that deletion left in place (`retype`) is not typed again. When `softNewlines` is
+    /// true, line breaks inside multi-character inserts go out as `⇧Return` (`SoftNewlines`) rather than
+    /// advancing the fence; a standalone Return still advances the fence.
+    mutating func insert(_ text: String, softNewlines: Bool = false) -> [Output] {
         if marked == nil, let selection {
             let new = sentReplacing(selection, with: text)
             guard keepsFinal(new) else { self.selection = nil; return [] }
-            return commit(new)
+            return commit(new, softNewlines: softNewlines)
         }
         guard let rest = typedAfterRetype(text) else { return [] }
-        return commit(sent + rest)
+        guard !rest.isEmpty else { return [] }
+        return commit(sent + rest, softNewlines: softNewlines)
     }
 
     /// The input method's composition so far (an empty one ends it: nothing is sent). One that starts
@@ -156,10 +159,11 @@ struct TextComposition: Equatable {
     }
 
     /// The composition is accepted as it stands: sent.
-    mutating func unmark() -> [Output] {
+    mutating func unmark(softNewlines: Bool = false) -> [Output] {
         guard let marked else { return [] }
+        let soft = softNewlines && !TextInputRules.isSingleNewline(marked)
         retype = ""
-        return commit(sent + marked)
+        return commit(sent + marked, softNewlines: soft)
     }
 
     /// Backspace: inside a composition it edits the composition; otherwise it deletes the selection if
@@ -188,10 +192,10 @@ struct TextComposition: Equatable {
     /// replacement typed a second time at the caret (dictation's last correction of a phrase, its
     /// punctuation or capitals, coming after a click), or the Return typed again with the line before it
     /// (the message sent twice, the command run twice).
-    mutating func replace(_ range: NSRange, with text: String, taken: Int? = nil) -> [Output] {
+    mutating func replace(_ range: NSRange, with text: String, taken: Int? = nil, softNewlines: Bool = false) -> [Output] {
         guard refusal(range, with: text, taken: taken) == nil else { return [] }
         retype = ""
-        return commit(replacing(range, with: text))
+        return commit(replacing(range, with: text), softNewlines: softNewlines)
     }
 
     /// Why `replace` would send nothing, or nil when it goes: a range taken before this side forgot or
@@ -295,7 +299,7 @@ struct TextComposition: Equatable {
     /// make one together (a CR there and an LF typed later); only the person's own backspace leaves `new`
     /// without it, and the fence then comes back to what is left. A Return or a Tab this sends puts the
     /// fence just after the last one.
-    private mutating func commit(_ new: String) -> [Output] {
+    private mutating func commit(_ new: String, softNewlines: Bool = false) -> [Output] {
         selection = nil
         marked = nil
         markedSelection = NSRange(location: 0, length: 0)
@@ -310,7 +314,8 @@ struct TextComposition: Equatable {
         if now.count > common { out.append(.text(String(now[common...]))) }
         sent = new
         fence = min(fence, newUnits.count)
-        if case .text(let typed)? = out.last, let end = TextInputRules.endOfReturnOrTab(in: typed) {
+        if case .text(let typed)? = out.last,
+           let end = TextInputRules.endOfReturnOrTab(in: typed, softNewlines: softNewlines) {
             fence = newUnits.count - typed.utf16.count + end
         }
         return out
@@ -355,12 +360,16 @@ enum TextInputRules {
     /// twice, the command run twice, backspaces into the next field). What follows it, in the same text
     /// or typed later, went where the caret went and is revised as any typing is. Unicode scalars, not
     /// characters: "\r\n" is one Character.
-    static func endOfReturnOrTab(in text: String) -> Int? {
+    static func isSingleNewline(_ text: String) -> Bool {
+        text == "\n" || text == "\r" || text == "\r\n"
+    }
+
+    static func endOfReturnOrTab(in text: String, softNewlines: Bool = false) -> Int? {
         var end: Int?
         var offset = 0
         for scalar in text.unicodeScalars {
             offset += scalar.utf16.count
-            if scalar == "\n" || scalar == "\r" || scalar == "\t" { end = offset }
+            if scalar == "\t" || (!softNewlines && (scalar == "\n" || scalar == "\r")) { end = offset }
         }
         return end
     }

@@ -90,6 +90,8 @@ struct HostSettingsPanel: View {
     /// This iPhone's Arrow Keys (#287; PhoneKeyRow.arrowKeysKey): off unless turned on, read by the key row
     /// (the four arrows after shift, in a row that scrolls), never sent; offered on an iPhone alone.
     @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
+    /// Sends ⇧Return for line breaks inside multi-line dictation or input-method text (`SoftNewlines`).
+    @AppStorage(SoftNewlines.switchKey) private var softNewlines = SoftNewlines.defaultOn
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
@@ -928,6 +930,13 @@ struct HostSettingsPanel: View {
             .id(Self.hideThumbnailsRowID)
             Footnote(text: PhoneKeyboardLift.Copy.footnote)
         }
+        Rows {
+            Toggle(isOn: $softNewlines) {
+                Text(SoftNewlines.Copy.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: SoftNewlines.Copy.footnote)
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
