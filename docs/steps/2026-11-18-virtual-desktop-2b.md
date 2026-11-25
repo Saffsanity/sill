@@ -1172,3 +1172,8 @@ Virtual Desktop and its encoder's limits only said; probe P3 built and run with 
   right after the other: identical but #395's locked line (8 and 3, 15 and 11, 18 and 11; 11 and 10), as in run 5.
 - Sill for Mac's previews from the bare SillMenuBar: 363 files; the ten new are Custom…'s five states (nothing typed,
   within, over, the encoder's note, scaled) in light and dark, looked at; the other 353 byte for byte run 5's.
+- Probe P3's build, found after the run (2026-11-25): `p3/run.sh` gave swiftc `probe-phone.swift` under its own name,
+  and beside another file swiftc takes top-level code from a file named `main.swift` alone, so the pushed script did not
+  build ("expressions are not allowed at the top level") and "built" above was not true of it. It now compiles a copy
+  named `main.swift`, as P2b's and P2c's do; `run.sh --build` and `run.sh --dry-run` pass on this Mac (all 17 selectors
+  looked up, the four cases listed, nothing made).

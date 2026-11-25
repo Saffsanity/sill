@@ -31,10 +31,16 @@ RUN_LIMIT=90
 build() {
   print -r -- "run.sh: building the probe, into $BIN (swiftc, under a minute)"
   mkdir -p "$OUT"
-  if ! swiftc -swift-version 5 -Onone "$SRC" "$HERE/probe-phone.swift" -o "$BIN.new"; then
-    rm -f "$BIN.new"
+  # swiftc takes top-level code from a file named main.swift alone (beside another file, under any other name it is
+  # "expressions are not allowed at the top level"), so the probe is compiled as a copy of that name, as P2b's and P2c's.
+  local T=$OUT/tmp-src
+  rm -rf "$T" && mkdir -p "$T" || return 1
+  cp "$HERE/probe-phone.swift" "$T/main.swift" || return 1
+  if ! swiftc -swift-version 5 -Onone "$SRC" "$T/main.swift" -o "$BIN.new"; then
+    rm -rf "$T" "$BIN.new"
     return 1
   fi
+  rm -rf "$T"
   mv -f "$BIN.new" "$BIN"
   linked_ok || return 1
   print -r -- "run.sh: built $BIN"
