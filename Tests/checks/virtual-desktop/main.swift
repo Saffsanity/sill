@@ -1041,6 +1041,7 @@ check(VB.shownName(ownPro, among: [ownPro, ownMini, ownPhone]) == "your iPad (iP
       && VB.shownName(ownPhone, among: [ownPro, ownMini, ownPhone]) == "your iPhone", "two iPads known: each whole, so they read apart; the iPhone alone of its kind")
 check(VB.shownName(VB.largestIPad, among: [ownPro]) == "iPad Pro 13-inch" && VB.shownName(VB.largestIPad, among: [], start: true) == "iPad Pro 13-inch"
       && VB.shownName(VB.Device(name: "(iPad16,6)", pixelWidth: 1, pixelHeight: 1, phone: false, fps: 60), among: []) == "(iPad16,6)"
+      && VB.shownName(VB.Device(name: " (iPad16,6)", pixelWidth: 1, pixelHeight: 1, phone: false, fps: 60), among: []) == " (iPad16,6)"
       && VB.shownName(VB.Device(name: "iPad (mine", pixelWidth: 1, pixelHeight: 1, phone: false, fps: 60), among: []) == "iPad (mine",
       "a name with no identifier as it is: the table's, one with nothing before it, one never closed")
 check(VB.upTo(ownPro, known: [ownPro, ownPhone]) == "Up to 5504 × 4128 at 120 Hz for your iPad, or as many pixels a second at a lower rate."

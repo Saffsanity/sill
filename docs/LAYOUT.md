@@ -314,8 +314,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
   `VirtualDesktopBudget` (part B, 2026-11-25: a size the person types, up to a device's budget, twice its screen each
   way at 120 Hz, Noah's; `current`, every current iPhone's and iPad's screen from Xcode's simulator profiles; the
-  ceiling, the largest budget known; the entry's refusals and their sentences; what a device gets, as it is or scaled,
-  `view`, `fitted`; what this Mac's encoder carries, `encoderNote`; TEST ONLY SILL_TEST_ENCODER; pure,
+  ceiling, the largest budget known; the entry's refusals and their sentences; a device named as the status menu names
+  it, "your iPad", `shownName`; what a device gets, as it is or scaled, `view`, `fitted`; what this Mac's encoder
+  carries, `encoderNote`; TEST ONLY SILL_TEST_ENCODER; pure,
   `Tests/checks/virtual-desktop`),
   `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
   the roles changing hands with the headless display, never the main display beside a real screen;

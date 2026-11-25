@@ -1027,13 +1027,22 @@ Add to the pull request before it merges please."
   each one's ScreenDimensionsCapability: Apple's own numbers), the iPhone Duo's two screens among them. What may be
   typed: the largest budget among the devices this Mac knows (Sill for Mac keeps each device that connected and said its
   screen, `HostSettings.knownDevices`, saved as JSON under `virtualDesktopDevices`), or the largest current iPad's when it
-  knows none (default 51). Beside the entry, each known device's line: "iPad Pro 13-inch: as it is, at 120 Hz." or
-  "iPhone 15 Pro: scaled to 4008 × 3006 at 120 Hz."; with none known, "No device has connected yet: up to 5504 × 4128 at
-  120 Hz, the largest current iPad’s, or as many pixels a second at a lower rate." Refused, with one sentence each: a side
-  not typed ("Type a width and a height in pixels."), under 640 or over 8192 pixels, an odd Retina side, a Retina desktop
+  knows none (default 51). Beside the entry, each known device's line: "Your iPad: as it is, at 120 Hz." or "Your
+  iPhone: scaled to 4008 × 3006 at 120 Hz."; with none known, "No device has connected yet: up to 5504 × 4128 at 120 Hz,
+  the largest current iPad’s, or as many pixels a second at a lower rate." Refused, with one sentence each: a side not
+  typed ("Type a width and a height in pixels."), under 640 or over 8192 pixels, an odd Retina side, a Retina desktop
   under 1600 pixels on both sides (macOS shows it at standard resolution: the stage's 754 × 784), a rate out of 24 to 120
   Hz, and over the ceiling: "That’s more than Sill sends to iPad Pro 13-inch: up to 5504 × 4128 at 120 Hz, or as many pixels
-  a second at a lower rate." (the device's own name and size when it is one this Mac knows).
+  a second at a lower rate." with no device known, "… to your iPad: up to …" with that device's size when it is one this
+  Mac knows.
+- **A device's name** (default 56): a device of Sill's calls itself by its kind and model identifier, "iPad (iPad16,6)"
+  (UIDevice's name, which since iOS 16 is the kind alone, and the identifier: ClientStatsReporter.deviceName), and the
+  status menu shows it as "iPad"; so Settings says "your iPad" (`VirtualDesktopBudget.shownName`), and "your iPad
+  (iPad16,6)" while another device of its kind is known, so the two read apart. Sill for Mac keeps each device by that
+  whole name, the 24 that connected last. The host lists for it only the devices whose names it knows, anew when a name
+  comes with a hello or stats (`publishBudgetDevices`), so a device that said its screen before its name is never kept as
+  "a device" (desktop-check's first try at 39b76f54 found the budget's line naming "a device": its clients sent no hello;
+  a device of this build sends its hello, and its name, first).
 - **What this Mac can carry** (B3): Sill already learns at launch whether its hardware encoder answers (one small frame,
   `EncoderProbe.hardwareResponds`), and while it streams on the software encoder, how fast the hardware runs at the
   stream's size (`throughput`, the re-check of docs/steps/2026-09-24-encoder-recovery.md, kept as `enginePixelRate`);
@@ -1083,3 +1092,13 @@ Add to the pull request before it merges please."
 53. **A Retina desktop** needs one side of 1600 pixels or more, and even sides; each side 640 to 8192 pixels.
 54. **One picture for every device**: two devices of different budgets showing it both get the smaller one's picture.
 55. **Sill measures the encoder** at a chosen size once a run, its rate only while no device is connected.
+56. **A device is "your iPad"** in Custom…'s lines and sentences (as the status menu's "iPad"), whole ("your iPad
+    (iPad16,6)") only while two of a kind are known; no table of model names.
+57. **Sill for Mac keeps the 24 devices that connected last** for the ceiling and the lines; nothing forgets one by hand,
+    so a device given away keeps its budget the ceiling until 24 newer ones replace it.
+
+**Words for COMPATIBILITY.md once a public build carries them** (the sixth part's; proposed, not written there): "a
+viewport's optional `screen` (`ViewportScreen`: `pixelWidth` and `pixelHeight` held upright, `scale`, `phone` optional),
+which every device from this build on sends and a host takes only within `ViewportBounds.screen` (each side 1 to 32768
+pixels, 1 to 4 pixels a point), ignoring any other and never refusing the viewport for it; an older host skips it, and a
+host serves a device that sends none as before (the 800-point floor, no budget)."
