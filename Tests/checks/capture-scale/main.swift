@@ -532,6 +532,8 @@ check(held(4097, 3001) == "4096×3000", "a side just over: held, the other side 
 func heldTo(_ w: Int, _ h: Int, _ side: Int) -> String { EncoderLimit.held(width: w, height: h, side: side).map { "\($0.width)×\($0.height)" } ?? "nil" }
 check(heldTo(5120, 2880, 3840) == "3840×2160" && heldTo(3840, 2160, 3840) == "nil" && heldTo(2880, 5120, 3840) == "2160×3840",
       "held to another side: 5K at 3840 is 3840×2160, upright too; at it, nothing")
+check(heldTo(4000, 2000, 3840) == "3840×1920" && heldTo(5000, 2000, 6000) == "nil",
+      "the side given, not 4096: 4000 wide held at 3840, and 5000 wide within 6000")
 check(held(5504, 4128) == "4096×3072" && held(7680, 2160) == "4096×1152", "the Virtual Desktop at Noah's 5504 × 4128 and a 32:9 7680 × 2160: held")
 var heldWrong = 0
 for _ in 0..<20_000 {

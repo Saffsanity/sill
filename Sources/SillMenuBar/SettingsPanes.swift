@@ -705,18 +705,19 @@ struct VirtualDesktopSection: View {
 
     /// Custom…'s fields, its one sentence or its lines, and Use This Size.
     @ViewBuilder private var customEntry: some View {
+        // Each field's word as its placeholder, inside it: a Form's TextField would put its title in the label column.
         LabeledContent("Size") {
             HStack(spacing: 6) {
-                TextField("Width", text: $widthText).frame(width: 64).multilineTextAlignment(.trailing)
+                TextField("Width", text: $widthText, prompt: Text("Width")).labelsHidden().frame(width: 72).multilineTextAlignment(.trailing)
                 Text("×")
-                TextField("Height", text: $heightText).frame(width: 64).multilineTextAlignment(.trailing)
+                TextField("Height", text: $heightText, prompt: Text("Height")).labelsHidden().frame(width: 72).multilineTextAlignment(.trailing)
                 Text("pixels")
             }
         }
         Toggle("Retina (half as many points each way)", isOn: $retina)
         LabeledContent("Refresh Rate") {
             HStack(spacing: 6) {
-                TextField("Device’s", text: $rateText).frame(width: 64).multilineTextAlignment(.trailing)
+                TextField("Device’s", text: $rateText, prompt: Text("Device’s")).labelsHidden().frame(width: 72).multilineTextAlignment(.trailing)
                 Text("Hz")
             }
         }
