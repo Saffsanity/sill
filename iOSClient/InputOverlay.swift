@@ -142,6 +142,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// A finger held on the picture: with Hold, Then Drag on (the default), a right click at its lift or a
     /// left drag once it moves; off, a right click at once (TouchHold).
     private var hold = TouchHold()
+    /// Space-bar floating cursor scrubber (`ArrowScrub`).
+    private var floatingScrub = ArrowScrub()
+    private let scrubFeedback = UISelectionFeedbackGenerator()
+    private var lastHapticAt: Double = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -583,7 +587,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop(); releaseForwardedKeys(); commitComposition("left its window"); pencilTouching = false }
+        if window == nil { momentum.stop(); releaseForwardedKeys(); cancelFloatingScrub(); commitComposition("left its window"); pencilTouching = false }
         // A session's start, a rotation's other layout, a reconnect's new screen: the proxy takes the
         // keyboard for a hardware keyboard (on the next turn, once this view is settled in the window).
         if window != nil { keyboardProxy?.joined(self) } else { keyboardProxy?.left(self) }
@@ -998,6 +1002,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         let resigned = super.resignFirstResponder()
         if resigned {
             releaseForwardedKeys()
+            cancelFloatingScrub()
             commitComposition("resigned")
             keyboardProxy?.resigned(self)
             KeyboardFrameMonitor.shared.holds(self, false)
@@ -1434,6 +1439,43 @@ extension InputOverlayView {
     func closestPosition(to point: CGPoint) -> UITextPosition? { endOfDocument }
     func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? { range.end }
     func characterRange(at point: CGPoint) -> UITextRange? { nil }
+
+    private func cancelFloatingScrub() {
+        let res = floatingScrub.cancel()
+        res.events.forEach(send)
+        if res.spendsLatch { consumeLatch() }
+    }
+
+    func beginFloatingCursor(at point: CGPoint) {
+        Self.textinput("beginFloatingCursor (\(Int(point.x)),\(Int(point.y)))")
+        scrubFeedback.prepare()
+        let now = ProcessInfo.processInfo.systemUptime
+        let res = floatingScrub.beginFloating(at: point, time: now, latched: latchedModifiers)
+        res.events.forEach(send)
+        if res.spendsLatch { consumeLatch() }
+    }
+
+    func updateFloatingCursor(at point: CGPoint) {
+        guard floatingScrub.isActive else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let res = floatingScrub.move(to: point, time: now)
+        guard !res.events.isEmpty else { return }
+        forgetTyped()
+        res.events.forEach(send)
+        if res.ticks > 0, now - lastHapticAt >= 0.018 {
+            lastHapticAt = now
+            scrubFeedback.selectionChanged()
+            scrubFeedback.prepare()
+        }
+    }
+
+    func endFloatingCursor() {
+        guard floatingScrub.isActive else { return }
+        Self.textinput("endFloatingCursor")
+        let res = floatingScrub.end(time: ProcessInfo.processInfo.systemUptime)
+        res.events.forEach(send)
+        if res.spendsLatch { consumeLatch() }
+    }
 
     /// The top middle of the picture, where the composition shows.
     private var compositionAnchor: CGRect {

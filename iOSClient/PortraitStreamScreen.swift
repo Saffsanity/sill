@@ -1005,6 +1005,11 @@ private struct KeyRow: View {
     var hidden: Bool = false
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
+    /// Continuous 2D cursor scrubbing when sliding across the arrow caps (`ArrowScrub`).
+    @State private var arrowScrub = ArrowScrub()
+    @State private var activeArrowCap: UInt16?
+    @State private var scrubHoldTask: Task<Void, Never>?
+    @State private var lastScrubHapticAt: Double = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Whether escape, tab and the arrows are held from the touch to the release: everywhere but where a
     /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
@@ -1067,15 +1072,34 @@ private struct KeyRow: View {
         }
         // Arrow Keys turned on or off with a cap held (another finger in Settings): the row it was in has
         // gone, and no release comes from it, so it comes up here.
-        .onChange(of: arrowKeys) { _, _ in heldCap.releaseAll().forEach(send) }
+        .onChange(of: arrowKeys) { _, _ in cancelArrowScrub(); heldCap.releaseAll().forEach(send) }
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
         // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
-        .onDisappear { heldCap.releaseAll().forEach(send) }
-        .onChange(of: hidden) { _, now in if now { heldCap.releaseAll().forEach(send) } }
+        .onDisappear { cancelArrowScrub(); heldCap.releaseAll().forEach(send) }
+        .onChange(of: hidden) { _, now in if now { cancelArrowScrub(); heldCap.releaseAll().forEach(send) } }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
+    }
+
+    private func cancelArrowScrub() {
+        scrubHoldTask?.cancel()
+        scrubHoldTask = nil
+        activeArrowCap = nil
+        applyScrub(arrowScrub.cancel())
+    }
+
+    private func applyScrub(_ result: ArrowScrub.StepResult) {
+        result.events.forEach(send)
+        if result.spendsLatch { latched = [] }
+        if result.ticks > 0 {
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastScrubHapticAt >= 0.018 {
+                lastScrubHapticAt = now
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+        }
     }
 
     @ViewBuilder private func key(_ key: Key) -> some View {
@@ -1084,10 +1108,14 @@ private struct KeyRow: View {
             cap(open: false, label: label, largeContent: title, held: capsHold ? { touch(usage, down: $0) } : nil,
                 action: { activate(usage) }) { text(title) }
         case .arrow(let symbol, let usage, let label):
-            cap(open: false, label: label, held: capsHold ? { touch(usage, down: $0) } : nil, action: { activate(usage) }) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.text)
+            if keys == .full {
+                scrubArrowCap(symbol: symbol, usage: usage, label: label)
+            } else {
+                cap(open: false, label: label, held: capsHold ? { touch(usage, down: $0) } : nil, action: { activate(usage) }) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Palette.text)
+                }
             }
         case .modifier(let title, let flag, let label):
             latchKey(key, title, flag, label: label)
@@ -1176,6 +1204,60 @@ private struct KeyRow: View {
         }
     }
 
+    /// An arrow cap that taps once, holds to repeat when stationary, and turns into a continuous 2D
+    /// haptic cursor trackpad the moment the finger slides across it (`ArrowScrub`). Uses a UIKit touch
+    /// surface (`ArrowScrubCap`) so Control Center / Screen Recording interruptions always deliver
+    /// `touchesCancelled` cleanly without wedging SwiftUI's `DragGesture`.
+    @ViewBuilder
+    private func scrubArrowCap(symbol: String, usage: UInt16, label: String) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        let active = activeArrowCap == usage
+        Image(systemName: symbol)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(active && arrowScrub.isScrubbing ? Palette.accent : Palette.text)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(shape.fill(active ? Palette.controlOpen : Palette.control))
+            .opacity(active && !arrowScrub.isScrubbing ? 0.65 : 1)
+            .overlay {
+                ArrowScrubCap(
+                    label: label,
+                    onBegin: { point, time in
+                        heldCap.releaseAll().forEach(send)
+                        activeArrowCap = usage
+                        applyScrub(arrowScrub.begin(cap: usage, at: point, time: time, latched: latched))
+                        scrubHoldTask?.cancel()
+                        scrubHoldTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: UInt64(ArrowScrub.holdDelay * 1_000_000_000))
+                            guard !Task.isCancelled, activeArrowCap == usage else { return }
+                            let firedAt = max(ProcessInfo.processInfo.systemUptime, time + ArrowScrub.holdDelay)
+                            applyScrub(arrowScrub.holdReady(at: firedAt))
+                        }
+                    },
+                    onMove: { point, time in
+                        guard activeArrowCap == usage else { return }
+                        let res = arrowScrub.move(to: point, time: time)
+                        if arrowScrub.isScrubbing { scrubHoldTask?.cancel(); scrubHoldTask = nil }
+                        applyScrub(res)
+                    },
+                    onEnd: { point, time in
+                        guard activeArrowCap == usage else { return }
+                        scrubHoldTask?.cancel()
+                        scrubHoldTask = nil
+                        activeArrowCap = nil
+                        applyScrub(arrowScrub.end(at: point, time: time))
+                    },
+                    onCancel: {
+                        guard activeArrowCap == usage else { return }
+                        cancelArrowScrub()
+                    },
+                    onActivate: {
+                        activate(usage)
+                    }
+                )
+            }
+            .clipShape(shape)
+    }
+
     private func text(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .medium))
@@ -1231,6 +1313,73 @@ struct KeyboardToggleFrameKey: PreferenceKey {
 private struct KeyboardToggleFrame: View {
     var body: some View {
         GeometryReader { g in Color.clear.preference(key: KeyboardToggleFrameKey.self, value: g.frame(in: .named(TourSpace.name))) }
+    }
+}
+
+/// Direct UIKit touch surface for an arrow cap (`ArrowScrub`): tracks a single finger from `touchesBegan`
+/// through `touchesMoved`, `touchesEnded` and `touchesCancelled` in window coordinates so a cancelled press
+/// always releases any held chord cleanly.
+private struct ArrowScrubCap: UIViewRepresentable {
+    let label: String
+    var onBegin: (CGPoint, Double) -> Void
+    var onMove: (CGPoint, Double) -> Void
+    var onEnd: (CGPoint, Double) -> Void
+    var onCancel: () -> Void
+    var onActivate: () -> Void
+
+    func makeUIView(context: Context) -> TouchView {
+        let view = TouchView()
+        view.backgroundColor = .clear
+        view.isExclusiveTouch = true
+        view.isAccessibilityElement = true
+        view.accessibilityTraits = .button
+        return view
+    }
+
+    func updateUIView(_ uiView: TouchView, context: Context) {
+        uiView.accessibilityLabel = label
+        uiView.onBegin = onBegin
+        uiView.onMove = onMove
+        uiView.onEnd = onEnd
+        uiView.onCancel = onCancel
+        uiView.onActivate = onActivate
+    }
+
+    final class TouchView: UIView {
+        var onBegin: ((CGPoint, Double) -> Void)?
+        var onMove: ((CGPoint, Double) -> Void)?
+        var onEnd: ((CGPoint, Double) -> Void)?
+        var onCancel: (() -> Void)?
+        var onActivate: (() -> Void)?
+        private weak var tracked: UITouch?
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard tracked == nil, let touch = touches.first else { return }
+            tracked = touch
+            onBegin?(touch.location(in: nil), touch.timestamp)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let tracked, touches.contains(tracked) else { return }
+            onMove?(tracked.location(in: nil), tracked.timestamp)
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let tracked, touches.contains(tracked) else { return }
+            self.tracked = nil
+            onEnd?(tracked.location(in: nil), tracked.timestamp)
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let tracked, touches.contains(tracked) else { return }
+            self.tracked = nil
+            onCancel?()
+        }
+
+        override func accessibilityActivate() -> Bool {
+            onActivate?()
+            return true
+        }
     }
 }
 
