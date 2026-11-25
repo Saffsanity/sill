@@ -1102,3 +1102,73 @@ viewport's optional `screen` (`ViewportScreen`: `pixelWidth` and `pixelHeight` h
 which every device from this build on sends and a host takes only within `ViewportBounds.screen` (each side 1 to 32768
 pixels, 1 to 4 pixels a point), ignoring any other and never refusing the viewport for it; an older host skips it, and a
 host serves a device that sends none as before (the 800-point floor, no budget)."
+
+**For whichever of this branch and #400 lands second** (the sixth part's; the fifth's words stand): a direct merge of the
+two meets in the same files with the same number of conflict blocks as the fifth part's head did (git merge-tree, read
+only): this run adds no parameter to HostConfig's initializer, keeps `standard`'s "headlessDisplay: true, virtualDesktop:
+false," as it is, and keeps Sill for Mac's known devices beside the log's switch, away from the darkening's new settings
+(39b76f54), so the local combined build's settling script finds its blocks where it expects them.
+
+**For Noah** (the sixth part's; first in the pull request's list). Watch Sill.log meanwhile:
+`grep -E "Virtual Desktop|Desktop:|This Mac's hardware" ~/Library/Logs/Sill/Sill.log | tail -40`.
+1. **Probe P3, two minutes, no install**: `zsh ~/Downloads/wt-vd-2b/Scripts/display-modes-probe/p3/run.sh` with Sill quit
+   and no device connected; it makes each size an iPhone 15 Pro gets for a few seconds and says whether macOS kept it at
+   2x. A failure: "kept at 2x: no" (Sill then makes the 800-point size for that layout and says so, default 49).
+2. **Install this branch**: Sill for Mac, and the app on the iPhone and the iPad (both changed: they say their screen, and
+   an iPhone draws its desktop one pixel for one).
+3. **The iPhone upright with Full Screen** on the Virtual Desktop (Match the device): text about two thirds of its own size
+   and sharp, no bars; "Virtual Desktop 589×1189 pt @2× at 120 Hz id N: made in … ms for iPhone (its picture: 393×793 pt,
+   1179×2379 px; pixel for pixel)."; on its side 1101×589, its controls 1077×448, upright with its controls 800×499
+   (scaled). A failure: half-size text (800×1614), bars, or a picture soft everywhere.
+4. **A size of your own within the budget**: Custom… 3840 × 2160, Retina off, 60 Hz: "Your iPad: as it is, at 60 Hz." and
+   "Your iPhone: as it is, at 60 Hz."; Use This Size; made at that size the next time. A failure: no line per device, or a
+   made line at another size.
+5. **One over the budget**: 8192 × 4608 at 120 Hz: "That’s more than Sill sends to your iPad: up to 4532 × 2976 at 120 Hz,
+   or as many pixels a second at a lower rate." (the iPad mini's), Use This Size disabled; at 30 Hz, taken.
+6. **One over this Mac's encoder**: 6016 × 3384 at 60 Hz, no device connected for a moment: the note says what this Mac
+   carries ("This Mac streams this at about 38 frames a second." or "… scaled down to 4096 × 2304 …"); it works from the
+   iPad. A failure: no picture, or one far slower than the note.
+7. **The same desktop on the iPhone after the iPad**: 4096 × 3072, Retina, 120 Hz; the iPad on it, then the iPhone too:
+   "Virtual Desktop: 4096×3072 at 120 Hz is more than iPhone (iPhone16,1) takes (1446491520 pixels a second): streaming it
+   at 4008×3006.", both showing that picture; the iPhone gone, the full size again. A failure: no line, or a stuttering
+   picture.
+
+**Verified in the sixth part** (2026-11-25; nothing made a display, posted input, locked, slept or switched anything, and
+nothing used the hardware video encoder: every live run a synthetic test host on 127.0.0.1 with the software encoder, its
+Virtual Desktop and its encoder's limits only said; probe P3 built and run with --dry-run only):
+- Main brought in: CI on virtual-desktop-2a's merge 18a47362 (run 45498083096) and on this branch's 023201d5 (run
+  45498202041) passed every step (the release build, run-all, the iOS app with #393's pane, the CLI). 2a was verified
+  through CI alone: main changed no source under Sources/.
+- The Virtual Desktop's switch in #393's pane, harness photos of 00f096a2 (`Scripts/harness-photos.sh`): an iPad Pro
+  13-inch on its side (on) and upright (off), an iPad mini on its side (on; unpaired: disabled, its warning), a phone
+  upright (on) and on its side (off), an SE (unavailable), the Duo flat: the row in the Mac's part after Virtual Display's,
+  in the pane's own style, its footnotes under it.
+- Part A, pushed and verified before part B began (PART A IS PUSHED AND BUILDS: fbef64e3): the release build 61 s; the
+  checks virtual-desktop 110,055, sill-displays 63, viewport-bounds 108, compatibility 200, picture-fit 21, away-quality,
+  each 0 failed; their mutants virtual-desktop 274 of 274 (P3 lived on the first try; a pane of fractions of a pixel
+  catches it), sill-displays 56 of 56, viewport-bounds 44 of 44 (SC3 changed nothing on its first try), compatibility 52
+  of 52, picture-fit 12 of 12. desktop-check 96 of 96 (the iPhone host: made at 589×1189 pixel for pixel, on its side
+  after 1 s in place in 650 ms at 1101×589, its controls at once at 1077×448, upright with its controls 800×499, Full
+  Screen upright at once at 589×1189; the short-1x host: the make fell back at once to 800×1614 in one line, and a turn
+  fell back, then followed 1494×800 1 s later), headless-check 66 of 66, privacy-check 48 of 48. CI on fbef64e3 (run
+  45512001157) passed every step.
+- Part B (a278ed22, then 458caeb5's case): the release build 52 s, no warning but CaptureProbe's; the CLI's refusals each
+  its sentence ("That’s more than Sill sends to iPad Pro 13-inch: up to 5504 × 4128 at 120 Hz, …" for 3840x2160@2:120);
+  the checks virtual-desktop 109,597, capture-scale 184, away-quality, sill-displays 63, viewport-bounds 108, compatibility
+  200, picture-fit 21, each 0 failed. Mutants: virtual-desktop 321 of 321 (the 286 whose files did not change after
+  16629e1a caught there, in two halves; "8K offered" and B6 lived there and are caught by the list's sizes checked within
+  the ceiling and a side's bounds said before Retina's evenness; B24 found its pattern twice there, made unique; the 34 of
+  VirtualDesktopBudget.swift and "8K offered" at a278ed22, where B33 lived until 458caeb5's case, B28 to B34 7 of 7
+  there), capture-scale 57 of 57 (E7 lived first: the side given now not 4096 in its cases), away-quality 82 of 82; of the
+  text checks reading the files part B changed (sill-displays, stage-release, away-copy, away-wire, update-install) every
+  mutant's pattern found once at a278ed22.
+- The gates on a278ed22's CLI: desktop-check 104 of 104, among them the custom host (a size of its own, 5120 × 2880 at
+  60 Hz, its encoder said to take 4096 pixels at most and 31 frames a second): its start line and the encoder's note, made
+  (said) at its own size, the picture held to 4096 × 2304, an iPhone SE joining at 8 s held to its budget, 3772 × 2120,
+  in one line naming it, the encoder's 4096 × 2304 again once it left, never followed; the iPhone host as part A's (on its
+  side in 677 ms, its controls in 645 ms, upright with its controls in 665 ms, Full Screen in 343 ms). On 39b76f54 (a278ed22
+  changed only the names and when Sill for Mac's list is sent): headless-check 66 of 66, lock-check 42, 4, 6 and 26,
+  privacy-check 48 of 48, #396's sound gate 17 of 17, #399's smoke 6 of 6; H2 against main's CLI (d9b3e995's host) one
+  right after the other: identical but #395's locked line (8 and 3, 15 and 11, 18 and 11; 11 and 10), as in run 5.
+- Sill for Mac's previews from the bare SillMenuBar: 363 files; the ten new are Custom…'s five states (nothing typed,
+  within, over, the encoder's note, scaled) in light and dark, looked at; the other 353 byte for byte run 5's.
