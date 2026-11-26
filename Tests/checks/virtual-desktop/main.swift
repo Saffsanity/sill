@@ -1065,12 +1065,12 @@ check(phoneView.scaled && phoneView.hz == 120 && phoneView.width * phoneView.hei
       "an iPhone 15 Pro: scaled down evenly to its budget at 120 Hz (\(phoneView))")
 check(VB.view(width: 5504, height: 4128, hz: 120, device: miniDevice) == VB.View(width: 5504, height: 4128, hz: 60, scaled: false),
       "an iPad mini: at its own 60 Hz, the same picture is within its budget")
-check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == "iPad Pro 13-inch: as it is, at 120 Hz."
-      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: iPhone15) == "iPhone 15 Pro: scaled to \(phoneView.width) × \(phoneView.height) at 120 Hz."
-      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: miniDevice) == "iPad mini: as it is, at 60 Hz.", "Settings' lines beside it")
-check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPro, among: [ownPro, ownPhone]) == "Your iPad: as it is, at 120 Hz."
-      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPhone, among: [ownPro, ownPhone]) == "Your iPhone: scaled to \(phoneView.width) × \(phoneView.height) at 120 Hz."
-      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: ownMini, among: [ownPro, ownMini]) == "Your iPad (iPad14,1): as it is, at 60 Hz.",
+check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == "iPad Pro 13-inch shows it at full size, 120 Hz."
+      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: iPhone15) == "iPhone 15 Pro shows it scaled down to \(phoneView.width) × \(phoneView.height), 120 Hz."
+      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: miniDevice) == "iPad mini shows it at full size, 60 Hz.", "Settings' lines beside it")
+check(VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPro, among: [ownPro, ownPhone]) == "Your iPad shows it at full size, 120 Hz."
+      && VB.deviceLine(width: 5504, height: 4128, hz: 120, device: ownPhone, among: [ownPro, ownPhone]) == "Your iPhone shows it scaled down to \(phoneView.width) × \(phoneView.height), 120 Hz."
+      && VB.deviceLine(width: 1920, height: 1080, hz: 0, device: ownMini, among: [ownPro, ownMini]) == "Your iPad (iPad14,1) shows it at full size, 60 Hz.",
       "…named as a device of Sill's names itself")
 var fitWrong = 0
 for _ in 0..<20_000 {

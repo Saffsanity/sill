@@ -1208,3 +1208,10 @@ made as they are (a make is what Sill does first). Each size has its verdict lin
 name the smallest size kept of each shape. Built and run with `--dry-run` only on this Mac (all 17 selectors looked up,
 the five cases listed, nothing made; the real run refused without a terminal, exit 2); `Tests/checks/repo-rules` holds.
 Then `phone`'s bend takes the floor P4 finds in place of 400 and 800 points, its check and mutants with it.
+
+**The words beside a typed size (2026-11-26).** Noah, after his first try of Custom…: "Custom resolutions text in the Mac
+app needs refinement. Right now, it says Your iPhone/iPad: as it is, at 60Hz. Can you explain what that means?" Told what
+it means (the device gets the size typed, not scaled down, at that rate) and shown two sentences in its place, his answer:
+"use those". So `VirtualDesktopBudget.deviceLine` now says "Your iPad shows it at full size, 60 Hz." and "Your iPhone shows
+it scaled down to 4008 × 3006, 120 Hz." (before: "Your iPad: as it is, at 60 Hz." and "Your iPhone: scaled to 4008 × 3006
+at 120 Hz."; the sixth part's notes above quote the old words). The check's six lines and mutant B19 with it.

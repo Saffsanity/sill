@@ -230,13 +230,14 @@ package enum VirtualDesktopBudget {
         return (w, h)
     }
 
-    /// Settings' lines beside a typed size: each device this Mac knows (`known`), as it gets it ("Your iPad: as it is, at
-    /// 120 Hz." or "Your iPhone: scaled to 4008 × 3006 at 120 Hz."; `shownName`).
+    /// Settings' lines beside a typed size: each device this Mac knows (`known`), as it gets it ("Your iPad shows it at
+    /// full size, 120 Hz." or "Your iPhone shows it scaled down to 4008 × 3006, 120 Hz."; `shownName`). Noah's words,
+    /// 2026-11-26, shown these two for "Your iPad: as it is, at 60 Hz.", which he asked the meaning of: "use those".
     package static func deviceLine(width: Int, height: Int, hz: Int, device: Device, among known: [Device] = []) -> String {
         let v = view(width: width, height: height, hz: hz == 0 ? device.fps : hz, device: device)
         let name = shownName(device, among: known, start: true)
-        return v.scaled ? "\(name): scaled to \(v.width) × \(v.height) at \(v.hz) Hz."
-                        : "\(name): as it is, at \(v.hz) Hz."
+        return v.scaled ? "\(name) shows it scaled down to \(v.width) × \(v.height), \(v.hz) Hz."
+                        : "\(name) shows it at full size, \(v.hz) Hz."
     }
 
     // MARK: What this Mac can carry (Noah's agreed point 2: "Sill says what this Mac can carry")

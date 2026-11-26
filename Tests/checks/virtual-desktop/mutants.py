@@ -526,7 +526,7 @@ MUTANTS = [
      "        var w = max(2, Int(Double(width) * f)), h = max(2, Int(Double(height) * f) & ~1)"),
     ("B18 scaled by the budget, not its root", "budget", "        let f = (Double(budget) / Double(width * height * fps)).squareRoot()",
      "        let f = Double(budget) / Double(width * height * fps)"),
-    ("B19 every line as it is", "budget", "        return v.scaled ? \"\\(name): scaled to", "        return false ? \"\\(name): scaled to"),
+    ("B19 every line at full size", "budget", "        return v.scaled ? \"\\(name) shows it scaled down to", "        return false ? \"\\(name) shows it scaled down to"),
     ("B20 the encoder held by the width alone", "budget",
      "        if let widest = e.widest, max(width, height) > widest { held = EncoderLimit.held(width: width, height: height, side: widest) }",
      "        if let widest = e.widest, width > widest { held = EncoderLimit.held(width: width, height: height, side: widest) }"),
