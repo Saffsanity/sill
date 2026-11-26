@@ -155,15 +155,26 @@ package struct HostConfig: Equatable, Sendable {
     }()
 
     /// What Sill.app saves for Send Audio at launch, before it registers its defaults (issue #419),
-    /// or nil to save nothing. Send Audio is on by default since 2026-10-27 (#236), but only a fresh
-    /// install should get that: a Mac that ran an earlier Sill.app and never saved the key would
-    /// start sending its sound after an update without its user choosing it. So the first launch of
-    /// this build on such a Mac (`ranBefore`: a key an earlier Sill.app writes is there) saves it off;
-    /// the user can turn it on in the menu or Settings as before. Once only (`settled`), so a fresh
-    /// install keeps the default on at every later launch, and a saved choice (`saved`) always wins.
-    package static func sendAudioToSave(saved: Bool?, settled: Bool, ranBefore: Bool) -> Bool? {
-        guard saved == nil, !settled, ranBefore else { return nil }
+    /// or nil to save nothing. An update keeps what its user had, and a fresh install starts with
+    /// Send Audio on, as since 2026-10-27 (#236). Sill.app before 0.6.0 had no Send Audio, so a Mac
+    /// coming from 0.5.x heard nothing on its devices; registering the default on would start sending
+    /// its sound with no one choosing it, so that Mac gets it saved off. One on 0.6.x keeps the
+    /// default it had (on), and a fresh install too.
+    /// No key tells 0.5.x from 0.6.x, so the update check's last release seen (`lastReleaseSeen`,
+    /// updateLatestTag, on by default and daily) does: one named before 0.6.0 means this Mac never ran
+    /// 0.6.x since. A Mac with no such tag (a fresh install, or update checks off) keeps the default.
+    /// Once only (`settled`), and a saved choice (`saved`) always wins.
+    package static func sendAudioToSave(saved: Bool?, settled: Bool, lastReleaseSeen: String?) -> Bool? {
+        guard saved == nil, !settled, let tag = lastReleaseSeen, releaseBeforeSendAudio(tag) else { return nil }
         return false
+    }
+
+    /// Whether a release tag ("v0.5.1", "0.4.0") names a Sill.app from before Send Audio (0.6.0).
+    /// Anything else, "nightly" included, is not.
+    package static func releaseBeforeSendAudio(_ tag: String) -> Bool {
+        let parts = (tag.hasPrefix("v") ? String(tag.dropFirst()) : tag).split(separator: ".")
+        guard parts.count >= 2, let major = Int(parts[0]), let minor = Int(parts[1]) else { return false }
+        return (major, minor) < (0, 6)
     }
 
     /// The remote door's port when none is set.

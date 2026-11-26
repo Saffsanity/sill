@@ -123,17 +123,14 @@ final class HostSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = HostConfig.app
-        // An update must not turn the Mac's sound on by itself (issue #419): an install that ran an
-        // earlier Sill.app keeps Send Audio off until its user turns it on. Before `register`, so the
-        // keys read here are only what was saved (and launch arguments).
-        let ranBefore = [Key.settingsTab, Key.askedScreenRecording, Key.permissionsOnboardingDismissed,
-                         Key.maxFPS, Key.virtualDisplay, UpdatePolicy.Stored.lastCheckKey]
-            .contains { defaults.object(forKey: $0) != nil }
+        // An update keeps what its user had (issue #419): a Mac coming from 0.5.x, which had no Send
+        // Audio, keeps it off; one on 0.6.x and a fresh install get the default. Before `register`, so
+        // the keys read here are only what was saved (and launch arguments).
         if let v = HostConfig.sendAudioToSave(saved: defaults.object(forKey: Key.sendAudio) as? Bool,
                                               settled: defaults.bool(forKey: Key.sendAudioSettled),
-                                              ranBefore: ranBefore) {
+                                              lastReleaseSeen: defaults.string(forKey: UpdatePolicy.Stored.tagKey)) {
             defaults.set(v, forKey: Key.sendAudio)
-            print("Send Audio: off after the update; turn it on in the menu to hear the Mac on your devices.")
+            print("Send Audio: off, as before the update; turn it on in the menu to hear the Mac on your devices.")
         }
         defaults.set(true, forKey: Key.sendAudioSettled)
         defaults.register(defaults: [
