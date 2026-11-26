@@ -1,4 +1,4 @@
-"""Mutants of PictureInPicturePolicy.swift (iOSClient, issue #291): each changes it in one place and must
+"""Mutants of PictureInPicturePolicy.swift (iOSClient, issues #291 and #379): each changes it in one place and must
 make the check (main.swift) fail. usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
@@ -10,6 +10,7 @@ orig = open(SRC).read()
 Q = "s.switchOn && s.supported && s.connected && s.streaming && s.pictureCame && !s.covered"
 TIE = "if (w.lastUsedAt ?? -.infinity) > (b.lastUsedAt ?? -.infinity) { best = w }"
 STOPS = "case .sessionEnded, .backInFront, .deviceLocked: return pip.active"
+ENDS = "old.active && !new.active && !appForeground"
 MUTANTS = [
     # The constants.
     ("M1 on by default", "static let defaultOn = false", "static let defaultOn = true"),
@@ -67,6 +68,13 @@ MUTANTS = [
     ("M38 a look before the limit owes none", "return Effects(lookAt: pausedAt + PictureInPicturePolicy.pausedLimit)", "return .none"),
     ("M39 every ending stops it", "Effects(stop: PictureInPicturePolicy.stops(ending, pip: state))", "Effects(stop: true)"),
     ("M42 a start tells AVKit nothing", "return Effects(invalidate: true)", "return .none"),
+    # Ended with Sill in the background (#379).
+    ("M43 the session ends with Sill in front", ENDS, "old.active && !new.active"),
+    ("M44 the session never ends with it", ENDS, "false"),
+    ("M45 a stay in the background without it ends the session", ENDS, "!new.active && !appForeground"),
+    ("M46 a pause with Sill away ends the session", ENDS, "old.active && !(new.active && !new.paused) && !appForeground"),
+    ("M47 the session ends while it still shows", ENDS, "old.active && !appForeground"),
+    ("M48 ended in the background, no second look", "static let endSettle: Double = 0.5", "static let endSettle: Double = 0"),
     ("M40 a second willStart starts it afresh", "guard !state.active else { return .none }\n            state = State(active: true, paused: false)",
         "state = State(active: true, paused: false)"),
     # The words.

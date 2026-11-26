@@ -2,17 +2,24 @@ import SwiftUI
 import UIKit
 import StreamProtocol
 
-/// The Settings panel: the Mac's streaming settings, changed from here the way the Sill menu on
-/// the Mac changes them (one change, one apply, at most one short restart; Sill.app saves them).
+/// Settings: the Mac's streaming settings, changed from here the way the Sill menu on the Mac changes
+/// them (one change, one apply, at most one short restart; Sill.app saves them), then this device's own.
 ///
-/// A panel in the view hierarchy, mirroring the Apps drawer on the trailing edge; not a sheet,
-/// popover or Menu. The client has no system presentation anywhere; sheets and popovers adapt by
-/// size class, which is unknown for the Duo; the layout harness draws a fake Duo screen inside an
-/// iPad window, which a system presentation would escape; and a tall sheet or a flipped popover
-/// could cross the half-folded crease. Its height follows its content; only the middle scrolls,
-/// where the room under the bar is short (259 pt in the compact halves at 500×710, an iPad window
-/// that narrow; 279 on an iPhone SE upright with Larger Picture; 275 on an SE on its side), so the
-/// header and Disconnect are always in reach.
+/// A whole-screen pane over the stream screen on every device and in every layout (Noah, 2026-11-18:
+/// "Whole screen everywhere: Settings covers the stream completely on every device, with Done to go back,
+/// like a settings page"; docs/settings-pane-plan.md), the floating panel it was until 2026-11-18 grown to the
+/// screen. In the view hierarchy, not a sheet or a full-screen cover: the client has no system
+/// presentation anywhere; sheets adapt by size class, which is unknown for the Duo; the layout harness
+/// draws a fake Duo screen inside the simulator's, which a presentation would escape; and a presentation
+/// knows nothing of the half-folded crease. Its two parts are the places for rows: the Mac's (`macPart`,
+/// under the pinned header with Done, then Disconnect, `withDisconnect`) and this device's (`devicePart`): one
+/// column on every screen without a fold to keep to (Noah, 2026-11-23), both parts in one scroll view with
+/// Disconnect under them; around the iPhone Duo's fold a column on each page in the book pose, or the laptop
+/// pose's two pages, each part scrolling on its own and nothing on the fold (`SettingsPane.Layout`). Each scroll
+/// view spans its page, the whole screen in one column, its column inside it, so a drag anywhere scrolls the
+/// rows (Noah, 2026-11-23). A
+/// feature's rows go into the part whose they are: a group is a `Rows` with its `Footnote`, and a group that
+/// begins a topic carries a header as Away from home and This iPad do.
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
@@ -33,8 +40,9 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
-/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; on an iPhone, Keys (Arrow Keys,
+/// `PhoneKeyRow.arrowKeysKey`, #287); then Take the Tour, and last this app's version, "Sill 0.6.2 (1400)"
+/// (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -47,6 +55,10 @@ struct HostSettingsPanel: View {
     /// Full Screen in This iPad (docs/full-screen-plan.md): the stream screen puts the panel away and hides
     /// its controls; nil where the panel shows no such row.
     var fullScreen: FullScreenRow? = nil
+    /// The safe area at the screen's bottom edge, the home indicator's, which the stream screen ignores: the
+    /// pane's content keeps clear of it. The window's (StreamScreen's `deviceInsets`; in the harness its fake
+    /// screen's), since a reader that ignores an edge reports no inset there, this pane's own included.
+    var bottomInset: CGFloat = 0
 
     /// Full Screen's row: whether a hide can start now (FullScreenPolicy.hideAllowed, the panel itself not
     /// counted), whether Sill's window covers the screen (FullScreenPolicy.offered: the footnote says why the
@@ -75,11 +87,17 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This iPhone's Arrow Keys (#287; PhoneKeyRow.arrowKeysKey): off unless turned on, read by the key row
+    /// (the four arrows after shift, in a row that scrolls), never sent; offered on an iPhone alone.
+    @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
     /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
     @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off
+    /// (`TouchHold.defaultOn`, Noah 2026-11-20), read by the picture's input view as each hold begins, never sent.
+    @AppStorage(TouchHold.key) private var holdThenDrag = TouchHold.defaultOn
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -100,11 +118,18 @@ struct HostSettingsPanel: View {
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
+    /// The Duo's fold across the stream screen, in its space, which the pane shares (StreamScreen, iOS 27.1):
+    /// the pane's parts keep off it (SettingsPane.Layout).
+    @Environment(\.duoFold) private var duoFold
+    /// Right to left (Arabic, Hebrew): the Mac's part is still on the leading side, and a fold's pages swap.
+    @Environment(\.layoutDirection) private var layoutDirection
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
-    private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
-    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour, the version).
+    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour, the version);
+    /// in the book pose's columns and the laptop pose's pages, each part at its end (the Mac's at Away from
+    /// home, this device's at the version).
+    /// `-SillSettingsScroll` below goes to its row in whichever part holds it.
     private static var startsAtEnd: Bool {
         #if DEBUG
         return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
@@ -124,6 +149,7 @@ struct HostSettingsPanel: View {
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
+    /// `keys`, to the Keys group's title, over Arrow Keys and its footnote (#287; an iPhone's alone).
     /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     private static var startsAt: String? {
         #if DEBUG
@@ -136,7 +162,9 @@ struct HostSettingsPanel: View {
         case "typing"?: return hideThumbnailsRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
+        case "holddrag"?: return holdThenDragRowID
         case "fullscreen"?: return fullScreenRowID
+        case "keys"?: return keysGroupID
         default: return nil
         }
         #else
@@ -144,7 +172,10 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let keysGroupID = "keys"
     private static let sendAudioID = "sendAudio"
+    /// DEBUG `-SillSettingsScroll holddrag`: Hold, Then Drag's switch and its footnote (#292).
+    private static let holdThenDragRowID = "holdThenDrag"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
@@ -160,28 +191,32 @@ struct HostSettingsPanel: View {
         return UIAccessibility.isVoiceOverRunning
     }
 
+    /// The rows grow with Dynamic Type to the third accessibility size: the screen has the room the panel
+    /// lacked, and each row stacks its control under its words when they need the width. The pinned header
+    /// and Disconnect stop at xxLarge, as the panel did, so on a phone on its side they never take the room
+    /// the rows scroll in.
+    private static let largestRowType = DynamicTypeSize.accessibility3
+    private static let largestPinnedType = DynamicTypeSize.xxLarge
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            // The rows at their own height when they fit, a scroll view in the room left when not.
-            ViewThatFits(in: .vertical) {
-                middle
-                ScrollViewReader { reader in
-                    ScrollView { middle }
-                        .scrollIndicatorsFlash(onAppear: true)
-                        .scrollBounceBehavior(.basedOnSize)
-                        .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
-                        .onAppear { if let id = Self.startsAt { reader.scrollTo(id, anchor: .top) } }
-                }
-            }
-            foot
+        GeometryReader { geo in
+            // The safe area beside the stream screen, by the sensor housing of an iPhone on its side or the Duo's
+            // cover's camera: this reader's own, which follows a turn in the same layout as the scroll views that
+            // reach into it (`part`'s `ignoresSafeArea`); leading and trailing, as the layout counts from the
+            // leading edge.
+            let layout = SettingsPane.Layout(size: geo.size, bottomInset: bottomInset,
+                                             leadingInset: geo.safeAreaInsets.leading, trailingInset: geo.safeAreaInsets.trailing,
+                                             fold: duoFold, rightToLeft: layoutDirection == .rightToLeft)
+            arranged(layout)
+                #if DEBUG
+                // The console's line for the photo gates: how the pane sits on this screen, at each change.
+                .onChange(of: layout.description, initial: true) { _, line in print("settings: " + line) }
+                #endif
         }
-        .padding(14)
-        .background(Self.shape.fill(Palette.bar))
-        .overlay(Self.shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-        .shadow(color: .black.opacity(0.65), radius: 30, x: 0, y: 24)
+        // The bars' colour over the whole screen: under the status bar and into the side insets too, as the
+        // top bar's runs; the content keeps to the safe area.
+        .background(Palette.bar.ignoresSafeArea())
         .tint(Palette.accent)
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         // VoiceOver stays inside while it is open, the escape gesture closes it, and focus starts
         // on the Mac's name.
         .accessibilityElement(children: .contain)
@@ -215,13 +250,143 @@ struct HostSettingsPanel: View {
         }
     }
 
+    // MARK: The pane's arrangement (SettingsPane.Layout)
+
+    /// The header, the two parts and Disconnect where the layout puts them, in the leading-edge space (so right
+    /// to left mirrors them): one column on every screen without a fold to keep to, the header pinned over both
+    /// parts and Disconnect under them, as the panel had them; the book pose's column on each page, the header
+    /// across both (its words over the leading page's column, Done at the trailing page's column's end), the
+    /// Mac's part with Disconnect under it on the leading page and this device's on the trailing one; or the
+    /// laptop pose's two pages, the header, the Mac's part and Disconnect above the fold and this device's part
+    /// below it. Nothing on the fold's band. Each part is laid out on its page (`page(macScroll)`, the whole
+    /// screen in one column) and its scroll view goes on into the safe area beside the screen, so it takes a drag
+    /// anywhere on the pane (`macScroll`, `deviceScroll`); the header, the rows and Disconnect keep to their
+    /// column inside it (`inColumn`, and the scroll view's content margins).
+    @ViewBuilder private func arranged(_ l: SettingsPane.Layout) -> some View {
+        let macPage = l.page(l.macScroll), devicePage = l.page(l.deviceScroll)
+        let edges = l.systemEdgeEffectHidden
+        switch l.arrangement {
+        case .oneColumn:
+            VStack(spacing: 0) {
+                header(words: nil).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
+                withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
+                    macPart
+                    devicePart
+                }
+            }
+            .frame(width: macPage.width, height: macPage.height)
+            .paneAt(x: macPage.minX, y: macPage.minY, in: l.size)
+        case .twoColumns:
+            // The book pose: the header across both pages, each page's scroll view up to the fold's band.
+            VStack(spacing: 0) {
+                header(words: l.headerWords).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
+                HStack(alignment: .top, spacing: devicePage.minX - macPage.maxX) {
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
+                        macPart
+                    }
+                    .frame(width: macPage.width)
+                    part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll, systemEdges: edges) { devicePart }
+                        .frame(width: devicePage.width)
+                }
+            }
+            .frame(width: devicePage.maxX - macPage.minX, height: l.size.height)
+            .paneAt(x: macPage.minX, y: 0, in: l.size)
+        case .twoPages:
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    header(words: nil).inColumn(x: l.header.x - macPage.minX, width: l.header.width)
+                    withDisconnect(footBottom: l.footBottom, column: l.mac, scroll: l.macScroll, page: macPage, systemEdges: edges) {
+                        macPart
+                    }
+                }
+                .frame(width: macPage.width, height: macPage.height)
+                .paneAt(x: macPage.minX, y: macPage.minY, in: l.size)
+                part(bottom: l.bottom, column: l.device, scroll: l.deviceScroll, systemEdges: edges) { devicePart }
+                    .frame(width: devicePage.width, height: devicePage.height)
+                    .paneAt(x: devicePage.minX, y: devicePage.minY, in: l.size)
+            }
+        }
+    }
+
+    /// Rows, then Disconnect, in reach either way, as the panel had them: right under the rows while they fit
+    /// (an iPad's tall column), else pinned under the rows' scroll view; `footBottom` under it either way
+    /// (SettingsPane.Layout's: the home indicator's room at the screen's foot, 12 pt over the laptop pose's
+    /// fold), so it never sits in that room or on the fold: the rows fit only if it is left under Disconnect too.
+    /// The rows and Disconnect in `column`, on the part's `page`; the rows' scroll view, where they scroll, is
+    /// `scroll` (`part`).
+    private func withDisconnect<Content: View>(footBottom: CGFloat, column: CGRect, scroll: CGRect, page: CGRect,
+                                               systemEdges: SettingsPane.Edges,
+                                               @ViewBuilder _ content: () -> Content) -> some View {
+        let rows = content()
+        let x = column.minX - page.minX
+        return ViewThatFits(in: .vertical) {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) { rows }
+                    .padding(.top, ScrollEdgeFade.height)
+                    .dynamicTypeSize(...Self.largestRowType)
+                    .inColumn(x: x, width: column.width)
+                foot.inColumn(x: x, width: column.width)
+                Spacer(minLength: footBottom)
+            }
+            VStack(spacing: 0) {
+                part(bottom: 0, column: column, scroll: scroll, systemEdges: systemEdges) { rows }
+                foot.inColumn(x: x, width: column.width).padding(.bottom, footBottom)
+            }
+        }
+    }
+
+    /// One part's rows in a scroll view of their own, which bounces only where they do not fit. The scroll view
+    /// spans `scroll` (SettingsPane.Layout's: the part's page, the whole screen in one column, out to the screen's
+    /// edges through the safe area beside it), and the rows keep to `column` inside it, so a drag beside them
+    /// scrolls them too (Noah, 2026-11-23: "on iPad in landscape, you have to touch the middle 3rd of the display
+    /// to scroll instead of anywhere on the screen"). The pane lays the scroll view out on its page and
+    /// `ignoresSafeArea` takes it on to the screen's edge wherever the page meets one: inside, no safe area is
+    /// left, so the column's place is measured from `scroll`'s leading edge, as the scroll view's content margins.
+    /// Its indicator is at its trailing edge, as in a system list whose rows keep a readable width. `bottom`: the
+    /// room kept under the rows where the scroll view reaches the screen's bottom edge (the home indicator's), so
+    /// they scroll under it and their last line rests above it. Its edges fade (`ScrollEdgeFade`), so a row cut by
+    /// the header, Disconnect or the fold reads as scrolled away; the rows begin under the top's fade. iOS's own
+    /// scroll edge effect stays off it at `systemEdges` (SettingsPane.Layout's `systemEdgeEffectHidden`: every
+    /// edge), so the fade is the only one it has (`SystemEdgeEffect`).
+    private func part<Content: View>(bottom: CGFloat, column: CGRect, scroll: CGRect, systemEdges: SettingsPane.Edges,
+                                     @ViewBuilder _ content: () -> Content) -> some View {
+        let rows = content()
+        // The column as the scroll view's content margins at its sides, not as padding round the rows: the scroll
+        // view lays the rows out at the column's width and places them, pixel for pixel as when it was the column's
+        // width wherever the column falls on whole points (the book pose, an upright iPhone, the cover); padded,
+        // they were drawn a fraction of a pixel off there. Full Screen's footnote breaks "them back." onto a second
+        // line at 600 pt either way: its words need a little more than the 572 pt the column leaves them
+        // (docs/steps/2026-11-18-settings-pane.md, 2026-11-24).
+        let margins = EdgeInsets(top: 0, leading: max(0, column.minX - scroll.minX), bottom: bottom,
+                                 trailing: max(0, scroll.maxX - column.maxX))
+        return ScrollViewReader { reader in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) { rows }
+                    .padding(.top, ScrollEdgeFade.height)
+            }
+            .scrollIndicatorsFlash(onAppear: true)
+            .scrollBounceBehavior(.basedOnSize)
+            .modifier(StartAnchor(atEnd: Self.startsAtEnd))
+            .contentMargins([.leading, .bottom, .trailing], margins, for: .scrollContent)
+            .modifier(SystemEdgeEffect(hidden: systemEdges))
+            .modifier(ScrollEdgeFade())
+            .modifier(ScrollAreaOutline())
+            .ignoresSafeArea(edges: .horizontal)
+            .dynamicTypeSize(...Self.largestRowType)
+            .onAppear { if let id = Self.startsAt { reader.scrollTo(id, anchor: .top) } }
+        }
+    }
+
     // MARK: Header and foot (pinned)
 
-    private var header: some View {
+    /// `words`: how wide the Mac's name and lines may be (the book pose: the leading page's column, so they keep
+    /// off the fold); nil: the row's room beside Done.
+    private func header(words: CGFloat?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
+                // The page's title: the Mac's name, larger than the panel's headline.
                 Text(client.macName.isEmpty ? "Mac" : client.macName)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -276,6 +441,7 @@ struct HostSettingsPanel: View {
                         .padding(.top, 2)
                 }
             }
+            .frame(maxWidth: words, alignment: .leading)
             Spacer(minLength: 8)
             // A 44 pt tall tap area (the word alone is about 42×22) without moving the header: the
             // padding and the shape sit inside the label, which is what the button hit-tests, and
@@ -292,8 +458,12 @@ struct HostSettingsPanel: View {
             // ⌘. (and Esc where SwiftUI gets it first); Esc itself is the panel's EscapeKey.
             .keyboardShortcut(.cancelAction)
         }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 12)
+        .padding(.horizontal, SettingsPane.Layout.headerInset)
+        // 16 pt from the top: clear of the Duo's inner display's rounded corners, where the stream screen
+        // hides the status bar. 4 under it, and the rows' 12 (their top fade's) before the first group.
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+        .dynamicTypeSize(...Self.largestPinnedType)
     }
 
     /// Disconnect, in Leave's old place of honour: the bar's last slot is Settings now.
@@ -314,11 +484,14 @@ struct HostSettingsPanel: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
         .accessibilityLabel("Disconnect from \(mac)")
         .padding(.top, 10)
+        .dynamicTypeSize(...Self.largestPinnedType)
     }
 
-    // MARK: Middle (scrolls when short)
+    // MARK: The Mac's part (scrolls)
 
-    @ViewBuilder private var middle: some View {
+    /// Everything of the Mac's, under the header: the callouts, its groups, Away from home. A feature of the
+    /// Mac's adds its group here (a `Rows` and its `Footnote`).
+    @ViewBuilder private var macPart: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let state = client.settings.host, let shown = client.settings.displayed {
                 if state.softwareEncoder {
@@ -462,8 +635,18 @@ struct HostSettingsPanel: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 4)
             }
-            // After everything of the Mac's, whatever state its settings are in: while they load, and
-            // for a Mac without them too. Both are this device's own: its gestures, then the tour.
+        }
+    }
+
+    // MARK: This device's part (scrolls)
+
+    /// This device's own, after everything of the Mac's (in one column under it; in the book pose its own
+    /// page's column, in the laptop pose the page below the fold), whatever state the Mac's settings are in:
+    /// while they load, and for a Mac without them too. A feature of this device's adds its group here, in This
+    /// iPad's or after it.
+    @ViewBuilder private var devicePart: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Both are this device's own: its gestures, then the tour.
             thisDevice
             tour
             versionLine
@@ -686,6 +869,9 @@ struct HostSettingsPanel: View {
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
     /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
+    /// Hold, Then Drag (`TouchHold`, #292) comes right before Reverse Scrolling, the first of the rows about
+    /// touch, for every Mac: it changes only what a finger held on the picture sends, a drag being the
+    /// left button's down, moves and up, which every Sill for Mac takes.
     /// The switches reach nothing on the Mac but the clipboard's, which subscribes or stops; a gesture
     /// row, activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
     /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a window
@@ -770,6 +956,19 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
+        // Hold, Then Drag (issue #178, PR #292; TouchHold): on unless turned off (Noah, 2026-11-20), this device's
+        // own, never sent.
+        // The first of the rows about touch; under Touch Mode's Direct Touch once #222's row is here (in Trackpad
+        // mode the pad over the picture takes the fingers, and has its own hold, then drag), and in the
+        // whole-screen Settings pane's Touch and Zoom group once #393 is.
+        Rows {
+            Toggle(isOn: $holdThenDrag) {
+                Text(TouchHold.title).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.holdThenDragRowID)
+        Footnote(text: TouchHold.footnote)
         Rows {
             Toggle(isOn: $reverseScroll) {
                 Text("Reverse Scrolling").foregroundStyle(Palette.text)
@@ -800,6 +999,31 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        keys
+    }
+
+    /// Keys, this device's key row: on an iPhone, Arrow Keys (#287, PhoneKeyRow), off unless turned on, with
+    /// what it does under it (PhoneKeyRow.Copy); nothing on an iPad, whose key row has the arrows. Its own
+    /// group under This iPhone, after the gestures and before Take the Tour, where the key row's other
+    /// switches are to join it. For every Mac: the row is this device's own, and the Mac sees only its keys.
+    @ViewBuilder private var keys: some View {
+        if PhoneKeyRow.offered(phoneArrangement: DuoLayout.phoneArrangement) {
+            Text(PhoneKeyRow.Copy.group)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+                .id(Self.keysGroupID)
+            Rows {
+                Toggle(isOn: $arrowKeys) {
+                    Text(PhoneKeyRow.Copy.title).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: PhoneKeyRow.Copy.footnote)
+        }
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every
@@ -1306,6 +1530,121 @@ private extension View {
     /// A row inside a group: at least 44 pt tall, inset 14 pt.
     func rowFrame() -> some View {
         frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 14)
+    }
+
+    /// This view with its top-leading corner at (x, y) of the leading-edge space (SettingsPane.Layout's), in a
+    /// view the stream screen's size: measured from the leading edge, so right to left mirrors it.
+    func paneAt(x: CGFloat, y: CGFloat, in size: CGSize) -> some View {
+        padding(.leading, x)
+            .padding(.top, y)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    /// This view as wide as a column `x` from its container's leading edge, the container's whole width taken
+    /// (SettingsPane.Layout's column on its part's page): the header, Disconnect, and the rows where they fit
+    /// without scrolling keep to the column while the part spans its page (the rows that scroll keep to it by
+    /// their scroll view's content margins, `part`). From the leading edge, so right to left mirrors it.
+    func inColumn(x: CGFloat, width: CGFloat) -> some View {
+        frame(width: max(0, width))
+            .padding(.leading, max(0, x))
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A part's top and bottom edges, where its rows scroll out of sight under the header, Disconnect or the fold:
+/// 12 pt over which they fade, so a row cut there reads as scrolled away rather than cut off (the panel cut them
+/// sharply). The rows begin 12 pt down and end in a footnote's 12 pt, so at rest nothing shows faded.
+private struct ScrollEdgeFade: ViewModifier {
+    static let height: CGFloat = 12
+    func body(content: Content) -> some View {
+        content.mask {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.height)
+                Color.black
+                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.height)
+            }
+        }
+    }
+}
+
+/// iOS's own scroll edge effect (iOS 26 and later: a blur that deepens toward an edge the system judges something
+/// lies over) kept off a part's scroll view at `hidden` (SettingsPane.Layout's `systemEdgeEffectHidden`: every edge,
+/// on every screen), so `ScrollEdgeFade` is its only edge. Nothing of the system's lies over these scroll views; the
+/// pane's header and Disconnect sit beside them, not over them. Left on, the system's effect blurred all but the last
+/// rows of the 13-inch iPad's sideways harness photos (2026-11-24): turned a quarter round to fill the upright
+/// simulator, the scroll view lay along the simulator's own top and bottom edges, and the effect took its whole
+/// height for the top's (docs/steps/2026-11-18-settings-pane.md). DEBUG `-SillSettingsSystemEdge 1` leaves it on,
+/// as before, for photos of what it does. Before iOS 26 there is no such effect.
+private struct SystemEdgeEffect: ViewModifier {
+    let hidden: SettingsPane.Edges
+    private static var keptForPhotos: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "SillSettingsSystemEdge")
+        #else
+        return false
+        #endif
+    }
+    private var edges: Edge.Set {
+        var set: Edge.Set = []
+        if hidden.contains(.top) { set.insert(.top) }
+        if hidden.contains(.leading) { set.insert(.leading) }
+        if hidden.contains(.bottom) { set.insert(.bottom) }
+        if hidden.contains(.trailing) { set.insert(.trailing) }
+        return set
+    }
+    @ViewBuilder func body(content: Content) -> some View {
+        if Self.keptForPhotos || hidden.isEmpty {
+            content
+        } else if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectHidden(true, for: edges)
+        } else {
+            content
+        }
+    }
+}
+
+/// DEBUG `-SillSettingsScrollArea 1`: each scroll view's frame drawn, an orange line just inside its edges, so a
+/// still photo shows where a drag scrolls the rows (Noah, 2026-11-23: "anywhere on the screen"): the whole screen
+/// in one column, out to its edges, and each page around the fold. Where the rows fit there is no scroll view,
+/// and no line. Never in a release build.
+private struct ScrollAreaOutline: ViewModifier {
+    private static var shown: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "SillSettingsScrollArea")
+        #else
+        return false
+        #endif
+    }
+    @ViewBuilder func body(content: Content) -> some View {
+        if Self.shown {
+            content.overlay {
+                Rectangle().strokeBorder(Color.orange, lineWidth: 2).allowsHitTesting(false).accessibilityHidden(true)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// DEBUG `-SillSettingsEnd 1`: each part starts scrolled to its end and stays there as its size or its rows'
+/// settle after the first layout (the review of #393: with the initial offset alone an upright iPhone's one column
+/// stopped short of Take the Tour's footnote and the version, which the panel's plain anchor, every role, had
+/// kept). Rows shorter than their room still sit at its top: iOS 18's initial-offset and size-change roles, not
+/// the alignment's; before it the plain anchor, the panel's, only where its rows scrolled.
+private struct StartAnchor: ViewModifier {
+    let atEnd: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if !atEnd {
+            content
+        } else if #available(iOS 18.0, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content.defaultScrollAnchor(.bottom)
+        }
     }
 }
 

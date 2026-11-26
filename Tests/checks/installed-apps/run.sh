@@ -3,7 +3,9 @@
 # fake applications folder in a temporary directory, with apps in a suite's folder (#76) and two
 # folders down (#135), a helper inside a bundle, a package of another kind, a framework, dot names,
 # symbolic links (a folder's, not followed; a folder given that is a link, followed) and bundles
-# that share an ID (at different depths, and twice at one depth).
+# that share an ID (at different depths, and twice at one depth); and the Mac's other volumes (#370)
+# in a fake /Volumes with a made-up mount table, and Finder aliases and links to apps, and when the
+# look at them is due (a device connected). Nothing here reads the real /Volumes: only the mount table.
 #   Tests/checks/installed-apps/run.sh             compile and run
 #   Tests/checks/installed-apps/run.sh --mutants   one-line mutants of InstalledApps.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -146,8 +146,8 @@ struct PortraitMetrics {
 /// (`PhonePortraitLayout`). With Larger Picture (the Settings panel's This iPhone; issue #58) the
 /// phone's thumbnails go and the picture grows down to the software keyboard while a window
 /// streams; the Desktop keeps the usual arrangement (`largerKeyboard`; docs/larger-picture-plan.md).
-/// The picture pane, the key row, the trackpad, the drawer and the Settings panel are the same views
-/// in both; each arrangement places them.
+/// The picture pane, the key row, the trackpad and the drawer are the same views in both; each
+/// arrangement places them. Settings is a whole-screen pane over either (StreamScreen's).
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
     var metrics: PortraitMetrics = .regular
@@ -158,25 +158,20 @@ struct PortraitStreamScreen: View {
     @Binding var windowMenu: UInt32?
     @Binding var latched: KeyModifiers
     let overlay: InputOverlayProxy
-    /// The Settings panel, owned by `StreamScreen` (see its `setSettings`).
+    /// Settings, the whole-screen pane `StreamScreen` owns and draws (see its `openSettings`): open lights
+    /// the Settings button, which opens it.
     let settingsOpen: Bool
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
     /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
     let menusOpened: () -> Void
     let menusClosed: () -> Void
-    /// The panel's open and close motion, scaled about the given point (see `StreamScreen`).
-    let settingsTransition: (_ anchor: UnitPoint) -> AnyTransition
     /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
     let onPanelSize: (CGSize) -> Void
-    /// Pair This iPad… in the panel (see `StreamScreen.openPairingOverlay`).
-    var pairThisDevice: () -> Void = {}
     /// The line over the stream while the link cannot carry the quality, as StreamScreen shows it
     /// (docs/remote-bundle-plan.md §6.7); nil for none.
     var linkLine: String? = nil
     /// The line's most lines: the off-console view's three, the link's two (StreamScreen).
     var linkLineLines = 2
-    /// Take the Tour in the panel (see `StreamScreen.takeTour`).
-    var takeTour: () -> Void = {}
     /// Larger Picture on a phone: the software keyboard's height its rows are kept above
     /// (`PhonePortraitLayout.keyboard(for:largerPicture:foldable:)`, while a window streams with the
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
@@ -196,8 +191,6 @@ struct PortraitStreamScreen: View {
     var preview = false
     /// How the controls go and come as the interface hides and shows (StreamScreen's `chromeTransition`).
     var chromeTransition: AnyTransition = .identity
-    /// Settings › This iPad › Full Screen (StreamScreen's `fullScreenRow`).
-    var fullScreen: HostSettingsPanel.FullScreenRow? = nil
     /// The hidden picture's Show Controls (HiddenPictureElement).
     var showChrome: () -> Void = {}
 
@@ -293,28 +286,6 @@ struct PortraitStreamScreen: View {
                     .padding(.top, split.controls + metrics.padTop + metrics.barHeight + 8)
                     .padding(.bottom, metrics.padBottom)
                     .transition(.opacity)
-            }
-
-            // The drawer's mirror: from just under the window bar at the trailing edge, lined up
-            // with the Settings button, entirely in the lower half, so it never spans the Duo's
-            // crease and the stream above stays in view. No dim; the tap catcher covers both
-            // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
-            // and never reaches the Mac.
-            if settingsOpen, !preview {
-                let top = split.controls + metrics.padTop + metrics.barHeight + 8
-                catcher
-
-                settingsPanel
-                    .frame(width: min(360, size.width - 2 * metrics.padSide))
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, top)
-                    .padding(.bottom, metrics.padBottom)
-                    .padding(.trailing, metrics.padSide)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    // The view carrying the transition fills the screen, so the panel's own
-                    // top-trailing corner, under the Settings button, is given as a point in it.
-                    .transition(settingsTransition(UnitPoint(x: 1 - metrics.padSide / max(size.width, 1),
-                                                             y: top / max(size.height, 1))))
             }
         }
         // The laptop pose with the person's keyboard up: KeyboardFrameMonitor reads where its glass is after
@@ -480,10 +451,10 @@ struct PortraitStreamScreen: View {
     /// Every rect is `PhonePortraitLayout`'s, from this screen's size alone: the picture's pane is
     /// fixed at 16:10, so a 16:9 window gets black bars above and below and nothing under it moves.
     /// Row 1 holds the Keyboard button, which the software keyboard never covers; the keyboard
-    /// covers the trackpad (this screen ignores its safe area, so nothing moves up). The drawer and
-    /// the Settings panel hang under row 1, which stays live and undimmed while they are open, as
-    /// the landscape bar does; the dim and the tap catcher cover everything else, so a tap outside
-    /// closes them and never reaches the Mac.
+    /// covers the trackpad (this screen ignores its safe area, so nothing moves up). The drawer
+    /// hangs under row 1, which stays live and undimmed while it is open, as the landscape bar does;
+    /// the dim covers everything else, so a tap outside closes it and never reaches the Mac.
+    /// Settings covers the whole screen (StreamScreen's pane).
     ///
     /// With Larger Picture (`layout.largerPicture`: the switch on while a window streams; the
     /// Desktop, which Aa never resizes, and nothing streaming keep the usual arrangement, so
@@ -547,10 +518,9 @@ struct PortraitStreamScreen: View {
             }
 
             // While the drawer is open VoiceOver skips what it dims (a double-tap there would reach
-            // the Mac, where a tap only closes the drawer): row 1, then the drawer. The drawer and the
-            // Settings panel cover the strip but for its first thumbnail's badge, which sticks out
-            // past row 1's leading edge; the strip goes while either is open, so nothing cut shows
-            // beside them.
+            // the Mac, where a tap only closes the drawer): row 1, then the drawer. The drawer covers
+            // the strip but for its first thumbnail's badge, which sticks out past row 1's leading
+            // edge; the strip goes while it is open, so nothing cut shows beside it.
             PhoneRows(size: layout.size, rects: rects) {
                 picturePane(measured: false).accessibilityHidden(drawerOpen)
                 if !hidden {
@@ -558,7 +528,7 @@ struct PortraitStreamScreen: View {
                         .transition(chromeTransition)
                     if !larger {
                         phoneRow2(layout)
-                            .opacity(drawerOpen || settingsOpen ? 0 : 1)
+                            .opacity(drawerOpen ? 0 : 1)
                             .accessibilityHidden(drawerOpen)
                             .modifier(TuckedAway(tucked: lift.tucked))
                             .transition(chromeTransition)
@@ -579,19 +549,6 @@ struct PortraitStreamScreen: View {
                     .modifier(AfterRow1(active: larger))
                     .placed(lift.drawer, in: layout.size)
                     .transition(.opacity)
-            }
-
-            if settingsOpen, !preview {
-                ForEach(layout.dim.indices, id: \.self) { index in
-                    catcher.placed(layout.dim[index], in: layout.size)
-                }
-                settingsPanel
-                    .frame(width: layout.settings.width)
-                    .frame(maxHeight: layout.settings.height, alignment: .top)
-                    .placed(at: layout.settings.origin, in: layout.size)
-                    // Placed in a view the screen's size, so the anchor is the panel's top-trailing
-                    // corner as a point of the screen, as in the halves.
-                    .transition(settingsTransition(UnitPoint(x: layout.settingsAnchor.x, y: layout.settingsAnchor.y)))
             }
         }
     }
@@ -759,11 +716,6 @@ struct PortraitStreamScreen: View {
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }
 
-    private var settingsPanel: some View {
-        HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice,
-                          takeTour: takeTour, fullScreen: fullScreen)
-    }
-
     /// The drawer's dim: a tap on it closes the drawer instead of clicking the Mac.
     private var dim: some View {
         Color.black.opacity(0.58)
@@ -771,14 +723,6 @@ struct PortraitStreamScreen: View {
             .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
             .accessibilityHidden(true)
             .transition(.opacity)
-    }
-
-    /// The Settings panel's tap catcher: clear, so the stream stays in view while a setting changes.
-    private var catcher: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture { setSettings(false, true) }
-            .accessibilityHidden(true)
     }
 
     private func appsButton(width: CGFloat? = nil) -> some View {
@@ -1034,9 +978,13 @@ private enum Key {
 /// tab, the four modifiers, the four arrows, the keyboard itself and Spotlight, twelve equal caps
 /// across the screen at 48 pt tall, ≈49 pt wide at 710 pt — or, in the compact halves where twelve
 /// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
-/// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
-/// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
-/// ⌘Space). Arrows there come from a hardware keyboard. Escape, tab and the arrows are down on the
+/// (`.phone`): escape, tab and the four modifiers, six caps across the row; with Arrow Keys on
+/// (Settings › This iPhone › Keys, off unless turned on; PhoneKeyRow, #287) the four arrows after shift
+/// too, in one row that scrolls sideways as the thumbnails above it do: as many caps as fit whole at
+/// 44 pt or wider (six, five at 320 pt) and over half of the next across the row, the cut cap fading out
+/// at the edge to say there is more, and a swipe brings the arrows in beside shift (`PhoneKeyStrip`).
+/// The Keyboard button is in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns
+/// a typed space into ⌘Space). Escape, tab and the arrows are down on the
 /// Mac while a finger holds them, so the Mac repeats them (HeldCap, #162), but for the phone's at the
 /// accessibility text sizes, whose long press shows the cap large (`capsHold`).
 private struct KeyRow: View {
@@ -1062,6 +1010,9 @@ private struct KeyRow: View {
     /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
     /// stays a look, a tap at its release as before, and never a key held down and repeating on the Mac.
     private var capsHold: Bool { !(keys == .phone && dynamicTypeSize.isAccessibilitySize) }
+    /// Arrow Keys (Settings › This iPhone › Keys; PhoneKeyRow.arrowKeysKey): off unless turned on. On, a
+    /// phone's row adds the four arrows and scrolls; an iPad's rows (`.full`) have them either way.
+    @AppStorage(PhoneKeyRow.arrowKeysKey) private var arrowKeys = PhoneKeyRow.arrowKeysDefault
 
     private static let all: [Key] = [
         .press("esc", HIDKey.escape, "Escape"),
@@ -1078,12 +1029,11 @@ private struct KeyRow: View {
         .spotlight,
     ]
 
-    /// The six that name a key.
-    private static let phone = Array(all.prefix(6))
-
     private var shown: [Key] {
         switch keys {
-        case .phone: return Self.phone
+        // The six that name a key, and with Arrow Keys on the four arrows after them: never Keyboard or
+        // Spotlight, which a phone has elsewhere.
+        case .phone: return Array(Self.all.prefix(PhoneKeyRow.capCount(arrowKeys: arrowKeys)))
         case .full: return showSpotlight ? Self.all : Self.all.filter { if case .spotlight = $0 { return false } else { return true } }
         }
     }
@@ -1097,16 +1047,27 @@ private struct KeyRow: View {
     }
 
     var body: some View {
-        VStack(spacing: metrics.keyRowGap) {
-            ForEach(rows.indices, id: \.self) { row in
-                HStack(spacing: metrics.keyGap) {
-                    ForEach(rows[row].indices, id: \.self) { index in
-                        key(rows[row][index])
+        Group {
+            if keys == .phone && PhoneKeyRow.scrolls(arrowKeys: arrowKeys) {
+                PhoneKeyStrip(count: shown.count, gap: metrics.keyGap, height: metrics.capHeight) { index in
+                    key(shown[index])
+                }
+            } else {
+                VStack(spacing: metrics.keyRowGap) {
+                    ForEach(rows.indices, id: \.self) { row in
+                        HStack(spacing: metrics.keyGap) {
+                            ForEach(rows[row].indices, id: \.self) { index in
+                                key(rows[row][index])
+                            }
+                        }
+                        .frame(height: metrics.capHeight)
                     }
                 }
-                .frame(height: metrics.capHeight)
             }
         }
+        // Arrow Keys turned on or off with a cap held (another finger in Settings): the row it was in has
+        // gone, and no release comes from it, so it comes up here.
+        .onChange(of: arrowKeys) { _, _ in heldCap.releaseAll().forEach(send) }
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
         // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
@@ -1270,5 +1231,80 @@ struct KeyboardToggleFrameKey: PreferenceKey {
 private struct KeyboardToggleFrame: View {
     var body: some View {
         GeometryReader { g in Color.clear.preference(key: KeyboardToggleFrameKey.self, value: g.frame(in: .named(TourSpace.name))) }
+    }
+}
+
+/// The phone's key row with Arrow Keys on (#287, PR #315 by oyyblin): every cap in one row that scrolls
+/// sideways, as the thumbnails above it do, laid out by `PhoneKeyRow.Strip`. As many caps as fit whole at
+/// 44 pt or wider (six at most, five at 320 pt) and over half of the next (the left arrow's chevron, or
+/// shift at 320 pt) show past them, fading out at the edge, so the row says there is more; a swipe brings
+/// the arrows in beside shift, and the first caps fade at the left edge once scrolled. It stops with a cap
+/// at the leading edge, never halfway. Its room is the row's 44 pt as before, so nothing else on the screen
+/// moves (PhonePortraitLayout's `keys`). A cap goes down only once the scroll view has let the touch be a
+/// press, so a swipe that starts on esc or an arrow should scroll and send nothing; a quick tap is still
+/// one press (HeldCap's `activated`). VoiceOver: every cap's action "Show the arrow keys" scrolls to them
+/// and moves VoiceOver to the left arrow, and at the end "Show the modifier keys" goes back to esc (#293's
+/// action, PhoneKeyRow.Copy). DEBUG: `-SillKeyScroll end` starts scrolled to the arrows.
+private struct PhoneKeyStrip<Cap: View>: View {
+    let count: Int
+    let gap: CGFloat
+    let height: CGFloat
+    @ViewBuilder let cap: (Int) -> Cap
+
+    /// How far the row has scrolled from its start: 0 at rest.
+    @State private var scrolled: CGFloat = 0
+    /// The cap VoiceOver's action puts VoiceOver on (PhoneKeyRow.voiceOverFocus).
+    @AccessibilityFocusState private var focus: Int?
+
+    /// The scroll view's own space, which the caps' place is read in (computed: a generic type stores none).
+    private static var space: String { "keyStrip" }
+
+    var body: some View {
+        GeometryReader { geo in
+            let strip = PhoneKeyRow.Strip(rowWidth: geo.size.width, gap: gap, count: count)
+            let atEnd = strip.atEnd(scrolled: scrolled)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: gap) {
+                        ForEach(0..<count, id: \.self) { index in
+                            cap(index)
+                                .frame(width: strip.capWidth, height: height)
+                                .accessibilityFocused($focus, equals: index)
+                                .accessibilityAction(named: Text(PhoneKeyRow.Copy.scrollAction(atEnd: atEnd))) {
+                                    // From the end back to the start, else on to the end, where the arrows are.
+                                    proxy.scrollTo(atEnd ? 0 : count - 1, anchor: atEnd ? UnitPoint.leading : UnitPoint.trailing)
+                                    focus = min(count - 1, PhoneKeyRow.voiceOverFocus(atEnd: atEnd))
+                                }
+                                .id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                    .onGeometryChange(for: CGFloat.self, of: { -$0.frame(in: .named(Self.space)).minX },
+                                      action: { scrolled = $0 })
+                }
+                .coordinateSpace(name: Self.space)
+                .scrollTargetBehavior(.viewAligned)
+                .mask(fade(strip))
+                #if DEBUG
+                .onAppear {
+                    guard UserDefaults.standard.string(forKey: "SillKeyScroll") == "end" else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(count - 1, anchor: .trailing) }
+                }
+                #endif
+            }
+        }
+        .frame(height: height)
+    }
+
+    /// Clear at an edge with caps past it (PhoneKeyRow.Strip), over the cut cap and the gap before it.
+    private func fade(_ strip: PhoneKeyRow.Strip) -> LinearGradient {
+        let span = strip.fadeShare
+        var stops: [Gradient.Stop] = strip.fadesLeading(scrolled: scrolled)
+            ? [.init(color: .clear, location: 0), .init(color: .black, location: span)]
+            : [.init(color: .black, location: 0)]
+        stops += strip.fadesTrailing(scrolled: scrolled)
+            ? [.init(color: .black, location: 1 - span), .init(color: .clear, location: 1)]
+            : [.init(color: .black, location: 1)]
+        return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
     }
 }

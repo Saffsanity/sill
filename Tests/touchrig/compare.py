@@ -22,6 +22,10 @@ scroll deltas are compared by their count and their last move or their sum, and 
   - A one- or two-finger stroke made right after a gesture on the same surface: its events are the
     same stroke's made fresh (pointer moves by their count: the trackpad's pointer is relative).
   - OFF: NEW's events, less the gesture going out: nothing else at all.
+Hold, Then Drag (#292): on in the rig as on a fresh install (Noah, 2026-11-20), off with RIG_HOLD=off; a log
+whose overlay asks it says which ("RIG hold:"), and one of surfaces from before it holds as with it off. A
+picture's hold that moves on past the slop (HOLD_MOVES) drags while it is on, by design, so in every mode it is
+judged only between two logs that agree on the switch, and noted otherwise.
 Exits 1 on any failure."""
 import re, sys
 
@@ -123,6 +127,24 @@ def unplaced(events, surface):
     if surface != "TRACKPAD": return out
     out = [re.sub(r"(pointer\.move ×\d+) → \([-\d.]+,[-\d.]+\)", r"\1", e) for e in out]
     return [re.sub(r"(pointer\.\w+)\([-\d.]+,[-\d.]+\)", r"\1", e) for e in out]
+# The picture's holds that move on past the slop: what Hold, Then Drag changes (TouchHold, #292). Held in place they send
+# the same right click either way (at the lift with it on), so only these differ between a log with it and one without.
+HOLD_MOVES = ("1-finger hold 0.6 s, then move 60 and lift", "1-finger hold 0.6 s, move 60, then cancelled")
+
+def hold_drags(path):
+    """Whether the log's overlay had Hold, Then Drag on: its "RIG hold:" line, printed where the overlay asks it."""
+    for line in open(path, errors="replace"):
+        if line.startswith("RIG hold: Hold, Then Drag "):
+            return line.startswith("RIG hold: Hold, Then Drag on")
+    return False
+
+def by_design(title, a_drags, b_drags):
+    """A picture's hold that moves, between two logs that disagree on Hold, Then Drag: different by design."""
+    return a_drags != b_drags and title.startswith("OVERLAY ") and title.endswith(HOLD_MOVES)
+
+def note_hold(title):
+    print(f"note {title}: Hold, Then Drag (#292) on in one log only, so it drags there; judged only between logs that agree (RIG_HOLD)")
+
 UNCHANGED = ["1-finger tap", "1-finger drag right 120", "1-finger hold 0.6 s, then move 60 and lift",
              "2-finger scroll up 150 (flick)", "2-finger scroll down 90, slowly", "2-finger tap",
              "2 fingers scroll 60, a 3rd lands 133 ms after the first, all move 120 more"]
@@ -189,10 +211,12 @@ def edge_main(base, new):
     print(f"{checks} checks, {fails} failed")
     sys.exit(1 if fails else 0)
 
-def all_main(base, new):
+def all_main(base, new, drags=(False, False)):
     fails = checks = 0
     titles = [t for t in base if t in new and " EDGE " not in t]
     for t in titles:
+        if by_design(t, *drags):
+            note_hold(t); continue
         a, b = sends(base[t]), sends(new[t])
         checks += 1
         if a != b:
@@ -210,11 +234,14 @@ def all_main(base, new):
 def main():
     if len(sys.argv) == 4 and sys.argv[1] in ("--edge", "--all"):
         base, new = load(sys.argv[2]), load(sys.argv[3])
-        (edge_main if sys.argv[1] == "--edge" else all_main)(base, new)
+        if sys.argv[1] == "--edge": edge_main(base, new)
+        all_main(base, new, (hold_drags(sys.argv[2]), hold_drags(sys.argv[3])))
     if len(sys.argv) not in (3, 4):
         print(__doc__); sys.exit(2)
     base, new = load(sys.argv[1]), load(sys.argv[2])
     off = load(sys.argv[3]) if len(sys.argv) == 4 else None
+    base_drags, new_drags = hold_drags(sys.argv[1]), hold_drags(sys.argv[2])
+    off_drags = hold_drags(sys.argv[3]) if off is not None else new_drags
     fails = checks = 0
     def check(ok, what):
         nonlocal fails, checks
@@ -224,6 +251,8 @@ def main():
     for surface in ("TRACKPAD", "OVERLAY"):
         for s in UNCHANGED:
             t = f"{surface} {s}"
+            if by_design(t, base_drags, new_drags):
+                note_hold(t); continue
             a, b = sends(base.get(t, [])), sends(new.get(t, []))
             # The overlay has no two-finger tap: nothing, before and now.
             empty = surface == "OVERLAY" and s == "2-finger tap"
@@ -274,6 +303,8 @@ def main():
         for surface in ("TRACKPAD", "OVERLAY"):
             for s in UNCHANGED:
                 t = f"{surface} {s}"
+                if by_design(t, new_drags, off_drags):
+                    note_hold(t); continue
                 check(sends(off.get(t, [])) == sends(new.get(t, [])), f"{t}, the switch off: the same events")
     print(f"{checks} checks, {fails} failed")
     sys.exit(1 if fails else 0)

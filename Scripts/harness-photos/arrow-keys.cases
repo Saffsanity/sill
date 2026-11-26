@@ -1,0 +1,19 @@
+# Arrow Keys (issue #287, PR #315; PhoneKeyRow) on the agents' Duo (iOS 27.1), its inner display open flat
+# upright, the fake iPhones drawn at their own size: an iPhone 17 Pro's 402x874 and Display Zoom's 320x568.
+#   Scripts/harness-photos.sh Scripts/harness-photos/arrow-keys.cases --baseline origin/main
+# The switch off, its default: main's six caps, pixel for pixel.
+keys-402-off          -SillLayout 402x874 -SillSafeArea 62,0,34,0
+keys-320-off          -SillLayout 320x568 -SillSafeArea 20,0,0,0
+# On: at rest (six whole and over half of the left arrow; at 320 pt five and over half of shift), and at the end.
+keys-402-on           -SillLayout 402x874 -SillSafeArea 62,0,34,0 -Sill.arrowKeys 1
+keys-402-end          -SillLayout 402x874 -SillSafeArea 62,0,34,0 -Sill.arrowKeys 1 -SillKeyScroll end
+keys-320-on           -SillLayout 320x568 -SillSafeArea 20,0,0,0 -Sill.arrowKeys 1
+keys-320-end          -SillLayout 320x568 -SillSafeArea 20,0,0,0 -Sill.arrowKeys 1 -SillKeyScroll end
+# With Larger Picture (the mock streams a window): the same row under the taller picture.
+keys-402-larger       -SillLayout 402x874 -SillSafeArea 62,0,34,0 -Sill.arrowKeys 1 -Sill.largerPicture 1
+# The iPhone Duo's cover, closed: a phone's arrangement too.
+keys-cover-on         -SillLayout 466x678 -SillHinge closed -Sill.arrowKeys 1
+# Settings: This iPhone's Keys group, the switch off and on; an iPad (-SillIdiom pad) has none, as on main.
+settings-keys-off     -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillSettings 1 -SillSettingsScroll keys --wait=5
+settings-keys-on      -SillLayout 402x874 -SillSafeArea 62,0,34,0 -SillSettings 1 -SillSettingsScroll keys -Sill.arrowKeys 1 --wait=5
+settings-ipad-end     -SillLayout 669x951 -SillHinge flat -SillIdiom pad -SillSettings 1 -SillSettingsEnd 1 --wait=5

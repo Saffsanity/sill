@@ -62,7 +62,8 @@ struct PhonePortraitLayout: Equatable {
     /// the shortest phone only just (an iPhone SE with Display Zoom, 320×548 under its status bar:
     /// the picture 188 pt tall, 2 pt short of 16:10).
     static let minTrackpad: CGFloat = 120
-    /// From row 1 to the drawer and the Settings panel, which hang under it.
+    /// From row 1 to the drawer, which hangs under it (Settings, a panel there until 2026-11-18, covers the
+    /// whole screen now: SettingsPane).
     static let panelGap: CGFloat = 8
     /// The Aa ruler's finger travel per detent at most, and `TextScaleControl.sliderInset`, the room
     /// either side of its four detent spans: the ruler's frame shows two detents either side of the
@@ -145,16 +146,13 @@ struct PhonePortraitLayout: Equatable {
     /// The same, on Aa of `buttonsBesideMenus`.
     let rulerBesideMenus: CGRect
     let rulerStepBesideMenus: CGFloat
-    /// The app drawer and the Settings panel, from under row 1 across its whole span (Apps' leading
-    /// edge to Settings' trailing one), so nothing cut shows beside them; each is at most this tall
-    /// (the panel follows its content). With Larger Picture the drawer is above row 1 instead, over
-    /// the picture's room, clear of any keyboard (on an 18 Pro Max 412×438 from 8).
+    /// The app drawer, from under row 1 across its whole span (Apps' leading edge to Settings'
+    /// trailing one), so nothing cut shows beside it, down to the trackpad's bottom. With Larger
+    /// Picture it is above row 1 instead, over the picture's room, clear of any keyboard (on an 18 Pro
+    /// Max 412×438 from 8).
     let drawer: CGRect
-    let settings: CGRect
-    /// The Settings panel's top-trailing corner as fractions of `size`: where it grows from.
-    let settingsAnchor: CGPoint
-    /// What the drawer's dim and the panel's tap catcher cover: everything but row 1's buttons,
-    /// which stay live while they are open, as the landscape bar does.
+    /// What the drawer's dim covers: everything but row 1's buttons, which stay live while it is
+    /// open, as the landscape bar does.
     let dim: [CGRect]
 
     /// Whether this is the Larger Picture arrangement (no thumbnails' row).
@@ -234,11 +232,10 @@ struct PhonePortraitLayout: Equatable {
         (ruler, rulerStep) = Self.ruler(on: buttons[Button.textSize.rawValue], in: row1)
         (rulerBesideMenus, rulerStepBesideMenus) = Self.ruler(on: buttonsBesideMenus[Button.textSize.rawValue], in: row1)
 
-        // The drawer and the panel hang under row 1 and span it, down to the trackpad's bottom. With
-        // Larger Picture the drawer opens upward instead, over the picture's room to `panelGap` above
-        // row 1: under row 1 is the keyboard's footprint, so a keyboard up (the Mac's, or the one the
-        // drawer's own search field brings) would leave only the search field in view there. The
-        // panel stays under row 1: opening it takes the keyboard down, and the picture stays in view.
+        // The drawer hangs under row 1 and spans it, down to the trackpad's bottom. With Larger
+        // Picture it opens upward instead, over the picture's room to `panelGap` above row 1: under
+        // row 1 is the keyboard's footprint, so a keyboard up (the Mac's, or the one the drawer's own
+        // search field brings) would leave only the search field in view there.
         let panelTop = row1.maxY + Self.panelGap
         let panelHeight = max(0, height - Self.bottom - panelTop)
         if footprint == nil {
@@ -246,8 +243,6 @@ struct PhonePortraitLayout: Equatable {
         } else {
             drawer = CGRect(x: Self.side, y: Self.margin, width: rowWidth, height: max(0, row1.minY - Self.panelGap - Self.margin))
         }
-        settings = CGRect(x: Self.side, y: panelTop, width: rowWidth, height: panelHeight)
-        settingsAnchor = CGPoint(x: width > 0 ? settings.maxX / width : 1, y: height > 0 ? settings.minY / height : 0)
 
         dim = [CGRect(x: 0, y: 0, width: width, height: row1.minY),
                CGRect(x: 0, y: row1.maxY, width: width, height: max(0, height - row1.maxY))]
