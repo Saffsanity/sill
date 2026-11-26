@@ -116,13 +116,12 @@ if [ "${SILL_RELEASE_NIGHTLY:-}" = 1 ]; then
 fi
 printf 'APPL????' > "$stage/Contents/PkgInfo"
 
-# The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a
-# full-bleed icon itself when it comes from an asset catalog, but shows a legacy .icns shrunk
-# inside a grey tile (seen on macOS 27). So Quick Look renders the SVG (design/README.md's own
-# tool), the render becomes the one layer of an Icon Composer document, and actool, the compiler
-# Xcode uses, turns that into Assets.car (macOS 26+) plus an AppIcon.icns masked for macOS 14–15.
-# A layered Packaging/AppIcon.icon made in Icon Composer (the SVG's four groups) wins when it
-# exists. Cached in .build/icon until the SVG, that document or this script changes.
+# The icon. Packaging/AppIcon.icon, the layered Icon Composer document both apps use
+# (design/README.md), goes to actool, the compiler Xcode uses, which turns it into Assets.car
+# (macOS 26+ masks and lights it, Liquid Glass) plus an AppIcon.icns masked for macOS 14–15; a
+# legacy .icns alone shows shrunk inside a grey tile (seen on macOS 27). Without that document,
+# Quick Look renders design/AppIcon.svg (its flat copy) as the one layer of a generated one.
+# Cached in .build/icon until the SVG, that document or this script changes.
 icon_out="$PWD/.build/icon"   # absolute: actool resolves relative paths in its helper's directory, not ours
 if [ ! -f "$icon_out/compiled/Assets.car" ] || [ design/AppIcon.svg -nt "$icon_out/compiled/Assets.car" ] \
    || [ "$0" -nt "$icon_out/compiled/Assets.car" ] \
