@@ -7,18 +7,28 @@
   },
   "groups": [
     {
-      "name": "Window",
+      "name": "Mac",
       "layers": [
         {
           "name": "window",
           "image-name": "window.svg",
           "glass": false
+        },
+        {
+          "name": "keys",
+          "image-name": "keys.svg",
+          "glass": false
+        },
+        {
+          "name": "imac",
+          "image-name": "imac.svg",
+          "glass": true
         }
       ],
       "specular": true,
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.3
+        "opacity": 0.35
       },
       "translucency": {
         "enabled": false,
@@ -29,8 +39,8 @@
       "name": "Phone",
       "layers": [
         {
-          "name": "island",
-          "image-name": "island.svg",
+          "name": "home-indicator",
+          "image-name": "home-indicator.svg",
           "glass": false
         },
         {
@@ -52,30 +62,6 @@
       "translucency": {
         "enabled": true,
         "value": 0.2
-      }
-    },
-    {
-      "name": "Mac",
-      "layers": [
-        {
-          "name": "slot",
-          "image-name": "slot.svg",
-          "glass": false
-        },
-        {
-          "name": "mac",
-          "image-name": "mac.svg",
-          "glass": true
-        }
-      ],
-      "specular": true,
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.3
-      },
-      "translucency": {
-        "enabled": true,
-        "value": 0.4
       }
     }
   ],

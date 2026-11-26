@@ -1,10 +1,10 @@
 import AppKit
 
 /// The status item's image: the app icon (Packaging/AppIcon.icon) reduced to a menu bar template.
-/// The Mac's screen is an outline (its stand left out), the iPhone lies sideways in front of its lower right
-/// corner as in the icon, cut out of the Mac's line, and the state shows on the iPhone's screen:
-/// empty (idle), a dot (a device is connected), a window (streaming), or a badge at the lower
-/// right (Sill needs attention).
+/// The iPhone, held open sideways, as an outline; on its screen the iMac's screen as an outline, its
+/// stand and its keyboard; the state shows on the iMac's screen: empty (idle), a dot (a device is
+/// connected), a window (streaming), or a badge at the lower right (Sill needs attention). The icon's
+/// home indicator and the keyboard's keys are left out: too small to see at this size.
 ///
 /// Drawn in code from the icon's own coordinates (its layers' 1024 grid, as generated for
 /// AppIcon.icon's Assets), so there is no asset to keep in sync, and marked as a template so the
@@ -14,9 +14,9 @@ import AppKit
 enum StatusGlyph {
     enum State: Equatable, CaseIterable { case idle, connected, streaming, attention }
 
-    /// 18 pt tall, like the system's own items, and 21 wide to fit the square status item; the
-    /// drawing fills the width and is centred in the height.
-    static let size = NSSize(width: 21, height: 18)
+    /// 18 pt tall, like the system's own items, and 20 wide to fit the square status item; the
+    /// drawing is centred in both.
+    static let size = NSSize(width: 20, height: 18)
 
     static let symbolFallback: NSImage? = {
         let image = NSImage(systemSymbolName: "macbook.and.iphone", accessibilityDescription: "Sill")
@@ -37,10 +37,10 @@ enum StatusGlyph {
 
     // MARK: Geometry, in the icon's units (1024 grid)
 
-    /// The drawing's extent: the Mac's screen from (100, 214) to the iPhone's corner at (928, 782).
-    private static let extent = CGRect(x: 100, y: 214, width: 828, height: 568)
-    /// Units → points: the extent in 21 × 16 pt at most, centred in the image.
-    private static let scale: CGFloat = min(16 / extent.height, size.width / extent.width)
+    /// The drawing's extent: the iPhone, from (92, 124), 840 × 776.
+    private static let extent = CGRect(x: 92, y: 124, width: 840, height: 776)
+    /// Units → points: the extent in 20 × 17 pt at most, centred in the image.
+    private static let scale: CGFloat = min(17 / extent.height, size.width / extent.width)
     private static let offset = CGPoint(x: (size.width - extent.width * scale) / 2,
                                         y: (size.height - extent.height * scale) / 2)
 
@@ -58,31 +58,31 @@ enum StatusGlyph {
         ctx.setFillColor(NSColor.black.cgColor)
         ctx.setStrokeColor(NSColor.black.cgColor)
 
-        // The Mac: its screen's outline (stroked inside the icon's 600×400 frame). The icon's stand is
-        // left out: the iPhone would cut it to a stub at this size.
-        let stroke: CGFloat = 58                              // about 1.5 pt
-        ctx.setLineWidth(stroke * scale)
-        ctx.addPath(rounded(rect(100 + stroke / 2, 214 + stroke / 2, 600 - stroke, 400 - stroke), 60 - stroke / 2))
-        ctx.strokePath()
-
-        // The iPhone, sideways (the icon's 540×270), cut out of the Mac with a gap around it.
-        let phone = rect(388, 512, 540, 270)
-        let radius: CGFloat = 72
-        let gap: CGFloat = 40                                 // about 1 pt
-        ctx.setBlendMode(.clear)
-        ctx.addPath(rounded(phone.insetBy(dx: -gap * scale, dy: -gap * scale), radius + gap))
-        ctx.fillPath()
-        ctx.setBlendMode(.normal)
-        let border: CGFloat = 50                              // about 1.25 pt
+        // The iPhone: its outline, stroked inside the icon's 840 × 776 frame (corner radius 130).
+        let border: CGFloat = 60                              // about 1.3 pt
         ctx.setLineWidth(border * scale)
-        ctx.addPath(rounded(phone.insetBy(dx: border / 2 * scale, dy: border / 2 * scale), radius - border / 2))
+        ctx.addPath(rounded(rect(92 + border / 2, 124 + border / 2, 840 - border, 776 - border), 130 - border / 2))
         ctx.strokePath()
 
-        // Its screen shows the state.
-        let screen = phone.insetBy(dx: (border + 34) * scale, dy: (border + 34) * scale)
+        // The iMac: its screen's outline (the icon's 550 × 344, radius 40), stand and foot.
+        let stroke: CGFloat = 50                              // about 1.1 pt
+        let mac = rect(237, 262, 550, 344)
+        ctx.setLineWidth(stroke * scale)
+        ctx.addPath(rounded(mac.insetBy(dx: stroke / 2 * scale, dy: stroke / 2 * scale), 40 - stroke / 2))
+        ctx.strokePath()
+        ctx.fill(rect(512 - 30, 606, 60, 42))
+        ctx.addPath(rounded(rect(512 - 100, 644, 200, 26), 13))
+        ctx.fillPath()
+
+        // Its keyboard, solid (the icon's 460 × 74; drawn 90 tall so it reads as more than a line).
+        ctx.addPath(rounded(rect(512 - 230, 696, 460, 90), 20))
+        ctx.fillPath()
+
+        // The iMac's screen shows the state.
+        let screen = mac.insetBy(dx: (stroke + 40) * scale, dy: (stroke + 40) * scale)
         switch state {
         case .connected:
-            let d: CGFloat = 70 * scale
+            let d: CGFloat = 90 * scale
             ctx.fillEllipse(in: CGRect(x: screen.midX - d / 2, y: screen.midY - d / 2, width: d, height: d))
         case .streaming:
             ctx.addPath(rounded(screen, 20))
@@ -93,7 +93,7 @@ enum StatusGlyph {
 
         // Attention: a dot at the lower right, cut out of whatever it overlaps.
         if state == .attention {
-            let d = size.height - phone.minY                  // as tall as the iPhone, so no corner peeks out
+            let d: CGFloat = 8
             let dot = CGRect(x: size.width - d, y: size.height - d, width: d, height: d)
             ctx.setBlendMode(.clear)
             ctx.fillEllipse(in: dot.insetBy(dx: -1.5, dy: -1.5))
