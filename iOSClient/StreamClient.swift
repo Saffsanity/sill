@@ -955,6 +955,10 @@ final class StreamClient: ObservableObject {
     @Published var hostDesktopDisplays: Int?
     @Published var hostDesktopDisplay: Int?
     @Published var hostDesktopDisplayNames: [String]?
+    /// Which of those stops is the Mac's Virtual Desktop, from 1 (`WindowList.desktopVirtual`, phase 2b): the button shows
+    /// `rectangle.dashed` over "Virtual" on it, and VoiceOver "Virtual Desktop, 3 of 3". Nil from a Mac before it, with its
+    /// switch off, or one stop. Cleared with the session.
+    @Published var hostDesktopVirtual: Int?
     /// This device's own step (kind 47) waits for the Mac's list that shows where it landed, which VoiceOver
     /// then says ("Display 2 of 3, DELL U2723QE"): the stop shown when the tap went out, and when. Another
     /// device's step moves this button unannounced.
@@ -3780,6 +3784,7 @@ final class StreamClient: ObservableObject {
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
         hostDesktopDisplayNames = nil
+        hostDesktopVirtual = nil
         desktopStepSentFrom = nil
         remoteRoute = nil
         macInfo = nil
@@ -3903,7 +3908,7 @@ final class StreamClient: ObservableObject {
     /// the Desktop streams, VoiceOver's words and what a tap does.
     var desktopButton: DesktopDisplays.Button {
         DesktopDisplays.button(displays: hostDesktopDisplays, current: hostDesktopDisplay, names: hostDesktopDisplayNames,
-                               desktopStreams: active == .desktop)
+                               desktopStreams: active == .desktop, virtual: hostDesktopVirtual)
     }
 
     /// A window list's stops: the button follows them; after this device's own step, the first list that
@@ -3912,12 +3917,16 @@ final class StreamClient: ObservableObject {
         if hostDesktopDisplays != list.desktopDisplays { hostDesktopDisplays = list.desktopDisplays }
         if hostDesktopDisplay != list.desktopDisplay { hostDesktopDisplay = list.desktopDisplay }
         if hostDesktopDisplayNames != list.desktopDisplayNames { hostDesktopDisplayNames = list.desktopDisplayNames }
+        if hostDesktopVirtual != list.desktopVirtual { hostDesktopVirtual = list.desktopVirtual }
         guard let sent = desktopStepSentFrom else { return }
         guard Date().timeIntervalSince(sent.at) < 5 else { desktopStepSentFrom = nil; return }
         guard let count = list.desktopDisplays, let shown = list.desktopDisplay, shown != sent.stop else { return }
         desktopStepSentFrom = nil
+        // The stop's own words, as VoiceOver reads the button: "Virtual Desktop, 3 of 3" on the Virtual Desktop's.
+        let face = DesktopDisplays.button(displays: count, current: shown, names: list.desktopDisplayNames, desktopStreams: true,
+                                          virtual: list.desktopVirtual)
         UIAccessibility.post(notification: .announcement,
-                             argument: DesktopDisplays.value(shown, of: count, names: list.desktopDisplayNames))
+                             argument: face.accessibilityValue ?? DesktopDisplays.value(shown, of: count, names: list.desktopDisplayNames))
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own

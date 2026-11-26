@@ -56,6 +56,9 @@ final class HostSettings {
         static let lockSleepsDisplay = "lockSleepsDisplay"
         static let lockOnlyAfterAway = "lockOnlyAfterAway"
         static let headlessDisplay = "headlessDisplay"
+        static let virtualDesktop = "virtualDesktop"
+        static let virtualDesktopSize = "virtualDesktopSize", virtualDesktopHz = "virtualDesktopHz"
+        static let virtualDesktopDevices = "virtualDesktopDevices"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
@@ -79,6 +82,29 @@ final class HostSettings {
     var askedAccessibility: Bool { didSet { defaults.set(askedAccessibility, forKey: Key.askedAccessibility) } }
     /// The Log window shows the once-a-second stats and client lines.
     var logShowsStats: Bool { didSet { defaults.set(logShowsStats, forKey: Key.logShowsStats) } }
+
+    /// The devices this Mac knows, as the Virtual Desktop's budget counts them (part B: VirtualDesktopBudget.Device, each
+    /// device that connected and said its screen, by its name, the newest kept), for Settings › Displays' Custom…: what may
+    /// be typed (the largest budget among them, VirtualDesktopBudget.ceiling) and which get a size as it is and which
+    /// scaled. Saved as JSON under `virtualDesktopDevices`; empty on a Mac that has seen none (the largest current iPad's
+    /// budget is then the ceiling). Forgotten with Sill's settings.
+    private(set) var knownDevices: [VirtualDesktopBudget.Device] = []
+
+    /// Keeps `devices` (the host's connected ones that said their screen) among the known: by name, the newest screen and
+    /// rate kept, at most 24 (the oldest dropped). Saved only when something changed.
+    func rememberDevices(_ devices: [VirtualDesktopBudget.Device]) {
+        guard !devices.isEmpty else { return }
+        var next = knownDevices
+        for d in devices {
+            next.removeAll { $0.name == d.name }
+            next.append(d)
+        }
+        if next.count > 24 { next.removeFirst(next.count - 24) }
+        guard next != knownDevices else { return }
+        knownDevices = next
+        if let data = try? JSONEncoder().encode(next) { defaults.set(data, forKey: Key.virtualDesktopDevices) }
+    }
+
     /// The router's dynamic DNS name for the internet switch ("home.example.net", or with ":port"
     /// when the router forwards another outside port); "" for none. Not in HostConfig: it changes
     /// no listener, only the addresses devices learn (`RemoteAccess.setAddressName`).
@@ -156,6 +182,11 @@ final class HostSettings {
             // On, like the CLI (Noah on #61: a Mac with no screen gets a display of its own); a saved key wins, so a
             // Mac whose user turned it off in Settings › Virtual Display (#380's stops, a #333 monitor) keeps it off.
             Key.headlessDisplay: base.headlessDisplay,
+            // Off, like the CLI (Noah, 2026-11-11: the Virtual Desktop off by default); a saved key wins.
+            Key.virtualDesktop: base.virtualDesktop,
+            // Its size and rate the device's (Noah, 2026-11-18), as the CLI's; a saved choice wins.
+            Key.virtualDesktopSize: base.virtualDesktopSize,
+            Key.virtualDesktopHz: base.virtualDesktopHz,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -180,7 +211,10 @@ final class HostSettings {
                             lockAfterSession: defaults.bool(forKey: Key.lockAfterSession),
                             lockSleepsDisplay: defaults.bool(forKey: Key.lockSleepsDisplay),
                             lockOnlyAfterAway: defaults.bool(forKey: Key.lockOnlyAfterAway),
-                            headlessDisplay: defaults.bool(forKey: Key.headlessDisplay)).validated()
+                            headlessDisplay: defaults.bool(forKey: Key.headlessDisplay),
+                            virtualDesktop: defaults.bool(forKey: Key.virtualDesktop),
+                            virtualDesktopSize: defaults.string(forKey: Key.virtualDesktopSize) ?? base.virtualDesktopSize,
+                            virtualDesktopHz: defaults.integer(forKey: Key.virtualDesktopHz)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
@@ -189,6 +223,9 @@ final class HostSettings {
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
         askedAccessibility = defaults.bool(forKey: Key.askedAccessibility)
         logShowsStats = defaults.bool(forKey: Key.logShowsStats)
+        // Saved by a later Sill for Mac in a form this one cannot read: none known, as on a Mac that has seen no device.
+        knownDevices = defaults.data(forKey: Key.virtualDesktopDevices)
+            .flatMap { try? JSONDecoder().decode([VirtualDesktopBudget.Device].self, from: $0) } ?? []
     }
 
     /// Writes only the keys that changed, so a launch-argument override of another key is not
@@ -212,6 +249,9 @@ final class HostSettings {
         if config.lockSleepsDisplay != old.lockSleepsDisplay { defaults.set(config.lockSleepsDisplay, forKey: Key.lockSleepsDisplay) }
         if config.lockOnlyAfterAway != old.lockOnlyAfterAway { defaults.set(config.lockOnlyAfterAway, forKey: Key.lockOnlyAfterAway) }
         if config.headlessDisplay != old.headlessDisplay { defaults.set(config.headlessDisplay, forKey: Key.headlessDisplay) }
+        if config.virtualDesktop != old.virtualDesktop { defaults.set(config.virtualDesktop, forKey: Key.virtualDesktop) }
+        if config.virtualDesktopSize != old.virtualDesktopSize { defaults.set(config.virtualDesktopSize, forKey: Key.virtualDesktopSize) }
+        if config.virtualDesktopHz != old.virtualDesktopHz { defaults.set(config.virtualDesktopHz, forKey: Key.virtualDesktopHz) }
     }
 
     // MARK: Remote devices seen (display only)

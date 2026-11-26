@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 import SillHostCore
 
-/// The Settings window's tabs, in the toolbar's order.
+/// The Settings window's tabs, in the toolbar's order. The fourth, "Displays" since phase 2b of the Virtual Desktop (the
+/// windows' Virtual Display, the Virtual Desktop, a Mac with no screen), keeps its raw value `virtualDisplay`, so a tab
+/// saved before opens it.
 enum SettingsTab: String, CaseIterable {
     case general, devices, streaming, virtualDisplay, permissions, remoteAccess
 
@@ -11,7 +13,7 @@ enum SettingsTab: String, CaseIterable {
         case .general: "General"
         case .devices: "Devices"
         case .streaming: "Streaming"
-        case .virtualDisplay: "Virtual Display"
+        case .virtualDisplay: "Displays"
         case .permissions: "Permissions"
         case .remoteAccess: "Remote Access"
         }

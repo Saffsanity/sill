@@ -499,7 +499,7 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
+    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay`, `desktopDisplayNames` or `desktopVirtual` (one
     /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
     /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
     /// were before this change.
@@ -514,6 +514,7 @@ enum LockPolicy {
         l.desktopDisplays = nil
         l.desktopDisplay = nil
         l.desktopDisplayNames = nil
+        l.desktopVirtual = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         if view, r == .offConsole { l.windows = list.windows; l.offConsoleView = true }

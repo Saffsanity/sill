@@ -103,6 +103,13 @@ MUTANTS = {
     "W1 the shake's words without the device": ('static func shakeFootnote(device: String) -> String { "Shaking your \\(device) brings the controls back too." }',
                                                 'static func shakeFootnote(device: String) -> String { "Shaking your device brings the controls back too." }'),
     "L1 Full Screen leads nowhere": ("var afterHide: ChromeLevel { .hidden }", "var afterHide: ChromeLevel { .shown }"),
+    "R1 the reader's own insets left out": ("        let whole = CGSize(width: reader.width + readerInsets.left + readerInsets.right,\n                           height: reader.height + readerInsets.top + readerInsets.bottom)\n",
+                                          "        let whole = reader\n"),
+    "R2 the reader's top left out": ("height: reader.height + readerInsets.top + readerInsets.bottom)", "height: reader.height + readerInsets.bottom)"),
+    "R3 the reader's sides left out": ("let whole = CGSize(width: reader.width + readerInsets.left + readerInsets.right,", "let whole = CGSize(width: reader.width,"),
+    "R4 the fold left where the reader has it": ("foldTop: foldTop.map { $0 + readerInsets.top })", "foldTop: foldTop)"),
+    "R5 the hidden room the safe area": ("        return room(size: whole, insets: insets, choice: choice, topIsStatusBar: topIsStatusBar,\n",
+                                         "        return room(size: whole, insets: insets, choice: .safeArea, topIsStatusBar: topIsStatusBar,\n"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

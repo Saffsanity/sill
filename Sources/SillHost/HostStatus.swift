@@ -131,6 +131,8 @@ package struct HostStatusSnapshot: Equatable {
     /// goes off console or Sill quits): its size as it came up, its rate, and whose screen it is sized to. The card's
     /// source row and Settings › Virtual Display say so. Nil while there is none.
     package var sillDisplay: SillDisplay?
+    /// The Virtual Desktop: whether this Mac can make it now and why not, and whether the Desktop shows it (phase 2b).
+    package var virtualDesktop = VirtualDesktop()
     /// The guard for #380 holds (DisplayMakeGuard): Sill stopped while making a display two runs in a row, and makes none
     /// by itself until the person chooses Try Again in Settings › Virtual Display.
     package var displayMakeHeld = false
@@ -158,7 +160,8 @@ package struct HostStatusSnapshot: Equatable {
     /// warning under the switch, and whether a wait runs, for Sill.app's App Nap hold.
     package var privacyLock = PrivacyLockStatus()
 
-    /// Sill's own display for a Mac with no working screen, as the card and Settings show it.
+    /// Sill's own display for the Desktop, as the card and Settings show it: a Mac with no working screen's, or the Virtual
+    /// Desktop (one display in two roles, docs/virtual-desktop-plan.md §1; `virtualDesktop`).
     package struct SillDisplay: Equatable {
         package var widthPt: Int
         package var heightPt: Int
@@ -166,9 +169,34 @@ package struct HostStatusSnapshot: Equatable {
         package var hz: Int
         /// The device it was sized to ("iPad mini"); nil when none had said its size (VirtualDesktopSize.fallback).
         package var device: String?
+        /// It is the Virtual Desktop (phase 2b, VirtualDesktopLife's role), not the display of a Mac with no screen.
+        package var virtualDesktop: Bool
 
-        package init(widthPt: Int, heightPt: Int, scale: Int, hz: Int, device: String? = nil) {
+        package init(widthPt: Int, heightPt: Int, scale: Int, hz: Int, device: String? = nil, virtualDesktop: Bool = false) {
             self.widthPt = widthPt; self.heightPt = heightPt; self.scale = scale; self.hz = hz; self.device = device
+            self.virtualDesktop = virtualDesktop
+        }
+    }
+
+    /// The Virtual Desktop (phase 2b; HostConfig.virtualDesktop) as Sill.app's Settings, menu and card show it, and as kind
+    /// 16 tells each device: whether this Mac can make it now (`note` nil) and why not (VirtualDesktopWords.note), and
+    /// whether the Desktop shows it now. Its size and rate, while it exists, are `sillDisplay`'s.
+    package struct VirtualDesktop: Equatable {
+        package var available = false
+        package var note: String?
+        package var shown = false
+        /// The devices connected that say their screen, as its budget counts them (part B: VirtualDesktopBudget): Sill.app
+        /// keeps each, so Settings › Displays knows which get a chosen size as it is and which scaled.
+        package var devices: [VirtualDesktopBudget.Device] = []
+        /// What this Mac's encoder carries of the chosen size and rate (`encoderFor`, "2752x2064@2:120"), for the note beside
+        /// it (VirtualDesktopBudget.encoderNote); nil before it is known, and for This device and the main display's.
+        package var encoder: VirtualDesktopBudget.Encoder?
+        package var encoderFor: String?
+
+        package init(available: Bool = false, note: String? = nil, shown: Bool = false, devices: [VirtualDesktopBudget.Device] = [],
+                     encoder: VirtualDesktopBudget.Encoder? = nil, encoderFor: String? = nil) {
+            self.available = available; self.note = note; self.shown = shown
+            self.devices = devices; self.encoder = encoder; self.encoderFor = encoderFor
         }
     }
 

@@ -1,0 +1,120 @@
+#!/bin/zsh
+# TEST ONLY. Probe P3 (2026-11-25; docs/steps/2026-11-18-virtual-desktop-2b.md, sixth part): what macOS does with the
+# Virtual Desktop an iPhone gets pixel for pixel (Noah, 2026-11-24: "middle one for iPhones"). It makes "Sill Probe" at
+# the sizes an iPhone 15 Pro gets, one at a time, each for a few seconds, reads back what macOS made of it, follows the
+# first in place the Virtual Desktop's way, and removes it (probe-phone.swift's header has every case). Each case ends
+# with a verdict line, "P3 589x1189 at 120 Hz: kept at 2x: yes|no (…)".
+#
+# Noah, from Terminal.app, with Sill quit and no device connected, one line (about a minute and a half, the build
+# included; never more than 120 s):
+#   zsh ~/Downloads/wt-vd-2b/Scripts/display-modes-probe/p3/run.sh
+# Everything it prints also goes to .build/display-modes-probe/p3/out-<date>-<time>.txt in the worktree.
+#
+#   run.sh --case N       one case of the four
+#   run.sh --dry-run      the plan only: looks up the private API, makes no display (what an agent runs)
+#   run.sh --build        builds the probe (an agent: through the heavy lock), then stops
+# Built into .build/display-modes-probe/p3/probe-phone (swiftc -Onone: Sources/SillHost/VirtualDisplay.swift and
+# probe-phone.swift alone, no VideoToolbox, no ScreenCaptureKit), and built again when either source is newer. Refused
+# without a terminal (an agent's shell) and while Sill.app, the bare SillMenuBar or a SillHost runs (one could be
+# streaming, and Sill would take the probe's display for its own Desktop display). The run stops itself at 90 s and is
+# killed two seconds later (its display goes with its process); Ctrl-C stops it, and its display goes with it.
+emulate -L zsh
+setopt no_unset
+typeset -F SECONDS
+HERE=${0:A:h}
+ROOT=${0:A:h:h:h:h}
+OUT=$ROOT/.build/display-modes-probe/p3
+BIN=$OUT/probe-phone
+SRC=$ROOT/Sources/SillHost/VirtualDisplay.swift
+RUN_LIMIT=90
+
+build() {
+  print -r -- "run.sh: building the probe, into $BIN (swiftc, under a minute)"
+  mkdir -p "$OUT"
+  # swiftc takes top-level code from a file named main.swift alone (beside another file, under any other name it is
+  # "expressions are not allowed at the top level"), so the probe is compiled as a copy of that name, as P2b's and P2c's.
+  local T=$OUT/tmp-src
+  rm -rf "$T" && mkdir -p "$T" || return 1
+  cp "$HERE/probe-phone.swift" "$T/main.swift" || return 1
+  if ! swiftc -swift-version 5 -Onone "$SRC" "$T/main.swift" -o "$BIN.new"; then
+    rm -rf "$T" "$BIN.new"
+    return 1
+  fi
+  rm -rf "$T"
+  mv -f "$BIN.new" "$BIN"
+  linked_ok || return 1
+  print -r -- "run.sh: built $BIN"
+}
+
+linked_ok() {
+  if otool -L "$BIN" | /usr/bin/grep -Eq 'VideoToolbox|ScreenCaptureKit'; then
+    print -r -- "REFUSED: the probe links VideoToolbox or ScreenCaptureKit"
+    rm -f "$BIN"
+    return 1
+  fi
+}
+
+stale() { [[ ! -x $BIN || $SRC -nt $BIN || $HERE/probe-phone.swift -nt $BIN ]] }
+
+dry=0
+rebuild=0
+args=()
+while (( $# > 0 )); do
+  case $1 in
+    --dry-run) dry=1 ;;
+    --build) rebuild=1 ;;
+    --case) shift; args+=(--case "${1:-0}") ;;
+    *) print -r -- "run.sh: unknown argument $1 (it takes --case N, --dry-run, --build)"; exit 2 ;;
+  esac
+  shift
+done
+
+if (( rebuild )); then build; exit $?; fi
+if (( dry )); then
+  # An agent's run: never a compile here, and no display made.
+  if stale; then
+    print -r -- "run.sh: no current build. Build it first: zsh $HERE/run.sh --build (an agent: through the heavy lock)"
+    exit 1
+  fi
+  linked_ok || exit 1
+  "$BIN" --dry-run "${args[@]}"
+  exit $?
+fi
+
+# The real run: Noah's alone, refused before anything is built or made.
+if [[ ! -t 0 || ! -t 1 ]]; then
+  print -r -- "REFUSED: no terminal. The real run makes a display on this Mac, which only Noah does, from Terminal.app. An agent runs: zsh $HERE/run.sh --dry-run"
+  exit 2
+fi
+for p in Sill SillMenuBar SillHost; do
+  if pgrep -x "$p" >/dev/null; then
+    print -r -- "REFUSED: $p is running. Quit it first: the probe runs on a Mac at rest, with nothing streaming."
+    exit 2
+  fi
+done
+if stale; then build || { print -r -- "run.sh: the build failed; nothing was made"; exit 1 }; fi
+linked_ok || exit 1
+
+mkdir -p "$OUT"
+LOG=$OUT/out-$(date +%Y%m%d-%H%M%S).txt
+: >> "$LOG"
+print -r -- "Probe P3, $(date '+%Y-%m-%d %H:%M:%S'), macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(sysctl -n hw.model); Sill not running; the output: $LOG" | tee -a "$LOG"
+"$BIN" --make --log "$LOG" "${args[@]}" &
+pid=$!
+trap 'kill -TERM $pid 2>/dev/null; print -r -- "run.sh: stopped; the probe'"'"'s display went with its process."; exit 130' INT TERM HUP
+start=$SECONDS
+while kill -0 $pid 2>/dev/null; do
+  if (( SECONDS - start > RUN_LIMIT + 2 )); then
+    kill -TERM $pid 2>/dev/null; sleep 1; kill -KILL $pid 2>/dev/null
+    print -r -- "run.sh: the probe passed its limit of $RUN_LIMIT s and was stopped; its display went with its process." | tee -a "$LOG"
+    break
+  fi
+  sleep 0.2
+done
+wait $pid 2>/dev/null
+code=$?
+print -r -- ""
+print -r -- "The verdict lines together (each also above):"
+/usr/bin/grep '^P3 ' "$LOG"
+print -r -- ""
+print -r -- "The whole run took $(( SECONDS - start )) s (exit $code). All of it is in $LOG: paste it into PR #408."

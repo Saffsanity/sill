@@ -15,10 +15,10 @@ ROLE_DESKTOP = "        if vendor == sillVendor && product == desktopProduct { r
 ROLE_STANDIN = "        if vendor == 0x756e6b6e && product == 0x76697274 { return .standIn }   // 'unkn', 'virt'\n"
 MIRROR = "            return primary.mirrors == d.id\n"
 SORT = "        let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY, $0.id) < ($1.frame.minX, $1.frame.minY, $1.id) }\n"
-TURN = "        guard let i = mainStop else { return sorted }\n        return Array(sorted[i...] + sorted[..<i])\n"
+TURN = "        let screens = mainStop.map { Array(sorted[$0...] + sorted[..<$0]) } ?? sorted\n"
 MAIN_MIRROR = "            ?? displays.first { $0.id == main }?.mirrors.flatMap { m in sorted.firstIndex { $0.id == m } }\n"
 CHOSEN = "        if !mainOnly, let chosen, let d = candidates.first(where: { $0.uuid == chosen }) { return d }\n"
-RESOLVE_FIRST = "        return candidates.first\n    }\n\n    /// How long"
+RESOLVE_FIRST = "        return candidates.first\n    }\n\n    /// The stop whose display"
 KEEP = "        return now >= leftAt && now - leftAt < choiceGrace\n"
 FEW = "        guard candidates.count > 1 else { return nil }\n"
 AT = "        guard let i = candidates.firstIndex(where: { $0.id == current }) else { return candidates[0] }\n"
@@ -32,6 +32,10 @@ VALUE = "        return name.isEmpty ? \"Display \\(n) of \\(count)\" : \"Displa
 NAME = "        let name = names.flatMap { $0.count == count && (1...count).contains(n) ? $0[n - 1] : nil }?\n"
 SHOWN = "        guard let displays, displays > 1, let current, (1...displays).contains(current) else { return nil }\n"
 ON = "        if let pointer, frame.contains(pointer) { return nil }\n"
+VD_LAST = "        return virtualDesktop ? screens + [virtualStop(displays)] : screens\n"
+VD_MADE = "        var stop = displays.first { $0.role == .sillDesktop && $0.online }\n"
+VD_SYMBOL = "        return Button(symbol: onVirtual ? virtualSymbol : desktopSymbol,\n"
+VD_VALUE = "                      accessibilityValue: onVirtual ? \"\\(virtualDesktopName), \\(n) of \\(count)\" : value(n, of: count, names: names),\n"
 MUTANTS = [
     # The stops
     ("D1 the stage's display a stop", SHOWN_FILTER, "        let shown = displays.filter { ($0.role == .screen || $0.role == .stage) && $0.online }\n"),
@@ -43,16 +47,16 @@ MUTANTS = [
     ("D7 right to left", SORT, "        let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY, $0.id) > ($1.frame.minX, $1.frame.minY, $1.id) }\n"),
     ("D8 by ID", SORT, "        let sorted = stops.sorted { $0.id < $1.id }\n"),
     ("D9 no tie by ID", SORT, "        let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }\n"),
-    ("D10 not turned to the main display (#173's leftmost first)", TURN, "        return sorted\n"),
-    ("D11 the main display last", TURN, "        guard let i = mainStop else { return sorted }\n        return Array(sorted[(i + 1)...] + sorted[...i])\n"),
+    ("D10 not turned to the main display (#173's leftmost first)", TURN, "        let screens = sorted\n"),
+    ("D11 the main display last", TURN, "        let screens = mainStop.map { Array(sorted[($0 + 1)...] + sorted[...$0]) } ?? sorted\n"),
     ("D12 the main display, then the rest left to right", TURN,
-     "        guard let i = mainStop else { return sorted }\n        return [sorted[i]] + sorted.enumerated().filter { $0.offset != i }.map(\\.element)\n"),
+     "        let screens = mainStop.map { i in [sorted[i]] + sorted.enumerated().filter { $0.offset != i }.map(\\.element) } ?? sorted\n"),
     ("D13 a main display that mirrors another not followed", MAIN_MIRROR, ""),
     # The stop the Desktop shows
     ("D14 locked, the chosen stop all the same", CHOSEN, "        if let chosen, let d = candidates.first(where: { $0.uuid == chosen }) { return d }\n"),
     ("D15 the choice ignored", CHOSEN, ""),
     ("D16 the choice by ID, not UUID", CHOSEN, "        if !mainOnly, let chosen, let d = candidates.first(where: { String($0.id) == chosen }) { return d }\n"),
-    ("D17 nothing chosen: the last stop", RESOLVE_FIRST, "        return candidates.last\n    }\n\n    /// How long"),
+    ("D17 nothing chosen: the last stop", RESOLVE_FIRST, "        return candidates.last\n    }\n\n    /// The stop whose display"),
     # The choice's span
     ("D18 a span of 300 s", "    public static let choiceGrace: Double = 30\n", "    public static let choiceGrace: Double = 300\n"),
     ("D19 no span", "    public static let choiceGrace: Double = 30\n", "    public static let choiceGrace: Double = 0\n"),
@@ -88,14 +92,14 @@ MUTANTS = [
     ("D44 seven dots", "    public static let maxDots = 6\n", "    public static let maxDots = 7\n"),
     ("D45 today's VoiceOver label lost", "    public static let todaysLabel = \"Show the full Mac desktop\"\n", "    public static let todaysLabel = \"Desktop\"\n"),
     ("D46 dots while a window streams", DOTS, "        let dots = count <= maxDots ? count : 0\n"),
-    ("D47 the first dot always filled", "        return Button(label: label(displays: count, current: n), dots: dots, lit: dots > 0 ? n : 0,\n",
-     "        return Button(label: label(displays: count, current: n), dots: dots, lit: dots > 0 ? 1 : 0,\n"),
+    ("D47 the first dot always filled", "                      label: label(displays: count, current: n, virtual: virtual), dots: dots, lit: dots > 0 ? n : 0,\n",
+     "                      label: label(displays: count, current: n, virtual: virtual), dots: dots, lit: dots > 0 ? 1 : 0,\n"),
     ("D48 3/7 while a window streams", COUNTER, "                      counter: count > maxDots ? \"\\(n)/\\(count)\" : nil,\n"),
     ("D49 the counter without the count", COUNTER, "                      counter: desktopStreams && count > maxDots ? \"\\(n)\" : nil,\n"),
     ("D50 the hint always the next display", HINT, "                      accessibilityHint: \"Shows the next display.\",\n"),
     ("D51 a tap steps while a window streams", "                      steps: desktopStreams)\n", "                      steps: true)\n"),
-    ("D52 today's VoiceOver label with two stops", "                      accessibilityLabel: \"Desktop\", accessibilityValue: value(n, of: count, names: names),\n",
-     "                      accessibilityLabel: todaysLabel, accessibilityValue: value(n, of: count, names: names),\n"),
+    ("D52 today's VoiceOver label with two stops", "                      accessibilityLabel: \"Desktop\",\n",
+     "                      accessibilityLabel: todaysLabel,\n"),
     ("D53 VoiceOver's value without the name", VALUE, "        return \"Display \\(n) of \\(count)\"\n"),
     ("D54 names not one per stop taken", NAME, "        let name = names.flatMap { (1...$0.count).contains(n) ? $0[n - 1] : nil }?\n"),
     ("D55 a name not trimmed", NAME + "            .trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"\n",
@@ -103,7 +107,7 @@ MUTANTS = [
     ("D56 a number with one stop", SHOWN, "        guard let displays, displays > 0, let current, (1...displays).contains(current) else { return nil }\n"),
     ("D57 a number past the count", SHOWN, "        guard let displays, displays > 1, let current, current >= 1 else { return nil }\n"),
     ("D58 a number of 0", SHOWN, "        guard let displays, displays > 1, let current, current <= displays else { return nil }\n"),
-    ("D59 the label without its number", "        return \"Desktop \\(n)\"\n", "        return \"Desktop\"\n"),
+    ("D59 the label without its number", "        return n == virtual ? virtualLabel : \"Desktop \\(n)\"\n", "        return n == virtual ? virtualLabel : \"Desktop\"\n"),
     ("D60 a tap steps whatever the stops", "        button(displays: displays, current: current, names: nil, desktopStreams: desktopStreams).steps\n",
      "        desktopStreams\n"),
     # Fault B of Noah's test (2026-11-12): what a display is, and a display gone since the last look
@@ -120,6 +124,30 @@ MUTANTS = [
     ("D70 an ID the stage once had the stage's whatever it reads now", ROLE_MADE, "        if madeByStage { return .stage }\n"),
     ("D71 a removed display's 0xFFFFFFFF not taken for no monitor", ROLE_MADE, "        if madeByStage && vendor == 0 { return .stage }\n"),
     ("D72 no monitor read as vendor 0 alone", "    public static let noMonitor: UInt32 = 0xFFFF_FFFF\n", "    public static let noMonitor: UInt32 = 0\n"),
+    # The Virtual Desktop's stop and its button (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18, §3).
+    ("V1 the Virtual Desktop never a stop", VD_LAST, "        return screens\n"),
+    ("V2 the Virtual Desktop the first stop", VD_LAST, "        return virtualDesktop ? [virtualStop(displays)] + screens : screens\n"),
+    ("V3 the Virtual Desktop a stop with its switch off", VD_LAST, "        return screens + [virtualStop(displays)]\n"),
+    ("V4 its display taken while offline", VD_MADE, "        var stop = displays.first { $0.role == .sillDesktop }\n"),
+    ("V5 the stage's display taken for it", VD_MADE, "        var stop = displays.first { ($0.role == .sillDesktop || $0.role == .stage) && $0.online }\n"),
+    ("V6 its choice its display's UUID", "        stop.uuid = virtualDesktopChoice\n", ""),
+    ("V7 its name macOS's", "        stop.name = virtualDesktopName\n", ""),
+    ("V8 its number with one stop", "        guard candidates.count >= 2 else { return nil }\n", ""),
+    ("V9 its number counted from 0", "        return candidates.firstIndex { $0.role == .sillDesktop }.map { $0 + 1 }\n",
+     "        return candidates.firstIndex { $0.role == .sillDesktop }\n"),
+    ("V10 the dashed screen on every stop", VD_SYMBOL, "        return Button(symbol: virtualSymbol,\n"),
+    ("V11 a plain screen on its stop", VD_SYMBOL, "        return Button(symbol: desktopSymbol,\n"),
+    ("V12 VoiceOver's value for it as a display's", VD_VALUE, "                      accessibilityValue: value(n, of: count, names: names),\n"),
+    ("V13 its label a number", "        return n == virtual ? virtualLabel : \"Desktop \\(n)\"\n", "        return \"Desktop \\(n)\"\n"),
+    ("V14 on it judged by the count", "        let onVirtual = virtual == n\n", "        let onVirtual = virtual == count\n"),
+    ("V15 the dashed symbol misnamed", "    public static let virtualSymbol = \"rectangle.dashed\"\n", "    public static let virtualSymbol = \"rectangle.dashed.badge.record\"\n"),
+    ("V16 its choice's key a display's", "    public static let virtualDesktopChoice = \"sill-virtual-desktop\"\n", "    public static let virtualDesktopChoice = \"BUILTIN\"\n"),
+    # The stop the Desktop streams while the Virtual Desktop's has no display yet (commit 8 of phase 2b).
+    ("V17 a stop with no display streamed", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d\n"),
+    ("V18 meanwhile the last stop", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d.id != 0 ? d : candidates.last { $0.id != 0 }\n"),
+    ("V19 meanwhile the first stop, display or not", "        return d.id != 0 ? d : candidates.first { $0.id != 0 }\n", "        return d.id != 0 ? d : candidates.first\n"),
+    ("V20 streamed ignores the lock", "        guard let d = resolve(chosen: chosen, among: candidates, mainOnly: mainOnly) else { return nil }\n",
+     "        guard let d = resolve(chosen: chosen, among: candidates) else { return nil }\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

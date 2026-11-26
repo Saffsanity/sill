@@ -15,6 +15,7 @@ struct MenuEntry: Equatable {
         /// menu is open, which does not rebuild it, and a toggle would then do the opposite of what
         /// the item shows.
         case setVirtualDisplay(Bool)
+        case setVirtualDesktop(Bool)
         case setDirectWireless(Bool)
         case setSendAudio(Bool)
         case setMaxFPS(Int), setBitrate(Int), setCaptureScale(CGFloat)
@@ -109,6 +110,9 @@ enum MenuBuilder {
 
         menu.append(MenuEntry(kind: .item, title: "Virtual Display", subtitle: p.virtualDisplayNote,
                               checked: config.virtualDisplay, action: .setVirtualDisplay(!config.virtualDisplay)))
+        // The Virtual Desktop (phase 2b): a desktop of Sill's own after this Mac's screens, its subtitle what it is doing.
+        menu.append(MenuEntry(kind: .item, title: VirtualDesktopWords.menuItem, subtitle: p.virtualDesktopNote,
+                              checked: config.virtualDesktop, action: .setVirtualDesktop(!config.virtualDesktop)))
         menu.append(MenuEntry(kind: .item, title: "Frame Rate", children: [60, 120].map { fps in
             MenuEntry(kind: .item, title: "Up to \(fps) fps", checked: config.maxFPS == fps, action: .setMaxFPS(fps))
         }))
@@ -328,6 +332,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .allowAccessibility: model.permissions.requestAccessibility()
         case .openPrivacy: model.permissions.openPrivacyPane()
         case .setVirtualDisplay(let on): model.settings.config.virtualDisplay = on
+        case .setVirtualDesktop(let on): model.settings.config.virtualDesktop = on
         case .setDirectWireless(let on): model.settings.config.directWireless = on
         case .setSendAudio(let on): model.settings.config.sendAudio = on
         case .setMaxFPS(let fps): model.settings.config.maxFPS = fps

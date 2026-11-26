@@ -1,0 +1,196 @@
+--- VirtualDisplay-b7339612.swift
++++ VirtualDisplay.swift
+@@ -144,7 +144,8 @@
+          vendorID: UInt32 = 0x5111,
+          productID: UInt32 = 0x0001,
+          serialNum: UInt32 = 1,
+-         otherModes: [ModeSize] = []) throws {
++         otherModes: [ModeSize] = [],
++         probeBackingAtLeast: (wide: Int, high: Int)? = nil) throws {
+         let modes = Self.modeList(asked: ModeSize(width: widthPt, height: heightPt), others: otherModes)
+         for m in modes {
+             guard m.width >= 320, m.height >= 240, m.width <= 8192, m.height <= 8192 else {
+@@ -163,7 +164,11 @@
+         self.modesListed = modes
+ 
+         // The largest mode's pixels each way: the window server sizes the display's backing for the largest mode listed.
+-        let maxPx = Self.maxPixels(modes, scale: scale)
++        // PROBE ONLY (probe3, P2c step 4): `probeBackingAtLeast`, in pixels, widens the backing past the modes' own (a
++        // display made with the room alone and the square backing of the room both ways). nil, as Sill calls it: unchanged.
++        let fromModes = Self.maxPixels(modes, scale: scale)
++        let maxPx = (wide: max(fromModes.wide, probeBackingAtLeast?.wide ?? 0),
++                     high: max(fromModes.high, probeBackingAtLeast?.high ?? 0))
+ 
+         // --- Descriptor ---------------------------------------------------------------
+         let descriptor = try Runtime.newObject("CGVirtualDisplayDescriptor")
+@@ -786,5 +791,170 @@
+             if !some.isEmpty { return some }
+         }
+         return desktops
++    }
++}
++
++// MARK: - PROBE ONLY: probe3 (P2c, vd-2b, 2026-11-23)
++// Appended for the probe alone; nothing in Sill has it. Above this mark the file is wt-vd-2b's at b7339612 but for init's
++// defaulted `probeBackingAtLeast` (NOTES.md has the diff). Every private method here is looked up and its type encoding
++// read from the runtime before it is called, as Runtime.method does, and a plain number is passed or read only in the one
++// type the runtime reports for it; anything else throws, calling nothing.
++
++extension VirtualDisplay {
++    /// The plain number types (one character of an Objective-C type encoding) the probe passes or reads.
++    static let probeNumberTypes: Set<Character> = ["c", "C", "s", "S", "i", "I", "l", "L", "q", "Q", "f", "d"]
++
++    /// The live CGVirtualDisplay (nil after `destroy()`), for the probe's reads.
++    var probeObject: AnyObject? { object }
++
++    /// An instance method's type encoding as the runtime reports it, offsets stripped; nil when the class or the method
++    /// is not there. A lookup only.
++    static func probeEncoding(_ className: String, _ selector: String) -> String? {
++        guard let c = NSClassFromString(className), let m = class_getInstanceMethod(c, NSSelectorFromString(selector)) else { return nil }
++        return method_getTypeEncoding(m).map { TypeEncoding.normalized(String(cString: $0)) }
++    }
++
++    /// A declared property's attributes as the runtime reports them ("TI,N,V_rotation"), or nil. A lookup only.
++    static func probePropertyAttributes(_ className: String, _ name: String) -> String? {
++        guard let c = NSClassFromString(className), let p = class_getProperty(c, name) else { return nil }
++        return property_getAttributes(p).map { String(cString: $0) }
++    }
++
++    /// Each instance method of the class with its type encoding (offsets stripped), sorted. Lookups only.
++    static func probeMethods(_ className: String) -> [String] {
++        guard let c = NSClassFromString(className) else { return ["(class not found)"] }
++        var n: UInt32 = 0
++        guard let list = class_copyMethodList(c, &n) else { return [] }
++        defer { free(list) }
++        return (0..<Int(n)).map { i -> String in
++            let name = NSStringFromSelector(method_getName(list[i]))
++            let encoding = method_getTypeEncoding(list[i]).map { TypeEncoding.normalized(String(cString: $0)) } ?? "?"
++            return "\(name) \(encoding)"
++        }.sorted()
++    }
++
++    /// Each declared property of the class with its attributes, sorted. Lookups only.
++    static func probeProperties(_ className: String) -> [String] {
++        guard let c = NSClassFromString(className) else { return ["(class not found)"] }
++        var n: UInt32 = 0
++        guard let list = class_copyPropertyList(c, &n) else { return [] }
++        defer { free(list) }
++        return (0..<Int(n)).map { i -> String in
++            "\(String(cString: property_getName(list[i]))) \(property_getAttributes(list[i]).map { String(cString: $0) } ?? "?")"
++        }.sorted()
++    }
++
++    private typealias PSetI8 = @convention(c) (AnyObject, Selector, Int8) -> Void
++    private typealias PSetU8 = @convention(c) (AnyObject, Selector, UInt8) -> Void
++    private typealias PSetI16 = @convention(c) (AnyObject, Selector, Int16) -> Void
++    private typealias PSetU16 = @convention(c) (AnyObject, Selector, UInt16) -> Void
++    private typealias PSetI32 = @convention(c) (AnyObject, Selector, Int32) -> Void
++    private typealias PSetU32 = @convention(c) (AnyObject, Selector, UInt32) -> Void
++    private typealias PSetI64 = @convention(c) (AnyObject, Selector, Int64) -> Void
++    private typealias PSetU64 = @convention(c) (AnyObject, Selector, UInt64) -> Void
++    private typealias PSetF = @convention(c) (AnyObject, Selector, Float) -> Void
++    private typealias PSetD = @convention(c) (AnyObject, Selector, Double) -> Void
++    private typealias PGetI8 = @convention(c) (AnyObject, Selector) -> Int8
++    private typealias PGetU8 = @convention(c) (AnyObject, Selector) -> UInt8
++    private typealias PGetI16 = @convention(c) (AnyObject, Selector) -> Int16
++    private typealias PGetU16 = @convention(c) (AnyObject, Selector) -> UInt16
++    private typealias PGetI32 = @convention(c) (AnyObject, Selector) -> Int32
++    private typealias PGetU32 = @convention(c) (AnyObject, Selector) -> UInt32
++    private typealias PGetI64 = @convention(c) (AnyObject, Selector) -> Int64
++    private typealias PGetU64 = @convention(c) (AnyObject, Selector) -> UInt64
++    private typealias PGetF = @convention(c) (AnyObject, Selector) -> Float
++    private typealias PGetD = @convention(c) (AnyObject, Selector) -> Double
++    private typealias PGetSize = @convention(c) (AnyObject, Selector) -> CGSize
++
++    /// The method and its one plain number type, from the runtime: `setter` true wants "v@:" and the type, false the type
++    /// and "@:". Throws, calling nothing, for anything else.
++    private static func probeNumberMethod(_ target: AnyObject, _ selector: String, setter: Bool) throws -> (IMP, Selector, Character) {
++        guard let c = object_getClass(target) else { throw Failure.classMissing("(the object has no class)") }
++        let sel = NSSelectorFromString(selector)
++        guard let m = class_getInstanceMethod(c, sel) else { throw Failure.selectorMissing(cls: NSStringFromClass(c), selector: selector) }
++        let found = method_getTypeEncoding(m).map { TypeEncoding.normalized(String(cString: $0)) } ?? "?"
++        let t: Character? = setter
++            ? (found.count == 4 && found.hasPrefix("v@:") ? found.last : nil)
++            : (found.count == 3 && found.hasSuffix("@:") ? found.first : nil)
++        guard let t, probeNumberTypes.contains(t) else {
++            throw Failure.signatureChanged(cls: NSStringFromClass(c), selector: selector,
++                                           expected: setter ? "v@: and one plain number type" : "one plain number type and @:", found: found)
++        }
++        return (method_getImplementation(m), sel, t)
+     }
++
++    /// `[target selector:value]` for a setter the runtime reports as "v@:" and one plain number type, the value passed in
++    /// that type (an integer type only takes a whole number in its range). Throws, calling nothing, otherwise.
++    static func probeSetNumber(_ target: AnyObject, _ selector: String, _ value: Double) throws {
++        let (imp, sel, t) = try probeNumberMethod(target, selector, setter: true)
++        func whole<T: BinaryInteger>(_: T.Type) throws -> T {
++            guard let v = T(exactly: value) else { throw Failure.invalidSize("\(value) is not a whole number that fits \(T.self)") }
++            return v
++        }
++        switch t {
++        case "c": let v = try whole(Int8.self); unsafeBitCast(imp, to: PSetI8.self)(target, sel, v)
++        case "C": let v = try whole(UInt8.self); unsafeBitCast(imp, to: PSetU8.self)(target, sel, v)
++        case "s": let v = try whole(Int16.self); unsafeBitCast(imp, to: PSetI16.self)(target, sel, v)
++        case "S": let v = try whole(UInt16.self); unsafeBitCast(imp, to: PSetU16.self)(target, sel, v)
++        case "i", "l": let v = try whole(Int32.self); unsafeBitCast(imp, to: PSetI32.self)(target, sel, v)
++        case "I", "L": let v = try whole(UInt32.self); unsafeBitCast(imp, to: PSetU32.self)(target, sel, v)
++        case "q": let v = try whole(Int64.self); unsafeBitCast(imp, to: PSetI64.self)(target, sel, v)
++        case "Q": let v = try whole(UInt64.self); unsafeBitCast(imp, to: PSetU64.self)(target, sel, v)
++        case "f": unsafeBitCast(imp, to: PSetF.self)(target, sel, Float(value))
++        case "d": unsafeBitCast(imp, to: PSetD.self)(target, sel, value)
++        default: throw Failure.invalidSize("type \(t) is not taken")
++        }
++    }
++
++    /// `[target selector]` for a getter the runtime reports as one plain number type and "@:", read in that type.
++    /// Throws, calling nothing, otherwise.
++    static func probeGetNumber(_ target: AnyObject, _ selector: String) throws -> Double {
++        let (imp, sel, t) = try probeNumberMethod(target, selector, setter: false)
++        switch t {
++        case "c": return Double(unsafeBitCast(imp, to: PGetI8.self)(target, sel))
++        case "C": return Double(unsafeBitCast(imp, to: PGetU8.self)(target, sel))
++        case "s": return Double(unsafeBitCast(imp, to: PGetI16.self)(target, sel))
++        case "S": return Double(unsafeBitCast(imp, to: PGetU16.self)(target, sel))
++        case "i", "l": return Double(unsafeBitCast(imp, to: PGetI32.self)(target, sel))
++        case "I", "L": return Double(unsafeBitCast(imp, to: PGetU32.self)(target, sel))
++        case "q": return Double(unsafeBitCast(imp, to: PGetI64.self)(target, sel))
++        case "Q": return Double(unsafeBitCast(imp, to: PGetU64.self)(target, sel))
++        case "f": return Double(unsafeBitCast(imp, to: PGetF.self)(target, sel))
++        case "d": return unsafeBitCast(imp, to: PGetD.self)(target, sel)
++        default: throw Failure.invalidSize("type \(t) is not taken")
++        }
++    }
++
++    /// `[target selector]` for a getter the runtime reports as "{CGSize=dd}@:". Throws, calling nothing, otherwise.
++    static func probeGetSize(_ target: AnyObject, _ selector: String) throws -> CGSize {
++        let (fn, sel) = try Runtime.imp(target, selector, "{CGSize=dd}@:", as: PGetSize.self)
++        return fn(target, sel)
++    }
++
++    /// A CGVirtualDisplaySettings given to no display (nothing is made or changed): its `rotation` as it reads at first,
++    /// then after `setRotation:` with each of `values` (probeSetNumber, probeGetNumber).
++    static func probeRotationRoundTrip(_ values: [Double]) throws -> (first: Double, after: [Double]) {
++        let settings = try Runtime.newObject("CGVirtualDisplaySettings")
++        let first = try probeGetNumber(settings, "rotation")
++        var after: [Double] = []
++        for v in values {
++            try probeSetNumber(settings, "setRotation:", v)
++            after.append(try probeGetNumber(settings, "rotation"))
++        }
++        return (first, after)
++    }
++
++    /// applyModes' settings (`newSettings`: the same modes, hiDPI and rate as `init` and `applyModes` send) with
++    /// `setRotation:` given `rotation` in the type the runtime reports (probeSetNumber), then `applySettings:`. The
++    /// private call's answer; on YES the list is `sizes`, as applyModes keeps it. Throws, sending nothing, when a method is
++    /// missing or not as expected.
++    func probeApplyModes(_ sizes: [ModeSize], rotation: Double) throws -> Bool {
++        guard let display = object, displayID != 0 else { throw Failure.noDisplayID }
++        let list = Self.modeList(asked: sizes.first ?? ModeSize(width: widthPt, height: heightPt), others: Array(sizes.dropFirst()))
++        let settings = try Self.newSettings(list, scale: scale, refreshHz: refreshHz)
++        try Self.probeSetNumber(settings, "setRotation:", rotation)
++        guard try VirtualDisplay.applySettings(settings, to: display) else { return false }
++        modesListed = list
++        return true
++    }
+ }

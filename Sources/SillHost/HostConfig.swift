@@ -107,12 +107,33 @@ package struct HostConfig: Equatable, Sendable {
     /// (`StreamCoordinator.adopt`): off removes Sill's display now, on asks again for a Desktop that streams with no
     /// screen.
     package var headlessDisplay: Bool
+    /// The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18; #281, #91): a display of Sill's
+    /// own after the Mac's screens, the Desktop's last stop, by default the size and refresh rate of the device that shows
+    /// it (Noah, 2026-11-18: "should default to resolution and refresh of client device"), there only while a device shows
+    /// it and 30 s after (VirtualDesktopLife). Off in both `standard` and `app` (Noah, 2026-11-11: off by default; the
+    /// overview of 2026-11-18: a switch that changes the Mac's screens starts off). Set from the Mac (Sill.app's key
+    /// `virtualDesktop`) and from a paired device's Settings panel, home or away (`DeviceSettings.accepted`, then `applying`
+    /// or `applyingAway`: open decision 11); never from an unpaired session. Applied at once, never by a restart of the
+    /// pipeline (absent from `restartNeeded`).
+    package var virtualDesktop: Bool
+    /// The Virtual Desktop's size, the person's choice (Noah, 2026-11-18: "allow the user to select resolution"):
+    /// "device" (This device, the default: the size of the device that shows it, VirtualDesktopSize.device), "main" (Same
+    /// as main display), one of VirtualDesktopSize.offered as "WxH@S", or since 2026-11-25 a size the person typed in the
+    /// same form (VirtualDesktopSize.custom: Noah, 2026-11-24, custom sizes up to a device's budget, VirtualDesktopBudget);
+    /// anything else is This device (`validated`), and a Sill for Mac before custom sizes reads a typed one so too. Set on
+    /// the Mac (Sill.app's Settings › Displays, its key `virtualDesktopSize`; the CLI's --virtual-desktop=…); a device's
+    /// pickers and their wire fields are phase 3's. Taken the next time the Virtual Desktop is made.
+    package var virtualDesktopSize: String
+    /// Its refresh rate: 0 (the device's, the default), or 24 to 120 Hz (VirtualDesktopSize.rateAllowed: the picker's
+    /// 30, 60 and 120, or one typed), held to the Frame Rate limit; anything else is the device's (`validated`).
+    package var virtualDesktopHz: Int
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
                  internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool, headlessDisplay: Bool) {
+                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool, headlessDisplay: Bool,
+                 virtualDesktop: Bool, virtualDesktopSize: String, virtualDesktopHz: Int) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -132,6 +153,9 @@ package struct HostConfig: Equatable, Sendable {
         self.lockSleepsDisplay = lockSleepsDisplay
         self.lockOnlyAfterAway = lockOnlyAfterAway
         self.headlessDisplay = headlessDisplay
+        self.virtualDesktop = virtualDesktop
+        self.virtualDesktopSize = virtualDesktopSize
+        self.virtualDesktopHz = virtualDesktopHz
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -146,7 +170,8 @@ package struct HostConfig: Equatable, Sendable {
     /// Send Audio off here; Sill.app's is on since 2026-10-27
     /// (`app`). Lock this Mac when the last device leaves off in both: a Mac locks by itself only once its user says so;
     /// under it, Turn off its display too on and Only after a device away from home off (the plan's recommendations).
-    /// A Mac with no screen's display on in both (Noah on #61); without the AppKit loop none is made.
+    /// A Mac with no screen's display on in both (Noah on #61); without the AppKit loop none is made. The
+    /// Virtual Desktop off in both (Noah, 2026-11-11).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
@@ -154,7 +179,8 @@ package struct HostConfig: Equatable, Sendable {
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
                                              offConsoleView: false, lockAfterSession: false,
                                              lockSleepsDisplay: true, lockOnlyAfterAway: false,
-                                             headlessDisplay: true)
+                                             headlessDisplay: true, virtualDesktop: false,
+                                             virtualDesktopSize: VirtualDesktopSize.deviceChoice, virtualDesktopHz: 0)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -185,6 +211,8 @@ package struct HostConfig: Equatable, Sendable {
         c.awayCaptureScale = awayCaptureScale >= 1.5 ? 2 : 1
         c.awayBitrate = min(max(awayBitrate, 1_000_000), 200_000_000)
         if remotePort != 0 && !(1024...65535).contains(remotePort) { c.remotePort = Self.defaultRemotePort }
+        if VirtualDesktopSize.choice(virtualDesktopSize) == nil { c.virtualDesktopSize = VirtualDesktopSize.deviceChoice }
+        if !VirtualDesktopSize.rateAllowed(virtualDesktopHz) { c.virtualDesktopHz = 0 }
         return c
     }
 
@@ -193,7 +221,8 @@ package struct HostConfig: Equatable, Sendable {
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
     /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
     /// send audio off → on, lock when the last device leaves off → on, its display off with the lock on → off, lock
-    /// only after a device away from home off → on, headless display on → off".
+    /// only after a device away from home off → on, headless display on → off, virtual desktop off → on, virtual
+    /// desktop size Match the device → 1920 × 1080 (Retina), virtual desktop rate Match the device → 60 Hz".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -223,6 +252,13 @@ package struct HostConfig: Equatable, Sendable {
             parts.append("lock only after a device away from home \(onOff(lockOnlyAfterAway)) → \(onOff(new.lockOnlyAfterAway))")
         }
         if headlessDisplay != new.headlessDisplay { parts.append("headless display \(onOff(headlessDisplay)) → \(onOff(new.headlessDisplay))") }
+        if virtualDesktop != new.virtualDesktop { parts.append("virtual desktop \(onOff(virtualDesktop)) → \(onOff(new.virtualDesktop))") }
+        if virtualDesktopSize != new.virtualDesktopSize {
+            parts.append("virtual desktop size \(VirtualDesktopSize.words(virtualDesktopSize)) → \(VirtualDesktopSize.words(new.virtualDesktopSize))")
+        }
+        if virtualDesktopHz != new.virtualDesktopHz {
+            parts.append("virtual desktop rate \(VirtualDesktopSize.rateWords(virtualDesktopHz)) → \(VirtualDesktopSize.rateWords(new.virtualDesktopHz))")
+        }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

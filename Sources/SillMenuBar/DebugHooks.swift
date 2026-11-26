@@ -17,7 +17,8 @@ import StreamProtocol
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, offConsoleView, lockAfterSession,
-///                                              lockSleepsDisplay, lockOnlyAfterAway, headlessDisplay,
+///                                              lockSleepsDisplay, lockOnlyAfterAway, headlessDisplay, virtualDesktop,
+///                                              virtualDesktopSize=device|main|WxH@S, virtualDesktopHz=0|30|60|120,
 ///                                              remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -334,7 +335,7 @@ enum DebugHooks {
                 $0.rawValue.lowercased().hasPrefix(word) || $0.title.lowercased().replacingOccurrences(of: " ", with: "").hasPrefix(word)
             }
             guard matches.count == 1, let tab = matches.first else {
-                print("SillSettingsAfter: “\(parts[1])” is no step: a tab (general, devices, streaming, virtual display, permissions, remote access, or the start of one), close, report, end or height=<points>")
+                print("SillSettingsAfter: “\(parts[1])” is no step: a tab (general, devices, streaming, displays or virtual display, permissions, remote access, or the start of one), close, report, end or height=<points>")
                 return nil
             }
             return (parts[0], delay, .tab(tab))
@@ -376,6 +377,9 @@ enum DebugHooks {
         case "lockSleepsDisplay": config.lockSleepsDisplay = flag
         case "lockOnlyAfterAway": config.lockOnlyAfterAway = flag
         case "headlessDisplay": config.headlessDisplay = flag
+        case "virtualDesktop": config.virtualDesktop = flag
+        case "virtualDesktopSize": config.virtualDesktopSize = value
+        case "virtualDesktopHz": if let v = Int(value) { config.virtualDesktopHz = v }
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -428,6 +432,20 @@ enum DebugHooks {
                 render(SettingsPane(tab: .virtualDisplay, model: model, previewStatus: status)
                         .background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("pane-virtualDisplay-\(state)-\(name).png"))
+            }
+        }
+        // Displays' Virtual Desktop section in each of its states (phase 2b; pane-virtualDesktop-<state>).
+        for sample in virtualDesktopSamples() {
+            let section = Form {
+                VirtualDesktopSection(on: .constant(sample.on), size: .constant(sample.size), hz: .constant(sample.hz),
+                                      snapshot: sample.status, accessibility: sample.accessibility, tryAgain: nil,
+                                      known: sample.known, draft: sample.draft)
+            }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-virtualDesktop-\(sample.name)-\(name).png"))
             }
         }
         // General while the macOS firewall blocks Sill's executable (the report's Mac), and the line alone
@@ -525,7 +543,8 @@ enum DebugHooks {
         let login = LoginState(available: true, on: false, needsApproval: false, error: nil)
         for sample in samples() {
             let p = StatusText.present(snapshot: sample.snapshot, permissions: sample.permissions,
-                                       startupError: sample.startupError, hasCoordinator: true, now: previewNow)
+                                       startupError: sample.startupError, hasCoordinator: true, now: previewNow,
+                                       virtualDesktopOn: sample.snapshot.sillDisplay?.virtualDesktop == true)
             for (name, appearance) in appearances {
                 render(StatusCard(presentation: p).padding(.vertical, 4).background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
@@ -533,6 +552,7 @@ enum DebugHooks {
             var config = model.settings.config
             config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmarks match the sample
             config.sendAudio = sample.snapshot.audio != nil
+            config.virtualDesktop = sample.snapshot.sillDisplay?.virtualDesktop == true
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
@@ -722,6 +742,54 @@ enum DebugHooks {
 
     /// Virtual Display's states for a Mac with no working screen (PR #200): Sill's display sized to an iPad mini with the
     /// Desktop streaming on it, the same kept after the iPad disconnected, and the guard for #380 holding.
+    /// The Virtual Desktop's section in Settings › Displays (phase 2b): off; on and available; on with a size chosen (5K at
+    /// Retina, wider than 4096 pixels); on and showing on an iPad mini; made and kept; without Accessibility; where it
+    /// cannot be made (Screen Recording); while the guard for #380 holds.
+    /// Custom… (part B, 2026-11-25): its fields empty with no device known; a size within the budget for the devices this
+    /// Mac knows (an iPad Pro 13-inch as it is, an iPhone 15 Pro scaled); one over the ceiling (its sentence); one in use
+    /// that this Mac's encoder takes only scaled (its note); and one an iPad mini gets scaled.
+    static func virtualDesktopSamples() -> [(name: String, on: Bool, size: String, hz: Int, status: HostStatusSnapshot, accessibility: Bool,
+                                            known: [VirtualDesktopBudget.Device], draft: (width: String, height: String, retina: Bool, hz: String)?)] {
+        var available = HostStatusSnapshot()
+        available.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: true, note: nil, shown: false)
+        var showing = available
+        showing.virtualDesktop.shown = true
+        showing.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: 1218, heightPt: 800, scale: 2, hz: 60, device: "iPad mini", virtualDesktop: true)
+        showing.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 2436, height: 1600, fps: 60,
+                                                   mbps: 15, onVirtualDisplay: false, softwareEncoder: false, onSillDisplay: true)
+        var kept = showing
+        kept.virtualDesktop.shown = false
+        kept.stream = nil
+        var noRecording = HostStatusSnapshot()
+        noRecording.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: false, note: VirtualDesktopWords.needsScreenRecording, shown: false)
+        var held = HostStatusSnapshot()
+        held.displayMakeHeld = true
+        held.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: false, note: VirtualDesktopWords.guardHolds, shown: false)
+        // Named as a device of Sill's names itself (its kind and model identifier, ClientStatsReporter.deviceName): an iPad Pro
+        // 13-inch, an iPhone 15 Pro, an iPad mini.
+        let pro13 = VirtualDesktopBudget.Device(name: "iPad (iPad16,6)", pixelWidth: 2064, pixelHeight: 2752, phone: false, fps: 120)
+        let iPhone = VirtualDesktopBudget.Device(name: "iPhone (iPhone16,1)", pixelWidth: 1179, pixelHeight: 2556, phone: true, fps: 120)
+        let mini = VirtualDesktopBudget.Device(name: "iPad (iPad14,1)", pixelWidth: 1488, pixelHeight: 2266, phone: false, fps: 60)
+        var encoderHeld = available
+        encoderHeld.virtualDesktop.encoder = VirtualDesktopBudget.Encoder(widest: 4096, fps: 38)
+        encoderHeld.virtualDesktop.encoderFor = "7680x4320@1:60"
+        return [
+            ("off", false, "device", 0, available, true, [], nil),
+            ("on", true, "device", 0, available, true, [], nil),
+            ("on-5k", true, "2560x1440@2", 60, available, true, [], nil),
+            ("showing", true, "device", 0, showing, true, [], nil),
+            ("kept", true, "device", 0, kept, true, [], nil),
+            ("noaccessibility", true, "device", 0, available, false, [], nil),
+            ("norecording", true, "device", 0, noRecording, true, [], nil),
+            ("guard", true, "device", 0, held, true, [], nil),
+            ("custom-empty", true, "device", 0, available, true, [], ("", "", true, "")),
+            ("custom-within", true, "device", 0, available, true, [pro13, iPhone], ("5504", "4128", true, "120")),
+            ("custom-over", true, "device", 0, available, true, [pro13, iPhone], ("6016", "5000", false, "120")),
+            ("custom-encoder", true, "7680x4320@1", 60, encoderHeld, true, [pro13], nil),
+            ("custom-scaled", true, "device", 0, available, true, [pro13, mini, iPhone], ("7680", "2160", false, "120")),
+        ]
+    }
+
     static func noScreenPaneSamples() -> [(String, HostStatusSnapshot)] {
         var showing = HostStatusSnapshot()
         showing.virtualDisplayOn = true
@@ -849,6 +917,10 @@ enum DebugHooks {
                                                         mbps: 15, onVirtualDisplay: false, softwareEncoder: false, onSillDisplay: true)
         sillsDisplay.sillDisplay = HostStatusSnapshot.SillDisplay(widthPt: 1218, heightPt: 800, scale: 2, hz: 60, device: "iPad mini")
         sillsDisplay.encodedFPS = 60
+        // The Virtual Desktop (phase 2b): the Desktop on it, sized to the iPad mini; its menu item's subtitle says so.
+        var virtualDesktop = sillsDisplay
+        virtualDesktop.sillDisplay?.virtualDesktop = true
+        virtualDesktop.virtualDesktop = HostStatusSnapshot.VirtualDesktop(available: true, note: nil, shown: true)
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -869,6 +941,7 @@ enum DebugHooks {
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
             Sample(name: "off-console-view", snapshot: offConsoleView),
             Sample(name: "sills-display", snapshot: sillsDisplay),
+            Sample(name: "virtual-desktop", snapshot: virtualDesktop),
         ]
     }
 }

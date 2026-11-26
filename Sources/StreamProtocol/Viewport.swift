@@ -20,15 +20,62 @@ public struct Viewport: Codable, Hashable {
     /// The host runs the stream at the highest rate among its connected clients and restarts the
     /// pipeline when that changes.
     public var fps: Int?
+    /// The room the picture has on this device with Sill's controls hidden (`ViewportRoom`; phase 2b of
+    /// docs/virtual-desktop-plan.md as revised 2026-11-18). The Virtual Desktop is sized to the panel (`width`,
+    /// `height`: the space the picture has now, as the stage fits a window to it; Noah, 2026-11-24); the room, the same
+    /// whether the controls show or not, tells the host whether a new panel is a turn, a fold or a resized window (the
+    /// room changed: followed once still) or Full Screen turned on or off (the room the same: followed at once). Nil from
+    /// every device before 2b: a host follows its panel as a turn then. An older host skips the key. A host from 2b
+    /// refuses a viewport whose room is out of bounds whole, as it refuses a side (`ViewportBounds.refusal`), and a device
+    /// from 2b holds it to them (`held`).
+    public var room: ViewportRoom?
+    /// The screen the picture is on (`ViewportScreen`, 2026-11-25): its pixels, its pixels a point and whether it is an
+    /// iPhone's, so a Mac sizes the Virtual Desktop pixel for pixel on an iPhone (Noah, 2026-11-24: "middle one for
+    /// iPhones, and leaving iPads as they are"). Nil from every device before it: the Mac sizes such a device as before
+    /// (the 800-point floor). An older host skips the key; a host never refuses a viewport for it (`ViewportBounds.screen`
+    /// takes one within its bounds, else none), and a device holds it (`held`).
+    public var screen: ViewportScreen?
 
-    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil) {
+    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil,
+                room: ViewportRoom? = nil, screen: ViewportScreen? = nil) {
         self.width = width; self.height = height; self.scale = scale; self.localCursor = localCursor; self.fps = fps
+        self.room = room
+        self.screen = screen
     }
 }
 
+/// The screen a device's picture is on (2026-11-25), in every viewport of a device from then on: its own pixels, held
+/// upright (UIScreen's `nativeBounds`: an iPhone 15 Pro's 1179 × 2556, an iPad Pro 13-inch's 2064 × 2752), the pixels a
+/// point Sill draws the picture at (UIScreen's `scale`: 3 on an iPhone 15 Pro, 2 on an iPad), and whether it is an
+/// iPhone's (UIDevice's idiom: the iPhone Duo's both screens; false on an iPad). The iPhone Duo's window moves between
+/// its two screens as it folds, so the viewport it sends then names the screen it is on now. The Mac reads it for the
+/// Virtual Desktop alone: an iPhone's is made pixel for pixel, its picture's space counted in those pixels.
+public struct ViewportScreen: Codable, Hashable {
+    public var pixelWidth: Int
+    public var pixelHeight: Int
+    public var scale: Double
+    public var phone: Bool?
+
+    public init(pixelWidth: Int, pixelHeight: Int, scale: Double, phone: Bool?) {
+        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.scale = scale; self.phone = phone
+    }
+}
+
+/// The room Sill's picture has on a device with its controls hidden: Full Screen's (the device's FullScreenPolicy.room
+/// for the person's Room choice), in the window's current orientation, in device points. The whole screen on an iPad;
+/// clear of the Dynamic Island on an iPhone held sideways; the part above the fold in the Duo's laptop pose; the window
+/// in Stage Manager or Split View. Sill's controls, its drawer, Settings or the keyboard coming and going never change
+/// it (#312's rule); a turn, a fold or a resized window does: so a host tells the two apart.
+public struct ViewportRoom: Codable, Hashable {
+    public var width: Double
+    public var height: Double
+
+    public init(width: Double, height: Double) { self.width = width; self.height = height }
+}
+
 /// What a host takes from a device's viewport (kind 9): each side from 1 to 16384 points, and a text
-/// scale, when there is one, from 0.25 to 4 (the Aa slider's 0.5 to 1.5, with room either way). Any
-/// other viewport is refused whole: the host keeps the one before, takes nothing of the message (its
+/// scale, when there is one, from 0.25 to 4 (the Aa slider's 0.5 to 1.5, with room either way), and a
+/// room's sides, when there is one (phase 2b), as the panel's. Any other viewport is refused whole: the host keeps the one before, takes nothing of the message (its
 /// rate neither) and says so in a line that names the device (StreamCoordinator). Until 2026-10-29 a
 /// host took any number greater than 0: a side of 1e300 points, or a scale of 1e-300 that made a
 /// side infinite, reached the Mac window's fit (`fitToViewport`) and the virtual display's window
@@ -59,19 +106,46 @@ public enum ViewportBounds {
         if let s = v.scale, !scales.contains(s) {
             why.append("scale \(number(s)) (\(number(scales.lowerBound)) to \(number(scales.upperBound)))")
         }
+        if let r = v.room {
+            if !sides.contains(r.width) { why.append("room width \(number(r.width)) \(points)") }
+            if !sides.contains(r.height) { why.append("room height \(number(r.height)) \(points)") }
+        }
         return why.isEmpty ? nil : why.joined(separator: ", ")
     }
 
     /// What a device sends for `v`: each side held to `sides` and a scale to `scales`, so no host
-    /// refuses it; a scale that is not a positive number becomes none, the Mac window left alone. Nil,
-    /// nothing to send, while a side is not a positive number (a panel not measured yet).
+    /// refuses it; a scale that is not a positive number becomes none, the Mac window left alone; the
+    /// room's sides held to `sides` too, and a room with a side that is not a positive number none (the
+    /// host takes the panel); a screen outside `screen`'s bounds none. Nil, nothing to send, while a side
+    /// is not a positive number (a panel not measured yet).
     public static func held(_ v: Viewport) -> Viewport? {
         guard v.width.isFinite, v.height.isFinite, v.width > 0, v.height > 0 else { return nil }
         var held = v
         held.width = min(max(v.width, sides.lowerBound), sides.upperBound)
         held.height = min(max(v.height, sides.lowerBound), sides.upperBound)
         held.scale = v.scale.flatMap { $0.isFinite && $0 > 0 ? min(max($0, scales.lowerBound), scales.upperBound) : nil }
+        held.room = v.room.flatMap { r in
+            guard r.width.isFinite, r.height.isFinite, r.width > 0, r.height > 0 else { return nil }
+            return ViewportRoom(width: min(max(r.width, sides.lowerBound), sides.upperBound),
+                                height: min(max(r.height, sides.lowerBound), sides.upperBound))
+        }
+        held.screen = v.screen.flatMap { ViewportBounds.screen($0) }
         return held
+    }
+
+    /// A screen's pixels a side a host takes (`screen`): an iPad Pro 13-inch's longer side is 2752.
+    public static let screenPixels: ClosedRange<Int> = 1...32768
+    /// Its pixels a point: Apple's screens draw at 1, 2 or 3.
+    public static let screenScales: ClosedRange<Double> = 1...4
+
+    /// The screen `s` as a host takes it: each side within `screenPixels` and its scale within `screenScales`, else none
+    /// (the host sizes that device as one that sends none). Never a reason to refuse the viewport: a device that sent a
+    /// screen this host's bounds do not hold (a screen larger than any Apple makes now) is served as before.
+    public static func screen(_ s: ViewportScreen) -> ViewportScreen? {
+        // A NaN or an infinity is in no range.
+        guard screenPixels.contains(s.pixelWidth), screenPixels.contains(s.pixelHeight),
+              screenScales.contains(s.scale) else { return nil }
+        return s
     }
 
     /// A number for a log line as `Int(x)` prints it, toward zero ("1512" for 1512.7), without its

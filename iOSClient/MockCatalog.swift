@@ -363,6 +363,11 @@ enum MockCatalog {
         case sound           // the Mac sends its sound: the Send Audio row on, and Mute under it
         case soundoff        // a Mac with sound, Send Audio off: the row off (as `default`), and Mute
         case soundnote       // on, and the Mac could not capture it: the note under the row
+        // The Virtual Desktop (phase 2b of docs/virtual-desktop-plan.md): a Mac with it, after Virtual Display's row.
+        case vdesk           // off, available, a paired session: the switch and what it is
+        case vdeskon         // on and shown, 1218 × 800 at 60 Hz: how to reach it, and its size
+        case vdeskunpaired   // on a session the Mac does not say is paired: the switch disabled, and why
+        case vdeskunavailable // off, and the Mac cannot make it now: disabled, with the Mac's note
         case nosound         // a Mac without sound (Sill for Mac 0.5.1): the row off and disabled, "Update Sill…", no Mute
     }
 
@@ -448,7 +453,7 @@ enum MockCatalog {
             // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs. A
             // paired session (`sessionPaired`, 2026-10-29), whose Direct Wireless switch works.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false, sendAudio: false),
+                                     directWireless: false, sendAudio: false, virtualDesktop: nil),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false),
             sessionPaired: true)
@@ -517,6 +522,19 @@ enum MockCatalog {
             state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
         case .nosound:
             state.settings.sendAudio = nil
+        case .vdesk:
+            state.settings.virtualDesktop = false
+            state.virtualDesktopState = VirtualDesktopState(available: true, shown: false, size: "1218x800@2", hz: 60)
+        case .vdeskon:
+            state.settings.virtualDesktop = true
+            state.virtualDesktopState = VirtualDesktopState(available: true, shown: true, size: "1218x800@2", hz: 60)
+        case .vdeskunpaired:
+            state.settings.virtualDesktop = false
+            state.sessionPaired = false
+            state.virtualDesktopState = VirtualDesktopState(available: true, shown: false)
+        case .vdeskunavailable:
+            state.settings.virtualDesktop = false
+            state.virtualDesktopState = VirtualDesktopState(available: false, note: VirtualDesktopWords.needsScreenRecording, shown: false)
         case .noremote:
             state.sessionPaired = nil   // an older Mac
         case .default, .legacy, .pending, .timeout, .wired, .noroute:

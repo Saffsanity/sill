@@ -22,6 +22,17 @@ HELD_S = "        held.scale = v.scale.flatMap { $0.isFinite && $0 > 0 ? min(max
 WHOLE = ("        if let i = Int(exactly: x.rounded(.towardZero)) { return String(i) }\n"
          "        return \"\\(x)\"\n")
 NUMBER = "        if x == x.rounded(), let i = Int(exactly: x) { return String(i) }\n"
+ROOM_W = '            if !sides.contains(r.width) { why.append("room width \\(number(r.width)) \\(points)") }\n'
+ROOM_H = '            if !sides.contains(r.height) { why.append("room height \\(number(r.height)) \\(points)") }\n'
+ROOM_IF = "        if let r = v.room {\n"
+ROOM_GUARD = "            guard r.width.isFinite, r.height.isFinite, r.width > 0, r.height > 0 else { return nil }\n"
+ROOM_HELD_W = "            return ViewportRoom(width: min(max(r.width, sides.lowerBound), sides.upperBound),\n"
+ROOM_HELD = "        held.room = v.room.flatMap { r in\n"
+SCREEN_PX = "    public static let screenPixels: ClosedRange<Int> = 1...32768\n"
+SCREEN_SC = "    public static let screenScales: ClosedRange<Double> = 1...4\n"
+SCREEN_GUARD = ("        guard screenPixels.contains(s.pixelWidth), screenPixels.contains(s.pixelHeight),\n"
+                "              screenScales.contains(s.scale) else { return nil }\n")
+SCREEN_HELD = "        held.screen = v.screen.flatMap { ViewportBounds.screen($0) }\n"
 LATE_MORE = "        let more = max(0, late ?? 0)\n"
 LATE_SUM = "        return count > Int.max - more ? Int.max : count + more\n"
 MUTANTS = [
@@ -66,6 +77,22 @@ MUTANTS = [
     ("L2 a negative count subtracted", LATE_MORE, "        let more = late ?? 0\n"),
     ("L3 the sum stops one short of Int.max", LATE_SUM, "        return count > Int.max - more ? Int.max - 1 : count + more\n"),
     ("L4 the sum wraps around", LATE_SUM, "        return count &+ more\n"),
+    # The room (phase 2b of docs/virtual-desktop-plan.md as revised 2026-11-18).
+    ("R1 a room's width never refused", ROOM_W, ""),
+    ("R2 a room's height never refused", ROOM_H, ""),
+    ("R3 a room's width named as the panel's", ROOM_W, ROOM_W.replace('"room width', '"width')),
+    ("R4 no room refused at all", ROOM_IF, "        if let r = v.room, false {\n"),
+    ("R5 a room with a side not a positive number sent", ROOM_GUARD, "            guard r.width.isFinite, r.height.isFinite else { return nil }\n"),
+    ("R6 an infinite room sent, held", ROOM_GUARD, "            guard r.width > 0, r.height > 0 else { return nil }\n"),
+    ("R7 a room's width sent as it is", ROOM_HELD_W, "            return ViewportRoom(width: r.width,\n"),
+    ("R8 no room ever sent", ROOM_HELD, "        held.room = v.room.flatMap { (r: ViewportRoom) -> ViewportRoom? in if true { return nil }\n"),
+    # The screen (2026-11-25): taken within bounds, else none; never a refusal.
+    ("SC1 a screen's pixels to 16384", SCREEN_PX, SCREEN_PX.replace("1...32768", "1...16384")),
+    ("SC2 a screen's scale from 0.5", SCREEN_SC, SCREEN_SC.replace("1...4", "0.5...4")),
+    ("SC3 a screen's height never looked at", SCREEN_GUARD, SCREEN_GUARD.replace(", screenPixels.contains(s.pixelHeight),", ",")),
+    ("SC4 a screen's scale never looked at", SCREEN_GUARD, SCREEN_GUARD.replace(",\n              screenScales.contains(s.scale) else", " else")),
+    ("SC5 a screen sent as it is", SCREEN_HELD, "        held.screen = v.screen\n"),
+    ("SC6 no screen ever sent", SCREEN_HELD, "        held.screen = nil\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

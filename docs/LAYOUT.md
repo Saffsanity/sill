@@ -15,11 +15,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LockedMac` (the device's words for a locked Mac: why, the drawer's and the
   panel's line, the cover over the stream and its "Unlocking…", checked with the
   host's LockPolicy) and image blob framing. `Viewport.swift` —
-  `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
+  `Viewport` (kind 9: the device's panel, the space its picture has, which the stage fits a window to and sizes
+  the Virtual Desktop, Aa's scale and its rate, and from phase 2b its
+  `room`, `ViewportRoom`: the picture's room with Sill's controls hidden, which tells the
+  Mac a turn from a tap on Full Screen, and since 2026-11-25 its `screen`, `ViewportScreen`: the screen the picture
+  is on, its pixels held upright, its pixels a point and whether it is an iPhone's, from which a Mac makes an
+  iPhone's Virtual Desktop pixel for pixel),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
   host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
-  none, any other refused; what a device sends, `held`; and `whole`, a number
+  none, a room's sides as the panel's, any other refused; a screen within 1 to 32768 pixels a side and 1 to 4
+  pixels a point, else none, never a refusal (`screen`); what a device sends, `held`; and `whole`, a number
   for a log line as Int() printed it, without its trap; pure,
   `Tests/checks/viewport-bounds`).
   (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
@@ -27,7 +33,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
-  `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
+  `HostSettingsChange`, `VirtualDesktopState` (phase 2b: the Virtual Desktop as one
+  connection sees it, `HostSettingsState.virtualDesktopState`, beside the settings'
+  `virtualDesktop` switch; its size's words "1218x800@2"), `SettingsChoices` (the Mac menu's values) and
   `QualityPreset` (Low, Efficient, Balanced, High, Pro, Ultra, Extreme). Remote access:
   `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
   `SignedMacInfo`, `PairRequest` (with pairing at home's methods `ask` and
@@ -59,7 +67,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   shown (the main display while locked; the choice by UUID for the session and
   30 s after), the next, the rate held to a stop's refresh rate, where input
   lands, the pointer's target, and the device's button (its label, dots or
-  "3/7", VoiceOver's words); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  "3/7", VoiceOver's words); from phase 2b the Virtual Desktop's stop, the last
+  (`candidates`' `virtualDesktop`, `virtualStop`, its choice by a fixed key,
+  `virtualNumber` for `WindowList.desktopVirtual`), the stop streamed while its display is not made yet
+  (`streamed`: the main display meanwhile) and its button (`rectangle.dashed`,
+  "Virtual"); pure, `Tests/checks/desktop-displays`. `VirtualDesktopWords.swift` — every sentence that names the
+  Virtual Desktop to a person, for both apps (phase 2b; a rename is one edit there), and `note`, why a Mac
+  cannot make it now (kind 16's `virtualDesktopState.note`, Sill for Mac's Settings); pure,
+  `Tests/checks/virtual-desktop`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
   `image` reserved for a later generation, a device's `stop`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
@@ -181,8 +196,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `VirtualDisplaySize`, the size of Sill's virtual display, no side under 800
   points, which macOS kept at 2x (an iPhone's 754×784 came up at 1x), and of
   the window on it, 1 to 65536 points a side, the most a host takes, so a
-  full-screen window's crop keeps the panel's shape (`windowSize`); pure,
-  `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
+  full-screen window's crop keeps the panel's shape (`windowSize`); and `EncoderLimit` (#295, addhumal's, merged
+  2026-11-25: a stream past 4096 pixels on its longer side held to 4096, its shape kept, when this Mac's hardware
+  encoder makes no session of its size, `HEVCEncoder.hardwareTakes`; `side` given for a test host's
+  SILL_TEST_ENCODER); pure, `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
   SILL_TEST_PATTERN=picture:<path> shows a still picture instead, under
   SILL_TEST_DISPLAYS the shown stop's number and name drawn on it,
@@ -266,16 +283,52 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
   `Tests/checks/virtual-display-api`, which also runs `Runtime.method`'s decision
   and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
-  on classes it makes at run time),
-  `VirtualStage` (`--virtual-display`: owns the display and the moved window,
+  on classes it makes at run time; `ModeSize`, `modeList` and `maxPixels`: the modes a display is made
+  with and its backing, `switchMode` and `applyModes` for phase 2b's probe P2, checked there too),
+  `VirtualStage` (`--virtual-display`: owns the moved window and what its display is for,
   geometry, prepare/release, emergency restore; a native tab switch's new tab
   taken as the staged window with the group's way home, `adoptTab`, #366, and
   the app's own windows on the display no strangers while the staged tab is
-  hidden), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
+  hidden), `SillDisplays` (phase 2b: every display Sill makes, in
+  one place: made with its role's identity, the guard's marker around it, online, listed by
+  ScreenCaptureKit, its lost callback, removed, the stage's IDs given to the catalog, macOS's one
+  reconfiguration callback, the teardown at Quit, a test host's display only said to be made; the
+  stage's display and the Desktop's, one display in two roles: a Mac with no screen's and the Virtual
+  Desktop; main actor) and
+  `SillDisplayRole` (the stage's and the Desktop's identities; pure, `Tests/checks/sill-displays`, which
+  also reads the wiring as text), `HeadlessDesktopPolicy` (VirtualDisplay.swift,
   PR #200 finished: Sill's own display for a Mac with no working screen, `Watch`; TEST ONLY
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
-  size and rate, the device's; `DisplayMakeGuard`, #380's guard, TEST ONLY SILL_TEST_MAKE_GUARD;
+  size and rate, the device's (rule A, 2026-11-24: the space its picture has, its panel; an iPhone's pixel for
+  pixel since 2026-11-25, `phone`, `device(space:screen:refused:)`: the space counted in its pixels, made as a 2x
+  desktop of that many, grown evenly to the least macOS keeps at 2x where a layout is smaller, 540 points a side and
+  800 on the longer, `phoneShort`, `phoneLong`, as Noah's probes P3 and P4 measured it on 2026-11-26; the size that
+  works when macOS does not keep one, `afterMake`, `refusedLine`), and (phase 2b)
+  following the device, `Follow` (a tap at once, a turn after 1 s steady: `Cause`), `followStep`, `followWay`
+  (in place, by Noah's probes P2b and P2c of 2026-11-23), the `backing` it is made with (4096 px square for
+  This device: every iPhone's and iPad's space both ways), `InPlace` (a
+  follow's steps: applySettings: with the size alone, the switch for a turn, each read back with a
+  bounded wait, a fall back to the size it had at 2x, else its removal) and, TEST ONLY, `TestDisplay`
+  (the display as the probes P2b, P2c, P3 and P4 measured one: kept at 2x from 540 by 800 points, `keeps`, `madeAt`,
+  `oneXFirst`) and SILL_TEST_VD_STEPS' knobs (`short-1x`: the line at 744 points, a Mac where macOS draws it
+  elsewhere); `DisplayMakeGuard`, #380's
+  guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
+  `VirtualDesktopBudget` (part B, 2026-11-25: a size the person types, up to a device's budget, twice its screen each
+  way at 120 Hz, Noah's; `current`, every current iPhone's and iPad's screen from Xcode's simulator profiles; the
+  ceiling, the largest budget known; the entry's refusals and their sentences; a device named as the status menu names
+  it, "your iPad", `shownName`; what a device gets, as it is or scaled, `view`, `fitted`; what this Mac's encoder
+  carries, `encoderNote`; TEST ONLY SILL_TEST_ENCODER; pure,
+  `Tests/checks/virtual-desktop`),
+  `VirtualDesktopLife` (phase 2b: when the Virtual Desktop exists, made, kept, spaced and removed,
+  the roles changing hands with the headless display, never the main display beside a real screen;
+  pure; its make's line, a test host's grace and the TEST ONLY hook SILL_TEST_VIRTUAL_DESKTOP) and
+  `DesktopWindowLedger` (phase 2b: the windows on it moved to the main display as it goes
+  and back as it returns, over WindowRestore's `Access`; on the Mac `WindowSizer.DesktopWindows`; pure; both
+  `Tests/checks/virtual-desktop`); the coordinator drives them (StreamCoordinator.swift's "The Virtual
+  Desktop": its stop, its make and removal through SillDisplays, its windows, following its device in
+  place (`followVirtualDesktopInPlace`, `driveInPlace`; the device it is for kept as devices come and go,
+  `adoptVirtualDesktopDevice`), the roles changing hands, kind 16's `virtualDesktopState`, Quit),
   `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
@@ -441,8 +494,13 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `Tests/checks/test-host`),
   `HostSettings` (UserDefaults; the presets are StreamProtocol's
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
-  (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` (its
-  height capped to the screen, issue #59) + `SettingsPanes`,
+  (all status copy; the Virtual Desktop's card row and menu subtitle from VirtualDesktopWords), `StatusCard`,
+  `StatusGlyph`, `SettingsWindow` (its height capped to the screen, issue #59; the fourth tab "Displays", raw
+  value `virtualDisplay`) + `SettingsPanes` (Displays' `VirtualDesktopSection`: the switch, Resolution and
+  Refresh Rate from VirtualDesktopSize's choices, Resolution's Custom… (part B, 2026-11-25: a width and a height in
+  pixels, Retina, a rate of 24 to 120 Hz, refused with VirtualDesktopBudget's sentence over the largest budget among
+  the devices this Mac knows, each known device's line, this Mac's encoder's note), its status, Try Again for the
+  guard; HostSettings keeps the known devices, `knownDevices`, under `virtualDesktopDevices`),
   `SettingsWindowFit` (how tall Settings may be on its screen and where it
   goes; pure, `Tests/checks/settings-window`), `Permissions`, `LoginItem`,
   `LogWindow`, `MainMenu` (key
@@ -604,7 +662,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the tool and the background. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
-  `--raw17=JSON@T`, `--raw9=JSON@T` (a literal viewport, kind 9),
+  `--raw17=JSON@T`, `--raw9=JSON@T` (a literal viewport, kind 9), a viewport's `--panel=WxH`, `--room=WxH`,
+  `--room-after=WxH@T` and `--view-after=PANEL[,ROOM]@T` (Full Screen on or off, a turn),
   `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
   and each second's frames with their kB (the encoder's output);
@@ -651,6 +710,29 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   each click found at its stamp), refusing a binary that links a media
   framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
   `summarize.py` judges them.
+  `Scripts/display-modes-probe/run.sh` (TEST ONLY; P2 of docs/virtual-desktop-plan.md as revised
+  2026-11-18, phase 2b): `probe.swift` with VirtualDisplay.swift alone; without `--make` the dry run (the
+  private API looked up, the modes, their backing and the steps printed; nothing made), with `--make`
+  Noah's run on a Mac at rest (refused without a terminal and while a Sill runs): a display with the room
+  both ways as its modes, switched in place, given new modes by `applySettings:` again, a window of its
+  own on it, each change's ID, mode, callback flags and the window's place, and one verdict line for each
+  way, saying what the display did (corrected 2026-11-23). The probes that followed it on 2026-11-23 and
+  decided the follow in place, as Noah ran them: `p2b/` (P2b: `probe2.swift`, `run.sh`) and `p2c/` (P2c:
+  `probe3.swift`, `VirtualDisplay-probe.patch`, its two PROBE ONLY changes, `run.sh`), both compiled with
+  `VirtualDisplay-b7339612.swift` (Sources/SillHost/VirtualDisplay.swift as it was then); each run.sh
+  checks the sources' sha256, never builds for `--dry-run` (`--build` builds: an agent's, through the heavy
+  lock), refuses the real run without a terminal or while a Sill runs, links no VideoToolbox or
+  ScreenCaptureKit, stops each case at its limit, and writes to `.build/display-modes-probe/p2b|p2c/`;
+  P2c's refuses `--quarter-turn` (the rotation setting) for good. `p3/` (P3, 2026-11-25, for Noah: `probe-phone.swift`
+  with this tree's VirtualDisplay.swift, `run.sh`): the sizes an iPhone 15 Pro's pixel-for-pixel Virtual Desktop takes,
+  each made for a few seconds as the Virtual Desktop is (a 4096-pixel backing), read back (its mode, its menu bar and
+  the room under it), the first followed in place to the others, removed; one verdict line each; the same refusals, the
+  run itself Noah's, output in `.build/display-modes-probe/p3/`. `p4/` (P4, 2026-11-26, for Noah, after P3's result: `probe-floor.swift`,
+  `run.sh`): one display at 589×1189 followed in place through two ladders of smaller sizes, one for each shape an
+  iPhone's picture has with its controls showing, and a few sizes that tell the shorter side from the height and the
+  pixels, back to 589×1189 after each size macOS does not keep; then four sizes made as they are, two at 60 Hz; one
+  verdict line each and the smallest size kept of each shape; the same refusals, output in
+  `.build/display-modes-probe/p4/`.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own
@@ -666,7 +748,18 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
   `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
   software decoder and prints each one's size and luma, so the placeholder's
-  black is measured. `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
+  black is measured. `Scripts/desktop-check/live.py OUT` (TEST ONLY; docs/virtual-desktop-plan.md): the Desktop's
+  stops on a test host (SILL_TEST_DISPLAYS: steps, taps, rates, the lock, the span), and from phase 2b the Virtual
+  Desktop on five more (SILL_TEST_VIRTUAL_DESKTOP, said and never made: the stop, a step onto it at the device's space, its
+  turn followed in place as the probes measured a display, its grace, locked and off console, the span; a paired
+  device's switch shown at once, an unpaired one's refused, the switch flipped four times a second against the spacing;
+  SILL_TEST_VD_STEPS: a refused switch falling back, another device taken over in place, a space beyond the backing,
+  a way back that never lands removing it; rule A: made with the controls showing, Full Screen on and off at once, a
+  turn with the controls showing, two changes close together, the iPhone upright after the iPad; an iPhone that says
+  its screen, pixel for pixel upright and on its side, and on a host whose said display refuses a short side, the
+  make's and a follow's fall back to the size that works; a size of the person's own, held to an encoder said to take
+  no more than 4096 pixels and to an iPhone SE's budget, and the CLI's refusal over the ceiling), a verdict per rule.
+  `Scripts/privacy-check/live.py OUT [case…|all]` (TEST ONLY;
   docs/privacy-mode-plan.md, part 1) runs Lock this Mac when the last device leaves on
   synthetic test hosts on loopback (each under 60 s, the lock a dry run): the wait,
   a return, a move, locked already, another user, no display, no lock call, a quit,
@@ -879,7 +972,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   after 12, back at 200), the preview's cut, `RevealCut` (each layout's picture's place, from its own
   geometry with DuoPosture's split and PhonePortraitLayout), the pointer's dwell at the edge, when it is
   offered, when the controls come back by themselves, the shake (`Sill.shakeToShowControls`), the Settings
-  rows' place, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
+  rows' place, the hint, the room (and `hiddenRoom`, the same room measured while the controls show: the
+  viewport's `room`, by which the Mac's Virtual Desktop tells a turn from a tap, phase 2b), the words; pure,
+  `Tests/checks/full-screen`;
+  pbxproj A279/F279),
   `RevealEdgePan` (the swipe in's recognizer, a UIPanGestureRecognizer of Sill's on its window, only while
   hidden, which other recognizers wait for it, `EdgeRecognizers.waits` (never one that only watches,
   `WatchesTouchesOnly`), where a held stroke landed, `heldLanding`, for the picture's scroll, and a stroke
@@ -918,6 +1014,10 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
   build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
   with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
+  `PictureFit` (where the picture is drawn in its pane: aspect-fit in its middle, but one for one from its top-left
+  pixel where the picture is the pane's own pixels less at most two a side, so an iPhone's pixel-for-pixel Virtual
+  Desktop is never scaled by a hair; the stream view's frame, the pointer sprite and every touch ask it; pure,
+  `Tests/checks/picture-fit`; pbxproj A7F1/F7F1),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
   the picture's interruptions on the network queue: `checkLayer` flushes a layer
   that failed, could not decode a frame or needs a flush to decode again, at each
@@ -952,13 +1052,14 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
   and the App Store address for a Mac's update notice, the App Store Connect
   record's since PR #27),
-  `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
-  (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (Settings, a whole-screen pane over the
+  `MockCatalog` (harness data and the settings cases; the Virtual Desktop's `vdesk…`), `HostSettingsLedger`
+  (the Mac's settings with this device's unanswered picks, eight fields, the Virtual Desktop's only on a
+  session the Mac says is paired, rule 11; pure logic, checked with swiftc), `HostSettingsPanel` (Settings, a whole-screen pane over the
   stream screen on every device (2026-11-18, docs/settings-pane-plan.md):
   the pinned header with the Mac's name, the readout and route line, the away
   line and Done, then the Mac's part (`macPart`: the callouts, the link's callout
-  and its button, the slow-link callout for older Macs, its groups, Away from
+  and its button, the slow-link callout for older Macs, its groups (the Virtual
+  Desktop's switch after Virtual Display's, from VirtualDesktopWords), Away from
   home, the footnote) and this device's part (`devicePart`: This iPad's group,
   Take the Tour, its last line this app's version, `VersionLine`), placed by
   `SettingsPane.Layout`: in one column both in one scroll view with Disconnect

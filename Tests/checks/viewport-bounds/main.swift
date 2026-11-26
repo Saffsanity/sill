@@ -12,7 +12,7 @@
 //       Tests/checks/viewport-bounds/main.swift
 // The rule case by case (the devices' own panels among them), the bug before it in a copy of the
 // host's arithmetic, what JSON can carry, then 200,000 random viewports, real and hostile, against the
-// rule's properties, then the late count. The virtual display's window size is VirtualDisplaySize's, in
+// rule's properties, the room (phase 2b) case by case and 100,000 random ones, then the late count. The virtual display's window size is VirtualDisplaySize's, in
 // the capture-scale check.
 import CoreGraphics
 import Foundation
@@ -219,6 +219,89 @@ check(heldNilWrong == 0, "a device sends nothing only for a side that is not a p
 check(heldRefused == 0, "whatever a device sends is taken (\(heldRefused) refused)")
 check(heldNotIdentity == 0, "a viewport already taken goes as it is (\(heldNotIdentity) changed)")
 check(wholeWrong == 0, "whole prints what Int() printed wherever Int() did not trap (\(wholeWrong) not)")
+
+// MARK: - The room (phase 2b of docs/virtual-desktop-plan.md: the picture's room with Sill's controls hidden)
+
+func roomy(_ rw: Double, _ rh: Double, w: Double = 1376, h: Double = 950) -> Viewport {
+    Viewport(width: w, height: h, scale: nil, fps: 120, room: ViewportRoom(width: rw, height: rh))
+}
+check(B.refusal(roomy(1376, 1032)) == nil && B.refusal(roomy(1, 16384)) == nil, "a room within bounds, and at them: taken")
+check(B.refusal(roomy(0, 1032)) == "room width 0 (1 to 16384 points)", "a room's width of 0 refused, named as the room's")
+check(B.refusal(roomy(1376, 1e300)) == "room height 1e+300 (1 to 16384 points)", "a room's height of 1e300 refused")
+check(B.refusal(roomy(.nan, 16385)) == "room width nan (1 to 16384 points), room height 16385 (1 to 16384 points)", "both of a room's sides, each named")
+check(B.refusal(roomy(0, 900, w: 0)) == "width 0 (1 to 16384 points), room width 0 (1 to 16384 points)", "the panel's first, then the room's")
+check(B.refusal(roomy(-.infinity, 900)) == "room width -inf (1 to 16384 points)", "a room's negative infinity refused")
+check(B.held(roomy(1376, 1032))?.room == ViewportRoom(width: 1376, height: 1032), "a device sends a room within bounds as it is")
+check(B.held(roomy(20000, 0.5))?.room == ViewportRoom(width: 16384, height: 1), "…and holds one beyond them to them")
+check([roomy(0, 900), roomy(-3, 900), roomy(900, .nan), roomy(.infinity, 900), roomy(900, -.infinity)].allSatisfy {
+          B.held($0).map { $0.room == nil && $0.width == 1376 } == true
+      }, "a room with a side that is not a positive number: none sent, the panel still sent (the host takes the panel)")
+check(B.held(vp(1376, 950, nil))?.room == nil, "no room, none")
+// 100,000 random rooms beside random panels: taken exactly when the panel and both of the room's sides are within bounds;
+// each of the room's sides out of range named as the room's, and only those; a device's room sent exactly when its sides
+// are positive numbers, as it is within the bounds, and always taken.
+var roomDisagree = 0, roomWords = 0, roomHeldRefused = 0, roomHeldWrong = 0
+for _ in 0..<100_000 {
+    let v = Viewport(width: side(), height: side(), scale: scale(), fps: 60,
+                     room: next() % 5 == 0 ? nil : ViewportRoom(width: side(), height: side()))
+    let why = B.refusal(v)
+    let inside = { (x: Double) in x >= 1 && x <= 16384 }
+    let roomTaken = v.room.map { inside($0.width) && inside($0.height) } ?? true
+    if (why == nil) != (oracleTakes(v) && roomTaken) { roomDisagree += 1 }
+    if let why, let r = v.room, why.contains("room width ") == inside(r.width) || why.contains("room height ") == inside(r.height) { roomWords += 1 }
+    if let held = B.held(v) {
+        if B.refusal(held) != nil { roomHeldRefused += 1 }
+        let sendable = v.room.map { $0.width.isFinite && $0.height.isFinite && $0.width > 0 && $0.height > 0 } ?? false
+        if (held.room != nil) != sendable { roomHeldWrong += 1 }
+        if roomTaken, v.room != nil, held.room != v.room { roomHeldWrong += 1 }
+    }
+}
+check(roomDisagree == 0, "100,000 random rooms: taken exactly when the panel and the room are within bounds (\(roomDisagree) not)")
+check(roomWords == 0, "each of a room's sides out of range named as the room's, and only those (\(roomWords) not)")
+check(roomHeldRefused == 0 && roomHeldWrong == 0,
+      "a device's room sent when its sides are positive numbers, as it is within the bounds, always taken (\(roomHeldRefused), \(roomHeldWrong))")
+
+// MARK: - The screen (2026-11-25: an iPhone's Virtual Desktop pixel for pixel, Noah 2026-11-24)
+
+// A device says which screen its picture is on: its pixels held upright, its pixels a point, whether it is an iPhone's.
+// A host takes one within bounds and ignores any other (the device then sized as one that says nothing); it never
+// refuses the viewport for it, so a later device with a screen past this host's bounds is still served.
+func screened(_ pw: Int, _ ph: Int, _ sc: Double, _ phone: Bool? = true) -> Viewport {
+    Viewport(width: 393, height: 793, scale: nil, fps: 120, room: ViewportRoom(width: 393, height: 793),
+             screen: ViewportScreen(pixelWidth: pw, pixelHeight: ph, scale: sc, phone: phone))
+}
+let pro15 = ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 3, phone: true)
+check(B.screen(pro15) == pro15 && B.screen(ViewportScreen(pixelWidth: 2064, pixelHeight: 2752, scale: 2, phone: false)) != nil,
+      "an iPhone 15 Pro's screen (1179×2556 at 3x) and an iPad Pro 13-inch's (2064×2752 at 2x): taken")
+check(B.screen(ViewportScreen(pixelWidth: 1, pixelHeight: 32768, scale: 1, phone: nil)) != nil
+      && B.screen(ViewportScreen(pixelWidth: 32768, pixelHeight: 1, scale: 4, phone: true)) != nil, "at its bounds: taken")
+check([ViewportScreen(pixelWidth: 0, pixelHeight: 2556, scale: 3, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 32769, scale: 3, phone: true),
+       ViewportScreen(pixelWidth: -1179, pixelHeight: 2556, scale: 3, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 0.5, phone: true),
+       ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: 4.5, phone: true), ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: .nan, phone: true),
+       ViewportScreen(pixelWidth: 1179, pixelHeight: 2556, scale: .infinity, phone: true)].allSatisfy { B.screen($0) == nil },
+      "a side of 0, past 32768 or negative, a scale under 1, over 4, NaN or infinite: none")
+check(B.refusal(screened(0, 2556, 3)) == nil && B.refusal(screened(1179, 2556, .nan)) == nil && B.refusal(screened(99999, 99999, 9)) == nil,
+      "a viewport is never refused for its screen")
+check(B.held(screened(1179, 2556, 3))?.screen == pro15, "a device sends a screen within bounds as it is")
+check(B.held(screened(1179, 2556, .nan)).map { $0.screen == nil && $0.width == 393 } == true
+      && B.held(screened(40000, 2556, 3)).map { $0.screen == nil && $0.room != nil } == true,
+      "…and none beyond them, the panel and the room still sent")
+check(B.held(vp(1376, 950, nil))?.screen == nil, "no screen, none")
+var screenWrong = 0
+for _ in 0..<100_000 {
+    let pick = [0, 1, 2, 1179, 2556, 32767, 32768, 32769, -5, 70000]
+    let w = next() % 3 == 0 ? pick[Int(next() % UInt64(pick.count))] : Int(next() % 40000) - 100
+    let h = next() % 3 == 0 ? pick[Int(next() % UInt64(pick.count))] : Int(next() % 40000) - 100
+    let scales = [0.0, 0.99, 1, 2, 2.88, 3, 4, 4.01, .nan, .infinity, -2]
+    let sc = next() % 2 == 0 ? scales[Int(next() % UInt64(scales.count))] : Double(next() % 600) / 100
+    let one = ViewportScreen(pixelWidth: w, pixelHeight: h, scale: sc, phone: next() % 2 == 0)
+    let within = (1...32768).contains(w) && (1...32768).contains(h) && sc.isFinite && sc >= 1 && sc <= 4
+    if (B.screen(one) != nil) != within { screenWrong += 1 }
+    let v = screened(w, h, sc, one.phone)
+    if B.refusal(v) != nil { screenWrong += 1 }
+    if (B.held(v)?.screen != nil) != within { screenWrong += 1 }
+}
+check(screenWrong == 0, "100,000 random screens: taken exactly within bounds, never a refusal, held to them (\(screenWrong) not)")
 
 // MARK: - A device's late-sound count (ClientStats.lateSince)
 

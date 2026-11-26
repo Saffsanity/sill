@@ -10,7 +10,19 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --fps-after=N@T    send a second viewport asking for N fps after T seconds
   --set=K=V[,K=V]@T  send a settings change (kind 17) T seconds in, with integer tokens 1, 2, 3...
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
-                     virtualDisplay, directWireless, sendAudio; booleans accept 1/0/true/false/on/off
+                     virtualDisplay, directWireless, sendAudio, virtualDesktop; booleans accept
+                     1/0/true/false/on/off
+  --room=WxH         every viewport this client sends (--fps=, --fps-after=, --room-after=) carries a room of
+                     W×H device points (Viewport.room, phase 2b: the picture's room with Sill's controls hidden,
+                     which tells the Mac a turn from a tap on Full Screen)
+  --room-after=WxH@T a viewport with this room T seconds in (the --fps= rate, else 60), its panel as before
+  --panel=WxH        the panel every viewport carries (its width and height: the space the picture has, which the
+                     Mac fits a window and its Virtual Desktop to), 1117x642 when left out
+  --view-after=PANEL[,ROOM]@T  from T seconds in the panel PANEL (WxH), and the room ROOM when given: one viewport
+                     carrying them, as a device's when Full Screen goes on or off (the panel alone) or it turns (both)
+  --screen=WxH@S[:phone]  every viewport carries the screen its picture is on (Viewport.screen, 2026-11-25): W×H
+                     pixels held upright at S pixels a point, an iPhone's with ":phone" (an iPhone 15 Pro:
+                     1179x2556@3:phone), else an iPad's; a Mac makes an iPhone's Virtual Desktop pixel for pixel
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --raw9=JSON@T      send this literal kind 9 payload (a viewport) T seconds in (split on the last @);
                      a host refuses one outside 1 to 16384 points a side or 0.25 to 4 for its scale,
@@ -43,7 +55,8 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      the Desktop moves to the Mac's next stop (DesktopDisplays). Only to a --synthetic host on
                      this Mac, whose stops are SILL_TEST_DISPLAYS' (any other host would step this Mac's own
                      displays and move its pointer). Each window list prints desktopDisplays=, desktopDisplay=
-                     and names= when it says them; --expect=desktopDisplay=N (or none) and desktopDisplays=N
+                     and names= when it says them, and desktopVirtual= (phase 2b: which stop is the Mac's Virtual
+                     Desktop); --expect=desktopDisplay=N (or none), desktopDisplays=N and desktopVirtual=N (or none)
                      check the last list's at exit
   --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
                      swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
@@ -174,22 +187,25 @@ import json, re, socket, struct, sys, time
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",43:"audio"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "persistent", "virtualDisplayAvailable",
-             "thisConnectionAway", "awayRunning", "sessionPaired"}
-# What --set may send: HostSettingsChange's seven fields. The host drops any other key without a
+             "thisConnectionAway", "awayRunning", "sessionPaired", "virtualDesktop", "virtualDesktopAvailable", "virtualDesktopShown"}
+# What --set may send: HostSettingsChange's eight fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
-SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio"}
+SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "virtualDesktop"}
+# The Virtual Desktop as this connection sees it (kind 16's virtualDesktopState, phase 2b): available, shown, its size
+# ("1218x800@2", or none) and rate.
+VD_KEYS = {"virtualDesktopAvailable", "virtualDesktopShown", "virtualDesktopSize", "virtualDesktopHz"}
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 # The Desktop's stops (DesktopDisplays), from the last window list: a number, or none for a list without it.
-LIST_KEYS = {"desktopDisplay", "desktopDisplays"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS
-TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
+LIST_KEYS = {"desktopDisplay", "desktopDisplays", "desktopVirtual"}
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS | LIST_KEYS | VD_KEYS
+TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "room-after", "view-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
          "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15", "next-display")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump", "room", "panel", "screen")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -218,9 +234,27 @@ def value(k, v):
         return None if v == "none" else unescape(v)
     if k in LIST_KEYS:
         return None if v == "none" else number(v, k)
+    if k == "virtualDesktopSize":
+        return None if v == "none" else v
     if k in ("captureScale", "homeCaptureScale", "awayCaptureScale"):
         f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
     return number(v, k)
+
+def room_size(text, flag):
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)", text)
+    if not m: raise ValueError(f"{flag}: WxH in points, got {text!r}")
+    return (float(m.group(1)), float(m.group(2)))
+
+def screen_of(text):
+    """--screen's WxH@S[:phone]: Viewport.screen's JSON object."""
+    m = re.fullmatch(r"(\d+)x(\d+)@(\d+(?:\.\d+)?)(:phone)?", text)
+    if not m: raise ValueError(f"--screen: WxH@S[:phone] in pixels, got {text!r}")
+    return {"pixelWidth": int(m.group(1)), "pixelHeight": int(m.group(2)), "scale": float(m.group(3)), "phone": m.group(4) is not None}
+
+def view_sizes(text):
+    """--view-after's PANEL[,ROOM]: the panel, and the room or None."""
+    p, comma, r = text.partition(",")
+    return (room_size(p, "--view-after"), room_size(r, "--view-after") if comma else None)
 
 def pairs(body, keys, flag):
     out = {}
@@ -527,6 +561,8 @@ try:
             else:
                 parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
                           else number(text, "--fps-after") if name == "fps-after"
+                          else room_size(text, "--room-after") if name == "room-after"
+                          else view_sizes(text) if name == "view-after"
                           else fractions(text, f"--{name}") if name in ("move", "tap")
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
@@ -554,6 +590,9 @@ try:
         return next((a.partition("=")[2] for a in flags if a.startswith(f"--{name}=")), default)
     host = valued("host", "127.0.0.1")
     dump_dir = valued("dump")
+    room = room_size(valued("room"), "--room") if valued("room") is not None else None
+    panel = room_size(valued("panel"), "--panel") if valued("panel") is not None else (1117.0, 642.0)
+    screen = screen_of(valued("screen")) if valued("screen") is not None else None
     if dump_dir is not None: os.makedirs(dump_dir, exist_ok=True)
     device = unescape(valued("device")) if valued("device") is not None else None
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
@@ -734,8 +773,12 @@ def pointer_input(action, x, y):
     return msg(8, json.dumps({"pointer": {"_0": action, "x": x, "y": y}}).encode())
 def key_input(hid, down):
     return msg(8, json.dumps({"key": {"down": down, "hidUsage": hid, "modifiers": 0}}).encode())
-def viewport(fps):
-    return msg(9, json.dumps({"width": 1117, "height": 642, "scale": None, "fps": fps}).encode())
+def viewport(fps, room_wh=None):
+    v = {"width": panel[0], "height": panel[1], "scale": None, "fps": fps}
+    r = room_wh or room
+    if r is not None: v["room"] = {"width": r[0], "height": r[1]}
+    if screen is not None: v["screen"] = screen
+    return msg(9, json.dumps(v).encode())
 if fps_now is not None:
     s.sendall(viewport(fps_now)); print(f"  sent viewport fps={fps_now}")
 
@@ -750,6 +793,8 @@ def describe(d):
     au = "-" if st.get("sendAudio") is None else b(st.get("sendAudio"))             # "-": a host without sound
     sp = "-" if d.get("sessionPaired") is None else b(d.get("sessionPaired"))       # "-": a host before 2026-10-29
     away = d.get("away"); link = d.get("link")
+    vds = "-" if st.get("virtualDesktop") is None else b(st.get("virtualDesktop"))      # "-": a host before 2b
+    vstate = d.get("virtualDesktopState")
     dash = lambda x: "-" if x is None else x
     extra = ""
     if isinstance(away, dict):
@@ -759,6 +804,11 @@ def describe(d):
         suggested = "-" if link.get("suggestedBitrate") is None else f"{link.get('suggestedBitrate')}/{dash(link.get('suggestedCaptureScale'))}"
         extra += (f" link={link.get('state')},withheld={link.get('withheldPerSecond')},bitrate={link.get('bitrate')},"
                   f"carried={dash(link.get('carriedKbps'))},suggested={suggested}")
+    if isinstance(vstate, dict):
+        extra += (f" vdesk={vds},avail:{b(vstate.get('available'))},shown:{b(vstate.get('shown'))},size:{vstate.get('size') or '-'},"
+                  f"hz:{vstate.get('hz') or '-'}" + (f",note:{vstate.get('note')!r}" if vstate.get('note') else ""))
+    elif vds != "-":
+        extra += f" vdesk={vds}"
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
             f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
@@ -794,7 +844,7 @@ aud_formats = 0; aud_orphans = 0
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
-    global token
+    global token, panel, room
     _, _, name, text, parsed = e
     at = f"{now - t0:.3f}s"
     if name == "set":
@@ -808,6 +858,13 @@ def fire(e, now):
         s.sendall(msg(6, json.dumps(parsed).encode())); print(f"  sent pick {text} at {at}")
     elif name == "fps-after":
         s.sendall(viewport(parsed)); print(f"  sent viewport fps={parsed} at {at}")
+    elif name == "room-after":
+        s.sendall(viewport(fps_now or 60, parsed)); print(f"  sent viewport fps={fps_now or 60} room={parsed[0]:g}x{parsed[1]:g} at {at}")
+    elif name == "view-after":
+        panel = parsed[0]
+        if parsed[1] is not None: room = parsed[1]
+        s.sendall(viewport(fps_now or 60)); print(f"  sent viewport fps={fps_now or 60} panel={panel[0]:g}x{panel[1]:g}"
+                                                  + (f" room={room[0]:g}x{room[1]:g}" if room else "") + f" at {at}")
     elif name == "stop-ping":
         global pinging; pinging = False; print(f"  stopped pinging at {at}")
     elif name == "stop-read":
@@ -931,6 +988,7 @@ while time.time() - t0 < dur:
                   + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
                   + (f" desktopDisplays={d['desktopDisplays']}" if "desktopDisplays" in d else "")
                   + (f" desktopDisplay={d['desktopDisplay']}" if "desktopDisplay" in d else "")
+                  + (f" desktopVirtual={d['desktopVirtual']}" if "desktopVirtual" in d else "")
                   + (f" names={json.dumps(d['desktopDisplayNames'], ensure_ascii=False)}" if "desktopDisplayNames" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
                   + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
@@ -1066,9 +1124,14 @@ if expect is not None:
         for k, want in expect.items():
             if k in ("persistent", "virtualDisplayAvailable", "sessionPaired"): got = last_state.get(k)
             elif k in AWAY_KEYS: got = (last_state.get("away") or {}).get(k)
+            elif k in VD_KEYS:
+                vs = last_state.get("virtualDesktopState") or {}
+                got = vs.get({"virtualDesktopAvailable": "available", "virtualDesktopShown": "shown",
+                              "virtualDesktopSize": "size", "virtualDesktopHz": "hz"}[k])
             elif k == "linkState": got = (last_state.get("link") or {}).get("state", "fine")
             else: got = last_state.get("settings", {}).get(k)
-            if isinstance(want, str): same = got == want
+            if want is None: same = got is None
+            elif isinstance(want, str): same = got == want
             else: same = (got == want) if isinstance(want, bool) else (got is not None and not isinstance(got, bool) and float(got) == float(want))
             if not same: problems.append(f"{k}: want {want}, got {got}")
     print("EXPECT ok" if not problems else "EXPECT FAIL " + "; ".join(problems))
