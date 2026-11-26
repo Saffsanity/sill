@@ -34,6 +34,9 @@ protocol Curtain: AnyObject {
     /// Whether this Mac's pointer reads as showing now (CGCursorIsVisible, the window server's shared state); nil with
     /// nothing to read it. Read only.
     func pointerShowing() -> Bool?
+    /// Sill's own hide is outstanding: PointerHider's in Sill.app; in the dry run, it would be (the calls found). A hide
+    /// macOS never made (the calls missing or refused, said once) is never made again (rule 15, renewed).
+    var pointerHeld: Bool { get }
 }
 
 /// The seam where this Mac's own keys, clicks and pointer are observed, only while it is dark (DarkenPolicy rule 7):
@@ -246,9 +249,10 @@ final class PrivacyScreen {
 
     /// Rule 15, renewed: `cause` may have let macOS show the pointer again; the rule decides with what it reads now.
     /// Nothing is read while Sill has not hidden it (darkening off, the black down, Hide the pointer too off, the lock
-    /// screen), so a step or a warp then costs nothing.
+    /// screen), so a step or a warp then costs nothing; nor when macOS never let Sill hide it (`Curtain.pointerHeld`:
+    /// the calls missing or refused, which the log said once), so no line says it was hidden again.
     private func renew(_ cause: DarkenPolicy.PointerCause) {
-        guard state.pointerHidden else { return }
+        guard state.pointerHidden, curtain.pointerHeld else { return }
         run(state.pointerCheck(cause, showing: curtain.pointerShowing()))
     }
 
@@ -393,9 +397,14 @@ final class DryCurtain: Curtain {
     /// never touched.
     func pointer(hidden: Bool) {
         Stats.shared.bump("priv.pointer")
+        wouldHold = hidden && PointerCalls.found != nil
         say(hidden ? DarkenPolicy.Words.dryPointerHide(found: PointerCalls.found != nil, reads: PointerCalls.isVisible != nil)
                    : DarkenPolicy.Words.dryPointerShow)
     }
+
+    /// Sill.app would hold a hide now: the rule said hidden and the calls are found here.
+    private var wouldHold = false
+    var pointerHeld: Bool { wouldHold }
 
     /// Rule 15, renewed: says what Sill.app would do, and counts it as Sill.app does (the cause's key).
     func renewPointer(_ cause: DarkenPolicy.PointerCause) {

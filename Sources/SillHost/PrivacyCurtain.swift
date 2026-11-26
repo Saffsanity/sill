@@ -66,6 +66,8 @@ final class WindowCurtain: Curtain {
 
     func pointerShowing() -> Bool? { hider.showing() }
 
+    var pointerHeld: Bool { hider.hidden }
+
     func hint(_ hint: DarkenPolicy.Hint, for seconds: Double) {
         guard raised else { return }
         self.hint = hint
