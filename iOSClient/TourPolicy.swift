@@ -186,6 +186,10 @@ struct TourFeatures: Equatable {
     var menus: Bool
     /// This device's Three-Finger Gestures are on, and the Mac takes them (its window list says so).
     var gestures: Bool
+    /// This device's Hold, Then Drag is on (TouchHold, PR #292): a hold on the picture right-clicks at its
+    /// lift, or drags once it moves; off, a hold right-clicks at once. On unless set, as the switch itself
+    /// (`TouchHold.defaultOn`; Noah, 2026-11-20); StreamScreen always passes the switch.
+    var holdThenDrag = true
     /// The Mac's Virtual Display setting is on.
     var virtualDisplay: Bool
     /// The Mac shares its clipboard (its window list says so).
@@ -583,7 +587,12 @@ enum TourPolicy {
         switch t {
         case .touch:
             var rows = [row("hand.tap", [strong("Tap"), plain(" to click.")]),
-                        row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),
+                        // The hold's row follows this device's Hold, Then Drag (TouchHold, PR #292): on, the default
+                        // since Noah's 2026-11-20, the drag beside the right click; off, the right click, as before.
+                        // Not "New:", as before the default changed: which of 0.7's rows carry it is the 0.7 tour's.
+                        features.holdThenDrag
+                            ? row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click, or hold, then drag, to move a window or select text.")])
+                            : row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),
                         row("hand.draw", [strong("Drag"), plain(" to scroll.")])]
             if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" works as a mouse.")])) }
             // Pinch to zoom (StreamZoom, PR #196): this device's alone, 1× to 5× about the pinch;

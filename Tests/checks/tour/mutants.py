@@ -144,6 +144,15 @@ MUTANTS = [
     ("Reverse Scrolling and the hold under VoiceOver", "if !voiceOver {\n                rows.append(row(\"arrow.up.arrow.down\"", "if true {\n                rows.append(row(\"arrow.up.arrow.down\""),
     ("Larger Picture's row where it is not offered", "if layout == .phone && features.largerPicture {", "if layout == .phone {"),
     ("Larger Picture's row in the halves", "if layout == .phone && features.largerPicture {", "if features.largerPicture {"),
+    # …Hold, Then Drag (TouchHold, PR #292): the hold's row follows this device's switch, on unless turned off
+    # (Noah, 2026-11-20), so a new person's card has the drag.
+    ("Hold, Then Drag off unless set (a new person's hold row the right click alone)", "var holdThenDrag = true", "var holdThenDrag = false"),
+    ("the hold's row with the drag while Hold, Then Drag is off", 'features.holdThenDrag\n                            ? row("contextualmenu', 'true\n                            ? row("contextualmenu'),
+    ("the hold's row ignoring Hold, Then Drag (the right click alone, as before #292)", 'features.holdThenDrag\n                            ? row("contextualmenu', 'false\n                            ? row("contextualmenu'),
+    ("the drag's row marked New", 'then drag, to move a window or select text.")])\n', 'then drag, to move a window or select text.")], new: true)\n'),
+    ("the drag's row cut short", 'plain(" to right-click, or hold, then drag, to move a window or select text.")', 'plain(" to right-click, or hold, then drag.")'),
+    ("the drag's row with another symbol", '? row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click, or',
+     '? row("hand.point.up.left", [strong("Touch and hold"), plain(" to right-click, or'),
     # …and "New:".
     ("New: dropped", 'let mark = new ? [TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: " ")] : []', "let mark: [TourSpan] = []"),
     ("the mark not marked", "TourSpan(text: newPrefix, strong: true, isNew: true)", "TourSpan(text: newPrefix, strong: true, isNew: false)"),
