@@ -23,17 +23,24 @@ func aspectFit(_ b: CGRect, _ v: CGSize) -> CGRect {
     return CGRect(x: b.minX + (b.width - w) / 2, y: b.minY + (b.height - h) / 2, width: w, height: h)
 }
 
-// An iPhone 15 Pro (3 pixels a point): its Virtual Desktop pixel for pixel in each layout, the spare pixel of an odd side
-// a hairline at the right or bottom.
+// An iPhone 15 Pro (3 pixels a point): its Virtual Desktop pixel for pixel with Full Screen, the spare pixel of an odd
+// side a hairline at the right or bottom; with its controls showing grown to the least macOS keeps at 2x (540 points a
+// side, Noah's probes P3 and P4, 2026-11-26), so fitted as before.
 let fsUp = PictureFit.rect(in: pane(393, 793), videoSize: px(1178, 2378), screenScale: 3)
 check(PictureFit.oneToOne(in: pane(393, 793), videoSize: px(1178, 2378), screenScale: 3)
       && near(fsUp, CGRect(x: 0, y: 0, width: 1178.0 / 3, height: 2378.0 / 3)),
       "upright with Full Screen: 1178×2378 in 1179×2379 px, one for one from the top-left (\(fsUp))")
 check(PictureFit.oneToOne(in: pane(734, 393), videoSize: px(2202, 1178), screenScale: 3), "on its side with Full Screen: 2202×1178 in 2202×1179")
-check(PictureFit.oneToOne(in: pane(718, 299), videoSize: px(2154, 896), screenScale: 3), "on its side with the controls: 2154×896 in 2154×897")
+check(PictureFit.oneToOne(in: pane(718, 299), videoSize: px(2154, 896), screenScale: 3), "a picture one pixel short of its pane: 2154×896 in 2154×897")
+check(!PictureFit.oneToOne(in: pane(718, 299), videoSize: px(2594, 1080), screenScale: 3)
+      && near(PictureFit.rect(in: pane(718, 299), videoSize: px(2594, 1080), screenScale: 3), aspectFit(pane(718, 299), px(2594, 1080))),
+      "on its side with the controls (its desktop grown to 1297×540): fitted as before")
+check(!PictureFit.oneToOne(in: pane(377, 235), videoSize: px(1732, 1080), screenScale: 3)
+      && near(PictureFit.rect(in: pane(377, 235), videoSize: px(1732, 1080), screenScale: 3), aspectFit(pane(377, 235), px(1732, 1080))),
+      "upright with the controls (its desktop grown to 866×540): fitted as before")
 check(!PictureFit.oneToOne(in: pane(377, 235), videoSize: px(1600, 998), screenScale: 3)
       && near(PictureFit.rect(in: pane(377, 235), videoSize: px(1600, 998), screenScale: 3), aspectFit(pane(377, 235), px(1600, 998))),
-      "upright with the controls (its desktop grown to 800×499): fitted as before")
+      "…and run 6's 800×499: fitted")
 // An origin other than zero: the pane's own top-left.
 let off = PictureFit.rect(in: CGRect(x: 8, y: 59, width: 393, height: 793), videoSize: px(1178, 2378), screenScale: 3)
 check(near(off, CGRect(x: 8, y: 59, width: 1178.0 / 3, height: 2378.0 / 3)), "the pane's own top-left (\(off))")

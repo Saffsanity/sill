@@ -301,15 +301,17 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   SILL_TEST_HEADLESS; `HeadlessDisplayKind`, a display's kind by role; `VirtualDesktopSize`, its
   size and rate, the device's (rule A, 2026-11-24: the space its picture has, its panel; an iPhone's pixel for
   pixel since 2026-11-25, `phone`, `device(space:screen:refused:)`: the space counted in its pixels, made as a 2x
-  desktop of that many, grown evenly to 800 × 400 points where a layout is smaller, the size that works when macOS
-  does not keep one, `afterMake`, `refusedLine`), and (phase 2b)
+  desktop of that many, grown evenly to the least macOS keeps at 2x where a layout is smaller, 540 points a side and
+  800 on the longer, `phoneShort`, `phoneLong`, as Noah's probes P3 and P4 measured it on 2026-11-26; the size that
+  works when macOS does not keep one, `afterMake`, `refusedLine`), and (phase 2b)
   following the device, `Follow` (a tap at once, a turn after 1 s steady: `Cause`), `followStep`, `followWay`
   (in place, by Noah's probes P2b and P2c of 2026-11-23), the `backing` it is made with (4096 px square for
   This device: every iPhone's and iPad's space both ways), `InPlace` (a
   follow's steps: applySettings: with the size alone, the switch for a turn, each read back with a
   bounded wait, a fall back to the size it had at 2x, else its removal) and, TEST ONLY, `TestDisplay`
-  (the display as the probes measured one) and SILL_TEST_VD_STEPS' knobs (`short-1x`: a short side at 1x, as macOS
-  might do with an iPhone's); `DisplayMakeGuard`, #380's
+  (the display as the probes P2b, P2c, P3 and P4 measured one: kept at 2x from 540 by 800 points, `keeps`, `madeAt`,
+  `oneXFirst`) and SILL_TEST_VD_STEPS' knobs (`short-1x`: the line at 744 points, a Mac where macOS draws it
+  elsewhere); `DisplayMakeGuard`, #380's
   guard, TEST ONLY SILL_TEST_MAKE_GUARD;
   `Tests/checks/virtual-display-api` and `virtual-desktop`; `Scripts/headless-check/live.py`),
   `VirtualDesktopBudget` (part B, 2026-11-25: a size the person types, up to a device's budget, twice its screen each

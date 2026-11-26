@@ -4136,10 +4136,20 @@ package final class StreamCoordinator {
             displays.say(.desktop)
             desktopLife.made(.virtualDesktop, at: now)
             testVirtualDisplay = VirtualDesktopSize.TestDisplay(made: asked, backing: backing, knobs: testVirtualDesktopKnobs)
-            if let came = testVirtualDisplay?.read(at: now), await notKeptAtMake(asked, came: came, works: works) { return }
-            addTestVirtualStop(asked, hz: hz)
-            print(VirtualDesktopLife.madeLine(came: asked, asked: asked, hz: hz, id: nil, ms: 0, device: device, space: space, pixels: pixels))
-            virtualDesktopMade(asked, hz: hz, backing: backing, device: vp == nil ? nil : matched, name: device, at: now)
+            // What it came up at, as Noah's probes P3 and P4 saw macOS make a size (nil: at no mode, as a Mac's that never
+            // comes up): an iPhone's not kept is made again at the size that works, as a Mac's.
+            let said = testVirtualDisplay?.read(at: now)
+            if await notKeptAtMake(asked, came: said, works: works) { return }
+            guard let said else {
+                displays.remove(.desktop)
+                desktopLife.removed(at: CFAbsoluteTimeGetCurrent())
+                testVirtualDisplay = nil
+                virtualDesktopFailed("it never came up (asked \(asked.widthPt)×\(asked.heightPt) @\(asked.scale)× at \(hz) Hz)")
+                return
+            }
+            addTestVirtualStop(said, hz: hz)
+            print(VirtualDesktopLife.madeLine(came: said, asked: asked, hz: hz, id: nil, ms: 0, device: device, space: space, pixels: pixels))
+            virtualDesktopMade(said, hz: hz, backing: backing, device: vp == nil ? nil : matched, name: device, at: now)
             return
         }
         let newDisplay: VirtualDisplay
@@ -4731,10 +4741,10 @@ package final class StreamCoordinator {
         return VirtualDesktopSize.pixelForPixel(size, space: Self.space(v), scale: screen.scale)
     }
 
-    /// A follow in place to an iPhone's pixel-for-pixel size `size` that did not land (`failure`; macOS refusing a size
-    /// that short, as probe P3 asks): that size is never asked again this run, one line, and the size that works for the
-    /// device's space now (the 800-point floor) is its next follow, in place, after the spacing. Nothing for an iPad's, an
-    /// older device's or a chosen size (the next make takes the new size, as before).
+    /// A follow in place to an iPhone's size `size` that did not land (`failure`; macOS drawing its line elsewhere than
+    /// Noah's probes P3 and P4 found it, VirtualDesktopSize.phoneShort): that size is never asked again this run, one line,
+    /// and the size that works for the device's space now (the 800-point floor) is its next follow, in place, after the
+    /// spacing. Nothing for an iPad's, an older device's or a chosen size (the next make takes the new size, as before).
     private func phoneSizeNotKept(_ size: VirtualDesktopSize.Size, failure: VirtualDesktopSize.InPlace.Failure, why: VirtualDesktopSize.Cause,
                                   at now: Double) {
         guard let id = virtualDesktopNow?.device, let v = viewports[id], Self.screen(v)?.phone == true, let works = worksSize(v),

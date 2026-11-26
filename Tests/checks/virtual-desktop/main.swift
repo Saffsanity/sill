@@ -5,7 +5,7 @@ import CoreGraphics
 // default to resolution and refresh of client device, not what we originally proposed"), and the guard for #380
 // (DisplayMakeGuard: two runs in a row that ended while making a display, and Sill makes none by itself until Try
 // Again). Phase 2b: following the device (VirtualDesktopSize.Follow, followStep, the backing, and InPlace, the probes'
-// way of 2026-11-23, driven against TestDisplay, the display as P2b and P2c measured it), when the Virtual Desktop exists
+// way of 2026-11-23, driven against TestDisplay, the display as P2b, P2c, P3 and P4 measured it), when the Virtual Desktop exists
 // (VirtualDesktopLife, 5,000 random sessions against the plan's invariants) and its windows out and back
 // (DesktopWindowLedger, over a stand-in Mac). Compiled with Sources/SillHost/VirtualDesktopSize.swift,
 // DisplayMakeGuard.swift, VirtualDesktopLife.swift, DesktopWindowLedger.swift and WindowRestore.swift; the guard's Store
@@ -117,23 +117,26 @@ check(shapeChecked > 5000, "the shape judged on enough random panels (\(shapeChe
 
 // The device's picture's space (rule A, its viewport's panel) counted in the iPhone's own pixels (its screen's scale) and
 // made as a 2x desktop of that many pixels, the spare pixel of an odd side left over; grown evenly where a side would be
-// under 400 points or both under 800 (default 1: the smallest desktop macOS keeps at 2x and a Mac window fits). The
-// spaces are the devices' own, as their consoles print them (the step file's fifth part): an iPhone 15 Pro, 393 × 852
-// points at 3x, 1179 × 2556 pixels.
+// under 540 points or both under 800 (default 47: the least macOS keeps at 2x, as Noah's probes P3 and P4 found it on
+// 2026-11-26). The spaces are the devices' own, as their consoles print them (the step file's fifth part): an iPhone 15
+// Pro, 393 × 852 points at 3x, 1179 × 2556 pixels; the others from each iPhone's safe area, as below.
 func phone(_ w: Double, _ h: Double, scale: Double = 3) -> VDS.Size? {
     VDS.device(space: CGSize(width: w, height: h), screen: VDS.Screen(pixelWidth: 1179, pixelHeight: 2556, scale: scale, phone: true))
 }
 let phoneSpaces: [(String, Double, Double, Double, Int, Int, Bool)] = [
     ("iPhone 15 Pro upright, Full Screen (393×793, 1179×2379 px)", 393, 793, 3, 589, 1189, true),
     ("iPhone 15 Pro on its side, Full Screen (734×393, 2202×1179 px)", 734, 393, 3, 1101, 589, true),
-    ("iPhone 15 Pro on its side, the controls showing (718×299, 2154×897 px)", 718, 299, 3, 1077, 448, true),
-    ("iPhone 15 Pro upright, the controls showing (its 16:10 pane, 377×235, 1131×705 px): grown to 800 long", 377, 235, 3, 800, 499, false),
-    ("iPhone 12 to 14 on its side, the controls showing (734×296): 444 tall, pixel for pixel", 734, 296, 3, 1101, 444, true),
+    ("iPhone 15 Pro on its side, the controls showing (718×299, 2154×897 px): grown to 540 tall, P4's 1297×540", 718, 299, 3, 1297, 540, false),
+    ("iPhone 15 Pro upright, the controls showing (its 16:10 pane, 377×235, 1131×705 px): grown to 540 tall, P4's 866×540", 377, 235, 3, 866, 540, false),
+    ("iPhone 12 to 14 on its side, the controls showing (734×296, 2202×888 px): grown to 540 tall", 734, 296, 3, 1339, 540, false),
+    ("iPhone 12 mini on its side, the controls showing (696×281, 2088×843 px): grown to 540 tall", 696, 281, 3, 1338, 540, false),
+    ("iPhone 16 Pro Max on its side, the controls showing (816×346, 2448×1038 px): grown to 540 tall", 816, 346, 3, 1274, 540, false),
     ("iPhone Duo's inner display flat (951×669, 2853×2007 px)", 951, 669, 3, 1426, 1003, true),
-    ("iPhone SE upright, Full Screen (375×667 at 2x): its own points, grown to 800 long", 375, 667, 2, 450, 800, false),
-    ("a wide short pane (734×250 at 3x, 1101×375): grown to 400 tall", 734, 250, 3, 1174, 400, false),
+    ("iPhone SE upright, Full Screen (375×667 at 2x): its own points, grown to 540 wide", 375, 667, 2, 540, 960, false),
+    ("iPhone SE upright, the controls showing (its 16:10 pane, 359×224 at 2x): grown to 540 tall", 359, 224, 2, 865, 540, false),
+    ("a wide short pane (734×250 at 3x, 1101×375): grown to 540 tall", 734, 250, 3, 1585, 540, false),
     ("a small square-ish pane (600×450 at 2x): grown to 800 long", 600, 450, 2, 800, 600, false),
-    ("fractions (377.3333×235.6667 at 3x is 1132×707 px)", 377.3333, 235.6667, 3, 800, 500, false),
+    ("fractions (377.3333×235.6667 at 3x is 1132×707 px)", 377.3333, 235.6667, 3, 865, 540, false),
 ]
 for (name, w, h, sc, ew, eh, own) in phoneSpaces {
     let s = phone(w, h, scale: sc)
@@ -152,7 +155,7 @@ check(VDS.pixels(space: CGSize(width: 377.3333, height: 235.6667), scale: 3).map
 // edge, which the device would then draw scaled down by a hair.
 check(VDS.pixels(space: CGSize(width: 377.8667, height: 793), scale: 3).map { [$0.width, $0.height] } == [1133, 2379]
       && phone(377.8667, 793) == size(566, 1189), "a pane's pixels rounded down: 1133.6 pixels hold 1133, and 566 points at 2x")
-check(VDS.phoneShort == 400 && VDS.phoneLong == 800, "an iPhone's desktop: at least 400 points a side and 800 on its longer")
+check(VDS.phoneShort == 540 && VDS.phoneLong == 800, "an iPhone's desktop: at least 540 points a side and 800 on its longer (P3 and P4's line)")
 // The iPad keeps its rule, as before; so does a device that says nothing of its screen, and a size macOS did not keep.
 for (name, w, h, _, _) in spaces {
     let pad = VDS.device(space: CGSize(width: w, height: h), screen: VDS.Screen(pixelWidth: 1488, pixelHeight: 2266, scale: 2, phone: false))
@@ -166,8 +169,9 @@ check(VDS.device(space: upFS, screen: pro, refused: ["1101x589@2"]) == size(589,
 check(VDS.device(space: nil, screen: pro) == nil, "no space: none")
 check(VDS.phone(space: CGSize(width: 16384, height: 1000), scale: 3) == size(4096, 250), "past 4096 points: shrunk evenly (16384×1000 at 3x)")
 // 20,000 random iPhone spaces at 2x and 3x: at 2x always; pixel for pixel (each side half the space's pixels, at most one
-// pixel spare) exactly when that is at least 400 a side and 800 on the longer; else grown evenly to them, the shape kept
-// within a point; never a side over 4096.
+// pixel spare) exactly when that is at least 540 a side and 800 on the longer; else grown evenly to them, the shape kept
+// within a point; never a side over 4096; and every one a size the said display keeps at 2x (P3 and P4's line), unless
+// a shape no iPhone has was held to 4096.
 var phoneWrong = 0, phoneBent = 0, phoneOwn = 0, phoneFirst: [String] = []
 func phoneNot(_ why: String) { phoneWrong += 1; if phoneFirst.count < 3 { phoneFirst.append(why) } }
 for _ in 0..<20_000 {
@@ -175,7 +179,7 @@ for _ in 0..<20_000 {
     let sc: Double = Bool.random(using: &rng) ? 3 : 2
     guard let s = phone(w, h, scale: sc), let px = VDS.pixels(space: CGSize(width: w, height: h), scale: sc) else { phoneNot("\(w)×\(h) at \(sc): none"); continue }
     let half = (w: px.width / 2, h: px.height / 2)
-    let fits = min(half.w, half.h) >= 400 && max(half.w, half.h) >= 800
+    let fits = min(half.w, half.h) >= 540 && max(half.w, half.h) >= 800
     if s.scale != 2 || max(s.widthPt, s.heightPt) > 4096 { phoneNot("\(w)×\(h) at \(sc): \(s)"); continue }
     if fits {
         phoneOwn += 1
@@ -185,27 +189,52 @@ for _ in 0..<20_000 {
     } else {
         phoneBent += 1
         let short = min(s.widthPt, s.heightPt), long = max(s.widthPt, s.heightPt)
-        // Each side within half a point of its exact growth: the shape within that rounding. A shape past 4096 : 400
-        // (10.24 : 1, no iPhone's) grown to 400 would pass 4096: the ceiling wins, both sides shrunk again by one factor
-        // (two roundings), its shorter side then under 400.
+        // Each side within half a point of its exact growth: the shape within that rounding. A shape past 4096 : 540
+        // (7.59 : 1, no iPhone's) grown to 540 would pass 4096: the ceiling wins, both sides shrunk again by one factor
+        // (two roundings), its shorter side then under 540.
         let r = Double(px.width) / Double(px.height)
         let rel = abs(Double(s.widthPt) / Double(s.heightPt) / r - 1)
-        let ceiling = long == 4096 && Double(max(px.width, px.height)) / Double(min(px.width, px.height)) > 4096.0 / 400
+        let ceiling = long == 4096 && Double(max(px.width, px.height)) / Double(min(px.width, px.height)) > 4096.0 / 540
         if ceiling {
-            if short > 400 || rel > 1 / Double(s.widthPt) + 1 / Double(s.heightPt) + 1e-5 {
+            if short > 540 || rel > 1 / Double(s.widthPt) + 1 / Double(s.heightPt) + 1e-5 {
                 phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), held to 4096 wrong (\(rel))")
             }
-        } else if short < 400 || long < 800 || (short > 400 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-5 {
+            continue
+        } else if short < 540 || long < 800 || (short > 540 && long > 800) || rel > 0.5 / Double(s.widthPt) + 0.5 / Double(s.heightPt) + 1e-5 {
             phoneNot("\(w)×\(h) at \(sc) (\(px.width)×\(px.height) px): \(s), grown wrong (\(rel))")
         }
     }
+    if !VDS.TestDisplay.keeps(s, knobs: VDS.TestKnobs()) { phoneNot("\(w)×\(h) at \(sc): \(s), under the line macOS keeps") }
 }
 check(phoneWrong == 0 && phoneBent > 2000 && phoneOwn > 2000,
-      "20,000 random iPhone spaces: pixel for pixel when 400 by 800 or more, else grown to it, shape kept (\(phoneWrong) not; \(phoneOwn) own, \(phoneBent) grown; first \(phoneFirst))")
+      "20,000 random iPhone spaces: pixel for pixel when 540 by 800 or more, else grown to it, shape kept, each kept at 2x (\(phoneWrong) not; \(phoneOwn) own, \(phoneBent) grown; first \(phoneFirst))")
+// Every current iPhone's four layouts: Full Screen's room clear of the housing (FullScreenPolicy.room), the pane under the
+// landscape bar (its 78 points and the panel's 8-point margins) and the 16:10 pane upright (PhonePortraitLayout), from each
+// one's safe area as Apple ships it (an iPhone 15 Pro's four and an iPhone 12's on its side are its console's). Each the
+// said display keeps at 2x, pixel for pixel exactly when its own pixels are kept: none under the line, none bent for nothing.
+let iPhones: [(String, Double, Double, Double, Double, Double)] = [   // its points wide and high upright, scale, top and side inset
+    ("iPhone SE", 375, 667, 2, 0, 0), ("iPhone 12 mini, 13 mini", 375, 812, 3, 50, 50), ("iPhone 12 to 14, 16e, 17e", 390, 844, 3, 47, 47),
+    ("iPhone 14 Plus", 428, 926, 3, 47, 47), ("iPhone 15, 15 Pro, 16", 393, 852, 3, 59, 59), ("iPhone 15 Plus, 15 Pro Max, 16 Plus", 430, 932, 3, 59, 59),
+    ("iPhone 16 Pro, 17, 17 Pro, 18 Pro", 402, 874, 3, 62, 62), ("iPhone Air", 420, 912, 3, 62, 62), ("iPhone 16 to 18 Pro Max", 440, 956, 3, 62, 62),
+]
+var layoutsBent = 0, layoutsOwn = 0
+for (name, w, h, sc, top, side) in iPhones {
+    let pane = w - 16
+    for (layout, sw, sh) in [("upright, Full Screen", w, h - top), ("on its side, Full Screen", h - 2 * side, w),
+                             ("on its side, its controls", h - 2 * side - 16, w - 94), ("upright, its controls", pane, (pane / 1.6).rounded(.down))] {
+        let space = CGSize(width: sw, height: sh)
+        guard let s = VDS.phone(space: space, scale: sc), let px = VDS.pixels(space: space, scale: sc) else { check(false, "\(name) \(layout): none"); continue }
+        let own = size(px.width / 2, px.height / 2), mine = VDS.pixelForPixel(s, space: space, scale: sc)
+        if mine { layoutsOwn += 1 } else { layoutsBent += 1 }
+        check(VDS.TestDisplay.keeps(s, knobs: VDS.TestKnobs()) && mine == VDS.TestDisplay.keeps(own, knobs: VDS.TestKnobs()),
+              "\(name) \(layout) (\(Int(sw))×\(Int(sh)) pt): \(s), kept at 2x, pixel for pixel exactly when its own \(own) is kept")
+    }
+}
+check(layoutsOwn == 16 && layoutsBent == 20, "with Full Screen every iPhone but the SE pixel for pixel; with its controls every one bent (\(layoutsOwn), \(layoutsBent))")
 // The words its lines carry.
 check(VDS.pixelWords(size(589, 1189), space: upFS, screen: pro) == "1179×2379 px; pixel for pixel", "the made line's words, pixel for pixel")
-check(VDS.pixelWords(size(800, 499), space: CGSize(width: 377, height: 235), screen: pro)
-      == "1131×705 px; scaled to fit: an iPhone's desktop is at least 800×400 pt", "…grown")
+check(VDS.pixelWords(size(866, 540), space: CGSize(width: 377, height: 235), screen: pro)
+      == "1131×705 px; scaled to fit: an iPhone's desktop is at least 540 pt a side and 800 pt on its longer", "…grown")
 check(VDS.pixelWords(size(800, 1614), space: upFS, screen: pro) == "1179×2379 px; at least 800 pt a side: macOS did not keep it pixel for pixel",
       "…the size that works")
 check(VDS.pixelWords(size(1218, 800), space: CGSize(width: 1133, height: 744), screen: VDS.Screen(pixelWidth: 1488, pixelHeight: 2266, scale: 2, phone: false)) == nil
@@ -214,35 +243,61 @@ check(VirtualDesktopLife.madeLine(came: size(589, 1189), asked: size(589, 1189),
                                   pixels: VDS.pixelWords(size(589, 1189), space: upFS, screen: pro))
       == "Virtual Desktop 589×1189 pt @2× at 120 Hz id 9: made in 450 ms for iPhone (its picture: 393×793 pt, 1179×2379 px; pixel for pixel).",
       "the make's line says the pixel-for-pixel size")
-// What a make does with what came up: an iPhone's size macOS did not keep is made again at the size that works.
+// What a make does with what came up: an iPhone's size macOS did not keep is made again at the size that works (on Noah's
+// Mac no iPhone's size needs it since P4; the safety net for a Mac whose line runs elsewhere).
 check(VDS.afterMake(asked: size(589, 1189), came: size(589, 1189), works: size(800, 1614)) == .kept, "came as asked: kept")
-check(VDS.afterMake(asked: size(589, 1189), came: VDS.Size(widthPt: 800, heightPt: 1615, scale: 1), works: size(800, 1614)) == .again(size(800, 1614)),
-      "an iPhone's size at 1x: made again at the size that works")
+check(VDS.afterMake(asked: size(1077, 448), came: VDS.Size(widthPt: 2154, heightPt: 896, scale: 1), works: size(1921, 800)) == .again(size(1921, 800)),
+      "an iPhone's size at 1x (P3's 1077×448 made: its pixels at 1x): made again at the size that works")
+check(VDS.afterMake(asked: size(800, 499), came: VDS.Size(widthPt: 800, heightPt: 499, scale: 1), works: size(1283, 800)) == .again(size(1283, 800)),
+      "…at its points at 1x (P3's 800×499)")
 check(VDS.afterMake(asked: size(589, 1189), came: size(600, 1189), works: size(800, 1614)) == .again(size(800, 1614)), "…or at another size")
 check(VDS.afterMake(asked: size(1218, 800), came: VDS.Size(widthPt: 1218, heightPt: 800, scale: 1), works: size(1218, 800)) == .kept,
       "an iPad's (the size that works asked already): kept as it came, as before")
 check(VDS.afterMake(asked: size(1920, 1080), came: VDS.Size(widthPt: 1920, heightPt: 1080, scale: 1), works: nil) == .kept, "a chosen size: kept")
-check(VDS.refusedLine(asked: size(589, 1189), came: VDS.Size(widthPt: 800, heightPt: 1615, scale: 1), works: size(800, 1614), inPlace: false)
-      == "Virtual Desktop: macOS did not keep 589×1189 pt @2× (it came up at 800×1615 pt @1×); made it at 800×1614 pt @2×, the size that works, the picture scaled.",
-      "the fall back's one line, at a make")
+check(VDS.refusedLine(asked: size(800, 499), came: VDS.Size(widthPt: 800, heightPt: 499, scale: 1), works: size(1283, 800), inPlace: false)
+      == "Virtual Desktop: macOS did not keep 800×499 pt @2× (it came up at 800×499 pt @1×); made it at 1283×800 pt @2×, the size that works, the picture scaled.",
+      "the fall back's one line, at a make (Noah's log of run 6's bend, 2026-11-26)")
 check(VDS.refusedLine(asked: size(589, 1189), came: nil, works: size(800, 1614), inPlace: false).contains("@2× (it would not make it); made it at 800×1614"),
       "…a make that threw")
 check(VDS.refusedLine(asked: size(1101, 589), came: VDS.Size(widthPt: 1495, heightPt: 800, scale: 1), works: size(1494, 800), inPlace: true)
       == "Virtual Desktop: macOS did not keep 1101×589 pt @2× in place (it went to 1495×800 pt @1× instead); following at 1494×800 pt @2×, the size that works, the picture scaled.",
       "…in place")
-check(VDS.refusedLine(asked: size(1101, 589), came: nil, works: size(1494, 800), inPlace: true).contains("@2× in place; following at"), "…in place, nothing read")
-// TEST ONLY: a display that refuses a short side, as macOS might (SILL_TEST_VD_STEPS=short-1x; probe P3 says whether it does).
+check(VDS.refusedLine(asked: size(1077, 448), came: nil, works: size(1921, 800), inPlace: true)
+      == "Virtual Desktop: macOS did not keep 1077×448 pt @2× in place; following at 1921×800 pt @2×, the size that works, the picture scaled.",
+      "…in place, its 2x mode never listed (Noah's log, 2026-11-26)")
+// TEST ONLY: the said display keeps what P3 and P4 saw kept (macOS 27.2.1, 2026-11-26), and does with the rest what they
+// saw: made, at 1x (its pixels, or its points at a longer side of 800) or at no mode; in place, at its pixels at 1x, its
+// 2x mode never listed (the follows below).
+let p4Kept = [size(589, 1189), size(1101, 589), size(1383, 576), size(1345, 560), size(1297, 540), size(945, 589), size(924, 576),
+              size(898, 560), size(866, 540), size(800, 540), size(800, 800)]
+let p4NotKept = [size(1229, 512), size(1153, 480), size(821, 512), size(1077, 448), size(800, 499), size(499, 1189), size(448, 1077),
+                 size(1600, 448), size(754, 784), size(565, 352)]
+check(p4Kept.allSatisfy { VDS.TestDisplay.keeps($0, knobs: VDS.TestKnobs()) } && !p4NotKept.contains { VDS.TestDisplay.keeps($0, knobs: VDS.TestKnobs()) },
+      "the said display keeps at 2x exactly the sizes P3 and P4 saw kept, of the 21 they tried")
+check(VDS.TestDisplay.keeps(VDS.Size(widthPt: 1077, heightPt: 448, scale: 1), knobs: VDS.TestKnobs()) && VDS.TestDisplay.keptShort == VDS.phoneShort
+      && VDS.TestDisplay.keptLong == VDS.phoneLong, "…a 1x size always; the bend takes its line")
+check(VDS.TestDisplay.madeAt(size(1077, 448), knobs: VDS.TestKnobs()) == VDS.Size(widthPt: 2154, heightPt: 896, scale: 1)
+      && VDS.TestDisplay.madeAt(size(800, 499), knobs: VDS.TestKnobs()) == VDS.Size(widthPt: 800, heightPt: 499, scale: 1)
+      && VDS.TestDisplay.madeAt(size(565, 352), knobs: VDS.TestKnobs()) == nil,
+      "made, as P3 and P4 saw: 1077×448 at its pixels at 1x, 800×499 at its points at 1x, 565×352 at no mode")
+check(VDS.TestDisplay.madeAt(size(1297, 540), knobs: VDS.TestKnobs()) == size(1297, 540) && VDS.TestDisplay.madeAt(size(866, 540), knobs: VDS.TestKnobs()) == size(866, 540),
+      "…P4's 1297×540 and 866×540 made as they are, at 2x")
+var noMode = VDS.TestDisplay(made: size(565, 352), backing: bk(4096, 4096))
+check(noMode.read(at: 0) == nil && noMode.read(at: 5) == nil, "…a display made at no mode reads none")
+// TEST ONLY: short-1x, the line at 744 (P1's least kept): a Mac where macOS draws it elsewhere, the fall back's case.
 let shortK = VDS.TestKnobs(shortOneX: true)
-check(VDS.TestDisplay.kept(size(589, 1189), knobs: shortK) == VDS.Size(widthPt: 800, heightPt: 1615, scale: 1),
-      "short-1x: 589×1189 comes up at 800×1615 at 1x (the stage's 754×784 came up at 800×832)")
-check(VDS.TestDisplay.kept(size(1133, 744), knobs: shortK) == size(1133, 744) && VDS.TestDisplay.kept(size(800, 1614), knobs: shortK) == size(800, 1614),
-      "…the least kept (P1's 1133×744) and the size that works as asked")
-check(VDS.TestDisplay.kept(size(589, 1189), knobs: VDS.TestKnobs()) == size(589, 1189), "…and without the knob, as asked")
+check(!VDS.TestDisplay.keeps(size(589, 1189), knobs: shortK) && !VDS.TestDisplay.keeps(size(1297, 540), knobs: shortK)
+      && VDS.TestDisplay.keeps(size(1133, 744), knobs: shortK) && VDS.TestDisplay.keeps(size(800, 1614), knobs: shortK),
+      "short-1x: an iPhone's sizes not kept, P1's 1133×744 and the size that works kept")
+check(VDS.TestDisplay.madeAt(size(589, 1189), knobs: shortK) == VDS.Size(widthPt: 1178, heightPt: 2378, scale: 1)
+      && VDS.TestDisplay.madeAt(size(800, 600), knobs: shortK) == VDS.Size(widthPt: 800, heightPt: 600, scale: 1),
+      "…made: at its pixels at 1x (as P3's 1077×448), at its points with a longer side of 800 (as P3's 800×499)")
 var shortD = VDS.TestDisplay(made: size(589, 1189), backing: bk(4096, 4096), knobs: shortK)
-check(shortD.read(at: 0) == VDS.Size(widthPt: 800, heightPt: 1615, scale: 1), "…a display made so reads it at once")
+check(shortD.read(at: 0) == VDS.Size(widthPt: 1178, heightPt: 2378, scale: 1), "…a display made so reads it at once")
 var shortF = VDS.TestDisplay(made: size(800, 1614), backing: bk(4096, 4096), knobs: shortK)
 _ = shortF.apply(size(1101, 589), at: 0)
-check(shortF.read(at: 1) == VDS.Size(widthPt: 1495, heightPt: 800, scale: 1), "…and a follow to one lands there")
+check(shortF.read(at: 1) == VDS.Size(widthPt: 2202, heightPt: 1178, scale: 1) && !shortF.lists(size(1101, 589), at: 3),
+      "…and a follow to one lands at its pixels at 1x, its 2x mode never listed")
 check(VDS.testSteps(environment: ["SILL_TEST_VD_STEPS": "short-1x"], on: true).knobs == shortK, "short-1x read from SILL_TEST_VD_STEPS")
 // The follow's line says an iPhone's desktop is pixel for pixel; an iPad's line as before.
 check(VDS.followLine(device: "iPhone", why: .room(turned: true), from: size(589, 1189), to: size(1101, 589), step: .inPlace,
@@ -554,7 +609,7 @@ var shownAgain = VDS.Follow(made: mini, at: 0)
 shownAgain.saw(miniUp, cause: .shown, at: 5)
 check(shownAgain.due(now: 5.5) == .wait(until: 6) && shownAgain.due(now: 6) == .follow(miniUp, .shown), "shown again: 1 s steady")
 
-// InPlace against the display the probes measured (TestDisplay: P2b, P2c), driven as the coordinator drives it.
+// InPlace against the display the probes measured (TestDisplay: P2b, P2c, P3, P4), driven as the coordinator drives it.
 typealias IP = VDS.InPlace
 struct Drive { var actions: [IP.Action] = []; var end: IP.Action = .wait; var display: VDS.TestDisplay; var machine: IP; var t: Double }
 func drive(from: VDS.Size, to: VDS.Size, made: VDS.Size? = nil, at start: VDS.Size? = nil, backing: VDS.Backing = bk(3072, 3072),
@@ -610,7 +665,7 @@ check(applies(bigger) == [iphone] && switches(bigger).isEmpty && bigger.display.
 let turn = drive(from: mini, to: miniUp)
 check(applies(turn) == [miniUp] && switches(turn) == [miniUp], "a turn (P2c): applySettings: with the turn alone, then the switch: \(turn.actions.filter { $0 != .wait })")
 if case .done(let ms) = turn.end { check(ms >= 640 && ms <= 700, "…done in about 650 ms, the two landings: \(ms)") } else { check(false, "…done: \(turn.end)") }
-check(turn.display.now == miniUp && turn.display.now.scale == 2, "…the display at the turn, at 2x")
+check(turn.display.now == miniUp && turn.display.now?.scale == 2, "…the display at the turn, at 2x")
 // The detail line, at P2c's own times (iPad mini, case 1).
 var tr = IP(from: mini, to: miniUp, at: 0)
 _ = tr.applied(true, reading: mini, at: 0.285)
@@ -628,13 +683,14 @@ check(back.display.made == mini && applies(back) == [mini] && switches(back).isE
 let upUp = drive(from: miniUp, to: size(800, 1496), made: mini, at: miniUp)
 check(switches(upUp) == [size(800, 1496)] && upUp.display.now == size(800, 1496), "upright to another upright size: 1x first, then the switch")
 let madeUp = drive(from: miniUp, to: mini, made: miniUp)
-check(switches(madeUp) == [mini] && madeUp.display.now == mini, "a display made upright turned to lie down: its own other orientation, two steps")
+check(switches(madeUp).isEmpty && applies(madeUp) == [mini] && madeUp.display.now == mini,
+      "a display made upright turned to lie down: one step at 2x (P3 and P4: 589×1189 made, then 1101×589 at once)")
 let refused = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(switchRefused: true))
 check(refused.end == .fellBack(.switchRefused(1001), ms: refused.machine.ms(refused.t)) && applies(refused) == [miniUp, mini] && refused.display.now == mini,
-      "the switch refused: back to the room by applySettings: alone, at 2x, the next make: \(refused.end), \(refused.display.now)")
+      "the switch refused: back to the room by applySettings: alone, at 2x, the next make: \(refused.end), \(String(describing: refused.display.now))")
 let stuck = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(switchRefused: true, stuck: true))
 check(stuck.end == .remove(.switchRefused(1001)) && stuck.display.now == size(1600, 2436).withScale(1),
-      "…and the way back never lands: removed, never left at 1x: \(stuck.end), \(stuck.display.now)")
+      "…and the way back never lands: removed, never left at 1x: \(stuck.end), \(String(describing: stuck.display.now))")
 let late = drive(from: mini, to: miniUp, knobs: VDS.TestKnobs(late: true))
 if case .fellBack(.late, let ms) = late.end {
     check(applies(late) == [miniUp] && ms >= 2000 && ms <= 2100, "nothing lands: back where it is after 2 s, nothing more asked: \(ms)")
@@ -643,6 +699,37 @@ let beyond = drive(from: mini, to: size(1900, 800))
 check(beyond.end == .fellBack(.late, ms: beyond.machine.ms(beyond.t)) && beyond.display.now == mini, "a size beyond the backing asked anyway: never taken, falls back")
 let blanks = drive(from: mini, to: miniUp, blank: 0.3)
 check(blanks.end == .done(ms: blanks.machine.ms(blanks.t)) && blanks.display.now == miniUp, "a display that reads nothing now and then: still done")
+// An iPhone 15 Pro's four layouts followed in place on a display made at 589×1189 in a 4096-pixel backing, as P3 and P4
+// did on Noah's Mac: on its side with Full Screen in one step (P3: 324 ms); on its side with its controls, 1297×540, in one
+// step; upright with its controls, 866×540, its pixels at 1x first and then the switch (P4: 664 ms, from 898×560); and
+// back upright with Full Screen in one step. Then a size under the line (P3's 1077×448): its 2x mode never listed, back.
+let upPro = size(589, 1189), sidePro = size(1101, 589), sideBar = size(1297, 540), upBar = size(866, 540)
+func doneMs(_ r: Drive) -> Int { if case .done(let ms) = r.end { return ms } else { return -1 } }
+let proSide = drive(from: upPro, to: sidePro, made: upPro, backing: bk(4096, 4096))
+check(switches(proSide).isEmpty && applies(proSide) == [sidePro] && proSide.display.now == sidePro && (320...360).contains(doneMs(proSide)),
+      "iPhone on its side with Full Screen: one step at 2x, about 320 ms (\(doneMs(proSide)))")
+let proBar = drive(from: sidePro, to: sideBar, made: upPro, at: sidePro, backing: bk(4096, 4096))
+check(switches(proBar).isEmpty && proBar.display.now == sideBar && doneMs(proBar) > 0, "…its controls on its side: 1297×540 in one step (\(proBar.end))")
+let proPane = drive(from: sideBar, to: upBar, made: upPro, at: sideBar, backing: bk(4096, 4096))
+check(applies(proPane) == [upBar] && switches(proPane) == [upBar] && proPane.display.now == upBar && (640...700).contains(doneMs(proPane)),
+      "…upright with its controls: 866×540 at 1732×1080 @1× first, then the switch, about 650 ms (\(proPane.actions.filter { $0 != .wait }), \(doneMs(proPane)))")
+let proPaneP4 = drive(from: size(898, 560), to: upBar, made: upPro, at: size(898, 560), backing: bk(4096, 4096))
+let p4Steps = drive(from: upPro, to: size(800, 540), made: upPro, backing: bk(4096, 4096))
+check(switches(proPaneP4) == [upBar] && switches(p4Steps) == [size(800, 540)] && p4Steps.display.now == size(800, 540),
+      "…as P4 did it from 898×560, and 800×540 the same way (P4: 639 ms)")
+check(VDS.TestDisplay.oneXFirst(upBar, made: sideBar) && !VDS.TestDisplay.oneXFirst(size(898, 560), made: upPro)
+      && !VDS.TestDisplay.oneXFirst(sideBar, made: upPro) && !VDS.TestDisplay.oneXFirst(size(800, 800), made: upPro),
+      "…whatever the display was made at; 898×560, 1297×540 and 800×800 at 2x at once (P4)")
+let proBack = drive(from: upBar, to: upPro, made: upPro, at: upBar, backing: bk(4096, 4096))
+check(switches(proBack).isEmpty && proBack.display.now == upPro && doneMs(proBack) > 0, "…back upright with Full Screen: one step (P3)")
+let notKept = drive(from: upPro, to: size(1077, 448), made: upPro, backing: bk(4096, 4096))
+if case .fellBack(.notListed, let ms) = notKept.end {
+    check(applies(notKept) == [size(1077, 448), upPro] && switches(notKept).isEmpty && notKept.display.now == upPro && (1640...1720).contains(ms),
+          "a size under the line (P3's 1077×448): at 2154×896 @1×, its 2x never listed, back at 589×1189 @2× in about 1.7 s (\(ms))")
+} else { check(false, "a size under the line: fell back, not listed: \(notKept.end)") }
+let notKeptShort = drive(from: size(800, 1614), to: sidePro, made: size(800, 1614), backing: bk(4096, 4096), knobs: VDS.TestKnobs(shortOneX: true))
+check(notKeptShort.end == .fellBack(.notListed, ms: notKeptShort.machine.ms(notKeptShort.t)) && notKeptShort.display.now == size(800, 1614),
+      "short-1x: an iPhone's size in place falls back the same way (\(notKeptShort.end))")
 
 // By hand: each step refused or late on the way, and the way back that needs the switch too.
 var h = IP(from: mini, to: miniUp, at: 0)
@@ -725,18 +812,18 @@ for run in 0..<2_000 {
     let r = drive(from: from, to: to, made: made, at: from, knobs: knobs, poll: Double.random(in: 0.005...0.06, using: &rng),
                   blank: run % 4 == 0 ? 0.2 : 0)
     var bad: String?
-    let atOneX = r.display.now.scale == 1
+    let atOneX = r.display.now?.scale == 1
     switch r.end {
     case .done:
-        if r.display.now != to { bad = "done at \(r.display.now)" }
+        if r.display.now != to { bad = "done at \(String(describing: r.display.now))" }
     case .fellBack:
-        if r.display.now != from { bad = "fell back at \(r.display.now)" }
+        if r.display.now != from { bad = "fell back at \(String(describing: r.display.now))" }
     case .remove:
-        if r.display.now == from || r.display.now == to { bad = "removed at \(r.display.now)" }
+        if r.display.now == from || r.display.now == to { bad = "removed at \(String(describing: r.display.now))" }
     default:
         bad = "never ended: \(r.end)"
     }
-    if bad == nil, atOneX { if case .remove = r.end {} else { bad = "left at 1x: \(r.display.now), \(r.end)" } }
+    if bad == nil, atOneX { if case .remove = r.end {} else { bad = "left at 1x: \(String(describing: r.display.now)), \(r.end)" } }
     if bad == nil, r.t > 2 * (IP.landWait + IP.listWait + IP.switchWait) + 0.5 { bad = "took \(r.t) s" }
     let asked = applies(r)
     if bad == nil, asked.filter({ $0 == to }).count > 1 || asked.filter({ $0 == from }).count > 1 || asked.first != to { bad = "asked \(asked)" }
@@ -926,15 +1013,18 @@ for _ in 0..<2_000 {
 // panel and 120Hz ... any resolution/refresh rate that is less than 2726461440 pixels per second")
 
 typealias VB = VirtualDesktopBudget
-// A size typed in pixels, as its id: what can be a display (each side 640 to 8192 pixels; at 2x one side of 1600 or more).
+// A size typed in pixels, as its id: what can be a display (each side 640 to 8192 pixels; at 2x at least 1600 one way and
+// 1080 the other: the least macOS keeps at 2x, 800 × 540 points, P3 and P4's line).
 for (id, want) in [("2752x2064@2", VS.Size(widthPt: 2752, heightPt: 2064, scale: 2)), ("7680x2160@1", VS.Size(widthPt: 7680, heightPt: 2160, scale: 1)),
                    ("640x640@1", VS.Size(widthPt: 640, heightPt: 640, scale: 1)), ("8192x640@1", VS.Size(widthPt: 8192, heightPt: 640, scale: 1)),
-                   ("4096x4096@2", VS.Size(widthPt: 4096, heightPt: 4096, scale: 2)), ("800x320@2", VS.Size(widthPt: 800, heightPt: 320, scale: 2)),
+                   ("4096x4096@2", VS.Size(widthPt: 4096, heightPt: 4096, scale: 2)), ("800x540@2", VS.Size(widthPt: 800, heightPt: 540, scale: 2)),
+                   ("540x800@2", VS.Size(widthPt: 540, heightPt: 800, scale: 2)),
                    ("1280x720@2", VS.Size(widthPt: 1280, heightPt: 720, scale: 2)), ("999x999@2", VS.Size(widthPt: 999, heightPt: 999, scale: 2))] {
     check(VS.custom(id) == want && VS.choice(id) == .fixed(want), "\(id): a size typed, \(want)")
 }
-check(VS.custom("4097x800@2") == nil && VS.custom("799x799@2") == nil && VS.custom("320x319@2") == nil && VS.custom("8192x639@1") == nil,
-      "past 8192 pixels, a Retina desktop under 1600 on both sides, under 640 pixels: none")
+check(VS.custom("4097x800@2") == nil && VS.custom("799x799@2") == nil && VS.custom("320x319@2") == nil && VS.custom("8192x639@1") == nil
+      && VS.custom("800x539@2") == nil && VS.custom("539x800@2") == nil && VS.custom("1600x448@2") == nil && VS.custom("800x320@2") == nil,
+      "past 8192 pixels, a Retina desktop under 1600 on both sides or under 1080 on one (P4's 1600×448 points), under 640 pixels: none")
 check(VS.words("2752x2064@2") == "Custom: 5504 × 4128 pixels, Retina" && VS.words("7680x2160@1") == "Custom: 7680 × 2160 pixels"
       && VS.words("1920x1080@2") == "1920 × 1080 (Retina)", "a typed size's words: its pixels; the list's as before")
 // What an older Sill for Mac does with a saved typed size: its `choice` knew the list alone, so validated took This device.
@@ -996,8 +1086,11 @@ check(typed(1600, 639, true) == "Each side needs at least 640 pixels." && typed(
 check(typed(1921, 1080, true) == "A Retina desktop needs an even number of pixels each way."
       && typed(1920, 1081, true) == "A Retina desktop needs an even number of pixels each way." && typed(1921, 1081, false) == "1921x1081@1:0",
       "an odd Retina side, either; at 1x any count")
-check(typed(1598, 1598, true) == "A Retina desktop needs one side of 1600 pixels or more: macOS shows a smaller one at standard resolution."
-      && typed(1600, 640, true) == "800x320@2:0", "a Retina desktop under 1600 pixels on both sides; 1600 on one: taken")
+check(typed(1598, 1598, true) == "A Retina desktop needs at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution."
+      && typed(1600, 1078, true) == "A Retina desktop needs at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution."
+      && typed(3200, 896, true) == "A Retina desktop needs at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution."
+      && typed(1600, 1080, true) == "800x540@2:0" && typed(1080, 1600, true) == "540x800@2:0" && typed(1600, 640, false) == "1600x640@1:0",
+      "a Retina desktop under 1600 pixels on both sides, or under 1080 on one (P4's 1600×448 points): refused; 1600 × 1080 either way: taken; at 1x any")
 check(typed(1920, 1080, false, 23) == "The refresh rate can be 24 to 120 Hz." && typed(1920, 1080, false, 121) == "The refresh rate can be 24 to 120 Hz."
       && typed(1920, 1080, false, nil) == "The refresh rate can be 24 to 120 Hz." && typed(1920, 1080, false, 24) == "1920x1080@1:24",
       "a rate out of 24 to 120 Hz, or not a number")
@@ -1015,7 +1108,7 @@ for _ in 0..<20_000 {
     let w = Int.random(in: 500...8400, using: &rng), h = Int.random(in: 500...8400, using: &rng), r = Bool.random(using: &rng)
     let hz = [0, 24, 30, 60, 90, 120, 23, 121][Int.random(in: 0...7, using: &rng)]
     let result = VB.entry(width: w, height: h, retina: r, hz: hz, ceiling: VB.largestIPad)
-    let displayable = (640...8192).contains(w) && (640...8192).contains(h) && (!r || (w % 2 == 0 && h % 2 == 0 && max(w, h) >= 1600))
+    let displayable = (640...8192).contains(w) && (640...8192).contains(h) && (!r || (w % 2 == 0 && h % 2 == 0 && max(w, h) >= 1600 && min(w, h) >= 1080))
     let rateOK = hz == 0 || (24...120).contains(hz)
     let within = w * h * (hz == 0 ? 120 : hz) <= 2_726_461_440
     switch result {
@@ -1054,7 +1147,8 @@ check(VB.flagRefusal("3840x2160@2:120")?.hasPrefix("That’s more than Sill send
 check(VB.flagRefusal("8K")?.hasPrefix("--virtual-desktop=… takes device, main, a size of Sill for Mac's list (") == true
       && VB.flagRefusal("device:150")?.hasPrefix("--virtual-desktop=… takes") == true, "…and says its forms for anything else")
 check(VB.flagRefusal("1920x1080@2:150") == "The refresh rate can be 24 to 120 Hz."
-      && VB.flagRefusal("700x700@2") == "A Retina desktop needs one side of 1600 pixels or more: macOS shows a smaller one at standard resolution."
+      && VB.flagRefusal("700x700@2") == "A Retina desktop needs at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution."
+      && VB.flagRefusal("1600x448@2") == "A Retina desktop needs at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution."
       && VB.flagRefusal("9000x800@1") == "Each side can be at most 8192 pixels.", "…and a size of its own written right that cannot be, its own sentence")
 // What a device gets: its own rate, the picture as it is within its budget, else scaled down evenly to it.
 check(VB.view(width: 5504, height: 4128, hz: 120, device: VB.largestIPad) == VB.View(width: 5504, height: 4128, hz: 120, scaled: false),

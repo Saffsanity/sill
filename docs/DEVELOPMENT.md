@@ -549,8 +549,11 @@ display is fitted to it: the pane under the bar or the upper half's with the
 controls showing, the whole room with Full Screen; at Retina, grown to 800
 points and held to 4096, as for a Mac with no screen; on an iPhone, which says
 its screen in its viewport, pixel for pixel: the space counted in the iPhone's
-own pixels, made as a 2x desktop of that many, at least 800 × 400 points, the
-size that works if macOS does not keep it) and rate, or the main display's mode,
+own pixels, made as a 2x desktop of that many, grown to at least 540 points
+a side and 800 on the longer, the least macOS keeps sharp, as Noah's probes
+P3 and P4 found it, so with its controls showing an iPhone 15 Pro's is 1297 ×
+540 on its side and 866 × 540 upright, the picture scaled; the size that works
+if macOS does not keep it) and rate, or the main display's mode,
 a size chosen in Settings › Displays, or one typed there (Custom…: pixels,
 Retina, 24 to 120 Hz, up to the largest budget of the devices this Mac knows,
 twice a device's screen each way at 120 Hz; a device with a smaller budget gets
@@ -590,7 +593,7 @@ s since the last change).", "Settings from iPad mini: virtual desktop off → on
 On test hosts only: `SILL_TEST_VIRTUAL_DESKTOP=1` with `SILL_TEST_DISPLAYS` (its
 screens) says it makes it, as one more stop, and makes none;
 `SILL_TEST_VD_GRACE=<s>` shortens its 30 s; `SILL_TEST_VD_STEPS` makes its said
-display refuse a switch or never land, or a short side (`short-1x`);
+display refuse a switch or never land, or draw its line at 744 points (`short-1x`);
 `SILL_TEST_ENCODER=widest=4096,fps=31` says what its encoder carries;
 `Scripts/desktop-check/live.py OUT`
 runs its scenarios; `Tests/checks/virtual-desktop` checks its rules. The real

@@ -21,8 +21,9 @@ import Foundation
 ///   keeps each device that showed it its screen), or the largest current iPad's (`largestIPad`) when it knows none: a size
 ///   chosen for an iPad Pro can be over an iPhone's budget, and that iPhone then gets it scaled.
 /// - **What can be a display at all** (`VirtualDesktopSize.custom`): each side 640 to 8192 pixels; a Retina desktop (2x,
-///   half as many points each way) an even number of pixels each way and one side of 1600 pixels or more; a rate a whole
-///   number of 24 to 120 Hz.
+///   half as many points each way) an even number of pixels each way, at least 1600 one way and 1080 the other (the
+///   least macOS keeps at 2x, Noah's probes P3 and P4 of 2026-11-26: 800 × 540 points); a rate a whole number of 24 to
+///   120 Hz.
 /// - **What a device gets** (`view`): its own rate (the display's, held to what the device shows), and the display's
 ///   picture as it is while its pixels a second are within the device's budget, else scaled down evenly to it, its shape
 ///   kept. Sill streams one picture to every connected device, so the picture is the smallest of theirs.
@@ -101,8 +102,10 @@ package enum VirtualDesktopBudget {
     package static var minSide: Int { VirtualDesktopSize.customSides.lowerBound }
     /// The most, in pixels.
     package static var maxSide: Int { VirtualDesktopSize.customSides.upperBound }
-    /// A Retina desktop's longer side at least, in pixels (VirtualDesktopSize.customRetinaLong).
+    /// A Retina desktop's longer side at least, and its shorter, in pixels (VirtualDesktopSize.customRetinaLong and
+    /// customRetinaShort: 1600 and 1080).
     package static var retinaLong: Int { VirtualDesktopSize.customRetinaLong }
+    package static var retinaShort: Int { VirtualDesktopSize.customRetinaShort }
     /// The rates that may be typed (VirtualDesktopSize.customRates).
     package static var rates: ClosedRange<Int> { VirtualDesktopSize.customRates }
 
@@ -116,7 +119,7 @@ package enum VirtualDesktopBudget {
         case large
         /// A Retina desktop with an odd number of pixels a side.
         case odd
-        /// A Retina desktop with both sides under `retinaLong`.
+        /// A Retina desktop with both sides under `retinaLong`, or one under `retinaShort`.
         case retinaSmall
         /// A rate not typed, or out of `rates`.
         case rate
@@ -133,7 +136,7 @@ package enum VirtualDesktopBudget {
         guard w <= maxSide, h <= maxSide else { return .failure(.large) }
         if retina {
             guard w % 2 == 0, h % 2 == 0 else { return .failure(.odd) }
-            guard max(w, h) >= retinaLong else { return .failure(.retinaSmall) }
+            guard max(w, h) >= retinaLong, min(w, h) >= retinaShort else { return .failure(.retinaSmall) }
         }
         guard let rate = hz, rate == 0 || rates.contains(rate) else { return .failure(.rate) }
         guard w * h * (rate == 0 ? rates.upperBound : rate) <= budget(ceilingDevice) else { return .failure(.ceiling(ceilingDevice)) }
@@ -182,7 +185,8 @@ package enum VirtualDesktopBudget {
         case .small: return "Each side needs at least \(minSide) pixels."
         case .large: return "Each side can be at most \(maxSide) pixels."
         case .odd: return "A Retina desktop needs an even number of pixels each way."
-        case .retinaSmall: return "A Retina desktop needs one side of \(retinaLong) pixels or more: macOS shows a smaller one at standard resolution."
+        case .retinaSmall:
+            return "A Retina desktop needs at least \(retinaLong) pixels on one side and \(retinaShort) on the other: macOS shows a smaller one at standard resolution."
         case .rate: return "The refresh rate can be \(rates.lowerBound) to \(rates.upperBound) Hz."
         case .ceiling(let d):
             let long = 2 * max(d.pixelWidth, d.pixelHeight), short = 2 * min(d.pixelWidth, d.pixelHeight)
