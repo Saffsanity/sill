@@ -51,6 +51,8 @@ final class HostSettings {
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
+        /// Set at the first launch of a build that asks `HostConfig.sendAudioToSave` (issue #419).
+        static let sendAudioSettled = "sendAudioSettled"
         static let offConsoleView = "offConsoleView"
         static let lockAfterSession = "lockAfterSession"
         static let lockSleepsDisplay = "lockSleepsDisplay"
@@ -121,6 +123,16 @@ final class HostSettings {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = HostConfig.app
+        // An update keeps what its user had (issue #419): a Mac coming from 0.5.x, which had no Send
+        // Audio, keeps it off; one on 0.6.x and a fresh install get the default. Before `register`, so
+        // the keys read here are only what was saved (and launch arguments).
+        if let v = HostConfig.sendAudioToSave(saved: defaults.object(forKey: Key.sendAudio) as? Bool,
+                                              settled: defaults.bool(forKey: Key.sendAudioSettled),
+                                              lastReleaseSeen: defaults.string(forKey: UpdatePolicy.Stored.tagKey)) {
+            defaults.set(v, forKey: Key.sendAudio)
+            print("Send Audio: off, as before the update; turn it on in the menu to hear the Mac on your devices.")
+        }
+        defaults.set(true, forKey: Key.sendAudioSettled)
         defaults.register(defaults: [
             Key.maxFPS: base.maxFPS,
             Key.captureScale: Double(base.captureScale),

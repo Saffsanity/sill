@@ -101,6 +101,12 @@ MUTANTS = [
      "        return trusted.contains(key)\n", "        return !trusted.isEmpty\n"),
     ("AQ39 a prefix of a paired key counts", H + "DeviceSettings.swift",
      "        return trusted.contains(key)\n", "        return trusted.contains { $0.starts(with: key) }\n"),
+    ("AQ45 an update from 0.5.x leaves Send Audio on (#419)", H + "HostConfig.swift", "        return false\n    }\n\n    /// Whether a release tag", "        return nil\n    }\n\n    /// Whether a release tag"),
+    ("AQ46 0.6.x saved off too", H + "HostConfig.swift", "return (major, minor) < (0, 6)", "return (major, minor) < (0, 7)"),
+    ("AQ47 every launch saves it off", H + "HostConfig.swift", "guard saved == nil, !settled, let tag", "guard saved == nil, let tag"),
+    ("AQ48 a saved choice overwritten", H + "HostConfig.swift", "guard saved == nil, !settled, let tag", "guard !settled, let tag"),
+    ("AQ49 0.5.x read as 0.6", H + "HostConfig.swift", "return (major, minor) < (0, 6)", "return (major, minor) < (0, 5)"),
+    ("AQ50 a v-less tag misread", H + "HostConfig.swift", '(tag.hasPrefix("v") ? String(tag.dropFirst()) : tag)', 'String(tag.dropFirst())'),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

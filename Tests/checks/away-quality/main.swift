@@ -211,6 +211,27 @@ do {
     eq(standard.changes(to: app), "virtual display off → on, send audio off → on", "changes: the two knobs that differ")
 }
 
+// Send Audio after an update (issue #419): an update keeps what its user had. Coming from 0.5.x (the
+// update check last saw a release before 0.6.0) it is saved off, once; on 0.6.x, a fresh install, or
+// with no release seen, the default stays; a saved choice always wins.
+do {
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "v0.5.1"), false, "from 0.5.x: saved off")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "v0.4.0"), false, "from 0.4.x: saved off")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "v0.6.0"), nil, "on 0.6.x: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "v0.6.2"), nil, "on 0.6.2: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "v1.0.0"), nil, "on 1.0: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: "nightly"), nil, "a nightly: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: false, lastReleaseSeen: nil), nil, "a fresh install: the default stays")
+    eq(HostConfig.sendAudioToSave(saved: nil, settled: true, lastReleaseSeen: "v0.5.1"), nil, "once only: a later launch saves nothing")
+    for saved in [true, false] {
+        eq(HostConfig.sendAudioToSave(saved: saved, settled: false, lastReleaseSeen: "v0.5.1"), nil,
+           "the user's choice (\(saved ? "on" : "off")) wins")
+    }
+    check(HostConfig.releaseBeforeSendAudio("0.5.9") && !HostConfig.releaseBeforeSendAudio("0.6"),
+          "a tag without the v reads the same")
+    check(!HostConfig.releaseBeforeSendAudio("v") && !HostConfig.releaseBeforeSendAudio(""), "no version is not before")
+}
+
 // MARK: DeviceSettings
 
 do {
