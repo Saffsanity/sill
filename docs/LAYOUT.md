@@ -725,7 +725,12 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   with this tree's VirtualDisplay.swift, `run.sh`): the sizes an iPhone 15 Pro's pixel-for-pixel Virtual Desktop takes,
   each made for a few seconds as the Virtual Desktop is (a 4096-pixel backing), read back (its mode, its menu bar and
   the room under it), the first followed in place to the others, removed; one verdict line each; the same refusals, the
-  run itself Noah's, output in `.build/display-modes-probe/p3/`.
+  run itself Noah's, output in `.build/display-modes-probe/p3/`. `p4/` (P4, 2026-11-26, for Noah, after P3's result: `probe-floor.swift`,
+  `run.sh`): one display at 589×1189 followed in place through two ladders of smaller sizes, one for each shape an
+  iPhone's picture has with its controls showing, and a few sizes that tell the shorter side from the height and the
+  pixels, back to 589×1189 after each size macOS does not keep; then four sizes made as they are, two at 60 Hz; one
+  verdict line each and the smallest size kept of each shape; the same refusals, output in
+  `.build/display-modes-probe/p4/`.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own

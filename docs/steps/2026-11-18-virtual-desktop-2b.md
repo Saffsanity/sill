@@ -1177,3 +1177,34 @@ Virtual Desktop and its encoder's limits only said; probe P3 built and run with 
   build ("expressions are not allowed at the top level") and "built" above was not true of it. It now compiles a copy
   named `main.swift`, as P2b's and P2c's do; `run.sh --build` and `run.sh --dry-run` pass on this Mac (all 17 selectors
   looked up, the four cases listed, nothing made).
+
+**P3's result, and probe P4 (2026-11-26).** Noah ran P3 on 2026-11-26 (macOS 27.2.1, Mac14,9, Sill quit, no device
+connected; the whole output is `.build/display-modes-probe/p3/out-20261126-110358.txt` in this worktree on his Mac). Every
+size was asked at 2x and 120 Hz, in a 4096-pixel backing:
+- 589×1189, made: kept at 2x. In place to 1101×589: kept. In place to 1077×448: not kept (it reads 2154×896 at 1x; "its
+  2x mode never listed usable"). In place to 800×499: not kept (1600×998 at 1x). Back to 589×1189: kept.
+- Made as they are: 565×352 came up at no mode at all, 1077×448 at 2154×896 at 1x, 800×499 at 800×499 at 1x.
+
+So macOS keeps an iPhone 15 Pro's two Full Screen sizes and neither of the two with its controls showing. What
+`phoneLong`'s comment says ("every one with a side of 800 or more at 2x") is not so: 1077×448 and 800×499 have such a
+side. Where the line runs is not known: between a shorter side of 499 and of 589 points, or by the height, or by the
+pixels (1101×589 has 2.59 million, 1077×448 has 1.93, the stage's 754×784 that came up at 1x had 2.36).
+
+What this branch does with it, as built, seen in Noah's first try of the combined test build the same morning: an iPhone
+upright with its controls asks for 800×499, macOS runs it at 1x, and Sill makes it again at once at the 800-point floor,
+with its one line: "Virtual Desktop: macOS did not keep 800×499 pt @2× (it came up at 800×499 pt @1×); made it at
+1283×800 pt @2×, the size that works, the picture scaled." The fall back works as written. **But with its controls
+showing an iPhone so keeps the small text it had before the sixth part** (0.29 of its own size upright, 0.37 on its
+side); only with Full Screen is it pixel for pixel. A known visible defect of this branch until the bend is set from P4.
+
+Probe P4 (`Scripts/display-modes-probe/p4/`, Noah's, about a minute and a half, `zsh
+~/Downloads/wt-vd-2b/Scripts/display-modes-probe/p4/run.sh` with Sill quit and no device connected) looks for the line:
+one display made at 589×1189 and followed in place, the Virtual Desktop's way, through the shape of an iPhone on its side
+with its controls (2.40:1: 1383×576, 1345×560, 1297×540, 1229×512, 1153×480), the shape of its upright pane (1.60:1:
+945×589, 924×576, 898×560, 866×540, 821×512) and six sizes that tell the shorter side from the height and the pixels
+(499×1189, 448×1077, 1600×448, 800×540, 754×784, 800×800), going back to 589×1189 after each size not kept so that every
+step starts from the same state; then 1077×448 and 800×499 made at 60 Hz (does the rate decide) and 1297×540 and 866×540
+made as they are (a make is what Sill does first). Each size has its verdict line with its pixels, and the last two lines
+name the smallest size kept of each shape. Built and run with `--dry-run` only on this Mac (all 17 selectors looked up,
+the five cases listed, nothing made; the real run refused without a terminal, exit 2); `Tests/checks/repo-rules` holds.
+Then `phone`'s bend takes the floor P4 finds in place of 400 and 800 points, its check and mutants with it.
