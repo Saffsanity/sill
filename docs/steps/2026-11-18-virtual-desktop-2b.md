@@ -1215,3 +1215,152 @@ it means (the device gets the size typed, not scaled down, at that rate) and sho
 "use those". So `VirtualDesktopBudget.deviceLine` now says "Your iPad shows it at full size, 60 Hz." and "Your iPhone shows
 it scaled down to 4008 × 3006, 120 Hz." (before: "Your iPad: as it is, at 60 Hz." and "Your iPhone: scaled to 4008 × 3006
 at 120 Hz."; the sixth part's notes above quote the old words). The check's six lines and mutant B19 with it.
+
+**Seventh part (2026-11-26, run 7): the bend from probe P4.** Noah ran P4 the same morning (macOS 27.2.1, Mac14,9, Sill
+quit, no device connected; the whole output is `.build/display-modes-probe/p4/out-20261126-113503.txt` in this worktree
+on his Mac). Every size was asked at 2x in a 4096-pixel backing, at 120 Hz unless said; "in place" is the Virtual
+Desktop's way (applySettings: with the size alone; at 1x, the switch once macOS lists its 2x mode usable) on one display
+made at 589×1189, back to 589×1189 after each size not kept:
+- **Kept at 2x**: 589×1189 (made, in 1008 ms); in place 1383×576, 1345×560 and 1297×540 (the 2.40:1 shape of an iPhone
+  on its side with its controls), 945×589, 924×576 and 898×560 (the 1.60:1 shape of its upright pane), each at 2x in one
+  step at +322 to +340 ms; **866×540 and 800×540 by the switch**: each landed at its pixels at 1x first (1732×1080 and
+  1600×1080 @1× at +336 and +317 ms), macOS listed its 2x mode usable, and CoreGraphics' switch took it to 2x (complete
+  0 at +664 and +639 ms, the whole follow); 800×800 at 2x at once; made as they are, 1297×540 (380 ms) and 866×540
+  (318 ms) at 2x at once.
+- **Not kept** (in place each landed at its pixels at 1x, "its 2x mode never listed usable", and went back to 589×1189 at
+  2x): 1229×512 and 1153×480 (2.40:1), 821×512 (1.60:1), 499×1189, 448×1077, 1600×448 and 754×784. Made at 60 Hz:
+  1077×448 came up at 2154×896 @1×, 800×499 at 800×499 @1×, as P3 saw them at 120 Hz. P3 (above): 1077×448 and 800×499
+  not kept in place nor made, 565×352 made at no mode at all.
+- Its last two lines: "the smallest kept at 2x of the 5 tried in place: 1297x540" (on its side, its controls showing) and
+  "866x540" (upright, its controls showing).
+
+**The rule read from them**: macOS keeps a display of Sill's at 2x when its shorter side is at least 540 points and its
+longer side at least 800. All 21 sizes P3 and P4 tried fit it, and nothing simpler does: not the rate (1077×448 and
+800×499 the same at 60 Hz), not the pixels (1600×448 has 2.87 million, more than 1101×589's 2.59, and is not kept;
+800×540 has 1.73 and is), not the height alone (499×1189 is tall and not kept). The lines lie in 512…540 (the shorter
+side) and 784…800 (the longer); 540 and 800 themselves are kept. Two sizes at the line (866×540, 800×540, both 1080 pixels
+high and narrower than 1920) land at 1x first and take the switch, as a turn did in P2c; a size lying down on a display
+made upright lands at 2x in one step (P3's 1101×589, P4's ladders), where the said display had taken two.
+
+**What this run changed** (d40c5f39):
+- **The bend** (`VirtualDesktopSize.phone`, default 47): `phoneShort` 540 in place of 400, `phoneLong` 800, both sides
+  grown evenly from the space's own shape as before, the comments saying what was measured and by which probe (the
+  sentence that every display with a side of 800 points or more is kept is gone). Full Screen is unchanged.
+- **The made line's words** for a bent desktop: "…; scaled to fit: an iPhone's desktop is at least 540 pt a side and
+  800 pt on its longer)" (was "… at least 800×400 pt)").
+- **A Retina size typed in Custom… or the CLI** needs at least 1600 pixels on one side and 1080 on the other (was one
+  side of 1600), so a size macOS would show at standard resolution is refused, never made at 1x: "A Retina desktop needs
+  at least 1600 pixels on one side and 1080 on the other: macOS shows a smaller one at standard resolution." (was "A
+  Retina desktop needs one side of 1600 pixels or more: …"). Default 53, changed. Every size of the list, and every typed
+  size of a person's own seen so far, is past it.
+- **The fall back is as it was**: a size macOS does not keep is made again at once at the 800-point floor, one line, not
+  asked again in that run (`afterMake`, `phoneSizeNotKept`): the safety net for a Mac or a macOS whose line runs
+  elsewhere. On Noah's Mac no iPhone's size needs it now.
+- **TEST ONLY, the test host's said display** (`TestDisplay`) is now the display as P2b, P2c, P3 and P4 measured one:
+  kept at 2x from 540 by 800 points (`keeps`, `keptShort`, `keptLong`); a make not kept comes up as P3 and P4 saw
+  (`madeAt`: at its pixels at 1x, at its points at 1x when its longer side is 800, at no mode under 800); in place, a size
+  not kept lands at its pixels at 1x and its 2x mode is never listed (the follow goes back after 1 s, as on the Mac);
+  a size kept lands at 1x first and takes the switch when it is upright on a display made lying down (P2c) or its pixels
+  fit 1920×1080 (P4's 866×540 and 800×540), else at 2x at once (P2b; P3 and P4 on a display made upright). The knob
+  `short-1x` now moves the line to a shorter side of 744 points (P1's least, an iPad mini's 1133×744), a Mac where macOS
+  draws it elsewhere: every iPhone's size then falls back, made or followed. A test host's make that comes up at no mode
+  fails as a Mac's that never comes up ("it never came up"), and its made line says what came up, as a Mac's.
+- **The checks**: `virtual-desktop`'s iPhone cases (the four layouts of an iPhone 15 Pro, every current iPhone's four
+  layouts, the bend, 20,000 random spaces each kept by the said display's line, the fall back with Noah's own lines, the
+  21 sizes P3 and P4 tried, the follows in place of the four layouts on a display made at 589×1189, 866×540 by the
+  switch, a size under the line falling back, short-1x's), part B's Retina cases, and 16 new mutants (337 in all);
+  `picture-fit`'s bent sizes fitted as before; `desktop-check`'s iPhone hosts (below).
+
+**What each iPhone gets now** (Match the device; the spaces from each iPhone's safe area as Full Screen's room, the pane
+under the landscape bar and the 16:10 pane upright compute them, an iPhone 15 Pro's four and an iPhone 12's on its side
+as their consoles print them; "text" is a Mac point beside the iPhone's own, 2 × the picture's scale ÷ the screen's).
+An iPhone 15 Pro (393 × 852 points at 3x, 1179 × 2556 pixels):
+
+| Layout | The space | Its pixels | The Virtual Desktop | The picture | Text | Run 6 on Noah's Mac |
+|---|---|---|---|---|---|---|
+| Upright, Full Screen | 393 × 793 pt | 1179 × 2379 | 589 × 1189 pt @2× | pixel for pixel | 0.67 | the same |
+| On its side, Full Screen | 734 × 393 pt | 2202 × 1179 | 1101 × 589 pt @2× | pixel for pixel | 0.67 | the same |
+| On its side, its controls showing | 718 × 299 pt | 2154 × 897 | 1297 × 540 pt @2× | scaled to 0.83 | 0.55 | 1921 × 800 (fell back from 1077 × 448): 0.37 |
+| Upright, its controls showing (16:10 pane) | 377 × 235 pt | 1131 × 705 | 866 × 540 pt @2× | scaled to 0.65 | 0.44 | 1283 × 800 (fell back from 800 × 499): 0.29 |
+
+Every current iPhone, in the same four layouts (Full Screen upright, on its side; its controls on its side, upright):
+- iPhone SE (375 × 667 at 2x): 540 × 960 and 960 × 540 (its own points, 375 × 667, are under the line: bent, 0.69 of
+  its own size; run 6 fell back to 800 × 1423, 0.47); 1251 × 540 (0.52) and 865 × 540 (0.41).
+- iPhone 12 mini, 13 mini (375 × 812 at 3x): 562 × 1143 and 1068 × 562 pixel for pixel; 1338 × 540 (0.52; run 6 asked
+  1044 × 421 and fell back to 1981 × 800, 0.35) and 865 × 540 (0.41).
+- iPhone 12 to 14, 16e, 17e (390 × 844): 585 × 1195 and 1125 × 585; 1339 × 540 (0.55) and 867 × 540 (0.43).
+- iPhone 14 Plus (428 × 926): 642 × 1318 and 1248 × 642; 1319 × 540 (0.62) and 866 × 540 (0.48).
+- iPhone 15, 15 Pro, 16 (393 × 852): as the table.
+- iPhone 15 Plus, 15 Pro Max, 16 Plus (430 × 932): 645 × 1309 and 1221 × 645; 1283 × 540 (0.62) and 867 × 540 (0.48).
+- iPhone 16 Pro, 17, 17 Pro, 18 Pro (402 × 874): 603 × 1218 and 1125 × 603; 1287 × 540 (0.57) and 865 × 540 (0.45).
+- iPhone Air (420 × 912): 630 × 1275 and 1182 × 630; 1279 × 540 (0.60) and 866 × 540 (0.47).
+- iPhone 16 to 18 Pro Max (440 × 956): 660 × 1341 and 1248 × 660; 1274 × 540 (0.64; run 6 asked 1224 × 519 and fell
+  back to 1887 × 800, 0.43) and 864 × 540 (0.49).
+- iPhone Duo, outer screen (466 × 678 at 3x, its camera strip 84 points beside the picture upright): upright with Full
+  Screen 573 × 1017 pixel for pixel (the sixth part's "about 699 × 1017" left the strip out); upright with its controls
+  867 × 540 (0.42); on its side, with the strip at the top, 1017 × 573 and 1241 × 540 (0.53).
+- iPhone Duo, inner screen (669 × 951 at 3x): every layout past the line, pixel for pixel (flat with Full Screen 1426 ×
+  1003; upright with Full Screen 1003 × 1390; its upright halves with the controls about 979 × 670).
+
+So with Full Screen every iPhone but the SE is pixel for pixel; with its controls showing every iPhone is grown to 540
+points tall (the shorter side binds in every layout), between 864 and 867 points wide upright and 1251 and 1339 on its
+side; none lands under the line, and none is bent where its own pixels would be kept (the check computes all 36). An
+iPad is untouched (`device(space:)`, the 800-point floor), as is a device that says nothing of its screen.
+
+**Defaults taken for Noah to confirm** (this part's; 1 to 57 stand, 47 and 53 replaced):
+47. **The one bend, at the line his probes found**: no side of an iPhone's Virtual Desktop under 540 points and the
+    longer at least 800, grown evenly from the space's shape where it would be smaller, the picture then scaled: every
+    current iPhone with its controls showing (an iPhone 15 Pro: 1297 × 540 on its side, 866 × 540 upright, scaled to
+    0.83 and 0.65), and an iPhone SE with Full Screen too (540 × 960). Everything else pixel for pixel. (Run 6: 400 and
+    800.)
+53. **A Retina desktop typed** needs at least 1600 pixels on one side and 1080 on the other (run 6: one side of 1600), and
+    even sides; each side 640 to 8192 pixels.
+
+**For Noah** (this part's; first in the pull request's list). Every step needs this head's Sill for Mac and app on the
+iPhone and the iPad: the next test build has them. Watch Sill.log meanwhile:
+`grep -E "Virtual Desktop|Desktop:" ~/Library/Logs/Sill/Sill.log | tail -20`.
+1. **The iPhone on the Virtual Desktop, four ways** (under two minutes). With its controls showing the iPhone's desktop is
+   now the smallest size macOS keeps sharp, so its text should be clearly larger than in the morning's build (about half
+   as large again), sharp, with no bars; with Full Screen it stays pixel for pixel. Virtual Desktop on, Resolution Match
+   the device; on the iPhone 15 Pro, held upright with its controls showing, tap Desktop past the Mac's screens:
+   "Virtual Desktop 866×540 pt @2× at 120 Hz id N: made in … ms for iPhone (its picture: 377×235 pt, 1131×705 px; scaled
+   to fit: an iPhone's desktop is at least 540 pt a side and 800 pt on its longer)." Turn it on its side: "Virtual
+   Desktop: iPhone turned; followed in place in … ms: 1297×540 pt @2× at 120 Hz."; Full Screen on: "… hid its controls;
+   followed in place in … ms: 1101×589 pt @2× at 120 Hz, pixel for pixel."; upright again: "… turned; … 589×1189 pt @2×
+   at 120 Hz, pixel for pixel.". A failure looks like small text with the controls showing and a line "Virtual Desktop:
+   macOS did not keep 866×540 pt @2× …; made it at 1283×800 pt @2×, …" (his Mac drawing its line elsewhere than P4
+   found), bars, or a picture soft everywhere.
+
+**Where this meets #400** (the seventh part's; the fifth's and sixth's words stand): a direct merge with #400's head now
+(c230a9a4) meets in the same 10 files and 27 conflict blocks from this head as from 577da3fe (`git merge-tree`, read
+only): this run's changes sit away from the darkening's.
+
+**Verified in the seventh part** (2026-11-26; nothing made a display, posted input, locked, slept or switched anything,
+and nothing used the hardware video encoder: every live run a synthetic test host on 127.0.0.1 with the software encoder,
+its Virtual Desktop only said; no probe was built or run, and P3's and P4's outputs were only read):
+- The release build of d40c5f39 (clean): 74 s, no warning but CaptureProbe's. The CLI refuses `--virtual-desktop=
+  1600x448@2`, `800x539@2` and `700x700@2` with the new Retina sentence, exit 2.
+- `Tests/checks/run-all.sh` on d40c5f39: all passed, 0 failed (835 s, the Mac under other agents' load), among them
+  virtual-desktop 109,618 checks, picture-fit 23, sill-displays 63, stage-release 847, away-quality, capture-scale 184,
+  viewport-bounds 108, compatibility 200, repo-rules 11 of 11.
+- Mutants, on a `git archive` snapshot of d40c5f39 in the heavy lock (12:41 to 14:37): virtual-desktop 337 of 337
+  (16 new: P1b, P20b, P25 to P32, C8 to C10, B35 to B37; and each whose pattern changed: P1, P20 to P23, C6, C7, B9 and
+  the said display's turn), picture-fit 12 of 12 (its cases changed), sill-displays 56 of 56 and stage-release 25 of 25
+  (both read the coordinator, whose test make path changed; none of their patterns did). Every mutant's pattern of the
+  checks that compile or read a file this run changed is found exactly once in it (parse only).
+- `desktop-check` 106 of 106 (104 before this run; two new verdicts read the follow's steps): the iPhone host made at
+  589×1189 pixel for pixel; on its side after 1 s at 1101×589 pixel for pixel in one step, 342 ms (no switch, as P3);
+  its controls back at once, 1297×540 in 331 ms; upright with its controls after 1 s, 866×540 in 665 ms, at 1732×1080 @1×
+  first and then the switch (P4: 664 ms); Full Screen upright at once, 589×1189 in 334 ms; made once, nothing refused.
+  The short-1x host: the make fell back at once in one line ("Virtual Desktop: macOS did not keep 589×1189 pt @2× (it
+  came up at 1178×2378 pt @1×); made it at 800×1614 pt @2×, the size that works, the picture scaled."); the turn's follow
+  landed at 2202×1178 @1×, its 2x mode never listed, back at 800×1614 pt @2× in 1695 ms, then "macOS did not keep
+  1101×589 pt @2× in place; following at 1494×800 pt @2×, …" and 1494×800 followed 1.34 s later in 320 ms. `headless-
+  check` 66 of 66 (its iPhone says nothing of its screen: the floor, as before).
+- `run7/sizes.py` (scratch, outside the repository): every current iPhone's four layouts under run 6's bend and this one,
+  and 200,000 random spaces: each size this bend gives is kept by the line, and none is bent where its own pixels are.
+- Nothing here touches the wire or the device's app: no file under `Sources/StreamProtocol/` or `iOSClient/` changed
+  (picture-fit's check compiles `iOSClient/PictureFit.swift` as it was).
+- GitHub's CI on d40c5f39 (run 45769329547): every step of Build and check passed (the release build, run-all, the iOS
+  app built for the simulator, the CLI's paths). The notes' commit after it changes two comments and this file; its CI
+  is in the pull request.

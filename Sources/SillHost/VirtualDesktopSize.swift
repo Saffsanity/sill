@@ -130,8 +130,9 @@ package enum VirtualDesktopSize {
     /// 499 at 800 × 499), and 565 × 352 came up at no mode at all; 1077 × 448 and 800 × 499 the same at 60 Hz. So neither
     /// the rate nor the pixels decide (1600 × 448 has more than 1101 × 589), nor the height alone (499 × 1189 is tall):
     /// one rule fits every one, a shorter side of at least 540 points and a longer of at least 800 (the lines lie in
-    /// 512…540 and 784…800). Every current iPhone with Full Screen is past it, pixel for pixel; every one with its
-    /// controls showing is under it, so grown to 540 (P4's smallest kept of the two shapes: 1297 × 540 and 866 × 540).
+    /// 512…540 and 784…800). Every current iPhone with Full Screen but the SE (375 × 667 points at 2x) is past it, pixel
+    /// for pixel; every one with its controls showing is under it, so grown to 540 tall (an iPhone 15 Pro's are P4's
+    /// smallest kept of the two shapes, 1297 × 540 and 866 × 540).
     static let phoneShort = 540
     /// The least longer side: P4's 800 × 540 and 800 × 800 kept at 2x, its 754 × 784 not (the stage's history alike: 754 ×
     /// 784 came up at 800 × 832 at 1x, five times; VirtualDisplaySize). Where macOS draws the line elsewhere (another Mac,

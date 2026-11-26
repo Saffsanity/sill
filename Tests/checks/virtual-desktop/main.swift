@@ -210,7 +210,7 @@ check(phoneWrong == 0 && phoneBent > 2000 && phoneOwn > 2000,
       "20,000 random iPhone spaces: pixel for pixel when 540 by 800 or more, else grown to it, shape kept, each kept at 2x (\(phoneWrong) not; \(phoneOwn) own, \(phoneBent) grown; first \(phoneFirst))")
 // Every current iPhone's four layouts: Full Screen's room clear of the housing (FullScreenPolicy.room), the pane under the
 // landscape bar (its 78 points and the panel's 8-point margins) and the 16:10 pane upright (PhonePortraitLayout), from each
-// one's safe area as Apple ships it (an iPhone 15 Pro's four and an iPhone 12's on its side are its console's). Each the
+// one's safe area as Apple ships it (an iPhone 15 Pro's four and an iPhone 12's on its side as their consoles print them). Each the
 // said display keeps at 2x, pixel for pixel exactly when its own pixels are kept: none under the line, none bent for nothing.
 let iPhones: [(String, Double, Double, Double, Double, Double)] = [   // its points wide and high upright, scale, top and side inset
     ("iPhone SE", 375, 667, 2, 0, 0), ("iPhone 12 mini, 13 mini", 375, 812, 3, 50, 50), ("iPhone 12 to 14, 16e, 17e", 390, 844, 3, 47, 47),
