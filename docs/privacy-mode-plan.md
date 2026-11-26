@@ -8,8 +8,9 @@ merged in as they are (as #355 carried #173), so #184 shows as merged when it la
 change, nothing on the device.
 
 In two pull requests (open decision 16): **part 1**, the lock when the last device leaves (#283, #275), is branch
-`privacy-lock`, built on #184's head as this plan says; **part 2**, darkening the screen, waits for G0. Progress at
-the end.
+`privacy-lock`, built on #184's head as this plan says (merged as #402); **part 2**, darkening the screen, is branch
+`privacy-darken` (#400), built for real once Noah ran G0 on 2026-11-23 (G0's results, under Tests). Progress at the
+end.
 
 ## What it is, in a user's words
 
@@ -118,6 +119,14 @@ glue.
    Usually both start together (the last session was a counting one). With `.away` and a home session still
    connected, the dark's ends with `lift` and no lock; the lock's starts when that home session leaves. With `darken`
    off, only the lock's runs, with no windows: #283 alone.
+   **Changed in run 6 of PR #400 (Noah, 2026-11-24, after his first try: 30 s was too long, "could we make it
+   fast?"):** the dark's wait is Settings' Stay dark after the last device leaves, 5 s by default or 30 s; with no lock
+   to follow it, its hint says when the screen comes back, and a key or click at the Mac lights it at once and locks
+   nothing (the lock at a key is for while a device is connected). With Lock this Mac when the last device leaves on,
+   nothing changed: the black holds until the lock shows, bounded by the lock's own 30 s + `lockConfirm` + the slack,
+   and a key or click in that wait locks. Whether a device left on purpose is not told apart: that needs a word on the
+   wire (a device's Disconnect and its own liveness check both close the connection cleanly, and the second
+   reconnects), so every departure waits the same.
 7. **Someone at the Mac (`local`).** While dark and the Mac reads unlocked, an input event that Sill did not post (it
    lacks `eventTag`, below): a key down or a mouse button down with `keysLock` on asks `lock` (at most once per
    `lockConfirm`), and shows the hint; with `keysLock` off it only shows the hint (the key reaches the app, unseen).
@@ -363,7 +372,8 @@ The menu's card: nothing new (it is covered while dark; open decision 12).
   session's end the display sleeps instead, at a key on the Mac the hint points to ⌃⌘Q, macOS's own lock.
 - **The watchdog** can end Sill (ending every session) only while dark and only after 10 s without a main-thread
   answer; it reopens Sill at most once in 10 minutes, so it is no loop.
-- **Small leaks, named in the docs:** the pointer still shows and moves on the black screen; the Mac's speakers keep
+- **Small leaks, named in the docs:** the pointer still shows and moves on the black screen (until run 6 of PR #400:
+  hidden since, open decision 14 below); the Mac's speakers keep
   playing the session's sound (open decision 13); a Touch Bar keeps showing the front app's controls; with keys
   passing, VoiceOver started at the Mac can read the covered windows aloud (with keys locking, its shortcut locks the
   Mac first).
@@ -389,6 +399,19 @@ but it darkens the screen). It reports, per step:
 4. A tagged posted event and an untagged one: the global monitor tells them apart (needs Accessibility).
 5. An external monitor and Sidecar if present, an HDR video under the window on an XDR panel, Night Shift and True
    Tone on: black stays black.
+
+**G0's results (Noah's Mac14,9, macOS 27.2.1, 2026-11-23 15:19; the report in sill-handoff's
+next/privacy-darken/probe-report.txt).** 1: under S1 to S4 the test window, a Safari video and an Electron app's window
+drew at 99 to 101 % of their uncovered rate and the captures held 57 to 58 frames a second: nothing freezes, so risk 1
+did not happen and no note is needed. 2 (all at 1000): the lock screen came in front (loginwindow, layers 2001 and 2004)
+and Noah locked and unlocked over the black, which stayed until the spell ended; a notification (layer 23), the volume
+indicator (101), Spotlight (23), Mission Control (2 to 20) and Force Quit (996) stayed behind it; the pointer showed;
+another app's window at 1000 was listed in front of the black for a whole spell. 3: a killed probe's black went in 14
+and 16 ms, a stopped one's stayed. 4: NSEvent's global monitor kept the tag; posted events named their poster's process,
+Noah's pointer move process 0 (no key of his reached the report). 5: two screens, Night Shift, True Tone and an HDR
+video: pure black. Chosen from it: level 1501 (above the screen saver's 1000 and the assistive 1500, under the lock
+screen's 2001), opaque, `staysUnderLockScreen` true, Sill's own input by its tag or its process, a click named in the
+hint, and the watchdog built (docs/steps/2026-11-18-privacy-darken.md, run 4).
 
 **G1, the check** (`Tests/checks/privacy`): each rule's cases (both scopes, a move home, the grace and a return
 within it, the lock with and without confirmation, the missing symbol, no display, local keys and movement with keys
@@ -578,7 +601,9 @@ The recommendation is what the work proceeds with if he says nothing.
     ends with Sill's process, as R0's spirit asks, is unchecked). **Recommend unchanged in this version**, a
     follow-up issue.
 14. **The pointer on the dark screen.** Shown / hidden (needs a private window-server property to hide it while Sill
-    is in the background). **Recommend shown.**
+    is in the background). **Recommend shown.** **Decided, hidden** (Noah, 2026-11-24, after his first try: "The
+    cursor is still shown when darkened"): rule 15 in DarkenPolicy, Settings' Hide the pointer too (on), run 6 of
+    PR #400.
 15. **How #184 lands.** A branch in Saffsanity/sill from its head, so it shows as merged (#355's way) / pushed onto
     addhumal's fork with maintainer edits / redone, crediting him. **Recommend #355's way.**
 16. **One pull request or two.** The lock after a session (#283, #275) first, darkening after G0 / together.

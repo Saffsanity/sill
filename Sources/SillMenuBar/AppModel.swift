@@ -424,7 +424,7 @@ final class AppModel {
         }
         let snapshot = coordinator?.status.snapshot
         holdAppNapOff(devices: snapshot?.devices.count ?? 0, remote: snapshot?.remoteDeviceCount ?? 0,
-                      lockWait: snapshot?.privacyLock.pending ?? false)
+                      lockWait: (snapshot?.privacyLock.pending ?? false) || (snapshot?.privacyDark ?? false))
         // A device restarts the automatic update's quiet wait (it installs only once none has been connected for a while).
         updater.devicesChanged(snapshot?.devices.count ?? 0)
         scheduleExpiry()
@@ -439,9 +439,12 @@ final class AppModel {
     /// wake it (Bonjour Sleep Proxy) or walk over. A device connected from away cannot, so while
     /// one is, the activity is `.userInitiated`, which also keeps the Mac from idle sleep (the
     /// display may still sleep; docs/remote-access-plan.md §6.5). With no device left, while Lock
-    /// this Mac when the last device leaves waits (or confirms its lock: `lockWait`), an activity
-    /// that only keeps App Nap off, so the wait's half-second ticks are not coalesced into a late
-    /// lock; the Mac may still sleep when idle. Switching ends one activity and begins the other.
+    /// this Mac when the last device leaves waits (or confirms its lock), and while this Mac's screen
+    /// is still dark (Darken this Mac's screen's wait, or its hold for the lock: `lockWait`), an
+    /// activity that only keeps App Nap off, so the waits' half-second ticks are not coalesced into a
+    /// late lock or a late light, nor the dark's once-a-second beats into a watchdog's false alarm
+    /// (PrivacyWatchdog); the Mac may still sleep when idle. Switching ends one activity and begins
+    /// the other.
     private func holdAppNapOff(devices: Int, remote: Int, lockWait: Bool) {
         let want: NapHold = remote > 0 ? .remote : (devices > 0 ? .connected : (lockWait ? .lockWait : .none))
         guard want != napHold else { return }
@@ -459,7 +462,7 @@ final class AppModel {
                                                                 reason: "Sill is serving a connected device")
         case .lockWait:
             napActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
-                                                                reason: "Sill locks this Mac shortly after the last device left")
+                                                                reason: "Sill locks this Mac, or lights its screen, shortly after the last device left")
         case .none:
             break
         }

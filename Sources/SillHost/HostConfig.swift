@@ -94,12 +94,49 @@ package struct HostConfig: Equatable, Sendable {
     /// away from home (AwayPolicy.isAway), so an iPad used beside the Mac never locks it. Off in both `standard` and
     /// `app`: every session counts (#283's words). The Mac's alone, applied at once, like `lockAfterSession`.
     package var lockOnlyAfterAway: Bool
+    /// Darken this Mac's screen while a device uses it (docs/privacy-mode-plan.md, part 2; issues #133 and #323;
+    /// DarkenPolicy, PrivacyScreen): off, only while a device away from home is connected, or whenever one is. Off in
+    /// both `standard` and `app`; the CLI takes it only with --synthetic (`--darken=away|any`), where it darkens nothing
+    /// and says what it would do; Sill.app's switches are in Settings › Devices (Darken this Mac's screen, and Only while
+    /// a device is away from home under it: DarkenPolicy.scope). The Mac's alone, like Share clipboard: absent from
+    /// StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns it
+    /// on or off. Applied at once (`StreamCoordinator.setTarget`), never by a restart.
+    package var darkenScreen: Darken
+    /// While this Mac's screen is dark, a key or click on it locks it (DarkenPolicy rule 7); off, they reach its apps
+    /// unseen and its screen says how to lock it (⌃⌘Q). On in both: it only counts while `darkenScreen` is on. The Mac's
+    /// alone, applied at once, like `darkenScreen`.
+    package var darkenKeysLock: Bool
+    /// How long this Mac's screen stays dark after the last device that darkens it leaves, in case it comes back
+    /// (DarkenPolicy rule 6; Settings › Devices' Stay dark after the last device leaves): 5 s (`short`) in both `standard`
+    /// and `app` (Noah, 2026-11-24, after his first try: 30 s was too long, "could we make it fast?"), or 30 s
+    /// (`long`, the lock's own wait, through which a connection that drops and comes back never shows the desktop).
+    /// With Lock this Mac when the last device leaves on, the black holds until the lock whatever this says. The Mac's
+    /// alone, applied at once, like `darkenScreen`.
+    package var darkenWait: DarkenWait
+    /// While this Mac's screen is dark, its pointer is hidden there too (DarkenPolicy rule 15; Settings › Devices' Hide
+    /// the pointer too; Noah, 2026-11-24: "The cursor is still shown when darkened"). On in both. The Mac's alone,
+    /// applied at once, like `darkenScreen`.
+    package var darkenHidesPointer: Bool
+
+    /// When this Mac's screen is dark (DarkenPolicy rule 2): never, while a device away from home is connected (the
+    /// remote door from a VPN, the internet or a relay on this Mac), or while any device is.
+    package enum Darken: String, CaseIterable, Equatable, Sendable {
+        case off, away, any
+    }
+
+    /// How long this Mac's screen stays dark after the last device leaves (`darkenWait`): Settings' two choices, in
+    /// seconds (their raw values, as saved and as the CLI's `--darken-wait=5|30` takes them).
+    package enum DarkenWait: Int, CaseIterable, Equatable, Sendable {
+        case short = 5, long = 30
+        package var seconds: Double { Double(rawValue) }
+    }
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
                  internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, offConsoleView: Bool,
-                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool) {
+                 lockAfterSession: Bool, lockSleepsDisplay: Bool, lockOnlyAfterAway: Bool,
+                 darkenScreen: Darken, darkenKeysLock: Bool, darkenWait: DarkenWait, darkenHidesPointer: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -118,6 +155,10 @@ package struct HostConfig: Equatable, Sendable {
         self.lockAfterSession = lockAfterSession
         self.lockSleepsDisplay = lockSleepsDisplay
         self.lockOnlyAfterAway = lockOnlyAfterAway
+        self.darkenScreen = darkenScreen
+        self.darkenKeysLock = darkenKeysLock
+        self.darkenWait = darkenWait
+        self.darkenHidesPointer = darkenHidesPointer
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -132,13 +173,17 @@ package struct HostConfig: Equatable, Sendable {
     /// Send Audio off here; Sill.app's is on since 2026-10-27
     /// (`app`). Lock this Mac when the last device leaves off in both: a Mac locks by itself only once its user says so;
     /// under it, Turn off its display too on and Only after a device away from home off (the plan's recommendations).
+    /// Darken this Mac's screen off in both, its keys locking once it is on: a screen goes dark only by its user's choice;
+    /// once on, dark 5 s after the last device leaves and the pointer hidden on the black (Noah, 2026-11-24).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
                                              requirePairing: true, shareClipboard: true, sendAudio: false,
                                              offConsoleView: false, lockAfterSession: false,
-                                             lockSleepsDisplay: true, lockOnlyAfterAway: false)
+                                             lockSleepsDisplay: true, lockOnlyAfterAway: false,
+                                             darkenScreen: .off, darkenKeysLock: true,
+                                             darkenWait: .short, darkenHidesPointer: true)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -177,7 +222,8 @@ package struct HostConfig: Equatable, Sendable {
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
     /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
     /// send audio off → on, lock when the last device leaves off → on, its display off with the lock on → off, lock
-    /// only after a device away from home off → on".
+    /// only after a device away from home off → on, darken the screen off → away, a key on the dark Mac locks →
+    /// passes, dark after the last device leaves 5 → 30 s, the pointer on the dark screen hidden → shown".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -205,6 +251,16 @@ package struct HostConfig: Equatable, Sendable {
         }
         if lockOnlyAfterAway != new.lockOnlyAfterAway {
             parts.append("lock only after a device away from home \(onOff(lockOnlyAfterAway)) → \(onOff(new.lockOnlyAfterAway))")
+        }
+        if darkenScreen != new.darkenScreen { parts.append("darken the screen \(darkenScreen.rawValue) → \(new.darkenScreen.rawValue)") }
+        if darkenKeysLock != new.darkenKeysLock {
+            parts.append("a key on the dark Mac \(darkenKeysLock ? "locks" : "passes") → \(new.darkenKeysLock ? "locks" : "passes")")
+        }
+        if darkenWait != new.darkenWait {
+            parts.append("dark after the last device leaves \(darkenWait.rawValue) → \(new.darkenWait.rawValue) s")
+        }
+        if darkenHidesPointer != new.darkenHidesPointer {
+            parts.append("the pointer on the dark screen \(darkenHidesPointer ? "hidden" : "shown") → \(new.darkenHidesPointer ? "hidden" : "shown")")
         }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }

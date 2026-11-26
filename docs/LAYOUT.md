@@ -423,11 +423,41 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   again by the Mac's own setting); the coordinator's `handle` forwards every
   message to the rule (`deviceActive`), and `parameterSetsSent` its stream
   changes.
+  Darken this Mac's screen (docs/privacy-mode-plan.md, part 2): `DarkenPolicy` (which sessions darken, the
+  dark and its raise before the wake, the wait (Settings' 5 or 30 s) and the hold for
+  the lock, a key after the last device left lighting it, the pointer hidden while
+  dark (rule 15), under
+  the lock screen, a key on the dark Mac, taken back, the switches, the
+  watchdog's decisions, the screens, who darkens: only Sill.app itself, the
+  lock's rule; what the probe G0 decided: the black windows' level and
+  opacity, which events count and which are Sill's own; Settings' switches as
+  the scope; the words; pure, `Tests/checks/darken`, which also runs it
+  beside the lock's rule with part 1's switches and each session's route),
+  `PrivacyScreen` (main actor: the rule's state and tick, the watchdog's
+  beats and the pointer's look at each, the display watch and its settle, the
+  coordinator's step and the stage's warp for the pointer's renewal; its seams
+  `Curtain` and `LocalInput`: the dry run's `DryCurtain` and a test host's
+  `FileInput`, whose file also takes `displays N` and `pointer showing|hidden`,
+  everywhere but in Sill.app itself), `PrivacyCurtain.swift` (Sill.app's seams: `WindowCurtain`, the
+  black windows at level 1501; `CurtainView`, their black and the hint, drawn
+  offscreen for the previews; `PointerHider`, the pointer hidden over the black
+  with CGDisplayHideCursor once Sill's connection may set it from the background,
+  and hidden again (a show and a hide in one turn) when the rule says so: after the
+  displays settle, a device's step to another Desktop stop, Sill's warp home, or a
+  look once a second that reads it as showing (rule 15 renewed, run 7);
+  `PointerCalls`, the two private calls that allow it and CGCursorIsVisible, the
+  look's read of the window server's shared state, each looked up by name;
+  `MonitorInput`, NSEvent's monitors, kind and
+  ownership only; `DisplayChanges`) and `PrivacyWatchdog` (a hung Sill.app
+  ends itself after 10 s without a beat while dark and opens again once in 10
+  minutes; elsewhere a dry run). InputInjector's event source carries
+  `DarkenPolicy.eventTag`.
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout), `--print-cable`, `--no-clipboard` and `--lock-after-session[=away][,nosleep]`
-  (with `--synthetic` only: a dry run).
+  on its own stdout), `--print-cable`, `--no-clipboard`, `--lock-after-session[=away][,nosleep]`
+  and `--darken=away|any` with `--darken-keys=lock|pass`, `--darken-wait=5|30` and
+  `--darken-pointer=hide|show` (with `--synthetic` only: a dry run).
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
@@ -443,7 +473,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
   (Settings › Devices: Require pairing, Show the pairing window to screen
-  sharing, Lock this Mac when the last device leaves with its two switches, the
+  sharing, Darken this Mac's screen with its two switches, Accessibility's
+  warning, Hide the pointer too and Stay dark after the last device leaves, Lock
+  this Mac when the last device leaves with its two switches, the
   paired devices, Remove and rename), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code; the window a device's ask opens, and the cable notice),
@@ -653,7 +685,24 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   every window), frames before, during and after, fourteen steps (its app
   stopped with SIGSTOP at a fit and at a stop among them); the front app must
   not change. It needs Accessibility, Screen Recording and an unlocked screen,
-  and exits 2 saying which is missing. `Scripts/lock-check/` (TEST ONLY;
+  and exits 2 saying which is missing. `Scripts/privacy-probe/run.sh [REPORT]`
+  (TEST ONLY, G0 of docs/privacy-mode-plan.md; Noah's to run, never an agent's:
+  it darkens the screens in spells of at most 10 s, each under a hard 12 s kill)
+  measures what Sill's black windows would do: covered windows still drawing,
+  what shows in front of them, a killed or stopped process, Sill's own input
+  told apart, black on every screen (Noah ran it on 2026-11-23; its numbers
+  are in docs/privacy-mode-plan.md, G0's results); `--build-only` compiles it
+  and runs nothing; S5 is Sill's own level, for a step re-run with
+  `--candidate S5`. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST
+  ONLY) runs darkening's dry run on synthetic test hosts on loopback, the
+  watchdog's, the pointer's, Settings' two waits', a key after the last
+  device left and the pointer's hide made again (`renew`: the test host's
+  screens changed and a step between SILL_TEST_DISPLAYS' stops while dark)
+  among its cases, every time counted from the host's first line, and in
+  `switch` Sill.app's own code for the
+  switches and its Quit in the bare SillMenuBar binary as one (`-SillSetAfter`,
+  `-SillQuitAfter`; the five keys it saves in the bare binary's defaults are
+  read and removed). `Scripts/lock-check/` (TEST ONLY;
   docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
   synthetic test hosts on loopback (each under 60 s) through locks, a switch to
   another user, the unlock's settle, the flap and a start while locked, with the
