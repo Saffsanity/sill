@@ -28,6 +28,12 @@ protocol Curtain: AnyObject {
     /// Rule 15: this Mac's pointer hidden (only once the black is up) or shown again (before it comes down, and for the
     /// lock screen or another user's session). Sill.app's is PointerHider's, through WindowCurtain.
     func pointer(hidden: Bool)
+    /// Rule 15, renewed (run 7): the pointer Sill has hidden, hidden again now (a show and a hide in one turn), for
+    /// `cause` (DarkenPolicy.pointerCheck decides when). Sill.app's is PointerHider.renew.
+    func renewPointer(_ cause: DarkenPolicy.PointerCause)
+    /// Whether this Mac's pointer reads as showing now (CGCursorIsVisible, the window server's shared state); nil with
+    /// nothing to read it. Read only.
+    func pointerShowing() -> Bool?
 }
 
 /// The seam where this Mac's own keys, clicks and pointer are observed, only while it is dark (DarkenPolicy rule 7):
@@ -49,7 +55,9 @@ protocol LocalInput: AnyObject {
 /// reading the lock's `pending` (HostStatus.privacyLock) for rule 6's hold. Its lock (rule 7) is ScreenLocker's (a dry
 /// run anywhere but in Sill.app itself), confirmed by SessionLock's reading like the lock's own. While the black is up
 /// the main actor beats once a second for PrivacyWatchdog (rule 12), which ends Sill.app if the beats stop for
-/// `DarkenPolicy.hangLimit` (its dry run elsewhere only says so).
+/// `DarkenPolicy.hangLimit` (its dry run elsewhere only says so), and at each beat looks at the pointer while Sill has it
+/// hidden (rule 15, renewed: `look`). Rule 15's renewal also hears the displays settle (`displaysChanged`), a device's
+/// step to another Desktop stop (`stepped`, from the coordinator) and Sill's warp of the pointer home (`warped`).
 @MainActor
 final class PrivacyScreen {
     private var state: DarkenPolicy.State
@@ -66,8 +74,11 @@ final class PrivacyScreen {
     private let status: HostStatus
     private let gate: LockGate
     private let hooks: DarkenPolicy.TestHooks
-    /// TEST ONLY: a test host's screens to cover (SILL_TEST_PRIVACY_DISPLAYS), else this Mac's online displays.
-    private let testScreens: Int?
+    /// TEST ONLY: a test host's screens to cover (SILL_TEST_PRIVACY_DISPLAYS, and its input file's `displays N`), else
+    /// this Mac's online displays.
+    private var testScreens: Int?
+    /// Rule 15, renewed: the pointer's hide made again once the displays have been still `DarkenPolicy.displaysSettle`.
+    private var settling: Task<Void, Never>?
     /// TEST ONLY: a test host's wait (SILL_TEST_PRIVACY_GRACE), which replaces Settings' Stay dark after the last device
     /// leaves as it replaces the lock's wait.
     private let testWait: Double?
@@ -117,6 +128,7 @@ final class PrivacyScreen {
         self.status = status
         self.gate = gate
         displays?.onChange = { [weak self] in self?.displaysChanged() }
+        (input as? FileInput)?.onWord = { [weak self] word in self?.testWord(word) }
         followDisplays()
         if scope != .off { run(state.screens(screenIDs().count, at: 0)) }
         run(state.reading(PrivacyPolicy.mac(gate.reading, established: gate.established), at: 0))
@@ -143,12 +155,34 @@ final class PrivacyScreen {
 
     /// The displays changed (rule 13; Sill.app's DisplayChanges, from the display reconfiguration callback and
     /// AppKit's screen parameters notification): the black windows follow the screens now, a new one's in before an old
-    /// one's out, and the rule its count. With darkening off nothing is read.
+    /// one's out, and the rule its count. With darkening off nothing is read. While Sill has the pointer hidden, its hide
+    /// is made again once the displays have been still `DarkenPolicy.displaysSettle` (rule 15, renewed): one renewal
+    /// after the last change of a burst, the black laid again before it.
     func displaysChanged() {
         guard state.scope != .off else { return }
         let ids = screenIDs()
         if state.up { curtain.resync(ids) }
         run(state.screens(ids.count, at: now()))
+        guard state.pointerHidden else { return }
+        settling?.cancel()
+        settling = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(DarkenPolicy.displaysSettle * 1000)))
+            guard let self, !Task.isCancelled else { return }
+            self.settling = nil
+            self.renew(.displays)
+        }
+    }
+
+    /// A device stepped the Desktop to another stop (kind 47), after Sill moved the pointer there (StreamCoordinator's
+    /// nextDesktopDisplay; a test host's step moves nothing): rule 15's hide made again now.
+    func stepped() {
+        renew(.step)
+    }
+
+    /// Sill moved the pointer to another display (the stage's warp home; called on the turn after the warp): rule 15's
+    /// hide made again now.
+    func warped() {
+        renew(.warp)
     }
 
     /// SessionLock's reading changed.
@@ -187,6 +221,8 @@ final class PrivacyScreen {
                 watch(false)
             case .pointer(let hidden):
                 curtain.pointer(hidden: hidden)
+            case .renewPointer(let cause):
+                curtain.renewPointer(cause)
             case .hint(let hint, let until):
                 curtain.hint(hint, for: max(0, until - now()))
             case .lock:
@@ -206,6 +242,27 @@ final class PrivacyScreen {
         status.update { $0.privacyDark = state.up }
         followPending()
         followDark()
+    }
+
+    /// Rule 15, renewed: `cause` may have let macOS show the pointer again; the rule decides with what it reads now.
+    /// Nothing is read while Sill has not hidden it (darkening off, the black down, Hide the pointer too off, the lock
+    /// screen), so a step or a warp then costs nothing.
+    private func renew(_ cause: DarkenPolicy.PointerCause) {
+        guard state.pointerHidden else { return }
+        run(state.pointerCheck(cause, showing: curtain.pointerShowing()))
+    }
+
+    /// TEST ONLY (a test host's input file, SILL_TEST_PRIVACY_INPUT): `displays N` and `pointer showing|hidden`.
+    private func testWord(_ word: DarkenPolicy.TestWord) {
+        switch word {
+        case .input:
+            break       // FileInput hands this Mac's own input to the watch's handler
+        case .displays(let count):
+            testScreens = count
+            displaysChanged()
+        case .pointer(let showing):
+            (curtain as? DryCurtain)?.testRead = showing
+        }
     }
 
     /// The Mac's own input is observed only while the black is up.
@@ -239,8 +296,9 @@ final class PrivacyScreen {
         }
     }
 
-    /// Rule 12: while the black is up, the main actor beats once a second for the watchdog, which watches the beats
-    /// from a queue of its own; down, the watchdog rests.
+    /// Rule 12: while the black is up, the main actor beats once a second (`DarkenPolicy.beat`) for the watchdog, which
+    /// watches the beats from a queue of its own; down, the watchdog rests. Rule 15, renewed: each beat looks at the
+    /// pointer while Sill has it hidden (one read of the window server's shared state, no message).
     private func followDark() {
         if state.up {
             guard beating == nil else { return }
@@ -248,7 +306,8 @@ final class PrivacyScreen {
             beating = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
                     self?.watchdog.beat()
-                    try? await Task.sleep(for: .seconds(1))
+                    self?.renew(.look)
+                    try? await Task.sleep(for: .milliseconds(Int(DarkenPolicy.beat * 1000)))
                 }
             }
         } else {
@@ -326,15 +385,29 @@ final class DryCurtain: Curtain {
         say(DarkenPolicy.Words.dryHint(hint))
     }
 
-    /// A test host's displays never change (SILL_TEST_PRIVACY_DISPLAYS).
+    /// A test host's displays are made up (SILL_TEST_PRIVACY_DISPLAYS, its input file's `displays N`): nothing to lay.
     func resync(_ screens: [UInt32]) {}
 
-    /// Says what Sill.app would do with the pointer, and whether the private calls it would make are found by name here
-    /// (looked up, never called: PointerCalls); counts `priv.pointer`. The pointer itself is never touched.
+    /// Says what Sill.app would do with the pointer, and whether the private calls it would make and the read its look
+    /// makes are found by name here (looked up, never called: PointerCalls); counts `priv.pointer`. The pointer itself is
+    /// never touched.
     func pointer(hidden: Bool) {
         Stats.shared.bump("priv.pointer")
-        say(hidden ? DarkenPolicy.Words.dryPointerHide(found: PointerCalls.found != nil) : DarkenPolicy.Words.dryPointerShow)
+        say(hidden ? DarkenPolicy.Words.dryPointerHide(found: PointerCalls.found != nil, reads: PointerCalls.isVisible != nil)
+                   : DarkenPolicy.Words.dryPointerShow)
     }
+
+    /// Rule 15, renewed: says what Sill.app would do, and counts it as Sill.app does (the cause's key).
+    func renewPointer(_ cause: DarkenPolicy.PointerCause) {
+        Stats.shared.bump(cause.statsKey)
+        say(DarkenPolicy.Words.dryPointerRenew(cause))
+    }
+
+    /// TEST ONLY: what a test host's input file last said the pointer reads as (`pointer showing|hidden`); nil until it
+    /// says, and never this Mac's own pointer, which the dry run neither hides nor reads.
+    var testRead: Bool?
+
+    func pointerShowing() -> Bool? { testRead }
 
     private func say(_ line: String) {
         guard stamped else { print(line); return }
@@ -345,27 +418,37 @@ final class DryCurtain: Curtain {
 
 /// A test host's view of this Mac's own input (SILL_TEST_PRIVACY_INPUT): while started, the file is read every quarter
 /// second; its word (`key`, `click` or `move`, with ` tagged` for one Sill posted) is taken once and the file removed.
-/// Never an event monitor, never this Mac's keyboard or mouse. Counts `priv.localDry`.
+/// Never an event monitor, never this Mac's keyboard or mouse. Counts `priv.localDry`. Its other words (rule 15's
+/// renewal, run 7: `displays N`, `pointer showing`, `pointer hidden`; DarkenPolicy.testWord) go to `onWord`.
 @MainActor
 final class FileInput: LocalInput {
     private let path: String
     private var polling: Task<Void, Never>?
+    /// TEST ONLY: the file's words that are not this Mac's own input (PrivacyScreen's test words).
+    var onWord: (@MainActor (DarkenPolicy.TestWord) -> Void)?
 
     init(path: String) { self.path = path }
 
     func start(_ handler: @escaping @MainActor (DarkenPolicy.Local, Bool) -> Void) {
         stop()
         let path = self.path
-        polling = Task { @MainActor in
+        polling = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 if let text = try? String(contentsOfFile: path, encoding: .utf8) {
                     try? FileManager.default.removeItem(atPath: path)
-                    if let event = DarkenPolicy.testInput(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    switch DarkenPolicy.testWord(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    case .input(let kind, let tagged):
                         Stats.shared.bump("priv.localDry")
-                        print("Test privacy: this Mac’s own \(event.0)\(event.tagged ? " (tagged: Sill’s own)" : "") from \(path).")
-                        handler(event.0, event.tagged)
-                    } else {
-                        print("Test privacy: \(path) said nothing the probe of this Mac’s own input takes (key, click or move, then tagged).")
+                        print("Test privacy: this Mac’s own \(kind)\(tagged ? " (tagged: Sill’s own)" : "") from \(path).")
+                        handler(kind, tagged)
+                    case .displays(let count):
+                        print("Test privacy: this Mac’s screens to cover are now \(count), from \(path) (a display change, as Sill.app hears one).")
+                        self?.onWord?(.displays(count))
+                    case .pointer(let showing):
+                        print("Test privacy: this Mac’s pointer reads as \(showing ? "showing" : "hidden") from now on, from \(path).")
+                        self?.onWord?(.pointer(showing: showing))
+                    case nil:
+                        print("Test privacy: \(path) said nothing the probe of this Mac’s own input takes (key, click or move, then tagged; displays N; pointer showing or hidden).")
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(250))

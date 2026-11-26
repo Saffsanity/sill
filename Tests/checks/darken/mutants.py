@@ -10,6 +10,10 @@ Run 6 (2026-11-24) added those of rule 15, the pointer hidden while the black is
 Noah asked: Settings' wait (5 s by default, or 30), its hint, a key or click after the last device left lighting the
 screen with no lock to follow, the hold's bound still the lock's own wait.
 
+Run 7 (2026-11-26) added those of rule 15 renewed: the pointer's hide made again while Sill has it hidden, after the
+displays changed, a step or Sill's warp whatever it reads, at a look only when it reads as showing and at most twice in a
+row, each line once per cause and read in a raise; its constants, words, statistics keys and the test file's words.
+
 Left out as equivalent (each a second guard behind one that already holds): the `!quitting` guards of `sessions`,
 `switched`, `reading`, `local`, `called` and `tick` (a quit has cleared the wait, the hold and the lock asked and taken
 the windows down, so nothing after it can raise, lift or lock); `screens`' guard that only a change across zero acts
@@ -260,6 +264,50 @@ M = [
     ("a return rewords any hint", F, "if up, left, let until = hintUntil, until > now {", "if up, let until = hintUntil, until > now {"),
     ("the wait's hint never", F, "            if lightsAtKey { return .left(max(1, Int(wait.rounded(.up)))) }\n", ""),
     ("the wait's hint says the lock's wait", F, "if lightsAtKey { return .left(max(1, Int(wait.rounded(.up)))) }", "if lightsAtKey { return .left(30) }"),
+    # Rule 15 renewed (run 7; Noah, 2026-11-26: the pointer on the black after his iPhone stepped to a Virtual Desktop and back).
+    ("a renewal while the pointer is not hidden", F, "            guard pointerHidden else { return [] }\n            let shows = showing == true",
+     "            let shows = showing == true"),
+    ("nothing to read it counts as showing", F, "            let shows = showing == true", "            let shows = showing != false"),
+    ("the look acts whatever it reads", F, "                guard shows else { looksShowing = 0; return [] }\n", ""),
+    ("a hidden read leaves the look's count", F, "guard shows else { looksShowing = 0; return [] }", "guard shows else { return [] }"),
+    ("an event renews only when it reads showing", F, "            if cause == .look {\n                guard shows",
+     "            if cause == .look || !shows {\n                guard shows"),
+    ("the look without a bound", F, "                if looksShowing > DarkenPolicy.lookTries {", "                if false {"),
+    ("the look's bound one later", F, "if looksShowing > DarkenPolicy.lookTries {", "if looksShowing > DarkenPolicy.lookTries + 1 {"),
+    ("the look three times in a row", F, "    package static let lookTries = 2", "    package static let lookTries = 3"),
+    ("that it still shows said at every look", F, "                    guard !saidStillShows else { return [] }\n", ""),
+    ("that it still shows never kept", F, "                    saidStillShows = true\n", ""),
+    ("the look renews past its bound", F, "                    return [.line(Words.pointerStillShows)]",
+     "                    return [.renewPointer(cause), .line(Words.pointerStillShows)]"),
+    ("no renewal at all", F, "            var out: [Action] = [.renewPointer(cause)]", "            var out: [Action] = []"),
+    ("every renewal the look's", F, "            var out: [Action] = [.renewPointer(cause)]", "            var out: [Action] = [.renewPointer(.look)]"),
+    ("the line before the renewal", F, "                out.append(.line(Words.pointerRenewed(cause, showing: shows)))",
+     "                out.insert(.line(Words.pointerRenewed(cause, showing: shows)), at: 0)"),
+    ("the line at every renewal", F, "if renewalsSaid.insert(Renewal(cause: cause, showing: shows)).inserted {",
+     "if renewalsSaid.insert(Renewal(cause: cause, showing: shows)).inserted || true {"),
+    ("the line once per cause whatever it read", F, "renewalsSaid.insert(Renewal(cause: cause, showing: shows))",
+     "renewalsSaid.insert(Renewal(cause: cause, showing: false))"),
+    ("the line says the other read", F, "out.append(.line(Words.pointerRenewed(cause, showing: shows)))",
+     "out.append(.line(Words.pointerRenewed(cause, showing: !shows)))"),
+    ("the lines never said again after the black came down", F, "            renewalsSaid = []\n", ""),
+    ("that it still shows never said again after the black came down", F, "            renewalsSaid = []\n            saidStillShows = false\n",
+     "            renewalsSaid = []\n"),
+    ("the look's count kept across hides", F, "            if want { looksShowing = 0 }\n", ""),
+    ("the renewal's words swapped", F, 'showing ? "Privacy: this Mac’s pointer was showing again', '!showing ? "Privacy: this Mac’s pointer was showing again'),
+    ("a step said as the displays", F, 'case .step: return "after a device stepped to another display"', 'case .step: return "after the displays changed"'),
+    ("one statistics key for every cause", F, 'package var statsKey: String { "priv.renew" + rawValue.prefix(1).uppercased() + rawValue.dropFirst() }',
+     'package var statsKey: String { "priv.renew" }'),
+    ("the displays' settle a second", F, "package static let displaysSettle: Double = 0.25", "package static let displaysSettle: Double = 1"),
+    ("the beat every two seconds", F, "package static let beat: Double = 1", "package static let beat: Double = 2"),
+    ("the dry run's read said found when missing", F, "return reads ? \"Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found, and",
+     "return !reads ? \"Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found, and"),
+    ("the dry renewal without its show and hide", F, "again \\(cause.when) (a show and a hide at once); it stays visible.", "again \\(cause.when); it stays visible."),
+    ("a test host covers 17 screens", F, "guard let count = Int(n), (0...16).contains(count) else { return nil }",
+     "guard let count = Int(n), (0...17).contains(count) else { return nil }"),
+    ("three test words taken", F, "        guard parts.count == 2 else { return nil }\n        switch (parts[0], parts[1]) {",
+     "        guard parts.count >= 2 else { return nil }\n        switch (parts[0], parts[1]) {"),
+    ("pointer showing reads hidden", F, 'case ("pointer", "showing"): return .pointer(showing: true)', 'case ("pointer", "showing"): return .pointer(showing: false)'),
+    ("any pointer word reads hidden", F, 'case ("pointer", "hidden"): return .pointer(showing: false)', 'case ("pointer", _): return .pointer(showing: false)'),
     # Part 1's switches and a session's route, beside the dark (the review of PR #400, follow-up 2).
     ("the lock waits with its switch off", P, "guard on, !onlyAway || awaySeen else {", "guard !onlyAway || awaySeen else {"),
     ("the lock's only away ignored at the departure", P, "guard on, !onlyAway || awaySeen else {", "guard on else {"),

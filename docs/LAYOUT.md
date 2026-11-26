@@ -434,13 +434,19 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   the scope; the words; pure, `Tests/checks/darken`, which also runs it
   beside the lock's rule with part 1's switches and each session's route),
   `PrivacyScreen` (main actor: the rule's state and tick, the watchdog's
-  beats, the display watch; its seams `Curtain` and `LocalInput`: the dry
-  run's `DryCurtain` and a test host's `FileInput` everywhere but in Sill.app
-  itself), `PrivacyCurtain.swift` (Sill.app's seams: `WindowCurtain`, the
+  beats and the pointer's look at each, the display watch and its settle, the
+  coordinator's step and the stage's warp for the pointer's renewal; its seams
+  `Curtain` and `LocalInput`: the dry run's `DryCurtain` and a test host's
+  `FileInput`, whose file also takes `displays N` and `pointer showing|hidden`,
+  everywhere but in Sill.app itself), `PrivacyCurtain.swift` (Sill.app's seams: `WindowCurtain`, the
   black windows at level 1501; `CurtainView`, their black and the hint, drawn
   offscreen for the previews; `PointerHider`, the pointer hidden over the black
   with CGDisplayHideCursor once Sill's connection may set it from the background,
-  and `PointerCalls`, the two private calls that allow it, looked up by name;
+  and hidden again (a show and a hide in one turn) when the rule says so: after the
+  displays settle, a device's step to another Desktop stop, Sill's warp home, or a
+  look once a second that reads it as showing (rule 15 renewed, run 7);
+  `PointerCalls`, the two private calls that allow it and CGCursorIsVisible, the
+  look's read of the window server's shared state, each looked up by name;
   `MonitorInput`, NSEvent's monitors, kind and
   ownership only; `DisplayChanges`) and `PrivacyWatchdog` (a hung Sill.app
   ends itself after 10 s without a beat while dark and opens again once in 10
@@ -689,8 +695,11 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   and runs nothing; S5 is Sill's own level, for a step re-run with
   `--candidate S5`. `Scripts/privacy-check/darken.py OUT [case…|all]` (TEST
   ONLY) runs darkening's dry run on synthetic test hosts on loopback, the
-  watchdog's, the pointer's, Settings' two waits' and a key after the last
-  device left among its cases, and in `switch` Sill.app's own code for the
+  watchdog's, the pointer's, Settings' two waits', a key after the last
+  device left and the pointer's hide made again (`renew`: the test host's
+  screens changed and a step between SILL_TEST_DISPLAYS' stops while dark)
+  among its cases, every time counted from the host's first line, and in
+  `switch` Sill.app's own code for the
   switches and its Quit in the bare SillMenuBar binary as one (`-SillSetAfter`,
   `-SillQuitAfter`; the five keys it saves in the bare binary's defaults are
   read and removed). `Scripts/lock-check/` (TEST ONLY;

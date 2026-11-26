@@ -51,7 +51,13 @@
 //   I11 the glue's pointer is hidden exactly while the black is up, the Mac reads unlocked and Hide the pointer too is on:
 //      hidden only after a raise, shown before every lift, never hidden after a quit;
 //   I12 a person's key or click in a wait with no lock to follow lights the screen at once and asks no lock, and never
-//      while the lock its departure started is under way.
+//      while the lock its departure started is under way;
+//   I13 rule 15's renewal (run 7): the pointer's hide made again only while the glue has it hidden; after the displays
+//      changed, a step or Sill's warp always, whatever it reads; at a look only when it reads as showing and at most
+//      `lookTries` looks in a row, the next saying once in a raise that it still shows; each renewal's line once per
+//      cause and read in a raise.
+// Rule 15, renewed (run 7; Noah, 2026-11-26: the pointer showed on the black after his iPhone stepped to a Virtual
+// Desktop and back): its causes, their keys and words, the constants, the cases scripted, and the test file's words.
 import Foundation
 
 var checks = 0, failures = 0
@@ -110,6 +116,11 @@ check(D.eventTag != 0 && D.eventTag != 1 && D.eventTag != -1, "the tag is no val
 check(D.tick > 0 && D.tick * 2 <= D.lockConfirm, "the tick looks at least twice within a confirmation")
 check(D.holdSlack >= 2 * D.tick, "the hold's slack covers the two rules' ticks")
 check(D.staysUnderLockScreen, "the black windows sit under the lock screen (the probe G0 found a level for it)")
+same(D.beat, 1, "the main actor beats once a second while dark: the watchdog's beat and the pointer's look (rule 15, renewed)")
+check(D.hangLimit >= 10 * D.beat, "the watchdog waits ten beats")
+same(D.lookTries, 2, "the look hides the pointer again at most twice in a row")
+same(D.displaysSettle, 0.25, "the pointer's hide made again once the displays have been still 0.25 s")
+check(D.displaysSettle > 0 && D.displaysSettle < D.beat, "sooner than the next look")
 
 // MARK: - The probe G0 (2026-11-23): the black windows' level and opacity
 
@@ -809,6 +820,105 @@ do {
     same(f.reading(.screenLocked, at: 2), [.line(W.lockScreenShows), .pointer(hidden: false), .lift], "fallback: shown, then down for the lock screen")
 }
 
+// MARK: - Rule 15, renewed (run 7; Noah, 2026-11-26: "the cursor shows on the Mac display when the Mac desktop is selected
+// on iPhone", after it stepped to a Virtual Desktop Sill made and back)
+
+typealias PC = DarkenPolicy.PointerCause
+same(PC.allCases, [.displays, .step, .warp, .look], "four causes: the displays changed, a step, Sill's warp, the look")
+same(PC.allCases.map(\.statsKey), ["priv.renewDisplays", "priv.renewStep", "priv.renewWarp", "priv.renewLook"],
+     "each renewal counted by its cause's own key")
+same(Set(PC.allCases.map(\.when)).count, 4, "and said in words of its own")
+do {
+    var s = make(.away, pointer: true)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "\(c) with nothing dark: nothing, whatever it reads") }
+    _ = s.sessions(away: 1, home: 0, at: 1)
+    check(s.pointerHidden, "a device connects: hidden")
+    same(s.pointerCheck(.displays, showing: false), [.renewPointer(.displays), .line(W.pointerRenewed(.displays, showing: false))],
+         "the displays changed and it reads hidden: made again anyway (the window server keeps a hide per display), then its line")
+    same(s.pointerCheck(.displays, showing: false), [.renewPointer(.displays)], "again: made again, its line said once")
+    same(s.pointerCheck(.displays, showing: nil), [.renewPointer(.displays)], "nothing to read it (the dry run): made again, as when it reads hidden")
+    same(s.pointerCheck(.displays, showing: true), [.renewPointer(.displays), .line(W.pointerRenewed(.displays, showing: true))],
+         "it reads showing: made again, and the line says it was showing")
+    same(s.pointerCheck(.step, showing: false), [.renewPointer(.step), .line(W.pointerRenewed(.step, showing: false))], "a step: made again")
+    same(s.pointerCheck(.step, showing: true), [.renewPointer(.step), .line(W.pointerRenewed(.step, showing: true))], "a step that left it showing")
+    same(s.pointerCheck(.warp, showing: nil), [.renewPointer(.warp), .line(W.pointerRenewed(.warp, showing: false))], "Sill's warp: made again")
+    check(s.pointerHidden && s.up, "still hidden, still dark")
+    same(s.pointerCheck(.look, showing: false), [], "a look that reads hidden: nothing (no show that could make it flash)")
+    same(s.pointerCheck(.look, showing: nil), [], "a look with nothing to read: nothing")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look), .line(W.pointerRenewed(.look, showing: true))],
+         "a look that reads showing: hidden again, then its line")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "still showing a beat later: again, the line said once")
+    same(s.pointerCheck(.look, showing: true), [.line(W.pointerStillShows)], "a third: no more renewals, once that it still shows")
+    same(s.pointerCheck(.look, showing: true), [], "and nothing after")
+    same(s.pointerCheck(.step, showing: true), [.renewPointer(.step)], "a step still makes it again")
+    same(s.pointerCheck(.look, showing: false), [], "it reads hidden again")
+    same(s.looksShowing, 0, "the look counts from zero")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "and acts again on the next that reads showing")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "twice")
+    same(s.pointerCheck(.look, showing: true), [], "the line that it still shows said once in a raise")
+}
+do {
+    // Never while the pointer is not Sill's to hide: the lock screen, another user, its switch off, the black down, a quit.
+    var s = make(.away, pointer: true)
+    _ = s.sessions(away: 1, home: 0, at: 1)
+    _ = s.reading(.screenLocked, at: 2)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "the lock screen in front (the pointer shown for it): \(c) nothing") }
+    s.deviceInputAtLockedScreen("iPad", at: 3)
+    _ = s.reading(.unlocked, at: 4)
+    same(s.pointerCheck(.look, showing: true).first, .renewPointer(.look), "the device's unlock: hidden again, the look acts")
+    _ = s.reading(.offConsole, at: 5)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "another user on the console: \(c) nothing") }
+    _ = s.reading(.screenLocked, at: 5.6)
+    s.deviceInputAtLockedScreen("iPad", at: 5.7)
+    _ = s.reading(.unlocked, at: 6)
+    _ = s.switched(scope: .away, keysLock: true, lockAfterSession: false, hidesPointer: false, at: 7)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "Hide the pointer too turned off: \(c) nothing") }
+    _ = s.switched(scope: .away, keysLock: true, lockAfterSession: false, hidesPointer: true, at: 8)
+    same(s.pointerCheck(.step, showing: false).first, .renewPointer(.step), "on again: hidden again, a step makes it again")
+    _ = s.screens(0, at: 9)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "no screen left (the black down): \(c) nothing") }
+    _ = s.screens(1, at: 10)
+    _ = s.quit(at: 11)
+    for c in PC.allCases { same(s.pointerCheck(c, showing: true), [], "after a quit: \(c) nothing") }
+    var n = make(.away, pointer: false)
+    _ = n.sessions(away: 1, home: 0, at: 1)
+    for c in PC.allCases { same(n.pointerCheck(c, showing: true), [], "dark with Hide the pointer too off: \(c) nothing") }
+}
+do {
+    // Each raise says each line again; the look counts from zero at each hide.
+    var s = make(.away, wait: S, pointer: true)
+    _ = s.sessions(away: 1, home: 0, at: 1)
+    _ = s.pointerCheck(.step, showing: false)
+    _ = s.pointerCheck(.look, showing: true)
+    _ = s.pointerCheck(.look, showing: true)
+    same(s.pointerCheck(.look, showing: true), [.line(W.pointerStillShows)], "three looks that read showing")
+    check(s.saidStillShows && s.renewalsSaid.count == 2, "two lines said and the one that it still shows")
+    _ = s.sessions(away: 0, home: 0, at: 2)
+    same(s.tick(at: 7, lockHolds: false), [.line(W.lit), .pointer(hidden: false), .lift], "the wait's end: shown, lit")
+    check(s.renewalsSaid.isEmpty && !s.saidStillShows, "the black down: nothing said any more")
+    same(s.pointerCheck(.step, showing: true), [], "a step with the black down: nothing")
+    _ = s.sessions(away: 1, home: 0, at: 8)
+    same(s.pointerCheck(.step, showing: false), [.renewPointer(.step), .line(W.pointerRenewed(.step, showing: false))], "a new raise: the step's line again")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look), .line(W.pointerRenewed(.look, showing: true))], "the look's too, from zero")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "a second")
+    _ = s.reading(.screenLocked, at: 9)
+    s.deviceInputAtLockedScreen("iPad", at: 9.5)
+    _ = s.reading(.unlocked, at: 10)
+    same(s.looksShowing, 0, "hidden anew in the same raise: the look counts from zero")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "and acts, its line already said in this raise")
+    same(s.pointerCheck(.look, showing: true), [.renewPointer(.look)], "twice")
+    same(s.pointerCheck(.look, showing: true), [.line(W.pointerStillShows)], "then once that it still shows")
+    // The fallback (the black down at a lock, up again at the device's unlock) is a new raise.
+    var f = make(.away, under: false, pointer: true)
+    _ = f.sessions(away: 1, home: 0, at: 1)
+    _ = f.pointerCheck(.displays, showing: true)
+    _ = f.reading(.screenLocked, at: 2)
+    f.deviceInputAtLockedScreen("iPad", at: 3)
+    _ = f.reading(.unlocked, at: 4)
+    same(f.pointerCheck(.displays, showing: true), [.renewPointer(.displays), .line(W.pointerRenewed(.displays, showing: true))],
+         "fallback: down for the lock screen and up again, a new raise: the line again")
+}
+
 // MARK: - Rule 11: a quit
 
 do {
@@ -880,6 +990,18 @@ do {
     check(D.testInput("key tagged")! == (.key, true) && D.testInput(" move  tagged ")! == (.move, true), "with tagged: one Sill posted")
     check(D.testInput("") == nil && D.testInput("type") == nil && D.testInput("key now") == nil && D.testInput("key tagged twice") == nil,
           "anything else is nothing")
+    // Rule 15, renewed (run 7): the file's other words.
+    same(D.testWord("key"), .input(.key, tagged: false), "the file's input words as before")
+    same(D.testWord("move tagged"), .input(.move, tagged: true), "with tagged")
+    same(D.testWord("displays 2"), .displays(2), "displays N: a test host's screens to cover now N, a display change")
+    check(D.testWord("displays 0") == .displays(0) && D.testWord("displays 16") == .displays(16), "0 and 16 are taken")
+    check(D.testWord("displays 17") == nil && D.testWord("displays -1") == nil && D.testWord("displays x") == nil
+          && D.testWord("displays") == nil && D.testWord("displays 2 3") == nil, "17, -1, a word, nothing or two numbers are nothing")
+    same(D.testWord("pointer showing"), .pointer(showing: true), "pointer showing: the dry run reads it as showing from then on")
+    same(D.testWord("pointer hidden"), .pointer(showing: false), "pointer hidden: as hidden")
+    check(D.testWord("pointer") == nil && D.testWord("pointer shown") == nil && D.testWord("pointer showing now") == nil
+          && D.testWord("showing pointer") == nil, "anything else is nothing")
+    same(D.testWord(""), nil, "an empty file is nothing")
 }
 
 // MARK: - Every word
@@ -890,7 +1012,9 @@ do {
                          W.noneCounts, W.noScreen, W.quitting, W.locking, W.couldNotLock("why"), W.lockScreenShows, W.takenBack,
                          W.deviceUnlocked("iPad"), W.watchdog, W.watchdogNoReopen, W.reopened, W.noAccessibility,
                          W.pointerHidden, W.pointerShown, W.pointerUnavailable, W.pointerRefused(1001), W.pointerShowFailed(1001),
-                         W.startLine(.away, keysLock: true, dry: false), W.startLine(.any, keysLock: false, wait: 30, hidesPointer: false, dry: true)]
+                         W.startLine(.away, keysLock: true, dry: false), W.startLine(.any, keysLock: false, wait: 30, hidesPointer: false, dry: true),
+                         W.pointerStillShows, W.pointerNoLook]
+        + DarkenPolicy.PointerCause.allCases.flatMap { [W.pointerRenewed($0, showing: true), W.pointerRenewed($0, showing: false)] }
     check(all.allSatisfy { $0.hasPrefix("Privacy: ") && $0.hasSuffix(".") && !$0.contains("\n") }, "every log line begins with Privacy: and is one sentence")
     check(Set(all).count == all.count, "no two lines alike")
     check(all.allSatisfy { !$0.contains("'") }, "typographic apostrophes only")
@@ -909,14 +1033,25 @@ do {
     same(W.dryHint(.pass), "Privacy (dry run): would show “This Mac is in use from another device. To use it here, press Control-Command-Q, then unlock it.”; nothing is drawn.", "the dry run's hint")
     same(W.dryHint(.left(5)), "Privacy (dry run): would show “This Mac’s screen comes back within 5 seconds. Press any key or click to bring it back now.”; nothing is drawn.",
          "the dry run's hint in the wait")
-    same(W.dryPointerHide(found: true),
-         "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found); it stays visible.",
-         "the dry run's pointer, the private calls found by name (never called)")
-    same(W.dryPointerHide(found: false), "Privacy (dry run): would leave this Mac’s pointer visible: this macOS has no CGSSetConnectionProperty.",
+    same(W.dryPointerHide(found: true, reads: true),
+         "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found, and CGCursorIsVisible to look at it); it stays visible.",
+         "the dry run's pointer, the private calls and the look's read found by name (never called)")
+    same(W.dryPointerHide(found: true, reads: false),
+         "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found; no CGCursorIsVisible to look at it); it stays visible.",
+         "the private calls without the read")
+    same(W.dryPointerHide(found: false, reads: true), "Privacy (dry run): would leave this Mac’s pointer visible: this macOS has no CGSSetConnectionProperty.",
          "and without them")
+    same(W.dryPointerHide(found: false, reads: false), W.dryPointerHide(found: false, reads: true), "the read alone hides nothing")
     same(W.dryPointerShow, "Privacy (dry run): would show this Mac’s pointer again; it was never hidden.", "the dry run's pointer shown")
-    check([W.dryRaise(1), W.dryLift, W.dryHint(.lock), W.dryPointerHide(found: true), W.dryPointerHide(found: false), W.dryPointerShow,
-           PW.dryLock].allSatisfy { $0.hasPrefix("Privacy (dry run): would ") && $0.hasSuffix(".") },
+    same(W.dryPointerRenew(.displays), "Privacy (dry run): would hide this Mac’s pointer again after the displays changed (a show and a hide at once); it stays visible.",
+         "the dry run's renewal (rule 15, renewed)")
+    same(W.dryPointerRenew(.look), "Privacy (dry run): would hide this Mac’s pointer again on the black (a show and a hide at once); it stays visible.",
+         "the look's")
+    let dryRenewals = DarkenPolicy.PointerCause.allCases.map(W.dryPointerRenew)
+    same(Set(dryRenewals).count, 4, "one for each cause")
+    check([W.dryRaise(1), W.dryLift, W.dryHint(.lock), W.dryPointerHide(found: true, reads: true), W.dryPointerHide(found: true, reads: false),
+           W.dryPointerHide(found: false, reads: true), W.dryPointerShow, PW.dryLock].allSatisfy { $0.hasPrefix("Privacy (dry run): would ") && $0.hasSuffix(".") }
+          && dryRenewals.allSatisfy { $0.hasPrefix("Privacy (dry run): would ") && $0.hasSuffix(".") && !$0.contains("'") },
           "the dry curtain's lines begin as the lock's dry run's")
     same(W.pointerHidden, "Privacy: this Mac’s pointer is hidden while its screen is dark.", "Sill.app's line as it hides the pointer")
     same(W.pointerShown, "Privacy: this Mac’s pointer shows again.", "and as it shows it")
@@ -924,6 +1059,25 @@ do {
          "once, on a macOS without the private calls")
     same(W.pointerRefused(1001), "Privacy: this Mac’s pointer stays visible on the black: macOS didn’t let Sill hide it (error 1001).", "once, when macOS refuses")
     same(W.pointerShowFailed(1001), "Privacy: couldn’t show this Mac’s pointer again (error 1001); it comes back when Sill quits.", "a show that failed")
+    // Rule 15, renewed (run 7): what Noah's next trial greps for, one line per cause and read in a raise.
+    same(W.pointerRenewed(.displays, showing: true), "Privacy: this Mac’s pointer was showing again after the displays changed; hidden again.",
+         "the displays changed and it was showing: cause (1) of run 7")
+    same(W.pointerRenewed(.displays, showing: false), "Privacy: this Mac’s pointer hidden again after the displays changed, to be sure.",
+         "the displays changed, it read hidden: made again anyway")
+    same(W.pointerRenewed(.step, showing: true), "Privacy: this Mac’s pointer was showing again after a device stepped to another display; hidden again.",
+         "a step that left it showing: cause (2)")
+    same(W.pointerRenewed(.step, showing: false), "Privacy: this Mac’s pointer hidden again after a device stepped to another display, to be sure.", "a step")
+    same(W.pointerRenewed(.warp, showing: true), "Privacy: this Mac’s pointer was showing again after Sill moved it to another display; hidden again.",
+         "Sill's warp home that left it showing")
+    same(W.pointerRenewed(.look, showing: true), "Privacy: this Mac’s pointer was showing again on the black; hidden again.",
+         "the look found it showing, with no change before")
+    same(W.pointerStillShows, "Privacy: this Mac’s pointer still showed after Sill hid it again twice; it may stay visible on the black.",
+         "the look's last word in a raise (macOS not hiding it)")
+    same(W.pointerNoLook, "Privacy: this macOS has no CGCursorIsVisible; Sill hides the pointer again only after a display change or a step.",
+         "once a run, without the read")
+    check(DarkenPolicy.PointerCause.allCases.allSatisfy { W.pointerRenewed($0, showing: true).hasPrefix("Privacy: this Mac’s pointer was showing again ")
+                                                          && W.pointerRenewed($0, showing: false).hasPrefix("Privacy: this Mac’s pointer hidden again ") },
+          "every renewal's line begins as the grep in Noah's step looks for it")
     same(W.lastLeft(5, keyLights: true), "Privacy: the last device left; this Mac’s screen stays dark for 5 s in case it comes back, or until a key or click on it.",
          "the departure with no lock to follow")
     same(W.lastLeft(30, keyLights: false), "Privacy: the last device left; this Mac’s screen stays dark for 30 s in case it comes back, and then while a lock is under way.",
@@ -1010,6 +1164,7 @@ struct Pair {
             case .lift: log.append((t, "dark lift"))
             case .lock: log.append((t, "dark lock"))
             case .pointer(let hidden): log.append((t, hidden ? "pointer hide" : "pointer show"))
+            case .renewPointer(let cause): log.append((t, "pointer renew " + cause.rawValue))
             case .line(let l): log.append((t, "dark: " + l))
             case .hint, .look: break
             }
@@ -1240,6 +1395,12 @@ let eps = 1e-9
 var raises = 0, lifts = 0, keyLocks = 0, holds = 0, takenBacks = 0, deviceUnlocks = 0, waitsLit = 0, fallbackRuns = 0
 var holdsBegun = 0, onlyAwayHolds = 0, visitsAtHomeLetGo = 0, onlyAwayEndedWaits = 0, displayOnLocks = 0
 var pointerHides = 0, keyLights = 0
+/// Rule 15, renewed (run 7): the renewals made, those of the look, the lines that it still shows.
+var renewals = 0, lookRenewals = 0, stillShows = 0
+/// Every renewal's line, and its cause and read (`I13`: each once per raise).
+let renewalLines = Dictionary(uniqueKeysWithValues: DarkenPolicy.PointerCause.allCases.flatMap { c in
+    [true, false].map { (W.pointerRenewed(c, showing: $0), "\(c.rawValue) \($0)") }
+})
 /// The dark's waits the model draws from: shorter than the lock's, as long, and longer (a test host's).
 let waits = [1.0, 2.0, 6.0]
 var rng = Rng(state: 0x5111_DA2C)
@@ -1268,6 +1429,9 @@ for run in 0..<runs {
     var quit = false
     var windows = false                 // what the glue did with the black windows
     var pointerGlue = false             // and with the pointer
+    var saidRenewals: Set<String> = []  // the renewals' lines said since the black last came down (I13)
+    var saidStill = false               // and the line that it still shows
+    var looksInRow = 0                  // the looks in a row that read showing since the pointer was last hidden or read hidden
     var lastCountingAt: Double? = nil   // when the sessions that darken last dropped to none, while none is connected
     var lastAsk: Double? = nil
     var deviceTypedAt: Double? = nil
@@ -1296,6 +1460,8 @@ for run in 0..<runs {
                 if !windows { violated("I6", "run \(run): lift while down (\(event)) at \(t)") }
                 if pointerGlue { violated("I11", "run \(run): the black lifted with the pointer still hidden (\(event)) at \(t)") }
                 windows = false
+                saidRenewals = []
+                saidStill = false
                 // I8: never down while the lock its departure started is under way, within the hold's bound.
                 if let dep = lockWaitFor, event == "tick", p.pending, t < dep + lockGrace + D.lockConfirm + D.holdSlack - eps {
                     violated("I8", "run \(run): lit \(t - dep) s after the departure while the lock is under way")
@@ -1319,9 +1485,24 @@ for run in 0..<runs {
                 if hidden && !windows { violated("I11", "run \(run): the pointer hidden with the black down (\(event)) at \(t)") }
                 if hidden == pointerGlue { violated("I11", "run \(run): the pointer told \(hidden) twice (\(event)) at \(t)") }
                 pointerGlue = hidden
+                if hidden { looksInRow = 0 }
+            case .renewPointer:
+                renewals += 1
+                // I13: only while the glue has the pointer hidden, and only from a renewal's event.
+                if !pointerGlue { violated("I13", "run \(run): the pointer renewed while not hidden (\(event)) at \(t)") }
+                if !event.hasPrefix("renew") { violated("I13", "run \(run): a renewal from \(event) at \(t)") }
             case .hint, .look:
                 break
             case .line(let l):
+                // I13: each renewal's line once per cause and read in a raise, and the line that it still shows once.
+                if let key = renewalLines[l] {
+                    if !saidRenewals.insert(key).inserted { violated("I13", "run \(run): \(key)'s line said twice in a raise at \(t)") }
+                }
+                if l == W.pointerStillShows {
+                    stillShows += 1
+                    if saidStill { violated("I13", "run \(run): that it still shows said twice in a raise at \(t)") }
+                    saidStill = true
+                }
                 if l == W.takenBack { takenBacks += 1 }
                 if l.hasPrefix("Privacy: unlocked from") { deviceUnlocks += 1 }
                 if l == W.lit && event == "tick" { waitsLit += 1 }
@@ -1523,6 +1704,32 @@ for run in 0..<runs {
             screens = rng.below(4) == 0 ? 0 : 1 + rng.below(3)
             apply(d.screens(screens, at: t), from: "screens")
             invariants("screens")
+        case 14, 15:
+            // Rule 15, renewed (run 7): the displays changed, a step, Sill's warp or the look, with what the pointer reads.
+            let cause = DarkenPolicy.PointerCause.allCases[rng.below(4)]
+            let reads: [Bool?] = [true, false, nil]
+            let read = reads[rng.below(3)]
+            let hidden = pointerGlue
+            let a = d.pointerCheck(cause, showing: read)
+            let renewed = a.contains(.renewPointer(cause))
+            // I13: nothing while not hidden; after an event always; at a look only when it reads showing, at most
+            // `lookTries` in a row, the next saying once in a raise that it still shows.
+            if !hidden, !a.isEmpty { violated("I13", "run \(run): \(cause) did \(a) with the pointer not hidden at \(t)") }
+            if hidden, cause != .look, !renewed { violated("I13", "run \(run): \(cause) did not renew (read \(String(describing: read))) at \(t)") }
+            if hidden, cause == .look {
+                if read == true { looksInRow += 1 } else { looksInRow = 0 }
+                let should = read == true && looksInRow <= D.lookTries
+                if renewed != should {
+                    violated("I13", "run \(run): the look renewed \(renewed) with read \(String(describing: read)), \(looksInRow) in a row, at \(t)")
+                }
+                let still = read == true && looksInRow == D.lookTries + 1 && !saidStill
+                if a.contains(.line(W.pointerStillShows)) != still {
+                    violated("I13", "run \(run): that it still shows \(!still) after \(looksInRow) looks in a row at \(t)")
+                }
+                if renewed { lookRenewals += 1 }
+            }
+            apply(a, from: "renew " + cause.rawValue)
+            invariants("renew")
         case 13:
             if rng.below(30) == 0 {
                 quit = true
@@ -1537,7 +1744,7 @@ for run in 0..<runs {
         if nextTick == nil, d.pending || p.pending { nextTick = t + D.tick }
     }
 }
-for name in ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10", "I11", "I12"] {
+for name in ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10", "I11", "I12", "I13"] {
     check(violations[name] == nil, "\(runs) random sessions hold \(name)" + (violations[name].map { ": \($0) violations, e.g. \(firstViolation[name]!)" } ?? ""))
 }
 check(raises > 10_000 && lifts > 10_000 && keyLocks > 1_000 && holds > 100 && takenBacks > 500 && deviceUnlocks > 100 && waitsLit > 1_000 && fallbackRuns > 1_000,
@@ -1549,6 +1756,8 @@ check(holdsBegun > 100 && onlyAwayHolds > 20 && visitsAtHomeLetGo > 100 && onlyA
       + "\(displayOnLocks) locks with the display left on")
 check(pointerHides > 2_000 && keyLights > 100,
       "and run 6's: \(pointerHides) pointers hidden, \(keyLights) keys or clicks in a wait with no lock to follow, each lighting the screen")
+check(renewals > 2_000 && lookRenewals > 300 && stillShows > 5,
+      "and run 7's: \(renewals) renewals of the pointer's hide, \(lookRenewals) of them at a look, \(stillShows) lines that it still shows")
 
 print("darken: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

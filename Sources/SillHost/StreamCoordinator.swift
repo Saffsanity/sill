@@ -494,7 +494,11 @@ package final class StreamCoordinator {
         // A held key repeats (KeyRepeat) only while its device is heard from: a network can hold the
         // key's up back for seconds before the device is given up.
         injector.heardFrom = { [server] id in server.lastHeard(from: id) }
-        stage.onWarp = { [pointer] in pointer.sillMoved() }
+        stage.onWarp = { [pointer, darken] in
+            pointer.sillMoved()
+            // Darken this Mac's screen (rule 15, renewed): on the turn after the warp, the pointer's hide made again.
+            Task { @MainActor in darken.warped() }
+        }
         // A locked Mac (LockPolicy, docs/locked-mac-plan.md): SessionLock's gate is what the server drops
         // by on its own queue, and what each part that reads or posts on this Mac's behalf asks first,
         // whatever the main actor is doing. Its witnesses start now, before any door opens: until their
@@ -2358,6 +2362,10 @@ package final class StreamCoordinator {
         let name = Self.displayName(next)
         print("Desktop: display \(DesktopDisplays.number(of: next.id, in: candidates) ?? 0) of \(candidates.count) (\(name)), asked by \(who).")
         Stats.shared.bump("desk.next")
+        // Darken this Mac's screen (rule 15, renewed): a step, and Sill's warp of the pointer to its stop below, can let
+        // macOS show the pointer over the black; once the step is done, its hide is made again (nothing unless Sill has
+        // the pointer hidden; a test host's step, which warps nothing, too).
+        defer { darken.stepped() }
         await select(.desktop)
         guard !shuttingDown else { return }
         let streamed = active == .desktop

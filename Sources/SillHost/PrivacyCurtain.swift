@@ -60,6 +60,12 @@ final class WindowCurtain: Curtain {
         if hidden, raised { hider.hide() } else { hider.show() }
     }
 
+    func renewPointer(_ cause: DarkenPolicy.PointerCause) {
+        if raised { hider.renew(cause) }
+    }
+
+    func pointerShowing() -> Bool? { hider.showing() }
+
     func hint(_ hint: DarkenPolicy.Hint, for seconds: Double) {
         guard raised else { return }
         self.hint = hint
@@ -199,6 +205,17 @@ package final class CurtainView: NSView {
 /// Missing calls or a refusal: the pointer stays visible, darkening goes on, and the log says so once. Sill.app's alone
 /// (WindowCurtain): a test host or the bare binary never makes one, and their dry run (DryCurtain) only says what it would
 /// do. Never tried on an agent's Mac: Noah's trial is the first.
+///
+/// Made again while hidden (`renew`, run 7; Noah, 2026-11-26: the pointer showed on the black after his iPhone stepped to
+/// a Virtual Desktop and back): the rule says when (DarkenPolicy.pointerCheck: after the displays changed, a step, Sill's
+/// warp, or a look that reads it as showing), and this does it: the property set again, then a show and a hide back to
+/// back in the same turn, so the window server applies the hide afresh on every display (its count, which never goes
+/// below zero, passes zero and is back at one: one hide still outstanding, which the lift's show ends). CoreGraphics'
+/// CGDisplayHideCursor and CGDisplayShowCursor always return success on macOS 27.2.1 (SkyLight's SLDisplayHideCursor and
+/// SLDisplayShowCursor end with `mov w0, #0x0`, `dyld_info -disassemble`), so a refusal never shows in them: only the
+/// property's answer and the read (`showing`, CGCursorIsVisible) tell. The read is the window server's own shared state
+/// (SkyLight's SLCursorIsVisible reads the CGSScoreboard, no connection, no message), the same for every app: not
+/// Sill's own count; it reads hidden while the pointer is obscured by typing too.
 @MainActor
 final class PointerHider {
     /// Sill's own hide is outstanding (one at most).
@@ -206,6 +223,7 @@ final class PointerHider {
     /// Each failure is said once a run.
     private var saidUnavailable = false
     private var saidRefused = false
+    private var saidNoLook = false
 
     /// Hides the pointer now, once: the property first, then the hide; a hide that fails takes the property back.
     func hide() {
@@ -227,6 +245,26 @@ final class PointerHider {
         hidden = true
         Stats.shared.bump("priv.pointerHide")
         print(DarkenPolicy.Words.pointerHidden)
+        if PointerCalls.isVisible == nil, !saidNoLook { saidNoLook = true; print(DarkenPolicy.Words.pointerNoLook) }
+    }
+
+    /// Rule 15, renewed: while Sill's hide is outstanding, the property set again, then a show and a hide back to back,
+    /// now. Nothing if Sill has not hidden it; nothing but the refusal's line (once a run) if macOS refuses the property,
+    /// so a show never goes out that no hide can follow. Counted by its cause.
+    func renew(_ cause: DarkenPolicy.PointerCause) {
+        guard hidden, let calls = PointerCalls.found else { return }
+        let connection = calls.main()
+        let set = calls.set(connection, connection, PointerCalls.property as CFString, kCFBooleanTrue)
+        guard set == 0 else { refused(set); return }
+        _ = CGDisplayShowCursor(CGMainDisplayID())
+        _ = CGDisplayHideCursor(CGMainDisplayID())
+        Stats.shared.bump(cause.statsKey)
+    }
+
+    /// Whether the pointer reads as showing now (CGCursorIsVisible: the window server's shared state, no message); nil
+    /// when this macOS has no such call.
+    func showing() -> Bool? {
+        PointerCalls.isVisible.map { $0() != 0 }
     }
 
     /// Shows it again now, if Sill hid it: the show (tried twice), then the property back. A show that fails leaves the
@@ -291,6 +329,27 @@ enum PointerCalls {
             guard let handle = dlopen(place.image, RTLD_LAZY | RTLD_NOLOAD) ?? dlopen(place.image, RTLD_LAZY),
                   let main = dlsym(handle, place.main), let set = dlsym(handle, place.set) else { continue }
             return (unsafeBitCast(main, to: MainConnectionID.self), unsafeBitCast(set, to: SetConnectionProperty.self))
+        }
+        return nil
+    }()
+
+    /// `boolean_t CGCursorIsVisible(void)`: public, deprecated since macOS 10.9 ("No longer supported") and still there
+    /// in 27.2.1 (CoreGraphics re-exports SkyLight's SLCursorIsVisible), looked up by name rather than called by name, so
+    /// the build has no deprecation warning and a macOS without it gives nil (no look). Read only: it never hides or
+    /// shows anything.
+    typealias CursorIsVisible = @convention(c) () -> Int32
+
+    /// Where it is looked for, in order, and its name there.
+    static let readPlaces: [(image: String, name: String)] = [
+        ("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", "CGCursorIsVisible"),
+        ("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", "SLCursorIsVisible"),
+    ]
+
+    static let isVisible: CursorIsVisible? = {
+        for place in readPlaces {
+            guard let handle = dlopen(place.image, RTLD_LAZY | RTLD_NOLOAD) ?? dlopen(place.image, RTLD_LAZY),
+                  let read = dlsym(handle, place.name) else { continue }
+            return unsafeBitCast(read, to: CursorIsVisible.self)
         }
         return nil
     }()

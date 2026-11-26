@@ -33,8 +33,17 @@ and is killed at the end. One verdict per rule:
   keyleft   a key 1 s after the last device left: lit at once, nothing locks; a device back after it: dark again at
             once; a device back inside the next wait: dark goes on; with --lock-after-session a key in the wait locks
             at once, as before, and lights nothing
+  renew     rule 15 renewed (run 7): while dark with the pointer hidden, the test host's screens change (`displays N` in
+            its input file) and a test client steps the Desktop between SILL_TEST_DISPLAYS' two stops (kind 47): the
+            hide made again after each, whatever the dry run reads, each cause's line once per read; with `pointer
+            showing` the look hides it again twice and then says once that it still shows; nothing with the pointer
+            shown (--darken-pointer=show), and nothing after the black comes down
 
-    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|switch|pointer|waits|keyleft|all]
+Every time is counted from the host's first line on its stdout (run 7): the bare SillMenuBar binary's -SillSetAfter and
+-SillQuitAfter count from its launch, which can come 1.6 s after the spawn while other work runs on this Mac (2026-11-25:
+three verdicts of `switch` failed for that alone), and a test's own writes and clients wait on the same clock.
+
+    Scripts/privacy-check/darken.py OUT [order|home|away|wait|keys|pass|takeback|hold|quit|watchdog|switch|pointer|waits|keyleft|renew|all]
 
 Needs .build/release/SillHost (and .build/release/SillMenuBar for switch). Exits 1 when a verdict fails."""
 import os, re, signal, subprocess, sys, threading, time
@@ -54,8 +63,12 @@ HINT_PASS = "Privacy (dry run): would show “This Mac is in use from another de
 DRY_CURTAIN = ("Privacy (dry run): would darken", "Privacy (dry run): would light", "Privacy (dry run): would show")
 DRY_START = " A dry run here (only Sill.app itself darkens a Mac’s screen): it says what it would do."
 LOCK_DRY = "Privacy (dry run): would lock this Mac now; nothing is locked."
-POINTER_HIDE = "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found); it stays visible."
-POINTER_ANY_HIDE = "Privacy (dry run): would hide this Mac’s pointer"
+POINTER_HIDE = ("Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found, and CGCursorIsVisible "
+                "to look at it); it stays visible.")
+POINTER_ANY_HIDE = "Privacy (dry run): would hide this Mac’s pointer ("
+POINTER_RENEW = "Privacy (dry run): would hide this Mac’s pointer again"
+STOPS = "Built-in Retina Display:1512x982@2:60:0,0;Virtual Desktop:1920x1080@2:60:1512,0"
+DISPLAYS_SETTLE = 0.25   # DarkenPolicy.displaysSettle
 POINTER_SHOW = "Privacy (dry run): would show this Mac’s pointer again; it was never hidden."
 LIT_KEY = "Privacy: someone pressed a key or clicked on this Mac after the last device left; its screen is lit again, and nothing locks."
 WATCHDOG_DRY = ("Privacy (dry run): Sill’s main thread hasn’t answered for 10 s while this Mac’s screen was dark; would quit Sill and open "
@@ -75,14 +88,21 @@ def write(path, text):
 
 class Host:
     """One synthetic host: its stdout's lines with the time each was read, its port. `binary`: SillHost (the CLI), or
-    the bare SillMenuBar binary, whose port is the one its "Status: Test Pattern Mode" line names (`port_line`)."""
+    the bare SillMenuBar binary, whose port is the one its "Status: Test Pattern Mode" line names (`port_line`). Its clock
+    (`start`: every line's time, and `at`) starts at its first line, the host's own start as it says it (run 7: the bare
+    binary's -SillSetAfter counts from its launch, up to 1.6 s after the spawn on a busy Mac); `lag` is the spawn's lead."""
     def __init__(self, out, label, env, args=(), binary=HOST, port_line=None):
         self.lines, self.out, self.label = [], out, label
         e = dict(os.environ); e.update(BASE_ENV); e.update(env)
-        self.start = time.time()
+        self.spawned = time.time()
+        self.start = None
+        self.said = threading.Event()
         self.p = subprocess.Popen(["nice", "-n", "10", binary, "--synthetic", *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   env=e, start_new_session=True, text=True, bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
+        # The first line, within 15 s, else the spawn (a host that says nothing fails its verdicts anyway).
+        if not self.said.wait(15): self.start = self.spawned
+        self.lag = self.start - self.spawned
         self.port = None
         for _ in range(100):
             time.sleep(0.1)
@@ -97,7 +117,9 @@ class Host:
 
     def _read(self):
         for line in self.p.stdout:
-            self.lines.append((time.time() - self.start, line.rstrip("\n")))
+            now = time.time()
+            if self.start is None: self.start = now; self.said.set()
+            self.lines.append((now - self.start, line.rstrip("\n")))
 
     def at(self, t):
         d = self.start + t - time.time()
@@ -110,6 +132,7 @@ class Host:
             except subprocess.TimeoutExpired: os.killpg(self.p.pid, signal.SIGKILL); self.p.wait()
         time.sleep(0.2)
         with open(os.path.join(self.out, self.label + ".host.log"), "w") as f:
+            f.write(f"# times from the host's first line, {self.lag:.3f} s after the spawn\n")
             for t, l in self.lines: f.write(f"{t:8.3f} {l}\n")
 
     def find(self, text, after=0.0):
@@ -451,9 +474,83 @@ def case_keyleft(out):
     verdict(bool(gleft) and "and then while a lock is under way" in gleft[0][2], "the departure's line says a lock may follow")
 
 
+def renew_line(cause, showing):
+    """DarkenPolicy.Words.pointerRenewed: the line Sill.app and the dry run say once per cause and read in a raise."""
+    when = {"displays": "after the displays changed", "step": "after a device stepped to another display",
+            "warp": "after Sill moved it to another display", "look": "on the black"}[cause]
+    return (f"Privacy: this Mac’s pointer was showing again {when}; hidden again." if showing
+            else f"Privacy: this Mac’s pointer hidden again {when}, to be sure.")
+
+
+def stats_total(h, key):
+    """The sum of `key`'s counts in the host's [1s] lines."""
+    return sum(int(m.group(1)) for _, _, l in h.find("[1s]") for m in [re.search(r"\b" + re.escape(key) + r" (\d+)", l)] if m)
+
+
+def case_renew(out):
+    print("== renew: the pointer's hide made again while dark (rule 15, run 7): the displays changed, a step, the look", flush=True)
+    f = os.path.join(out, "renew.input")
+    h = Host(out, "renew", {"SILL_TEST_PRIVACY_INPUT": f, "SILL_TEST_DISPLAYS": STOPS}, ["--darken=any"])
+    c = client(h, "renew", 11, 1.0, ["--next-display@2", "--next-display@4.5", "--next-display@7.5"])
+    h.at(2.0); write(f, "displays 2")
+    h.at(4.0); write(f, "pointer showing")
+    h.at(6.5); write(f, "displays 1")
+    h.at(7.8); write(f, "pointer hidden")
+    c.join(); h.at(19.5); h.stop()
+    print(f"   (the host's first line {h.lag:.2f} s after its spawn; every time below counts from it)", flush=True)
+    _, hide_i, _ = h.first(POINTER_ANY_HIDE)
+    said = [x for x in h.find("Privacy: this Mac’s pointer ") if "hidden again" in x[2]]
+    verdict(hide_i is not None and bool(said) and all(i > hide_i for _, i, _ in said),
+            f"every renewal after the pointer's hide ({len(said)} lines, the hide at line {hide_i})")
+    steps = [x for x in h.find("Desktop: display ") if " of 2 (" in x[2]]
+    verdict(len(steps) == 3, f"three steps between the two stops reached the host: {[round(t, 2) for t, _, _ in steps]}")
+    t2, _, _ = h.first("Test privacy: this Mac’s screens to cover are now 2")
+    d1 = h.find(renew_line("displays", False))
+    verdict(t2 is not None and len(d1) == 1 and DISPLAYS_SETTLE - 0.05 <= d1[0][0] - t2 < DISPLAYS_SETTLE + 1.0,
+            f"the displays changed (it reads nothing): hidden again {round(d1[0][0] - t2, 2) if d1 and t2 else None} s later, once")
+    s1 = h.find(renew_line("step", False))
+    verdict(len(steps) >= 1 and len(s1) == 1 and 0 <= s1[0][0] - steps[0][0] < 1.0,
+            f"the first step: hidden again {round(s1[0][0] - steps[0][0], 2) if s1 and steps else None} s after it, its line once")
+    ts, _, _ = h.first("Test privacy: this Mac’s pointer reads as showing from now on")
+    look = h.find(renew_line("look", True))
+    verdict(ts is not None and len(look) == 1 and 0 <= look[0][0] - ts <= 1.5,
+            f"reading as showing: the look hides it again within a beat ({round(look[0][0] - ts, 2) if look and ts else None} s), its line once")
+    still = h.find("Privacy: this Mac’s pointer still showed after Sill hid it again twice; it may stay visible on the black.")
+    verdict(len(still) == 1 and bool(look) and 1.6 <= still[0][0] - look[0][0] <= 2.6,
+            f"two looks later, once, that it still shows ({round(still[0][0] - look[0][0], 2) if still and look else None} s after)")
+    s2 = h.find(renew_line("step", True))
+    verdict(len(steps) >= 2 and len(s2) == 1 and 0 <= s2[0][0] - steps[1][0] < 1.0,
+            "the second step while it reads showing: its line says it was showing")
+    t1, _, _ = h.first("Test privacy: this Mac’s screens to cover are now 1")
+    d2 = h.find(renew_line("displays", True))
+    verdict(t1 is not None and len(d2) == 1 and DISPLAYS_SETTLE - 0.05 <= d2[0][0] - t1 < DISPLAYS_SETTLE + 1.0,
+            "the displays changed again while it reads showing: its line says it was showing")
+    dry = {cause: h.find(f"{POINTER_RENEW} {when} (a show and a hide at once); it stays visible.")
+           for cause, when in (("displays", "after the displays changed"), ("step", "after a device stepped to another display"),
+                               ("look", "on the black"), ("warp", "after Sill moved it to another display"))}
+    counts = {k: len(v) for k, v in dry.items()}
+    verdict(counts == {"displays": 2, "step": 3, "look": 2, "warp": 0},
+            f"the dry run would make it again twice for the displays, at each of the three steps (the third's line said already), "
+            f"twice at the look and never for a warp (a test host warps nothing): {counts}")
+    keys = {k: stats_total(h, "priv.renew" + k.capitalize()) for k in ("displays", "step", "look", "warp")}
+    verdict(keys == counts, f"each counted by its cause's key in the stats lines: {keys}")
+    lit, lit_i, _ = h.first(LIGHT)
+    _, show_i, _ = h.first(POINTER_SHOW)
+    late = [x for x in h.find("Privacy (dry run): would hide this Mac’s pointer") if lit_i is not None and x[1] > lit_i]
+    verdict(lit_i is not None and show_i is not None and show_i < lit_i and not late,
+            f"lit after the last device left, the pointer shown before it, nothing made again after ({len(late)} lines after)")
+    v = Host(out, "renew-off", {"SILL_TEST_PRIVACY_INPUT": f + "-off", "SILL_TEST_DISPLAYS": STOPS}, ["--darken=any", "--darken-pointer=show"])
+    cv = client(v, "renew-off", 5, 1.0, ["--next-display@2"])
+    v.at(2.0); write(f + "-off", "displays 2")
+    cv.join(); v.at(7.5); v.stop()
+    verdict(bool(v.find(DARK)) and len([x for x in v.find("Desktop: display ") if " of 2 (" in x[2]]) == 1 and bool(v.find("Test privacy: this Mac’s screens to cover are now 2"))
+            and not v.find("Privacy (dry run): would hide this Mac’s pointer") and not [x for x in v.find("Privacy: this Mac’s pointer ")],
+            "with Hide the pointer too off: dark, a step and a display change, and the pointer never touched")
+
+
 CASES = {"order": case_order, "home": case_home, "away": case_away, "wait": case_wait, "keys": case_keys, "pass": case_pass,
          "takeback": case_takeback, "hold": case_hold, "quit": case_quit, "watchdog": case_watchdog, "switch": case_switch,
-         "pointer": case_pointer, "waits": case_waits, "keyleft": case_keyleft}
+         "pointer": case_pointer, "waits": case_waits, "keyleft": case_keyleft, "renew": case_renew}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2: raise SystemExit(__doc__)

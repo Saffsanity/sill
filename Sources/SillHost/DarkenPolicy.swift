@@ -62,6 +62,14 @@ import StreamProtocol
 ///   just plugged in is about to be, and Sill's own displays are seen by nobody at the Mac), and the pointer whenever
 ///   they are to use the Mac (every screen lit, the lock screen, another user). A device's own pointer is drawn from
 ///   where the Mac's is and the shape macOS reports (kinds 26 and 14), neither of which the hide touches.
+/// - **The pointer's hide made again** (rule 15, `pointerCheck`, run 7; Noah, 2026-11-26: the pointer showed on the
+///   black after his iPhone stepped to a Virtual Desktop Sill made and back to the Mac's own display): while Sill has it
+///   hidden, its hide is made again (`renewPointer`: a show and a hide in one turn) after the displays changed (once they
+///   have been still `displaysSettle`), after a device stepped the Desktop to another stop and after Sill moved the
+///   pointer to another display, whatever it reads: the window server keeps the hide per display too, and its shared
+///   state (CGCursorIsVisible) can say hidden while one display shows it. At a look once a `beat` while dark, only when it
+///   reads as showing (so the show cannot make a hidden pointer flash), at most `lookTries` looks in a row; then once
+///   that it still shows. Each renewal counted by its cause, and its line said once per cause and read in each raise.
 /// - **Only Sill.app itself darkens** (rule 14, `darkensForReal`: the lock's rule, PrivacyPolicy.locksForReal). The
 ///   CLI, the bare SillMenuBar binary and every test host decide the same and act on nothing: their glue says what it
 ///   would do (the "(dry run)" lines), draws nothing, watches no input, locks nothing and never quits for the watchdog.
@@ -101,6 +109,14 @@ package enum DarkenPolicy {
     static let tick: Double = 0.5
     /// Rule 4: the black windows sit under macOS's lock screen (settled by G0: `windowLevel` fits under it).
     package static let staysUnderLockScreen = true
+    /// The main actor's beat while the black is up: the watchdog's (rule 12) and the pointer's look (rule 15).
+    package static let beat: Double = 1
+    /// Rule 15, renewed: how long the displays stay still before the pointer's hide is made again after they changed (a
+    /// Virtual Desktop's make is several changes over about 0.7 s: one renewal after the last of them).
+    package static let displaysSettle: Double = 0.25
+    /// Rule 15, renewed: the looks in a row that hide the pointer again when it reads as showing; the next says once that
+    /// it still shows (macOS not hiding it), and the look rests until it reads hidden again or the pointer is hidden anew.
+    package static let lookTries = 2
 
     // MARK: The black windows (the probe G0, 2026-11-23, on Noah's Mac14,9 with macOS 27.2.1)
 
@@ -226,6 +242,39 @@ package enum DarkenPolicy {
         case left(Int)
     }
 
+    /// Rule 15, renewed (run 7): what may have let macOS show the pointer again while Sill has it hidden.
+    package enum PointerCause: String, CaseIterable, Hashable, Sendable {
+        /// The displays changed (one added, removed or given a new mode: Sill's own Virtual Desktop or stage display, a
+        /// monitor, anything), once they have been still `displaysSettle` (Sill.app's DisplayChanges; the black laid
+        /// again before).
+        case displays
+        /// A device stepped the Desktop to another stop (kind 47), and Sill moved the pointer there (never a test host).
+        case step
+        /// Sill moved the pointer to another display otherwise: the stage's warp home from its display.
+        case warp
+        /// The look, once a `beat` while dark: the pointer read as showing.
+        case look
+
+        /// When, in the log's words.
+        package var when: String {
+            switch self {
+            case .displays: return "after the displays changed"
+            case .step: return "after a device stepped to another display"
+            case .warp: return "after Sill moved it to another display"
+            case .look: return "on the black"
+            }
+        }
+
+        /// Its statistics key (`Stats`): every renewal counted by its cause.
+        package var statsKey: String { "priv.renew" + rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    }
+
+    /// A renewal's line said in this raise: its cause, and whether the pointer read as showing.
+    struct Renewal: Hashable, Sendable {
+        var cause: PointerCause
+        var showing: Bool
+    }
+
     enum Action: Equatable, Sendable {
         /// The black windows up on every screen to cover (`screens`), with the hint; at a connect, before anything else.
         case raise
@@ -234,6 +283,9 @@ package enum DarkenPolicy {
         /// Rule 15: this Mac's pointer hidden (true), only once the black is up; or shown again (false), before it comes
         /// down, at the lock screen and at another user's session.
         case pointer(hidden: Bool)
+        /// Rule 15, renewed: the pointer Sill has hidden, hidden again now (a show and a hide in one turn: one hide still
+        /// outstanding), for this cause.
+        case renewPointer(PointerCause)
         /// The hint's two lines on each dark screen until `until` (the glue fades them then).
         case hint(Hint, until: Double)
         /// Lock this Mac now (ScreenLocker; a test host only says it would).
@@ -277,6 +329,12 @@ package enum DarkenPolicy {
         private(set) var up = false
         /// The pointer is hidden (the last `pointer` said).
         private(set) var pointerHidden = false
+        /// Rule 15, renewed: the renewals' lines said since the black last came down (each cause once for each read).
+        private(set) var renewalsSaid: Set<Renewal> = []
+        /// Rule 15, renewed: the looks in a row that read the pointer as showing since it was last hidden or read hidden.
+        private(set) var looksShowing = 0
+        /// Rule 15, renewed: the line that it still shows after `lookTries` looks was said since the black last came down.
+        private(set) var saidStillShows = false
         /// When the last session that darkens left, while its wait runs (rule 6).
         private(set) var waitingSince: Double?
         /// That departure left no session at all with the lock's switch on: the lock's wait started with it.
@@ -438,6 +496,34 @@ package enum DarkenPolicy {
             return out + settle(at: now)
         }
 
+        /// Rule 15, renewed (run 7): `cause` may have let macOS show the pointer again. `showing`: whether it reads as
+        /// showing now (CGCursorIsVisible: the window server's own state, the same for every app), nil with nothing to
+        /// read it (the dry run). Only while Sill has it hidden (`pointerHidden`, which follows `shouldHidePointer` after
+        /// every event: the black up on an unlocked Mac with Hide the pointer too on). After the displays changed, a step
+        /// or Sill's warp, its hide is made again whatever it reads: the window server keeps the hide per display too, and
+        /// its shared state can say hidden while one display shows it. At the look, only when it reads as showing, so the
+        /// renewal's show cannot make a hidden pointer flash; at most `lookTries` looks in a row, then once that it still
+        /// shows, the look resting until it reads hidden or the pointer is hidden anew. Each renewal's line once per cause
+        /// and read until the black comes down (`renewalsSaid`), after the renewal itself.
+        mutating func pointerCheck(_ cause: PointerCause, showing: Bool?) -> [Action] {
+            guard pointerHidden else { return [] }
+            let shows = showing == true
+            if cause == .look {
+                guard shows else { looksShowing = 0; return [] }
+                looksShowing += 1
+                if looksShowing > DarkenPolicy.lookTries {
+                    guard !saidStillShows else { return [] }
+                    saidStillShows = true
+                    return [.line(Words.pointerStillShows)]
+                }
+            }
+            var out: [Action] = [.renewPointer(cause)]
+            if renewalsSaid.insert(Renewal(cause: cause, showing: shows)).inserted {
+                out.append(.line(Words.pointerRenewed(cause, showing: shows)))
+            }
+            return out
+        }
+
         /// A paired device's input was posted at the locked screen (LockPolicy took it): rule 8's witness.
         mutating func deviceInputAtLockedScreen(_ name: String, at now: Double) {
             guard mac == .screenLocked else { return }
@@ -526,13 +612,17 @@ package enum DarkenPolicy {
             up = want
             if want { return [.raise, .line(Words.dark(scope, screens: screens))] + showHint(at: now) + pointer() }
             hintUntil = nil
+            // Rule 15, renewed: the next raise says each renewal's line again.
+            renewalsSaid = []
+            saidStillShows = false
             return pointer() + [.lift]
         }
 
-        /// Rule 15: the pointer follows `shouldHidePointer`.
+        /// Rule 15: the pointer follows `shouldHidePointer`. Hidden anew, the look starts counting again.
         private mutating func pointer() -> [Action] {
             let want = shouldHidePointer
             guard want != pointerHidden else { return [] }
+            if want { looksShowing = 0 }
             pointerHidden = want
             return [.pointer(hidden: want)]
         }
@@ -578,7 +668,9 @@ package enum DarkenPolicy {
 
     /// What a test host takes (DoorPolicy.isTestHost; TestHooks says elsewhere that each is ignored):
     /// SILL_TEST_PRIVACY_INPUT=<file> (the Mac's own input, in place of the observer: a test host reads `key`, `click`
-    /// or `move`, with ` tagged` after it for one Sill posted, once from the file and removes it),
+    /// or `move`, with ` tagged` after it for one Sill posted, once from the file and removes it, only while dark; and
+    /// for rule 15's renewal (run 7) `displays N`, its screens to cover now N as a display change tells Sill.app, and
+    /// `pointer showing` or `pointer hidden`, what its dry run reads of the pointer from then on: `testWord`),
     /// SILL_TEST_PRIVACY_LOG=1 (the dry curtain's lines and the connect's display wake stamped with the host's clock, so
     /// rule 5's order shows in the log) and SILL_TEST_PRIVACY_STALL=<seconds> (1 to 30: the main thread stops once for
     /// that long a second after the black first goes up, so the watchdog's dry run says what it would do). The wait and
@@ -626,6 +718,29 @@ package enum DarkenPolicy {
         case "key": return (.key, tagged)
         case "click": return (.click, tagged)
         case "move": return (.move, tagged)
+        default: return nil
+        }
+    }
+
+    /// A test host's input file's word, all it takes (SILL_TEST_PRIVACY_INPUT): this Mac's own input (`testInput`), or
+    /// for rule 15's renewal (run 7) its screens to cover now (`displays N`, 0 to 16, as a display change tells
+    /// Sill.app) or what its dry run reads of the pointer from then on (`pointer showing`, `pointer hidden`).
+    enum TestWord: Equatable, Sendable {
+        case input(Local, tagged: Bool)
+        case displays(Int)
+        case pointer(showing: Bool)
+    }
+
+    static func testWord(_ word: String) -> TestWord? {
+        if let input = testInput(word) { return .input(input.0, tagged: input.tagged) }
+        let parts = word.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard parts.count == 2 else { return nil }
+        switch (parts[0], parts[1]) {
+        case ("displays", let n):
+            guard let count = Int(n), (0...16).contains(count) else { return nil }
+            return .displays(count)
+        case ("pointer", "showing"): return .pointer(showing: true)
+        case ("pointer", "hidden"): return .pointer(showing: false)
         default: return nil
         }
     }
@@ -734,6 +849,16 @@ package enum DarkenPolicy {
         package static func pointerShowFailed(_ code: Int) -> String {
             "Privacy: couldn’t show this Mac’s pointer again (error \(code)); it comes back when Sill quits."
         }
+        /// Rule 15, renewed (run 7): the pointer's hide made again, once per cause and read in each raise. `showing`: it
+        /// read as showing just before (CGCursorIsVisible); otherwise it read as hidden, or nothing reads it.
+        package static func pointerRenewed(_ cause: PointerCause, showing: Bool) -> String {
+            showing ? "Privacy: this Mac’s pointer was showing again \(cause.when); hidden again."
+                    : "Privacy: this Mac’s pointer hidden again \(cause.when), to be sure."
+        }
+        /// The look found it showing after `lookTries` renewals in a row: once in a raise.
+        package static let pointerStillShows = "Privacy: this Mac’s pointer still showed after Sill hid it again twice; it may stay visible on the black."
+        /// Once per run, at Sill.app's first hide: this macOS has no CGCursorIsVisible, so nothing looks at the pointer.
+        package static let pointerNoLook = "Privacy: this macOS has no CGCursorIsVisible; Sill hides the pointer again only after a display change or a step."
 
         // The dry run (PrivacyScreen's DryCurtain) of everything but Sill.app itself: the CLI, the bare binary, a test host
         package static func dryRaise(_ screens: Int) -> String {
@@ -743,12 +868,18 @@ package enum DarkenPolicy {
         package static func dryHint(_ hint: Hint) -> String {
             "Privacy (dry run): would show “\(hintFirst(hint)) \(hintSecond(hint))”; nothing is drawn."
         }
-        /// `found`: the private calls PointerHider would make are found by name here (looked up, never called).
-        package static func dryPointerHide(found: Bool) -> String {
-            found ? "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found); it stays visible."
-                  : "Privacy (dry run): would leave this Mac’s pointer visible: this macOS has no CGSSetConnectionProperty."
+        /// `found`: the private calls PointerHider would make are found by name here (looked up, never called); `reads`:
+        /// CGCursorIsVisible, which the look reads, too.
+        package static func dryPointerHide(found: Bool, reads: Bool) -> String {
+            guard found else { return "Privacy (dry run): would leave this Mac’s pointer visible: this macOS has no CGSSetConnectionProperty." }
+            return reads ? "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found, and CGCursorIsVisible to look at it); it stays visible."
+                         : "Privacy (dry run): would hide this Mac’s pointer (CGSMainConnectionID and CGSSetConnectionProperty found; no CGCursorIsVisible to look at it); it stays visible."
         }
         package static let dryPointerShow = "Privacy (dry run): would show this Mac’s pointer again; it was never hidden."
+        /// Rule 15, renewed: each renewal of the dry run.
+        package static func dryPointerRenew(_ cause: PointerCause) -> String {
+            "Privacy (dry run): would hide this Mac’s pointer again \(cause.when) (a show and a hide at once); it stays visible."
+        }
         /// The watchdog's dry run (PrivacyWatchdog on everything but Sill.app itself): it says, and the host goes on.
         package static let dryWatchdog = "Privacy (dry run): Sill’s main thread hasn’t answered for \(PrivacyPolicy.Words.number(DarkenPolicy.hangLimit)) s while this Mac’s screen was dark; would quit Sill and open it again; nothing quits."
 
