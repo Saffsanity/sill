@@ -513,3 +513,102 @@ used)"; #323: "as a toggle".
   - *Not verified in run 6*, and why: the pointer's hide on a real screen (no agent may hide this Mac's pointer: Noah's
     steps 1 to 4); that the hide ends with the process (step 3); the shape while hidden (step 1); the hide made again at a
     wake (no test may sleep this Mac: step 9); a deliberate leave told apart (left out: it needs the wire).
+- **Run 7 (2026-11-26): the pointer's hide made again while dark.** Noah tried a test build holding this branch
+  (6d51b2a5) with the Virtual Desktop's branches: "For some reason, the cursor shows on the Mac display when the Mac
+  desktop is selected on iPhone, behavior does not happen when the virtual display is selected. Oddly, this is not the
+  same on iPad, where the cursor never shows as expected." Sill.log: PointerHider hid the pointer once at each connect
+  ("Privacy: this Mac’s pointer is hidden while its screen is dark.", `priv.pointerHide 1`) and showed it once after
+  the last device left; in between it believed it hidden and never hid it again (its only renewal was the wake's). In
+  the iPhone's session (hidden 11:10:40) the iPhone stepped to the Virtual Desktop at 11:10:59, which Sill made (macOS
+  ran the first make at 1x, Sill removed it and made it again at 11:11:03), and back to the Mac's own display at
+  11:11:06, where the pointer showed on the black. The iPad's sessions where he did not see it either looked at the
+  Mac's display before any display was made in that connection, stepped to a Virtual Desktop that already existed, or
+  stayed on it (the pointer then on the virtual display, which nobody at the Mac sees): the order of his steps, not
+  the device, as far as the log can tell. Main 22ab5a3e (#414, #393) merged in first (7949a52c, no conflict).
+  - *What reads the pointer, read and not run* (nothing hidden, shown or moved; sill-handoff's next/privacy-darken/run7).
+    CGCursorIsVisible is still in the SDK (CGRemoteOperation.h, deprecated since 10.9, "No longer supported") and on
+    macOS 27.2.1, where CoreGraphics re-exports SkyLight's SLCursorIsVisible; `dyld_info -disassemble` of SkyLight:
+    SLCursorIsVisible reads two bytes of the window server's shared scoreboard (CGSScoreboard: no connection, no
+    message), so it is the window server's own state, the same in every app, not Sill's own hide count; and
+    SLDisplayHideCursor and SLDisplayShowCursor send SLSHideCursor and SLSShowCursor on the main connection and always
+    return 0, so CGDisplayHideCursor's result can never tell a refusal. A read-only watcher of its own on this Mac
+    (CGCursorIsVisible every 0.25 s from a separate process) saw it go to 0 while someone typed (macOS obscures the
+    pointer while typing): the read sees other apps' doings. SkyLight's strings say the window server also keeps the
+    pointer's hide per display ("FBShmem (shared between IOG and CD): ... cursorShow:%d (cursorHideCount) ...
+    cursorVisState", "Display 0x%08x cursor hidden -> %s", "move_cursor: reset cursor display", "Resetting cursor
+    state", "Unwound cursor hides, kept touch obscure"), so a display added or changed, or the pointer moved to another
+    display, can show it on one display while the shared state still says hidden. The window server's own log of the
+    morning (`log show`) kept only "Cursor disabled: failed set_cursor_surface" errors, at Sill's hide and at the
+    Virtual Desktop's makes as at other times; its debug lines are not kept, so it cannot say which cause it was.
+  - *The rule (rule 15 renewed, DarkenPolicy.pointerCheck and `.renewPointer`).* While Sill has the pointer hidden (the
+    black up on an unlocked Mac with Hide the pointer too on), its hide is made again: (a) once the displays have been
+    still 0.25 s after a change (`displaysSettle`: Sill.app's DisplayChanges, after the black has been laid again; a
+    Virtual Desktop's make is several changes over about 0.7 s, one renewal after the last), (b) after a device stepped
+    the Desktop to another stop (kind 47: a `defer` in StreamCoordinator's nextDesktopDisplay, so after Sill's warp of
+    the pointer there) and after the stage's warp home (VirtualStage's onWarp, on the turn after the warp), and (c) at a
+    look each beat while dark (`beat`, the watchdog's second), only when CGCursorIsVisible reads it as showing, at most
+    twice in a row (`lookTries`), then once "still showed", the look resting until it reads hidden or the pointer is
+    hidden anew. (a) and (b) renew whatever the pointer reads; (c) only on a read of showing.
+  - *How, and why it cannot leave two hides or none (PointerHider.renew).* The property set again, then a show and a
+    hide back to back in the same turn, as at a wake: the window server's count (which never goes below zero) passes
+    zero and is back at one, so one hide is still outstanding and the lift's one show ends it; if the window server had
+    unwound Sill's hides or reset a display's, the show changes nothing and the hide restores it. A second hide on top
+    (two, then one) would never cross zero, and a window server that acts only when the count crosses zero would do
+    nothing with it. A refused property: no show goes out (it could not be followed by a hide), and the refusal's line is
+    said once a run, as before; darkening goes on. And nothing is made again, nor said, while Sill holds no hide of its
+    own (`Curtain.pointerHeld`: PointerHider's `hidden`; in the dry run, the rule said hidden and the calls are found):
+    a hide macOS never made (the calls missing or refused, said once) is never "hidden again" in the log.
+  - *Unconditional at (a) and (b), only when showing at (c): the default for Noah.* The read is the window server's
+    shared state, but it cannot see a display whose own hide was reset, and a display change or a move to another
+    display is exactly when that happens: a renewal there only when it reads as showing would miss the case Noah saw.
+    The look, which runs every second whatever happens, acts only on a pointer that reads as showing, so its show can
+    never make a hidden pointer flash. At (a) and (b) the show and the hide go out back to back in one turn; that the
+    window server applies the pair before it draws a frame is the wake's renewal's assumption too, not measured (no agent
+    may show or hide this Mac's pointer).
+  - *The log, so Noah's next trial tells the causes apart.* Each renewal is counted by its cause (`priv.renewDisplays`,
+    `priv.renewStep`, `priv.renewWarp`, `priv.renewLook` in the `[1s]` lines) and said once per cause and read in a
+    raise, with what the pointer read just before: "Privacy: this Mac’s pointer was showing again after the displays
+    changed; hidden again." (cause 1), "... was showing again after a device stepped to another display; hidden again."
+    (cause 2), "... after Sill moved it to another display ...", "... was showing again on the black; hidden again." (the
+    look: something else let it go), or, when it read hidden, "Privacy: this Mac’s pointer hidden again after the
+    displays changed, to be sure." (and the same for a step and the warp); "Privacy: this Mac’s pointer still showed
+    after Sill hid it again twice; it may stay visible on the black." when the look's two renewals did not take. A
+    macOS without CGCursorIsVisible says once that Sill hides the pointer again only after a display change or a step.
+  - *The dry run and the gate.* DryCurtain says each renewal ("Privacy (dry run): would hide this Mac’s pointer again
+    after the displays changed (a show and a hide at once); it stays visible.") and counts it as Sill.app does; its first
+    hide now names CGCursorIsVisible found by name too. A test host's input file (SILL_TEST_PRIVACY_INPUT) takes
+    `displays N` (its screens to cover now N, as a display change tells Sill.app) and `pointer showing` or `pointer
+    hidden` (what the dry run reads from then on); with SILL_TEST_DISPLAYS a test client's `--next-display@T` steps the
+    Desktop, and the step's renewal follows. darken.py's new case `renew` drives all of it on one host and checks the
+    words, their times, the counts by cause in the dry lines and the stats lines, and a host with the pointer shown that
+    renews nothing.
+  - *darken.py's clock (Part B).* Every case now counts from its host's first line on stdout instead of the spawn
+    (`Host.start`; `lag` is the spawn's lead, written at the top of each `.host.log`): the bare SillMenuBar binary's
+    -SillSetAfter and -SillQuitAfter count from its launch, which on 2026-11-25 came 1.63 s after the spawn while other
+    work ran here, and `switch`'s windows (8.0 to 9.5 s, 13.0 to 14.5 s, the pointer shown before 19.0 s) failed three
+    verdicts for that alone; the test's own writes and clients wait on the same clock, so the CLI cases, whose first
+    line comes a few milliseconds after the spawn, are unchanged.
+  - *Nothing touches the wire:* no message, field or kind is new or changed (Sources/StreamProtocol untouched); no new
+    switch (Hide the pointer too covers the renewal), setting, flag or environment variable.
+  - *Verified in run 7* (sill-handoff's next/privacy-darken/run7/logs): hold 1 (the working tree, 12:00) built it from
+    scratch in 66 s with no new warning (the two warning lines are CaptureProbe's, as on main) and found two slips of my
+    own (the model's reach for "still shows" set too high; a name clash in darken.py), both fixed; hold 2 at c230a9a4
+    (12:04 to 14:07): the darken check, 542 checks, 0 failed (445 before), I1 to I13 holding through 20,000 random
+    sessions that now also change the displays, step, warp and look with random reads (19,130 renewals, 1,901 at a look,
+    10 lines that it still shows); its mutants 211 of 211 caught (4,671 s; 31 new); the privacy check, 217, its mutants
+    87 of 87 (1,421 s); `darken.py OUT all` 72 of 72 (286 s; 60 before), `renew` as in "The dry run and the gate" above
+    (the first change's renewal 0.26 s after it, the first step's 0.00 s after, the look's within its beat at 0.93 s and
+    once that it still showed 2.02 s after that, the counts by cause displays 2, step 3, look 2, warp 0 in the dry lines and
+    the stats lines alike, nothing with Hide the pointer too off) and `switch` seeing its changes at 8.00, 13.00 and 19.00 s
+    from its first line, which came 0.66 s after the spawn; `live.py OUT all` 48 of 48 (183 s); `Tests/checks/run-all.sh`,
+    all 80 pure checks passed (777 s). CI green at c230a9a4 (run 45769130517, Build and check 23 m 58 s). Hold 3 after
+    patch A (`pointerHeld`, 28f10b45; 14:08 to 14:17): the build 57 s, no warning; `darken.py OUT all` 72 of 72 (284 s;
+    `renew` the same, its first renewal 0.25 s after the change, the look's at 0.96 s; `switch` at 8.00, 13.00 and 19.00 s,
+    its first line 0.57 s after the spawn); `live.py OUT all` 48 of 48 (183 s). No pure check compiles PrivacyScreen.swift
+    or PrivacyCurtain.swift, the only files patch A changed, so hold 2's checks, mutants and run-all stand for it.
+  - *Not verified in run 7*, and why: the renewed hide on a real display (no agent may hide or show this Mac's pointer:
+    Noah's step 1 is its first run); whether CGCursorIsVisible sees Sill's own hide (no Sill hid the pointer while the
+    watcher read it: Sill.app was not running after 11:35); whether a show and a hide back to back can flash the pointer
+    for a frame; which cause it was; the stage's warp home as a cause (a test host stages and warps nothing); the pointer
+    moved by hand onto another display while dark (not a cause Sill hears: only the look can catch it, if the read sees
+    it); the previews and H2 (this round's code prints nothing unless the pointer is hidden, and changes no window).
