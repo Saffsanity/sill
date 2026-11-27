@@ -1828,8 +1828,11 @@ struct ConnectScreen: View {
         titleFocused = true
     }
 
-    /// A saved Mac's Add an Address card, from its row's or tile's menu: the rows fold away for it.
+    /// A saved Mac's Add an Address card, from its row's or tile's menu: the rows fold away for it,
+    /// and a tap's ask still waiting for its answer stops (as Add a Mac's unfold does): its reply
+    /// would take this card's place with the home card, and the address being typed with it.
     private func unfoldAddress(_ macID: String) {
+        client.cancelHomeAsk()
         editing = false
         withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) {
             adding = false

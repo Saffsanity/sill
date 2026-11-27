@@ -24,4 +24,15 @@ fails to connect, never a wrong-Mac verdict.
 - The check (`Tests/checks/remote-rules/typedadd.swift`): what is added and refused, one destination
   once (the Mac's list, the typed ones, the remembered in and past their season, the host's case and
   port), never one `keepable` refuses, the cap, another record untouched, the encoding, the refresh
-  after it, the dial's order; 9 mutants in `mutants.py`.
+  after it, the dial's order; 13 mutants in `mutants.py`.
+- **Copilot's review (2026-11-27), all four fixed.** Typed addresses are the person's word, not the
+  Mac's: `RemoteDialPolicy.order` now takes them as `typed`, a group of its own after the Mac's own
+  list and before the remembered ones (they used to be kind-sorted into the Mac's group, so a typed
+  VPN name could run before the Mac's own internet address, against the card's words), and at one
+  only the Mac's own answers and silence count (`classify`, as at a remembered address) and no other
+  saved Mac's key is taken (`successors`), so another key or a stale name there never retires a
+  record nor stops the automatic redials. The harness's mock client no longer writes its made-up
+  record over the device's saved Macs (`addTypedAddress` casts `persistSavedMacs` aside when
+  `mockDiscovery`), and opening the card cancels a tap's ask still in flight (`unfoldAddress`, as
+  Add a Mac's unfold does), whose reply would otherwise take the card's place. New checks for the
+  order and the three rules; four mutants more.

@@ -157,7 +157,9 @@ extension StreamClient {
                                      allowLoopback: Self.keepsLoopback, now: Date().timeIntervalSince1970) {
         case .added(let list):
             savedMacs = list
-            persistSavedMacs()
+            // The layout harness's mock: in memory only. The record it holds is made up, and writing
+            // it would replace this device's own saved Macs (and prune their pictures and groups).
+            if !mockDiscovery { persistSavedMacs() }
             #if DEBUG
             print("remote: typed address added to \(name) (\(macID)): \(parsed.text)")
             #endif
@@ -423,13 +425,16 @@ extension StreamClient {
         }
         hostName = name
         status = why == .automatic ? "Reconnecting to \(name) remotely…" : "Connecting to \(name) remotely…"
-        // The Mac's own list and the typed addresses first, then the VPN addresses an earlier list of
-        // its had (its VPN was off while this device connected at home: SavedMac.rememberedAddresses).
-        let candidates = RemoteDialPolicy.order(mac.allAddresses, remembered: SavedMacs.remembered(mac, now: Date().timeIntervalSince1970),
+        // The Mac's own list first, then the addresses typed on this device, then the VPN addresses
+        // an earlier list of its had (its VPN was off while this device connected at home:
+        // SavedMac.rememberedAddresses). Only the Mac's list speaks for the Mac: a handshake with
+        // another key at a typed or remembered address proves nothing, and counts for nothing.
+        let candidates = RemoteDialPolicy.order(mac.addresses, typed: mac.typedAddresses ?? [],
+                                                remembered: SavedMacs.remembered(mac, now: Date().timeIntervalSince1970),
                                                 remotePort: mac.remotePort, lastWorked: mac.lastWorked,
                                                 localIPv4: Self.localIPv4Networks())
         #if DEBUG
-        print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map { $0.remembered ? "\($0.key) (remembered)" : $0.key })")
+        print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map { "\($0.key)\($0.remembered ? " (remembered)" : $0.typed ? " (typed)" : "")" })")
         #endif
         // A Mac set up again (a new key) that this device paired again: at an address that names
         // one machine, its newer record's key may answer for this one, and a handshake completed

@@ -1383,12 +1383,15 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   `SavedMacs.addingTyped`, pure; `StreamClient.addTypedAddress`, `AddressCard`). A saved Mac's menu
   offers **Add an Address…**: one field, no code — the dial stays pinned to the record's key, so a
   wrong address or another machine there only fails to connect (never a wrong-Mac verdict: the pin
-  decides). The address is appended to `typedAddresses` and dialed after the Mac's own list, for as
-  long as the record lives (Forget, a pairing with another key in its place, drop it; a kind 18's
-  refresh keeps it). One destination (host at `address.port ?? remotePort`) once: one the record
-  already dials — its own list, another typed one, or a remembered address still within `rememberFor`
-  — is refused, as is one `keepable` refuses (link-local, zone-scoped, loopback in Release). At
-  most `typedCap` (8) typed addresses per Mac, so a list that can only grow never slows the dial.
+  decides). The address is appended to `typedAddresses` and dialed as a group of its own after the
+  Mac's own list, for as long as the record lives (Forget, a pairing with another key in its place,
+  drop it; a kind 18's refresh keeps it). One destination (host at `address.port ?? remotePort`)
+  once: one the record already dials — its own list, another typed one, or a remembered address
+  still within `rememberFor` — is refused, as is one `keepable` refuses (link-local, zone-scoped,
+  loopback in Release). At most `typedCap` (8) typed addresses per Mac, so a list that can only grow
+  never slows the dial. A typed address is spoken of as a remembered one is (§7.5): it is the
+  person's word, not the Mac's, so another key or a name that no longer resolves there counts for
+  nothing, and no other saved Mac's key is taken there.
 - **An unpaired device** decodes kind 18 without verifying it, for display only (the Away from home
   group). Nothing is saved.
 - **Never saved:** link-local, zone-scoped and (in Release) loopback addresses. DEBUG builds keep
@@ -1478,21 +1481,23 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
   4. internet names, internet IPs;
   5. the other LAN addresses (a VPN into the home network).
 
-  The port is `address.port ?? remotePort`. That is the first group: the Mac's list and the typed
-  addresses. The remembered VPN addresses (§7.2) are a second group after it, in the same order
-  among themselves (the address that last worked first among them), never before the Mac's own
-  list, an address in both dialed once in the first (2026-11-11). What that order costs: a
-  remembered address starts a stagger (1 s) after each address of the Mac's list that neither
-  answers nor fails at once (Noah's case: the Wi‑Fi address, then the Tailscale name 1 s later); when
-  the Mac's list answers, none starts; when nothing answers (the Mac asleep), each adds about a
-  second before the dial gives up, never past `wholeDial`.
-- **At a remembered address** (`Candidate.remembered`), which the Mac no longer lists and may be
-  another machine's by now, only the Mac's own answers (our key refused after the pin, a goodbye, a
-  refusal by its door) and silence (no answer; this device's VPN off) count. Another key (-9808), a
-  TLS that is not Sill's, and a name that no longer resolves count for nothing, as another machine
-  at a LAN address: they say nothing about the Mac, and the wrong-Mac verdict would also stop the
-  automatic redials. No other saved Mac's key is taken there either (`successors`), so a stale
-  address never retires a record.
+  The port is `address.port ?? remotePort`. That is the first group: the Mac's own list. The
+  addresses typed on this device (`typedAddresses`, Add an Address…; `Candidate.typed`) are a second
+  group after it (2026-11-27), and the remembered VPN addresses (§7.2) a third, each in the same
+  order among themselves (the address that last worked first among them), never before the Mac's
+  own list, an address in more than one dialed once in the first (2026-11-11). What that order
+  costs: a typed or remembered address starts a stagger (1 s) after each address of the Mac's list
+  that neither answers nor fails at once (Noah's case: the Wi‑Fi address, then the Tailscale name
+  1 s later); when the Mac's list answers, none starts; when nothing answers (the Mac asleep), each
+  adds about a second before the dial gives up, never past `wholeDial`.
+- **At a typed or remembered address** (`Candidate.typed`, `Candidate.remembered`), which the Mac
+  did not list and may be another machine's by now (a typed one is the person's word, not the
+  Mac's), only the Mac's own answers (our key refused after the pin, a goodbye, a refusal by its
+  door) and silence (no answer; this device's VPN off) count. Another key (-9808), a TLS that is
+  not Sill's, and a name that no longer resolves count for nothing, as another machine at a LAN
+  address: they say nothing about the Mac, and the wrong-Mac verdict would also stop the automatic
+  redials. No other saved Mac's key is taken there either (`successors`), so such an address never
+  retires a record.
 - **Timing:**
   - attempts start 1 s apart, or at once when the previous one fails;
   - each has TCP `connectionTimeout` 10 s;

@@ -30,10 +30,11 @@ func typedAdd() {
         MacInfo(macID: id, name: "Mac mini", issuedAt: issued, remoteAccess: true, remotePort: 7455,
                 internet: false, addresses: list)
     }
-    /// The dial a tap on the Remote row makes (StreamClient+Remote.dialSaved).
+    /// The dial a tap on the Remote row makes (StreamClient+Remote.dialSaved): the Mac's own list,
+    /// then the typed addresses, then the remembered ones.
     func dial(_ m: SavedMac, at now: Double) -> [R.Candidate] {
-        R.order(m.allAddresses, remembered: SavedMacs.remembered(m, now: now), remotePort: m.remotePort,
-                lastWorked: m.lastWorked, localIPv4: hotspot)
+        R.order(m.addresses, typed: m.typedAddresses ?? [], remembered: SavedMacs.remembered(m, now: now),
+                remotePort: m.remotePort, lastWorked: m.lastWorked, localIPv4: hotspot)
     }
     func keys(_ cs: [R.Candidate]) -> [String] { cs.map(\.key) }
     /// The destination `addingTyped` compares: host at its effective port.
@@ -59,6 +60,43 @@ func typedAdd() {
     add = SavedMacs.addingTyped(second, to: id, in: list, allowLoopback: false, now: t0)
     check("typed add: a second one goes after the first",
           { if case .added(let l) = add { return l[0].typedAddresses == [forwarded, second] }; return false }())
+
+    // MARK: The dial: after the Mac's own list, and spoken of as a remembered address is
+
+    check("typed add: the dial puts the Mac's own list first and the typed ones after it",
+          keys(dial(list[0], at: t0)) == [key("mac-mini.tail1234.ts.net"), key("192.168.1.20"), key("mac.example.net", 7456)])
+    // The typed VPN name would sort before the Mac's own list as one group (VPN names first); as a
+    // group of its own it never does.
+    var typedList = list
+    typedList[0].typedAddresses = [MacAddress(host: "mac-mini.tail9999.ts.net", kind: MacAddress.vpn, via: "Tailscale"),
+                                   MacAddress(host: "203.0.113.9", kind: MacAddress.internet, via: "")]
+    check("typed add: a typed VPN name stays after every address the Mac lists",
+          keys(dial(typedList[0], at: t0)).suffix(2) == [key("mac-mini.tail9999.ts.net"), key("203.0.113.9")])
+    /// A typed candidate as the dial builds one: marked, and holding an address that may be another
+    /// machine's by now.
+    var typedCandidate = R.Candidate(host: "mac.example.net", port: 7456, kind: MacAddress.internet, via: "")
+    typedCandidate.typed = true
+    check("typed add: the dial's last candidate is the typed one, marked",
+          dial(list[0], at: t0).last.map { $0.typed && !$0.remembered && $0.key == key("mac.example.net", 7456) } == true)
+    // Another key at a typed address may be another machine's: it counts for nothing, as at a
+    // remembered one, and it takes no other saved Mac's key (successors), so it never retires a
+    // record nor stops the automatic redials.
+    check("typed add: another key at a typed address counts for nothing",
+          R.classify(.tls(-9808), candidate: typedCandidate, usedTunnel: false) == nil)
+    check("typed add: a name that no longer resolves there counts for nothing",
+          R.classify(.dns(R.dnsNoSuchName), candidate: typedCandidate, usedTunnel: false) == nil)
+    check("typed add: the Mac's own refusals still count there",
+          R.classify(.tls(-9825), candidate: typedCandidate, usedTunnel: false) == .revoked)
+    let newer = SavedMac(macID: MacID.make(fingerprint: Data(repeating: 7, count: 32)),
+                         fingerprint: Base64URL.encode(Data(repeating: 7, count: 32)), name: "Mac mini",
+                         recognitionKey: Base64URL.encode(Data(repeating: 8, count: 32)), remotePort: 7455,
+                         addresses: [wifi], typedAddresses: nil, infoIssuedAt: 0, bonjourName: nil, lastWorked: nil,
+                         pairedAt: Date(timeIntervalSince1970: t0 + day), method: "qr", lastConnectedAt: nil, lastRoute: nil)
+    check("typed add: no other saved Mac's key is taken at a typed address",
+          R.successors(of: list[0], at: typedCandidate, in: [list[0], newer], allowLoopback: false).isEmpty)
+    let listedCandidate = R.Candidate(host: tsName.host, port: 7455, kind: MacAddress.vpn, via: "Tailscale")
+    check("typed add: at the Mac's own list it still is, as before",
+          !R.successors(of: list[0], at: listedCandidate, in: [list[0], newer], allowLoopback: false).isEmpty)
 
     // MARK: One destination once
 

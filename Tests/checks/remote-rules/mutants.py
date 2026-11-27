@@ -152,6 +152,13 @@ M = [
     (S, "TA a cap of 4", "    static let typedCap = 8\n", "    static let typedCap = 4\n"),
     (S, "TA another record replaced", "        out[i] = next\n", "        out[0] = next\n"),
     (S, "TA the address first, not last", "        typed.append(address)\n", "        typed.insert(address, at: 0)\n"),
+    # Typed addresses as their own group, spoken of as remembered ones are (Copilot's review, 2026-11-27).
+    (R, "TA typed before the Mac's own list", "return (group(addresses, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4) + later)",
+        "return (later + group(addresses, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4))"),
+    (R, "TA typed not marked", "            c.typed = true\n", ""),
+    (R, "TA another key at a typed address counts", "if candidate.remembered || candidate.typed {", "if candidate.remembered {"),
+    (R, "TA typed takes another Mac's key", "guard !candidate.remembered, !candidate.typed else { return [] }",
+        "guard !candidate.remembered else { return [] }"),
 ]
 caught = 0
 for f, name, old, new in M:
