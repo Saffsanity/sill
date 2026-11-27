@@ -993,7 +993,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   a Mac, the session gate at the first window list, the ask, the cable's
   proof-less ok, the proofs sent to a row, how a session at home ends;
   pbxproj A601/F601), `AddMacCard` (the card, the fields, `EscapeKey`; the
-  home card for a row), `CodeScanner` (VisionKit),
+  home card for a row), `AddressCard` (a saved Mac's Add an Address card: an
+  address onto its record without pairing again, `SavedMacs.addingTyped`;
+  pbxproj A0FE/F0FE), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
   swiftc). The Mac's menus (docs/menu-bar-plan.md §7): `MacMenuState` (one

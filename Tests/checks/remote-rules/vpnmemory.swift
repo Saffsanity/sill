@@ -41,7 +41,8 @@ func vpnMemory() {
     func hosts(_ m: SavedMac) -> [String] { (m.rememberedAddresses ?? []).map(\.address.host) }
     func times(_ m: SavedMac) -> [Double] { (m.rememberedAddresses ?? []).map(\.listedAt) }
     func dial(_ m: SavedMac, at now: Double, local: [(address: [UInt8], prefix: Int)]) -> [R.Candidate] {
-        R.order(m.allAddresses, remembered: SavedMacs.remembered(m, now: now), remotePort: m.remotePort, lastWorked: m.lastWorked, localIPv4: local)
+        R.order(m.addresses, typed: m.typedAddresses ?? [], remembered: SavedMacs.remembered(m, now: now),
+                remotePort: m.remotePort, lastWorked: m.lastWorked, localIPv4: local)
     }
     func keys(_ cs: [R.Candidate]) -> [String] { cs.map { $0.remembered ? "\($0.key) r" : $0.key } }
     // RemoteConnector's verdict when every attempt ended as `end` says, and the words remoteDialFailed shows.
@@ -185,16 +186,16 @@ func vpnMemory() {
 
     var both = record([wifi, router], listedAt: t2, remembered: [RememberedAddress(address: tsName, listedAt: t1), RememberedAddress(address: ts4, listedAt: t1)])
     both.typedAddresses = [MacAddress(host: "home.example.net", kind: MacAddress.internet, via: "")]
-    check("the Mac's list and the typed ones first, in their order (the shared LAN, names, addresses, other LANs); the remembered after, even VPN ones",
-          keys(dial(both, at: t3, local: hotspot)) == ["home.example.net|7455", "203.0.113.9|7455", "192.168.1.20|7455",
+    check("the Mac's list first, then the typed ones, then the remembered, even VPN ones",
+          keys(dial(both, at: t3, local: hotspot)) == ["203.0.113.9|7455", "192.168.1.20|7455", "home.example.net|7455",
                                                        "mac-mini.tail1234.ts.net|7455 r", "100.101.102.103|7455 r"])
     both.lastWorked = "203.0.113.9|7455"
     check("the address that last worked first in the Mac's list as before", keys(dial(both, at: t3, local: hotspot)).first == "203.0.113.9|7455")
     var dup = record([ts4], listedAt: t2, remembered: [RememberedAddress(address: MacAddress(host: "Mac-Mini.tail1234.ts.net", kind: MacAddress.vpn, via: "Tailscale"), listedAt: t1),
                                                        RememberedAddress(address: ts6, listedAt: t1)])
     dup.typedAddresses = [tsName]
-    check("an address both typed and remembered: dialed once, in the first group, unmarked",
-          keys(dial(dup, at: t3, local: hotspot)) == ["mac-mini.tail1234.ts.net|7455", "100.101.102.103|7455", "fd7a:115c:a1e0::1234|7455 r"])
+    check("an address both typed and remembered: dialed once, in the first group that has it (the typed one)",
+          keys(dial(dup, at: t3, local: hotspot)) == ["100.101.102.103|7455", "mac-mini.tail1234.ts.net|7455", "fd7a:115c:a1e0::1234|7455 r"])
     check("a remembered address takes the Mac's port now (the door moved for every address)",
           dial(refresh(record([tsName], listedAt: t1), [wifi], at: t2, port: 7460), at: t3, local: hotspot).map(\.port) == [7460, 7460])
     check("nothing remembered: the dial as before", keys(dial(record([wifi, tsName], listedAt: t2), at: t3, local: hotspot))

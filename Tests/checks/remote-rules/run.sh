@@ -6,7 +6,9 @@
 # values, pairing at home end to end, the saved Macs' home fields); and #140's model (launch.swift:
 # DeviceKeyPolicy, a launch, a pairing, a SIGKILL and the next launch with each Keychain and
 # UserDefaults fault); and the VPN addresses a saved Mac keeps when a later list lacks them
-# (vpnmemory.swift, 2026-11-11: Noah's night as a model, the rule, the dial, the words, the records).
+# (vpnmemory.swift, 2026-11-11: Noah's night as a model, the rule, the dial, the words, the records);
+# and an address typed onto a saved Mac's record without pairing (typedadd.swift, 2026-11-27:
+# what is added, one destination once, the cap, the refresh after it).
 #   Tests/checks/remote-rules/run.sh             compile and run the check
 #   Tests/checks/remote-rules/run.sh --mutants   one-line mutants of the three files; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -99,6 +99,49 @@ enum SavedMacs {
     /// At most this many remembered addresses per Mac, those the Mac listed last first: Tailscale
     /// lists three (its name, an IPv4 and an IPv6 address), so four keep one VPN's set and one more.
     static let rememberCap = 4
+    /// At most this many typed addresses per Mac (`addingTyped`): a VPN's address and a forwarded
+    /// one or two, while a list that can only grow would slow every dial.
+    static let typedCap = 8
+
+    /// What laying a typed address on a saved Mac's record found (`addingTyped`).
+    enum TypedAdd: Equatable {
+        /// The list with the address as the record's last typed one.
+        case added([SavedMac])
+        /// The destination (host at its effective port) is dialed already: one of the Mac's own
+        /// list, another typed one, or a remembered address still within `rememberFor`.
+        case alreadyDialed
+        /// The record already has `typedCap` typed addresses.
+        case full
+        /// Link-local, zone-scoped or (in Release) loopback (`keepable`): never saved.
+        case notKeepable
+        /// No record with that Mac ID (Forgotten while the card was up).
+        case missing
+    }
+
+    /// A typed address laid on `macID`'s record without a pairing (Add an Address… on its row):
+    /// appended to its `typedAddresses`, dialed after the Mac's own list (`allAddresses`) for as
+    /// long as the record lives (Forget, a pairing with another key in its place). Nothing is
+    /// trusted for being typed: every dial stays pinned to the record's key, so a wrong address or
+    /// another machine there only fails to connect. One destination (host at
+    /// `address.port ?? remotePort`) once, in the record's own words for the check a refresh makes
+    /// of it; a record that already dials it is not given a second copy.
+    static func addingTyped(_ address: MacAddress, to macID: String, in list: [SavedMac],
+                            allowLoopback: Bool, now: Double) -> TypedAdd {
+        guard let i = list.firstIndex(where: { $0.macID == macID }) else { return .missing }
+        guard keepable(address.host, allowLoopback: allowLoopback) else { return .notKeepable }
+        let mac = list[i]
+        func destination(_ a: MacAddress) -> String { "\(a.host.lowercased())|\(a.port ?? mac.remotePort)" }
+        let dialable = Set(mac.allAddresses.map(destination) + remembered(mac, now: now).map(destination))
+        if dialable.contains(destination(address)) { return .alreadyDialed }
+        var typed = mac.typedAddresses ?? []
+        guard typed.count < typedCap else { return .full }
+        typed.append(address)
+        var next = mac
+        next.typedAddresses = typed
+        var out = list
+        out[i] = next
+        return .added(out)
+    }
 
     static func decode(_ text: String?) -> [SavedMac] {
         guard let text, let data = text.data(using: .utf8) else { return [] }

@@ -43,6 +43,10 @@ enum RemoteDialPolicy {
         /// list (`order`), where only the Mac's own answers and silence count (`classify`) and no other
         /// saved Mac's key is taken (`successors`).
         var remembered = false
+        /// An address typed on this device (SavedMac.typedAddresses, Add an Address…): dialed after
+        /// the Mac's own list (`order`), and talked about as `remembered` is (`classify`,
+        /// `successors`): it names a machine that may be another's now, not the Mac's own word.
+        var typed = false
 
         /// "host|port", how `SavedMac.lastWorked` names the address that won.
         var key: String { "\(host)|\(port)" }
@@ -55,21 +59,27 @@ enum RemoteDialPolicy {
         }
     }
 
-    /// The dial order: first `addresses`, the Mac's own list and the typed ones; then `remembered`, the
-    /// VPN addresses an earlier list of the Mac's had (SavedMacs.remembered), marked so, which never go
-    /// before the Mac's own list. Each group in this order: the address that last worked; VPN names,
-    /// VPN IPv4, VPN IPv6; LAN addresses in a subnet this device shares (it is at home, and Bonjour
-    /// failed); internet names, then internet addresses; the other LAN addresses (reached through a
-    /// VPN into the home network). Duplicates (same host and port) are dialed once, in the first
-    /// group that has them. `localIPv4` is this device's own IPv4 networks (address and prefix
-    /// length).
+    /// The dial order: first `addresses`, the Mac's own list; then `typed`, the addresses typed on
+    /// this device (SavedMac.typedAddresses); then `remembered`, the VPN addresses an earlier list
+    /// of the Mac's had (SavedMacs.remembered). The typed and remembered groups never go before the
+    /// Mac's own list, and each is marked so (`Candidate.typed`, `Candidate.remembered`). Each group
+    /// in this order: the address that last worked; VPN names, VPN IPv4, VPN IPv6; LAN addresses in
+    /// a subnet this device shares (it is at home, and Bonjour failed); internet names, then internet
+    /// addresses; the other LAN addresses (reached through a VPN into the home network). Duplicates
+    /// (same host and port) are dialed once, in the first group that has them. `localIPv4` is this
+    /// device's own IPv4 networks (address and prefix length).
     ///
     /// A loopback address goes before all of a group's: only a test host lists one (127.0.0.1, "This
     /// Mac", first in its list so the simulator on the same Mac reaches it that way), and it either
     /// is this very machine or nothing answers at once.
-    static func order(_ addresses: [MacAddress], remembered: [MacAddress] = [], remotePort: Int, lastWorked: String?,
+    static func order(_ addresses: [MacAddress], typed: [MacAddress] = [], remembered: [MacAddress] = [],
+                      remotePort: Int, lastWorked: String?,
                       localIPv4: [(address: [UInt8], prefix: Int)]) -> [Candidate] {
-        let later = group(remembered, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4).map { c -> Candidate in
+        let later = group(typed, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4).map { c -> Candidate in
+            var c = c
+            c.typed = true
+            return c
+        } + group(remembered, remotePort: remotePort, lastWorked: lastWorked, localIPv4: localIPv4).map { c -> Candidate in
             var c = c
             c.remembered = true
             return c
@@ -130,7 +140,7 @@ enum RemoteDialPolicy {
     /// - An address the Mac still lists: never a remembered one (`Candidate.remembered`), which may be
     ///   another machine's by now and proves nothing about who holds which key.
     static func successors(of old: SavedMac, at candidate: Candidate, in list: [SavedMac], allowLoopback: Bool) -> [SavedMac] {
-        guard !candidate.remembered else { return [] }
+        guard !candidate.remembered, !candidate.typed else { return [] }
         let h = candidate.host.lowercased()
         let loopback = h.hasPrefix("127.") || h == "::1" || h == "localhost"
         let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)
@@ -229,7 +239,7 @@ enum RemoteDialPolicy {
     /// this device's VPN off) count as anywhere, so the words still say a VPN may be off (#309).
     static func classify(_ end: End, candidate: Candidate, usedTunnel: Bool?) -> Failure? {
         let vpnAddress = candidate.kind == MacAddress.vpn || isVPNAddress(candidate.host)
-        if candidate.remembered {
+        if candidate.remembered || candidate.typed {
             switch end {
             case .tls(-9825), .tls(-9829), .tls(-9816), .tls(-9806): break
             case .tls, .dns: return nil

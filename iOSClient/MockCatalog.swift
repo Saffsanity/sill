@@ -571,6 +571,7 @@ enum MockCatalog {
         case remotefail    // a remote dial's failure, -SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff
         case camera        // Add a Mac with the camera refused
         case externalpair  // an outside sill://pair link waiting for its confirmation
+        case addaddress    // a saved Mac's Add an Address card, empty, over its Remote rows
         // Pairing at home (docs/home-pairing-plan.md §7.3–7.9). Each row's word is DiscoveryPolicy.rowWord's.
         case homerows        // a saved Wi-Fi row, Not paired, an unpaired Wired (the cable), a Wired row through a USB Ethernet adapter (Not paired), an open door's (Not paired), Update Sill, long names
         case homeasking      // a tap on a Not paired row: "Pairing with Mac mini…", the row lit
@@ -587,15 +588,17 @@ enum MockCatalog {
         case tiles           // tiles with stored preview pictures and Home / Work / Other groups
     }
 
-    /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
-    /// viewfinder's stand-in. The home card unfolds from the client's `homeAsk` (ConnectScreen).
-    static func connectScreenOptions(_ c: ConnectCase) -> (adding: Bool, typed: Bool, scanner: CodeScanner.Mode) {
+    /// How the connect screen starts in a case: the card unfolded, on the typed path, the
+    /// viewfinder's stand-in, and the saved Mac whose Add an Address card is up. The home card
+    /// unfolds from the client's `homeAsk` (ConnectScreen).
+    static func connectScreenOptions(_ c: ConnectCase) -> (adding: Bool, typed: Bool, scanner: CodeScanner.Mode, addressCard: String?) {
         switch c {
-        case .addmac, .pairing: return (true, false, .placeholder)
-        case .addcode, .addcodeerror: return (true, true, .placeholder)
-        case .camera: return (true, false, .denied)
-        case .homecode, .homecodeerror: return (false, true, .placeholder)
-        default: return (false, false, .placeholder)
+        case .addmac, .pairing: return (true, false, .placeholder, nil)
+        case .addcode, .addcodeerror: return (true, true, .placeholder, nil)
+        case .camera: return (true, false, .denied, nil)
+        case .homecode, .homecodeerror: return (false, true, .placeholder, nil)
+        case .addaddress: return (false, false, .placeholder, "A3C5HR4RBV67YR21")
+        default: return (false, false, .placeholder, nil)
         }
     }
 
@@ -699,6 +702,20 @@ enum MockCatalog {
             client.status = failureCopy(UserDefaults.standard.string(forKey: "SillRemoteFailure") ?? "timeout")
         case .externalpair:
             client.pendingLink = mockLink
+        case .addaddress:
+            // The Remote rows of `.remote`, and the saved record the card is for (its menu offers
+            // Add an Address… only for one). Its typed addresses start empty; the card's Add is
+            // the mock's own, which changes nothing (the mock never dials).
+            client.macs = remoteRows
+            client.savedMacs = [SavedMac(macID: "A3C5HR4RBV67YR21",
+                                          fingerprint: Base64URL.encode(Data((0..<32).map { UInt8($0 &+ 41) })),
+                                          name: "Noah Saffer’s MacBook Pro in the Studio",
+                                          recognitionKey: Base64URL.encode(Data(repeating: 9, count: 32)),
+                                          remotePort: 7455,
+                                          addresses: [MacAddress(host: "mac-studio.tail1234.ts.net", kind: MacAddress.vpn, via: "Tailscale")],
+                                          typedAddresses: nil, infoIssuedAt: 0, bonjourName: nil, lastWorked: nil,
+                                          pairedAt: Date(timeIntervalSince1970: 1_794_000_000), method: "qr",
+                                          lastConnectedAt: nil, lastRoute: "Tailscale")]
         case .homerows:
             // The long names check that "Not paired" and "Update Sill" never truncate or wrap: the
             // title does.
