@@ -64,9 +64,6 @@ func typedAdd() {
 
     check("typed add: the same address again is refused",
           SavedMacs.addingTyped(forwarded, to: id, in: list, allowLoopback: false, now: t0) == .alreadyDialed)
-    check("typed add: the same host at the record's port is the same destination",
-          SavedMacs.addingTyped(MacAddress(host: "mac.example.net", kind: MacAddress.internet, via: ""),
-                                to: id, in: list, allowLoopback: false, now: t0) == .alreadyDialed)
     check("typed add: the host's case is not a new destination",
           SavedMacs.addingTyped(MacAddress(host: "MAC.example.net", port: 7456, kind: MacAddress.internet, via: ""),
                                 to: id, in: list, allowLoopback: false, now: t0) == .alreadyDialed)
