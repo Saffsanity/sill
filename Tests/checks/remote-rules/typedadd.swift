@@ -70,6 +70,16 @@ func typedAdd() {
     check("typed add: the host's case is not a new destination",
           SavedMacs.addingTyped(MacAddress(host: "MAC.example.net", port: 7456, kind: MacAddress.internet, via: ""),
                                 to: id, in: list, allowLoopback: false, now: t0) == .alreadyDialed)
+    // A host without a port dials the record's own port (§7.5): with one typed at another port, it
+    // is a destination of its own, and the second one of it is refused.
+    let portless = MacAddress(host: "mac.example.net", kind: MacAddress.internet, via: "")
+    var addPortless = SavedMacs.addingTyped(portless, to: id, in: list, allowLoopback: false, now: t0)
+    check("typed add: a host without a port is a destination of its own, the record's",
+          { if case .added(let l) = addPortless { return l[0].typedAddresses?.count == 2 }; return false }())
+    if case .added(let l) = addPortless {
+        check("typed add: the same destination again, without a port",
+              SavedMacs.addingTyped(portless, to: id, in: l, allowLoopback: false, now: t0) == .alreadyDialed)
+    }
     check("typed add: the same host at another port is added",
           SavedMacs.addingTyped(MacAddress(host: "mac.example.net", port: 7457, kind: MacAddress.internet, via: ""),
                                 to: id, in: list, allowLoopback: false, now: t0) != .alreadyDialed)
@@ -139,7 +149,9 @@ func typedAdd() {
     var refreshed = refresh(list[0], [wifi], at: t0 + day)
     check("typed add: a kind 18's refresh keeps the typed address",
           refreshed.typedAddresses == [forwarded] && refreshed.addresses == [wifi])
-    check("typed add: the dial after the refresh still has it, after the Mac's own list",
-          keys(dial(refreshed, at: t0 + day)).first == key("192.168.1.20")
-              && keys(dial(refreshed, at: t0 + day)).contains(key("mac.example.net", 7456)))
+    // The dial's own order (RemoteDialPolicy) puts the internet name before the LAN address this
+    // hotspot does not share; both are there.
+    let afterRefresh = keys(dial(refreshed, at: t0 + day))
+    check("typed add: the dial after the refresh still has it, with the Mac's own list",
+          afterRefresh.contains(key("192.168.1.20")) && afterRefresh.contains(key("mac.example.net", 7456)))
 }
