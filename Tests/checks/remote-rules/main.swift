@@ -312,5 +312,8 @@ launchModel()
 // A Mac's VPN addresses kept when a later list from it lacks them (2026-11-11), in vpnmemory.swift.
 vpnMemory()
 
+// An address typed onto a saved Mac's record without pairing (2026-11-27), in typedadd.swift.
+typedAdd()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

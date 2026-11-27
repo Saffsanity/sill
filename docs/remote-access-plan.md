@@ -1379,6 +1379,16 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
     list lacks, as a kind 18 would (`adding`, aged against the pairing's time); a record retired
     for another key (`superseding`, `replacingNewKey`) takes them with it, and so does Forget;
   - nothing is trusted for being remembered: the dial is pinned to the record's key (§7.5).
+- **Typed addresses added later** (2026-11-27, branch `typed-address-without-repairing`;
+  `SavedMacs.addingTyped`, pure; `StreamClient.addTypedAddress`, `AddressCard`). A saved Mac's menu
+  offers **Add an Address…**: one field, no code — the dial stays pinned to the record's key, so a
+  wrong address or another machine there only fails to connect (never a wrong-Mac verdict: the pin
+  decides). The address is appended to `typedAddresses` and dialed after the Mac's own list, for as
+  long as the record lives (Forget, a pairing with another key in its place, drop it; a kind 18's
+  refresh keeps it). One destination (host at `address.port ?? remotePort`) once: one the record
+  already dials — its own list, another typed one, or a remembered address still within `rememberFor`
+  — is refused, as is one `keepable` refuses (link-local, zone-scoped, loopback in Release). At
+  most `typedCap` (8) typed addresses per Mac, so a list that can only grow never slows the dial.
 - **An unpaired device** decodes kind 18 without verifying it, for display only (the Away from home
   group). Nothing is saved.
 - **Never saved:** link-local, zone-scoped and (in Release) loopback addresses. DEBUG builds keep
@@ -1558,6 +1568,8 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
   - The person chose to point the camera, so there is no confirmation step.
 - **Add a Mac, typed:** Address plus Code.
   - The code's check digit is validated locally.
+- **Add an Address** (a saved Mac's menu, 2026-11-27): Address alone, no code — the record's key is
+  the pin. Added inline ("Added ‹address› to ‹Mac›."), folded back by its Done.
   - A pairing dial with no pin: any P-256 key, bound into `proof_D` with `method "code"`.
   - Save only after `proof_M` checks, then pin.
 - **An outside link** (`onOpenURL`: the system Camera, Messages, `xcrun simctl openurl`):
@@ -1600,6 +1612,21 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | Links | "Enter Code Instead" / "Scan Code Instead" · "Cancel" |
 | Typed | "Type the address and code that Sill shows on your Mac." Fields: Address (placeholder "100.101.102.103 or mac.example.net"; `.URL` keyboard; no autocorrection or capitalization; Return moves on) and Code (placeholder "0000 0000 0000"; `.numberPad`; groups of 4 as typed; paste accepted). [Pair] |
 | Camera | "Sill can’t use the camera. Enter the code instead, or allow the camera in Settings." [Open Settings]. The simulator (`isSupported == false`) goes straight to the typed path |
+
+**Add an Address card** (a saved Mac's menu, 2026-11-27):
+
+| Where | Text |
+|---|---|
+| Title | "Add an Address" (a heading; VoiceOver focus moves to it) |
+| Intro | "Reach ‹Mac› without pairing again." · "An address your VPN or the internet reaches, like 100.101.102.103 or mac.example.net. No code needed: Sill still checks it’s ‹Mac›." |
+| Field | Address (the typed path's prompt, keyboard and Return; Return adds) |
+| Buttons | [Add] · "Cancel", which reads "Done" once the line below shows |
+| Added | "Added ‹address as typed› to ‹Mac›. It’s tried after ‹Mac›’s own addresses." (a checkmark; the field is gone) |
+
+Its inline errors: the typed path's address and zone ones, then "That address only works on the
+network it came from. Try one your VPN or the internet reaches.", "‹Mac› already tries that
+address.", "‹Mac› already has 8 addresses you typed." and "‹Mac› was forgotten. Pair with it again
+to add an address."
 
 **Inline pairing errors** (orange, under the field they belong to):
 - "That doesn’t look like an address. Try 100.101.102.103 or mac.example.net."

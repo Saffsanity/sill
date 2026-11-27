@@ -139,6 +139,19 @@ M = [
     (S, "K10 the add's status lost", "        return .fail(added != 0 ? added : itemNotFound)\n", "        return .fail(itemNotFound)\n"),
     (S, "K11 the read-back's own failure lost", "        if case .failed(let status) = readBack { return .fail(status) }\n", ""),
     (S, "K12 errSecItemNotFound misspelt", "    static let itemNotFound: Int32 = -25300\n", "    static let itemNotFound: Int32 = -25299\n"),
+    # An address typed onto a saved Mac's record without pairing (2026-11-27), through typedadd.swift.
+    (S, "TA a dialable destination added again", "        if dialable.contains(destination(address)) { return .alreadyDialed }\n", ""),
+    (S, "TA a remembered address past its season still blocks", "let dialable = Set(mac.allAddresses.map(destination) + remembered(mac, now: now).map(destination))",
+        "let dialable = Set(mac.allAddresses.map(destination) + (mac.rememberedAddresses ?? []).map { destination($0.address) })"),
+    (S, "TA the host's case a new destination", "func destination(_ a: MacAddress) -> String { \"\\(a.host.lowercased())|\\(a.port ?? mac.remotePort)\" }",
+        "func destination(_ a: MacAddress) -> String { \"\\(a.host)|\\(a.port ?? mac.remotePort)\" }"),
+    (S, "TA the address's own port ignored", "func destination(_ a: MacAddress) -> String { \"\\(a.host.lowercased())|\\(a.port ?? mac.remotePort)\" }",
+        "func destination(_ a: MacAddress) -> String { \"\\(a.host.lowercased())|\\(mac.remotePort)\" }"),
+    (S, "TA an unkeepable address added", "        guard keepable(address.host, allowLoopback: allowLoopback) else { return .notKeepable }\n", ""),
+    (S, "TA the ninth added", "        guard typed.count < typedCap else { return .full }\n", "        guard typed.count <= typedCap else { return .full }\n"),
+    (S, "TA a cap of 4", "    static let typedCap = 8\n", "    static let typedCap = 4\n"),
+    (S, "TA another record replaced", "        out[i] = next\n", "        out[0] = next\n"),
+    (S, "TA the address first, not last", "        typed.append(address)\n", "        typed.insert(address, at: 0)\n"),
 ]
 caught = 0
 for f, name, old, new in M:

@@ -97,6 +97,32 @@ enum PairingProblem: Equatable {
     }
 }
 
+/// Why an address typed onto a saved Mac's record was not added (AddressCard shows it under the
+/// field, in §7.8's words; StreamClient.addTypedAddress says which).
+enum AddressProblem: Equatable {
+    case address
+    case zone
+    /// Link-local, zone-scoped or (in Release) loopback: never saved.
+    case notKeepable
+    /// The record already dials that destination.
+    case alreadyDialed(String)
+    /// The record already has `SavedMacs.typedCap` typed addresses.
+    case full(String)
+    /// No record with that Mac ID (Forgotten while the card was up).
+    case missing(String)
+
+    var text: String {
+        switch self {
+        case .address: return "That doesn’t look like an address. Try 100.101.102.103 or mac.example.net."
+        case .zone: return "Remove the part after %: it only works on this network."
+        case .notKeepable: return "That address only works on the network it came from. Try one your VPN or the internet reaches."
+        case .alreadyDialed(let mac): return "\(mac) already tries that address."
+        case .full(let mac): return "\(mac) already has \(SavedMacs.typedCap) addresses you typed."
+        case .missing(let mac): return "\(mac) was forgotten. Pair with it again to add an address."
+        }
+    }
+}
+
 extension StreamClient {
     /// "iPhone" or "iPad", for copy about this device.
     static var deviceWord: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
@@ -113,6 +139,35 @@ extension StreamClient {
     // MARK: Saved Macs
 
     func savedMac(_ macID: String) -> SavedMac? { savedMacs.first { $0.macID == macID } }
+
+    /// An address typed onto a saved Mac's record (Add an Address… on its row): appended to its
+    /// typed addresses without a code or a pairing, and dialed after the Mac's own list
+    /// (RemoteDialPolicy.order reads `allAddresses`). Every dial stays pinned to the record's key,
+    /// so a wrong address or another machine there only fails to connect. Nil: added (the DEBUG
+    /// console says so); else why it was not.
+    func addTypedAddress(_ text: String, for macID: String) -> AddressProblem? {
+        let parsed: ParsedAddress
+        switch AddressParser.parse(text) {
+        case .success(let a): parsed = a
+        case .failure(.zone): return .zone
+        case .failure: return .address
+        }
+        let name = savedMac(macID)?.name ?? "This Mac"
+        switch SavedMacs.addingTyped(RemoteDialPolicy.address(for: parsed), to: macID, in: savedMacs,
+                                     allowLoopback: Self.keepsLoopback, now: Date().timeIntervalSince1970) {
+        case .added(let list):
+            savedMacs = list
+            persistSavedMacs()
+            #if DEBUG
+            print("remote: typed address added to \(name) (\(macID)): \(parsed.text)")
+            #endif
+            return nil
+        case .alreadyDialed: return .alreadyDialed(name)
+        case .full: return .full(name)
+        case .notKeepable: return .notKeepable
+        case .missing: return .missing(name)
+        }
+    }
 
     /// "Mac mini", or "Mac mini (2)" for the second of that name.
     func displayName(_ macID: String) -> String {

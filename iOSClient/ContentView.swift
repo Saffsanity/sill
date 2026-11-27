@@ -456,8 +456,10 @@ struct ContentView: View {
 ///   `notice` (a goodbye reason this build does not know: the Mac's two-line message, no link);
 ///   or remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
 ///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
-///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
-///   `externalpair` (an outside link's confirmation); or pairing at home's
+///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused), `externalpair`
+///   (an outside link's confirmation) or `addaddress` (a saved Mac's Add an Address card over its
+///   Remote rows; `-SillAddressProblem address|zone|notkeepable|alreadydialed|full|missing` gives
+///   it a problem line, `-SillAddressAdded 1` the added one); or pairing at home's
 ///   (docs/home-pairing-plan.md §7.9): `homerows` (a saved Wi-Fi row, "Not paired", an unpaired
 ///   "Wired" over the cable, a Wired row through a USB Ethernet adapter reading "Not paired", an
 ///   open door's row reading "Not paired", "Update Sill", and long names), `homeasking` (a tap's ask: "Pairing with Mac mini…", the row
@@ -889,7 +891,8 @@ struct LayoutHarness: View {
             let options = MockCatalog.connectScreenOptions(c)
             ZStack {
                 Color.black
-                ConnectScreen(client: mock, adding: options.adding, typed: options.typed, scannerOverride: options.scanner)
+                ConnectScreen(client: mock, adding: options.adding, typed: options.typed, scannerOverride: options.scanner,
+                              addressCard: options.addressCard)
             }
         } else {
             StreamScreen(client: mock,
@@ -1263,6 +1266,8 @@ struct ConnectScreen: View {
     /// The saved Mac whose New Group… alert is up, and the name typed there.
     @State private var newGroupFor: String?
     @State private var newGroupName = ""
+    /// The saved Mac whose Add an Address card is up (its row's menu), by Mac ID.
+    @State private var addressCard: String?
 
     private var style: ConnectionList.Style {
         #if DEBUG
@@ -1271,22 +1276,29 @@ struct ConnectScreen: View {
         return ConnectionList.storedStyle(styleRaw)
     }
 
-    init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
+    init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil,
+         addressCard: String? = nil) {
         self.client = client
         self.scannerOverride = scannerOverride
         _adding = State(initialValue: adding)
         _homeCard = State(initialValue: client.homeAsk.flatMap { $0.phase == .shown ? $0.name : nil })
         _typed = State(initialValue: typed)
+        _addressCard = State(initialValue: addressCard)
     }
 
-    /// A card is up in the rows' place: Add a Mac, or the home card.
-    private var carded: Bool { adding || homeCard != nil }
+    /// A card is up in the rows' place: Add a Mac, the home card, or Add an Address.
+    private var carded: Bool { adding || homeCard != nil || addressCard != nil }
+
+    /// A card with the scanner is up: its side-by-side layout at a short height. Add an Address has
+    /// no scanner: the column stays its own width.
+    private var scannerCarded: Bool { adding || homeCard != nil }
 
     /// "Pair with Mac mini" over the home card; "Add a Mac" over Add a Mac and an outside link's
-    /// confirmation.
+    /// confirmation; "Add an Address" over a saved Mac's address card.
     private var title: String {
         if client.pendingLink != nil || adding { return "Add a Mac" }
         if let mac = homeCard { return DiscoveryPolicy.HomeCopy.cardTitle(mac: mac) }
+        if addressCard != nil { return "Add an Address" }
         return "Connect to a Mac"
     }
 
@@ -1330,7 +1342,7 @@ struct ConnectScreen: View {
                         visibleHeight: geo.size.height, scrollHeight: layout.roomAboveFold,
                         gap: Self.footerGap, atTop: toTop) {
                         column(layout)
-                            .frame(width: carded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
+                            .frame(width: scannerCarded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
                                    alignment: .leading)
                             // Placed by its leading edge, not centred: the side-by-side card is wider
                             // than the rows, and centring it moved the title sideways as the card
@@ -1510,6 +1522,13 @@ struct ConnectScreen: View {
                     .padding(.horizontal, 10)
                     .padding(.top, 4)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            } else if let id = addressCard, let mac = client.savedMac(id) {
+                // Forgotten while the card was up: the rows come back (the client's problem line
+                // never shows, the record it would name is gone).
+                AddressCard(client: client, layout: layout, mac: mac, close: foldAddress, editing: $editing)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             } else if let mac = homeCard {
                 AddMacCard(client: client, layout: layout, typed: $typed, scannerMode: scannerMode, close: fold, editing: $editing,
                            home: mac)
@@ -1634,6 +1653,10 @@ struct ConnectScreen: View {
                 Button { client.connect(to: mac) } label: { Label("Connect", systemImage: "globe") }
             } else if mac.route == .network {
                 Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
+            }
+            // Only a saved Mac's record can take one, and the card needs the record to name it.
+            if client.savedMac(id) != nil {
+                Button { unfoldAddress(id) } label: { Label("Add an Address…", systemImage: "plus.circle") }
             }
             let currentGroup = ConnectionList.cleanGroup(client.macGroups[id])
             Menu {
@@ -1765,7 +1788,10 @@ struct ConnectScreen: View {
         client.cancelHomeAsk()      // a tap's ask still waiting for its answer: Add a Mac is another way
         client.pairing = .idle
         typed = !scannerUsable
-        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) { adding = true }
+        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) {
+            adding = true
+            addressCard = nil
+        }
         titleFocused = true
     }
 
@@ -1777,6 +1803,7 @@ struct ConnectScreen: View {
         withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) {
             adding = false
             homeCard = mac
+            addressCard = nil
         }
         titleFocused = true
     }
@@ -1789,6 +1816,7 @@ struct ConnectScreen: View {
         withAnimation(.easeOut(duration: 0.18)) {
             adding = false
             homeCard = nil
+            addressCard = nil
         }
         titleFocused = true
     }
@@ -1797,6 +1825,24 @@ struct ConnectScreen: View {
     private func foldHome() {
         editing = false
         withAnimation(.easeOut(duration: 0.18)) { homeCard = nil }
+        titleFocused = true
+    }
+
+    /// A saved Mac's Add an Address card, from its row's or tile's menu: the rows fold away for it.
+    private func unfoldAddress(_ macID: String) {
+        editing = false
+        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) {
+            adding = false
+            homeCard = nil
+            addressCard = macID
+        }
+        titleFocused = true
+    }
+
+    /// Cancel, Esc and the escape gesture on the address card: nothing to stop, the rows come back.
+    private func foldAddress() {
+        editing = false
+        withAnimation(.easeOut(duration: 0.18)) { addressCard = nil }
         titleFocused = true
     }
 
