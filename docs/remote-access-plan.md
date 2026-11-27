@@ -1621,7 +1621,7 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | Intro | "Reach ‹Mac› without pairing again." · "An address your VPN or the internet reaches, like 100.101.102.103 or mac.example.net. No code needed: Sill still checks it’s ‹Mac›." |
 | Field | Address (the typed path's prompt, keyboard and Return; Return adds) |
 | Buttons | [Add] · "Cancel", which reads "Done" once the line below shows |
-| Added | "Added ‹address as typed› to ‹Mac›. It’s tried after ‹Mac›’s own addresses." (a checkmark; the field is gone) |
+| Added | "Added ‹address as typed› to ‹Mac›. It’s tried after its own addresses." (a checkmark; the field is gone) |
 
 Its inline errors: the typed path's address and zone ones, then "That address only works on the
 network it came from. Try one your VPN or the internet reaches.", "‹Mac› already tries that

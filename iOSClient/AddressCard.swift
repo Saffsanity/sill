@@ -49,7 +49,8 @@ struct AddressCard: View {
         VStack(alignment: .leading, spacing: 10) {
             words
             if let added {
-                Label("Added \(added) to \(mac.name). It’s tried after \(mac.name)’s own addresses.",
+                // "Its": the Mac named just before; its own addresses come first in every dial.
+                Label("Added \(added) to \(mac.name). It’s tried after its own addresses.",
                       systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.text)
